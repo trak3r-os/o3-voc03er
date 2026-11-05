@@ -20,6 +20,25 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | Harmonizer | Deferred to the 2040 layer | The weakest part of the design; 4-6 % a voice [est] |
 | TUNE with no note held in NOTES-IN | Falls back to KEY and SCALE | A held note overrides the scale and the voice keeps being corrected between notes |
 
+## 1b. The design review
+
+`docs/DESIGN-REVIEW.md` is an outside review. Its arithmetic was rechecked and holds. Its section 2 is the design of each part, with these changes:
+
+| Point | Decision |
+|---|---|
+| Bands geometry (review 2) | Taken: centres 125 x 2^(0.4 i), Q 2.3. Checked: V2's Q 3 leaves each band at -5 dB at the crossover, this leaves -3 dB |
+| Intelligibility (review 1.3) | Taken and pulled forward to V2b: 80 Hz high-pass, slow AGC, unvoiced noise path |
+| Second oscillator (review 2, 3) | Taken: DETUNE 0-20 cents. The carrier's budget is 12 %, not 4-6 % [est] |
+| TALK structure (review 1.2) | Taken: streaming lattice, Hann 768, hop 384, order 16, reflection coefficients interpolated, freeze-a-vowel in V3. mda's own batch structure costs 55 % of a block in one block and 16 ms [est] |
+| TUNE window (review 1.5) | Taken: W 256, the bass range at 8:1 |
+| Loops in SDRAM (review 1.7) | Taken: copy the span to SRAM once a block, interpolate there |
+| Measure first (review 4) | Taken: slice G0 |
+| FFT in `dsp` (review 3) | Not needed: nothing here asks for it. Design section 7 stays as written until o3-sdk is next edited |
+| Bar clock (review 3, an open question) | Answered by the code: `ProcessArgs::transport` gives the position at any frame (`Transport::at`), so the unit finds a bar line sample-exactly. No kit change, and the unit keeps the recorder |
+| Licence of a zita port (review 1.9) | Dropped: the review had no licence for this app. It is GPL-3.0-or-later, so GPL-2.0-or-later and MIT code both fit. The shifter is still written fresh (section 1) |
+| Free SRAM (review 1.1) | Answered by the link of the V1 image: 16,960 B free in SRAM_L, 88,800 B in SRAM_U. The parts want under 30 KiB [est] |
+| In-to-out latency (G0 item 7) | Deferred: it needs a loopback cable and only sets expectations, nothing depends on it |
+
 ## 2. Shape
 
 - One Instrument unit, `units/vocoder/`. `in_l` / `in_r` are the modulator, notes play the carrier. It depends on `dsp` only.
@@ -32,12 +51,18 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | Slice | What | Done when | State |
 |---|---|---|---|
 | V0 | The repository from the template, this plan | Host green | Done |
-| V1 | The audio-in gate on the template app: console `ain <source> [gain]`, input peaks in `state` | Host test, gate CANDIDATE, unit round run | First round run (section 4); line silence, radio and microphone owed |
-| V2 | `Carrier` and `Bands` (16 bands) in `units/vocoder/`, against a synthetic voice | Host tests, no doubles | Done on the host; CPU and a listening check owed at V4 |
-| V3 | `Talk` (mda Talkbox DSP, autocorrelation sliced across blocks) | Host tests, no block spike | |
-| V4 | The unit in the app: PLAY screen, pads play chords, MODE and the source on the keys, a scenario | Scenario, image, CPU of each mode measured on the unit | |
-| V5 | Loops: record, play, speed, reverse, roles, per-step carrier switch | Host tests, scenario, unit | |
-| V6 | TUNE | Host tests against synthetic voices, unit | |
+| V1 | The audio-in gate on the template app: console `ain <source> [gain]`, input peaks in `state` | Host test, gate CANDIDATE, unit round run | Done (section 4); the microphone left for later |
+| V2 | `Carrier` and `Bands` (16 bands) in `units/vocoder/`, against a synthetic voice | Host tests, no doubles | Done on the host; revised by V2a and V2b |
+| G0 | Microbench on the unit: the engine's own share, the real `Bands` and `Carrier`, a biquad bank, the YIN and autocorrelation inner loops, SDRAM reads | Numbers from `cpu` on the unit; they fix the band count and TALK's order before V4 | Next, beside V2a and V2b |
+| V2a | `Carrier`: second oscillator a voice (DETUNE), noise shared with the unvoiced path | Host tests, no doubles | Next |
+| V2b | `Bands`: the review's geometry and followers, high-pass and AGC, the unvoiced path | Host tests, summed bands flat within 3 dB in a sweep, no doubles | Next |
+| V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | |
+| V4 | The unit in the app: PLAY screen with the input peak, pads play chords, MODE and the source on the keys, line sources start at gain 0, `ain` clears its peaks, a scenario | Scenario, image, CPU of each mode measured on the unit, a spoken sentence intelligible to the maintainer | |
+| V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | |
+| V5b | Loops: speed and reverse, the span copy | Host tests, unit | |
+| V5c | Per-step carrier switch | Host tests, scenario, unit | |
+| V6a | TUNE: detector and gate | Host tests against synthetic voices and three sung phrases; aubio as a host oracle only, never shipped | |
+| V6b | TUNE: shifter, snap, retune | Host tests, unit | |
 | V7 | The 2040 layer, slice by slice | | |
 
 ## 4. The audio-in gate (design section 8)
@@ -72,7 +97,7 @@ What it changes:
 - Gain 0 is the ADC's 0 dB, not mute, and the ADC has no attenuation: a hot source can only be turned down at the source. This one had about 1.4 dB of headroom at gain 0. V4 starts line sources at gain 0, not 50, and the PLAY screen shows the input peak so that clipping can be seen.
 - Line left and right are not proven separate: every read was equal, and most were saturated. The source may be mono. A later round needs a hard-panned source at a level below clipping.
 - A peak read within a second of a switch still carries the previous source: the buckets of `poll_peaks()` are not cleared. Read at least a second after `ain` until `ain` clears them (V4).
-- Owed in the next round, batched: line silence (the maintainer stops the source), a radio station with an antenna, the microphone with a person at the unit.
+- The maintainer turned the source down and says line and radio work (2026-11-05): their word, not a measurement here, and enough to go on. The microphone is left for later. Line silence, line left and right, and a known radio station are not measured; V4's own unit round reads them if it needs them.
 
 ## 5. How the work runs
 
