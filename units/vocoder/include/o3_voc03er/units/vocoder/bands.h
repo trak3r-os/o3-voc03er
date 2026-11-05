@@ -57,7 +57,7 @@ class Bands {
   alignas(16) float a2_[kBands] = {};
   alignas(16) float center_[kBands] = {};
   alignas(16) float env_[kBands] = {};
-  alignas(16) float atk_[kBands] = {};  // follower coefficients a band
+  alignas(16) float atk_[kBands] = {};  // follower coefficients a band, for an update every second sample
   alignas(16) float rel_[kBands] = {};
   alignas(16) float rect_gain_[kBands] = {};  // kRectToPeak x b0^2: the rectifier's gain (the sections run with b0 folded out)
   alignas(16) float syn_gain_[kBands] = {};   // +-1 (the synthesis polarity) x b0^2
@@ -74,6 +74,7 @@ class Bands {
   float uv_ = 0.0f;
   float uv_step_ = 0.0f;
   bool uv_open_ = false;
+  bool fol_odd_ = false;  // follower phase: the next sample is the held one
   NoiseSource own_noise_;
   NoiseSource* noise_src_ = nullptr;
 };

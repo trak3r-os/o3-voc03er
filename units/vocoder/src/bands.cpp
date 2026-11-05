@@ -98,6 +98,7 @@ void Bands::restart() noexcept {
   hp_s2_ = 0.0f;
   uv_ = 0.0f;
   uv_open_ = false;
+  fol_odd_ = false;
 }
 
 void Bands::set_envelope(float attack_ms, float release_ms, float low_release_ms) noexcept {
@@ -105,8 +106,11 @@ void Bands::set_envelope(float attack_ms, float release_ms, float low_release_ms
   release_ms = release_ms < 0.05f ? 0.05f : release_ms;
   low_release_ms = low_release_ms < 0.05f ? 0.05f : low_release_ms;
   for (unsigned b = 0; b < kBands; ++b) {
-    atk_[b] = one_pole(attack_ms, fs_);
-    rel_[b] = one_pole(b < 3 ? low_release_ms : release_ms, fs_);
+    // the follower updates every second sample: c2 = 1 - (1 - c)^2 keeps the time constant
+    const float ca = one_pole(attack_ms, fs_);
+    const float cr = one_pole(b < 3 ? low_release_ms : release_ms, fs_);
+    atk_[b] = ca * (2.0f - ca);
+    rel_[b] = cr * (2.0f - cr);
   }
 }
 
@@ -178,6 +182,9 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
       uvn[i] *= u * kUvNoiseGain * (gate != nullptr ? gate[i] : 1.0f);
     }
     uv_ = u;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      carrier_uv[i] = carrier[i] + uvn[i];
+    }
   }
 
   for (unsigned b = 0; b < kBands; ++b) {
@@ -189,14 +196,12 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
     const float gs = syn_gain_[b];
     const float* cin = carrier;
     if (uv_live && b >= kUvFirstBand) {
-      for (std::uint32_t i = 0; i < n; ++i) {
-        carrier_uv[i] = carrier[i] + uvn[i];
-      }
       cin = carrier_uv;
     }
     float m1 = mod_state_[b][0], m2 = mod_state_[b][1], m3 = mod_state_[b][2], m4 = mod_state_[b][3];
     float c1 = car_state_[b][0], c2 = car_state_[b][1], c3 = car_state_[b][2], c4 = car_state_[b][3];
     float env = env_[b];
+    bool upd = !fol_odd_;  // the follower runs on every second sample, the phase carries across blocks
     for (std::uint32_t i = 0; i < n; ++i) {
       // analysis: two bandpass sections, transposed direct form II with b1 = 0, b2 = -b0, b0 folded out and the state negated:
       // w = x - n1; n1' = n2 + a1 w; n2' = x + a2 w. The cascade's output is y / b0^2; gr (rectifier) and gs (synthesis) restore it.
@@ -207,8 +212,11 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
       const float w2 = w1 - m3;
       m3 = m4 + mulb(a1, w2);
       m4 = w1 + mulb(a2, w2);
-      const float r = std::fabs(w2) * gr;
-      env += mulb(r - env, r > env ? atk : rel);
+      if (upd) {
+        const float r = std::fabs(w2) * gr;
+        env += mulb(r - env, r > env ? atk : rel);
+      }
+      upd = !upd;
       // synthesis
       const float u = cin[i];
       const float z1 = u - c1;
@@ -229,6 +237,7 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
     car_state_[b][3] = flush(c4);
     env_[b] = flush(env);
   }
+  fol_odd_ = ((static_cast<unsigned>(fol_odd_) + n) & 1u) != 0u;
 }
 
 }  // namespace o3_voc03er

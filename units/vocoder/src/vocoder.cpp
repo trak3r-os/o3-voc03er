@@ -161,6 +161,19 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   } else {
     for (std::uint32_t i = 0; i < n; ++i) tw[i] = 0.0f;
   }
+  if (!level_.moving() && !dry_.moving() && !talk_mix_.moving()) {
+    const float g = level_.value();
+    const float d = dry_.value();
+    const float m = talk_mix_.value();
+    const float wm = kWetGain * (1.0f - m);
+    const float tm = kTalkGain * m;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const float y = soft_clip(g * (wet[i] * wm + tw[i] * tm + d * mod[i]));
+      args.out_l[i] = y;
+      args.out_r[i] = y;
+    }
+    return;
+  }
   for (std::uint32_t i = 0; i < n; ++i) {
     const float g = level_.next();
     const float d = dry_.next();

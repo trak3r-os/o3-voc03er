@@ -30,6 +30,7 @@ class Talk {
   static constexpr std::uint32_t kMaxFrames = 64;
   static constexpr std::uint32_t kWin = 768;
   static constexpr std::uint32_t kHop = 384;
+  static constexpr std::uint32_t kStep = 8;  // the coefficient ramp moves every kStep samples; a power of 2 dividing kHop
   static constexpr std::uint32_t kRing = 2048;
   static constexpr std::uint32_t kMinOrder = 8;
   static constexpr std::uint32_t kMaxOrder = 24;

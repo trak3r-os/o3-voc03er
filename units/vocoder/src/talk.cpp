@@ -157,7 +157,7 @@ void Talk::publish() noexcept {
   tgt_order_ = use;
   run_ = prev_run > use ? prev_run : use;
   ramp_left_ = kHop;
-  const float inv = 1.0f / static_cast<float>(kHop);
+  const float inv = static_cast<float>(kStep) / static_cast<float>(kHop);  // k and the gain move every kStep samples
   for (std::uint32_t m = 1; m <= kMaxOrder; ++m) dk_[m] = (kt_[m] - k_[m]) * inv;
   dgain_ = (gain_t_ - gain_) * inv;
 }
@@ -200,34 +200,46 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
 
   const std::uint32_t run = run_;
   macs_last_ += n * (2u * run + run + 4u);
+  std::uint32_t left = ramp_left_;
+  float gain = gain_;
+  float ap0 = ap_[0], ap1 = ap_[1], ap2 = ap_[2], ap3 = ap_[3];
   for (std::uint32_t i = 0; i < n; ++i) {
-    if (ramp_left_ != 0u) {
-      for (std::uint32_t m = 1; m <= run; ++m) k_[m] += dk_[m];
-      gain_ += dgain_;
-      if (--ramp_left_ == 0u) {
+    if (left != 0u) {
+      // k and the gain step every kStep samples (left is a multiple of kStep at the first of each group); the last sample lands on the target
+      if ((left & (kStep - 1u)) == 0u) {
+        for (std::uint32_t m = 1; m <= run; ++m) k_[m] += dk_[m];
+        gain += dgain_;
+      }
+      if (--left == 0u) {
         for (std::uint32_t m = 1; m <= run; ++m) k_[m] = kt_[m];
-        gain_ = gain_t_;
+        gain = gain_t_;
       }
     }
     // carrier through the two-path allpass spread
     const float c = car[i];
-    const float y1 = -kA1 * c + ap_[0];
-    ap_[0] = c + kA1 * y1;
-    const float y2 = -kA2 * c + ap_[1];
-    ap_[1] = c + kA2 * y2;
-    float f = 0.5f * (y1 + y2) * gain_;
+    const float y1 = -kA1 * c + ap0;
+    ap0 = c + kA1 * y1;
+    const float y2 = -kA2 * c + ap1;
+    ap1 = c + kA2 * y2;
+    float f = 0.5f * (y1 + y2) * gain;
     // all-pole lattice, stages run..1
     for (std::uint32_t m = run; m >= 1u; --m) {
       f -= k_[m] * b_[m - 1u];
       b_[m] = b_[m - 1u] + k_[m] * f;
     }
     b_[0] = f;
-    const float z1 = -kA1 * f + ap_[2];
-    ap_[2] = f + kA1 * z1;
-    const float z2 = -kA2 * f + ap_[3];
-    ap_[3] = f + kA2 * z2;
+    const float z1 = -kA1 * f + ap2;
+    ap2 = f + kA1 * z1;
+    const float z2 = -kA2 * f + ap3;
+    ap3 = f + kA2 * z2;
     out[i] = 0.5f * (z1 + z2);
   }
+  ramp_left_ = left;
+  gain_ = gain;
+  ap_[0] = ap0;
+  ap_[1] = ap1;
+  ap_[2] = ap2;
+  ap_[3] = ap3;
   // Denormals: states decay to zero under silence; flush them once a block.
   for (std::uint32_t m = 0; m <= run; ++m) b_[m] = flush(b_[m]);
   for (auto& v : ap_) v = flush(v);
