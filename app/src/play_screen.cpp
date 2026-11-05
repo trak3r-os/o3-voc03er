@@ -2,8 +2,9 @@
 #include "play_screen.h"
 
 #include <o3_voc03er/pad_map.h>
-#include <o3_voc03er/units/voice/voice.h>
+#include <o3_voc03er/units/vocoder/vocoder.h>
 
+#include <o3sdk/app/audio_in.h>
 #include <o3sdk/app/context.h>
 #include <o3sdk/app/widgets.h>
 
@@ -54,13 +55,17 @@ const char* card_text(const app::Files& files) noexcept {
 
 }  // namespace
 
-void PlayScreen::init(dsp::UnitId voice) noexcept {
+void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter) noexcept {
   // setup() can run again on the same app object (every test starts a fresh simulator on the one o3sdk_app() instance): start from scratch.
   voice_ = voice;
+  meter_ = meter;
   octave_ = 0;
   pattern_ = Pattern{};
   note_ = nullptr;
-  page_ = app::ParamPage{"VOICE", voice, {Voice::Wave, Voice::Decay, Voice::Level, 0, 0, 0, 0, 0}, Voice::kParamCount};
+  page_ = app::ParamPage{"VOCODER", voice,
+                         {Vocoder::Mode, Vocoder::Quality, Vocoder::Freeze, Vocoder::Dry, Vocoder::Level, Vocoder::Wave, Vocoder::Detune,
+                          Vocoder::Release},
+                         8};
   keys_.set_pages(&page_, 1);  // the table must outlive the helper: it is a member
   for (auto& n : held_) {
     n = -1;
@@ -128,17 +133,47 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
   r.text(rx, area.y + 12, "OUT", Color::TextDim, Face::Label);
   const dsp::EngineStats s = ctx.engine().stats();
   app::level_meter(r, Rect{rx + 40, area.y + 14, rw - 40, 10}, s.peak_l > s.peak_r ? s.peak_l : s.peak_r);
+  // The input: its peak (the louder channel; CLIP when it reaches full scale, since gain 0 is the ADC's 0 dB and a hot source can only be
+  // turned down at the source), the mode and the source.
+  const app::AudioIn& ain = ctx.audio_in();
+  const float in_peak = meter_ != nullptr && ain.available() ? meter_->peak() : 0.0f;
+  const bool clip = meter_ != nullptr && ain.available() && meter_->clipping();
+  r.text(rx, area.y + 32, "IN", Color::TextDim, Face::Label);
+  app::level_meter(r, Rect{rx + 40, area.y + 34, rw - 100, 10}, in_peak);
+  const unsigned pm = permille(in_peak);
+  char pct[8] = {};
+  std::size_t n = 0;
+  if (pm >= 1000u) {
+    pct[n++] = '1';
+    pct[n++] = '0';
+    pct[n++] = '0';
+  } else {
+    if (pm >= 100u) {
+      pct[n++] = static_cast<char>('0' + pm / 100u);
+    }
+    pct[n++] = static_cast<char>('0' + (pm / 10u) % 10u);
+  }
+  pct[n++] = '%';
+  r.text(rx + rw - 54, area.y + 32, clip ? "CLIP" : pct, clip ? Color::Accent : Color::Text, Face::Label);
+  const bool talk = ctx.engine().param(voice_, Vocoder::Mode) >= 0.5f;
+  const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
+  r.text(rx, area.y + 54, "MODE", Color::TextDim, Face::Label);
+  r.text(rx + 48, area.y + 54, talk ? "TALK" : "BANDS", Color::Text, Face::Label);
+  r.text(rx + 130, area.y + 54, "PLAY", Color::TextDim, Face::Micro);
+  r.text(rx, area.y + 74, "SOURCE", Color::TextDim, Face::Label);
+  r.text(rx + 70, area.y + 74, src != nullptr ? src->label : "NONE", Color::Text, Face::Label);
+  r.text(rx + 190, area.y + 74, "SAMPLE PLAY", Color::TextDim, Face::Micro);
   // The card and the last file job (Context::files(), polled: the screen never waits for the card). The kit's strip shows the same result
   // for a few seconds; this line stays.
   const app::Files& files = ctx.files();
   const app::Files::Status fs = files.status();
-  r.text(rx, area.y + 48, "CARD", Color::TextDim, Face::Label);
-  r.text(rx + 48, area.y + 48, card_text(files), files.available() && files.card() == app::Files::Card::Ready ? Color::Play : Color::Text, Face::Label);
-  r.text(rx, area.y + 68, "FILE", Color::TextDim, Face::Label);
-  r.text(rx + 48, area.y + 68, note_ != nullptr ? note_ : (fs.phase == app::Files::Status::Idle ? "-" : fs.text),
+  r.text(rx, area.y + 96, "CARD", Color::TextDim, Face::Label);
+  r.text(rx + 48, area.y + 96, card_text(files), files.available() && files.card() == app::Files::Card::Ready ? Color::Play : Color::Text, Face::Label);
+  r.text(rx, area.y + 116, "FILE", Color::TextDim, Face::Label);
+  r.text(rx + 48, area.y + 116, note_ != nullptr ? note_ : (fs.phase == app::Files::Status::Idle ? "-" : fs.text),
          note_ != nullptr || fs.phase == app::Files::Status::Failed ? Color::Accent : Color::Text, Face::Label);
   const int hy = map_y + static_cast<int>(app::kPadRows) * cell_h + 18;
-  r.text(16, hy, "PADS play   F1-F3 pick a value   ENCODER turn it (SHIFT coarse)   LEFT/RIGHT octave", Color::TextDim, Face::Label);
+  r.text(16, hy, "PADS play chords   F1-F8 pick a value   ENCODER turn it (SHIFT coarse)   LEFT/RIGHT octave", Color::TextDim, Face::Label);
 
   // The pattern: 16 steps, the cursor framed.
   r.text(16, hy + 20, "PATTERN: pads record   DELETE clear   FILE save   SAMPLE LOAD load", Color::TextDim, Face::Label);
@@ -179,6 +214,8 @@ void PlayScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 // the octave. FILE and SAMPLE LOAD are handled in app.cpp. Look at it: app/scenarios/help.txt (Shift + Config, BUTTONS, PADS).
 void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
+      {Button::Play, "MODE: BANDS OR TALK", nullptr},
+      {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},
       {Button::File, "SAVE THE PATTERN", nullptr},
       {Button::SampleLoad, "LOAD THE PATTERN", nullptr},
       {Button::Delete, "CLEAR THE PATTERN", nullptr},
@@ -186,13 +223,18 @@ void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Right, "KEYBOARD AN OCTAVE UP", nullptr},
   };
   static constexpr app::HelpPadGroup kGroups[] = {
-      {"WHITE KEYS", "PLAY THE VOICE AND RECORD THE NOTE", Color::Sel},
-      {"BLACK KEYS", "THE SEMITONES: PLAY AND RECORD", Color::Instr},
+      {"WHITE KEYS", "PLAY THE CARRIER, CHORDS, RECORD", Color::Sel},
+      {"BLACK KEYS", "THE SEMITONES, THE SAME", Color::Instr},
   };
-  h.summary = "THE PADS PLAY THE VOICE AND RECORD THEIR NOTES INTO A 16-STEP PATTERN. F1-F3 POINT THE ENCODER AT A VALUE (A TAP LATCHES IT) AND THE ENCODER CHANGES IT.";
-  h.fkey[0] = "SIN, TRI OR SAW";
-  h.fkey[1] = "HOW LONG A NOTE RINGS";
-  h.fkey[2] = "THE OUTPUT LEVEL";
+  h.summary = "THE AUDIO INPUT SPEAKS THROUGH THE PADS' CHORD. F1-F8 POINT THE ENCODER AT A VALUE (A TAP LATCHES IT) AND THE ENCODER CHANGES IT.";
+  h.fkey[0] = "BANDS OR TALK";
+  h.fkey[1] = "LPC ORDER";
+  h.fkey[2] = "HOLD THE VOWEL";
+  h.fkey[3] = "DRY INPUT";
+  h.fkey[4] = "OUTPUT LEVEL";
+  h.fkey[5] = "SAW OR PULSE";
+  h.fkey[6] = "DETUNE, CENTS";
+  h.fkey[7] = "NOTE RELEASE";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "CHANGE VALUE (SHIFT COARSE)";

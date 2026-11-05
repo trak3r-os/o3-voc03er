@@ -1,0 +1,33 @@
+# The vocoder screen: the input peak with a tone at the line, a chord on the pads, MODE to TALK (PLAY), the next source (SAMPLE PLAY),
+# a hot input that shows CLIP. The simulator feeds a synthetic input (tone or WAV) through the fake codec: it shows the screen and that the
+# unit hears the input; it cannot say how speech sounds, what a source's level really is, or what the unit costs.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/vocoder.txt --out <dir>   (the dir must exist)
+input tone 220 -6
+wait 300
+snap 01_input
+record on
+paddown 36
+paddown 40
+paddown 43
+wait 600
+snap 02_bands_chord
+tap play
+wait 600
+snap 03_talk
+tap sampleplay
+wait 600
+snap 04_next_source
+tap sampleplay
+tap sampleplay
+tap sampleplay
+tap sampleplay
+tap sampleplay
+tap sampleplay
+input tone 220 0
+wait 800
+snap 05_back_on_line_hot
+padup 36
+padup 40
+padup 43
+wait 300
+wav vocoder

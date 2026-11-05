@@ -52,7 +52,9 @@ void tap(sim::Harness& h, app::Button b) {
 }  // namespace
 
 TEST_CASE("app: it starts, a pad sounds, and every frame fits the display list") {
-  auto h = std::make_unique<sim::Harness>(o3sdk_app());  // the app's entry point, linked whole into the test
+  platform::host::FakeCapture cap;  // the vocoder speaks only while it hears a modulator
+  cap.input_tone(220.0f, -12.0f);
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);  // the app's entry point, linked whole into the test
   REQUIRE(h->start());
   h->record(true);
   h->run_ms(200);
@@ -170,7 +172,8 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
     platform::host::ScratchDir card_dir("o3_voc03er-card");  // an empty card for each scenario
     REQUIRE(card_dir.ok());
     platform::host::DirCard card(card_dir.path());
-    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+    platform::host::FakeCapture cap;
+    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card, nullptr, &cap);
     REQUIRE(h->start());
     const sim::ScenarioResult r = sim::run_scenario(*h, text.str(), out.string());
     CHECK_MESSAGE(r.ok, r.error);
@@ -184,16 +187,17 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
 }
 
 namespace {
-void ain_run(const char* a1, const char* a2, std::string& text) {
+void cmd_run(std::size_t row, const char* name, const char* a1, const char* a2, std::string& text) {
   const app::DiagCommand* rows = nullptr;
   const std::size_t n = o3sdk_app().diag_commands(rows);
-  REQUIRE(n >= 1);
-  const char* argv[3] = {"ain", a1, a2};
+  REQUIRE(n > row);
+  const char* argv[3] = {name, a1, a2};
   const app::DiagArgs args{a1 == nullptr ? 1u : (a2 == nullptr ? 2u : 3u), argv};
   text.clear();
   app::DiagOut out(app::DiagSink{[](void* c, const char* d, std::size_t k) { static_cast<std::string*>(c)->append(d, k); }, &text});
-  rows[0].run(args, out);
+  rows[row].run(args, out);
 }
+void ain_run(const char* a1, const char* a2, std::string& text) { cmd_run(0, "ain", a1, a2, text); }
 }  // namespace
 
 TEST_CASE("app: ain selects the audio input and in_peak_l follows a tone") {
@@ -219,4 +223,35 @@ TEST_CASE("app: ain selects the audio input and in_peak_l follows a tone") {
   CHECK(state(*h).find("in_peak_l=0 ") != std::string::npos);
   ain_run(nullptr, nullptr, t);
   CHECK(t.find("ain: line gain 70") != std::string::npos);
+}
+
+TEST_CASE("app: a line source starts at gain 0, a switch clears the peaks, voc sets the mode and holds notes") {
+  platform::host::FakeCapture cap;
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  std::string t;
+  ain_run("line", nullptr, t);
+  CHECK(t.find("selected line gain 0") != std::string::npos);
+  ain_run("miclow", nullptr, t);
+  CHECK(t.find("selected miclow gain 50") != std::string::npos);
+  ain_run("left", nullptr, t);
+  CHECK(t.find("selected left gain 0") != std::string::npos);
+  cap.input_tone(440.0f, -6.0f);
+  h->run_ms(600);
+  CHECK(state(*h).find("in_peak_l=0 ") == std::string::npos);
+  ain_run("right", nullptr, t);  // the switch: the old source's peaks are gone at once, and what the gate lets through is ignored
+  CHECK(t.find("peak_l 0 peak_r 0") != std::string::npos);
+  h->run_ms(100);
+  CHECK(state(*h).find("in_peak_l=0 in_peak_r=0") != std::string::npos);
+
+  cmd_run(1, "voc", "talk", "3", t);
+  CHECK(t.find("voc: talk notes 3") != std::string::npos);
+  h->run_ms(50);
+  CHECK(state(*h).find("voc_mode=talk voc_notes=3") != std::string::npos);
+  cmd_run(1, "voc", "bands", nullptr, t);
+  CHECK(state(*h).find("voc_mode=bands voc_notes=0") != std::string::npos);
+  cmd_run(1, "voc", "talk", "9", t);
+  CHECK(t.find("usage") != std::string::npos);
+  CHECK(h->engine().dropped_commands() == 0u);
 }

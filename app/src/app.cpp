@@ -4,6 +4,7 @@
 // objects (no heap), wires them into the engine in setup() and shows the first screen. The one entry point at the end is all the
 // platform's main and the simulator know of it.
 //
+//   PLAY          MODE: BANDS <-> TALK;  SAMPLE PLAY  the next audio source (line sources start at gain 0)
 //   pads          a chromatic keyboard (app/include/o3_voc03er/pad_map.h); LEFT / RIGHT move it an octave
 //   F1..F3        point the encoder at a value (tap: latched; hold + turn: for a moment); the encoder changes it (SHIFT: coarse)
 //   pads, DELETE  the pads also record into a 16-step pattern; DELETE clears it
@@ -28,8 +29,9 @@
 
 #include "play_screen.h"
 
+#include <o3_voc03er/input.h>
 #include <o3_voc03er/pattern.h>
-#include <o3_voc03er/units/voice/voice.h>
+#include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/context.h>
@@ -48,9 +50,11 @@ using namespace o3sdk;
 class MyApp;
 MyApp& instance() noexcept;
 void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
+    {"voc", "voc <bands|talk> [notes 0..8]: set the vocoder mode, hold N notes", &voc_command},
 };
 
 // The console's limits (check_app_row in the mk66 platform). A row past them is dropped on the unit with only a log line, and the host
@@ -76,30 +80,8 @@ constexpr bool commands_fit() noexcept {
 }
 static_assert(commands_fit(), "a console command's name or help is too long: the unit would drop it");
 
-struct SourceName {
-  const char* name;
-  hal::capture::Source source;
-};
-constexpr SourceName kSources[] = {
-    {"line", hal::capture::Source::LineMix},   {"left", hal::capture::Source::LineLeft},   {"right", hal::capture::Source::LineRight},
-    {"miclow", hal::capture::Source::MicLow},  {"michigh", hal::capture::Source::MicHigh}, {"radio", hal::capture::Source::Radio},
-    {"usb", hal::capture::Source::Usb},
-};
-
-const char* source_name(hal::capture::Source s) noexcept {
-  for (const SourceName& n : kSources) {
-    if (n.source == s) {
-      return n.name;
-    }
-  }
-  return "?";
-}
-
-// Per-mille of full scale, 0..1000+ (saturating far above).
-unsigned permille(float peak) noexcept {
-  const float v = peak * 1000.0f + 0.5f;
-  return v <= 0.0f ? 0u : (v > 100000.0f ? 100000u : static_cast<unsigned>(v));
-}
+using o3_voc03er::permille;
+using o3_voc03er::source_name;
 
 class MyApp final : public app::App {
  public:
@@ -112,11 +94,14 @@ class MyApp final : public app::App {
   void setup(app::Context& ctx) noexcept override {
     ctx_ = &ctx;  // the console's handlers have no Context argument; they run in the main loop
     dsp::Engine& e = ctx.engine();
-    const dsp::UnitId voice = e.attach(voice_);
-    // Slot 0 plays the voice; the mixer's level, pan and sends are the slot's. A refused call is counted (Engine::setup_errors) and the
+    const dsp::UnitId voice = e.attach(voc_);  // an Instrument: the engine hands it the codec input as in_l / in_r (the modulator)
+    // Slot 0 plays the vocoder; the mixer's level, pan and sends are the slot's. A refused call is counted (Engine::setup_errors) and the
     // simulator and app_test fail on it, so the result need not be checked here.
     (void)e.set_source(0, voice);
-    play_.init(voice);
+    voc_id_ = voice;
+    meter_.reset(0, 0);
+    console_notes_ = 0;
+    play_.init(voice, &meter_);
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
     op_ = Op::None;
     boot_ = Boot::Pattern;
@@ -165,6 +150,20 @@ class MyApp final : public app::App {
 
   // The keys the screen does not use: FILE saves the pattern, SAMPLE LOAD loads it. A key pressed while a job runs is ignored (busy()).
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
+    if (in.press(app::Button::Play)) {  // MODE: BANDS <-> TALK
+      dsp::Engine& e = ctx.engine();
+      (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, e.param(voc_id_, o3_voc03er::Vocoder::Mode) >= 0.5f ? 0.0f : 1.0f);
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::SamplePlay)) {  // the next source, at its own starting gain
+      if (ctx.audio_in().available()) {
+        const hal::capture::Source next = o3_voc03er::next_source(ctx.audio_in().source());
+        (void)select_source(next, o3_voc03er::default_gain(next));
+        ctx.redraw();
+      }
+      return true;
+    }
     const bool save = in.press(app::Button::File);
     if (!save && !in.press(app::Button::SampleLoad)) {
       return false;
@@ -198,12 +197,12 @@ class MyApp final : public app::App {
     app::AudioIn& in = ctx_->audio_in();
     if (args.argc >= 2u) {
       const hal::capture::Source* src = nullptr;
-      for (const SourceName& n : kSources) {
+      for (const o3_voc03er::SourceName& n : o3_voc03er::kSources) {
         if (std::strcmp(args.arg(1), n.name) == 0) {
           src = &n.source;
         }
       }
-      unsigned gain = 50;
+      unsigned gain = src != nullptr ? o3_voc03er::default_gain(*src) : 0u;  // a line source starts at the ADC's 0 dB
       bool ok = src != nullptr && args.argc <= 3u;
       if (ok && args.argc == 3u) {
         const char* g = args.arg(2);
@@ -219,13 +218,34 @@ class MyApp final : public app::App {
         out.text("usage: ain [line|left|right|miclow|michigh|radio|usb] [gain 0..100]").nl();
         return;
       }
-      const bool acked = in.select(*src, gain);
+      const bool acked = select_source(*src, gain);
       out.text(acked ? "ain: selected " : "ain: select refused ");
     } else {
       out.text("ain: ");
     }
     out.text(source_name(in.source())).text(" gain ").dec(in.gain()).text(" settling ").dec(in.settling() ? 1u : 0u);
-    out.text(" failed ").dec(in.failed() ? 1u : 0u).text(" peak_l ").dec(peak_l_).text(" peak_r ").dec(peak_r_).nl();
+    out.text(" failed ").dec(in.failed() ? 1u : 0u).text(" peak_l ").dec(permille(meter_.left())).text(" peak_r ").dec(permille(meter_.right())).nl();
+  }
+
+  // `voc <bands|talk> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
+  void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    o3_voc03er::VocCommand c;
+    if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
+        !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
+      out.text("usage: voc <bands|talk> [notes 0..8]").nl();
+      return;
+    }
+    dsp::Engine& e = ctx_->engine();
+    (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, c.talk ? 1.0f : 0.0f);
+    for (unsigned i = 0; i < console_notes_; ++i) {
+      (void)e.note_off(voc_id_, o3_voc03er::kVocChord[i]);
+    }
+    console_notes_ = c.notes;
+    for (unsigned i = 0; i < console_notes_; ++i) {
+      (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100);
+    }
+    out.text("voc: ").text(c.talk ? "talk" : "bands").text(" notes ").dec(console_notes_).nl();
+    ctx_->redraw();
   }
 
   // The console's `state` after the kit's pairs (`o3console.py state` over USB; the same line is in the simulator's tests): the keyboard
@@ -250,39 +270,41 @@ class MyApp final : public app::App {
     w.num("in_gain", have ? in.gain() : 0u);
     w.num("in_settling", have && in.settling() ? 1u : 0u);
     w.num("in_failed", have && in.failed() ? 1u : 0u);
-    w.num("in_peak_l", peak_l_);
-    w.num("in_peak_r", peak_r_);
+    w.num("in_peak_l", permille(meter_.left()));
+    w.num("in_peak_r", permille(meter_.right()));
+    w.str("voc_mode", ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode) >= 0.5f ? "talk" : "bands");
+    w.num("voc_notes", console_notes_);
     return w.size();
   }
 
  private:
-  // Peaks (main loop only, update() writes, describe_state reads): peaks() is polled every pass (it measures only while called at least
-  // once a second) and its per-pass maxima fill two 500 ms buckets; the shown value is the larger of the two, so it covers 0.5..1 s.
+  // Peaks (main loop only: update() writes, the screen and describe_state read): peaks() is polled every pass (it measures only while
+  // called at least once a second); the meter (input.h) keeps them and forgets the previous source after a switch.
   void poll_peaks(app::Context& ctx) noexcept {
     app::AudioIn& in = ctx.audio_in();
     if (!in.available()) {
-      peak_l_ = peak_r_ = 0;
+      meter_.reset(ctx.uptime_ms(), 0);
       return;
     }
-    const dsp::InputPeaks p = in.peaks();
+    const dsp::InputPeaks p = in.peaks();  // always read: it drains what the engine measured
     const std::uint64_t now = ctx.uptime_ms();
-    if (now - bucket_start_ >= kBucketMs) {
-      prev_l_ = now - bucket_start_ >= 2u * kBucketMs ? 0.0f : cur_l_;
-      prev_r_ = now - bucket_start_ >= 2u * kBucketMs ? 0.0f : cur_r_;
-      cur_l_ = cur_r_ = 0.0f;
-      bucket_start_ = now;
+    if (in.settling()) {
+      meter_.reset(now, o3_voc03er::InputMeter::kSettleHoldoffMs);
     }
-    cur_l_ = p.l > cur_l_ ? p.l : cur_l_;
-    cur_r_ = p.r > cur_r_ ? p.r : cur_r_;
-    peak_l_ = permille(cur_l_ > prev_l_ ? cur_l_ : prev_l_);
-    peak_r_ = permille(cur_r_ > prev_r_ ? cur_r_ : prev_r_);
+    meter_.feed(p.l, p.r, now);
+  }
+
+  // The one place a source is chosen (the console's `ain` and the SAMPLE PLAY key): the meter forgets the old source's peaks.
+  bool select_source(hal::capture::Source src, unsigned gain) noexcept {
+    const bool acked = ctx_->audio_in().select(src, gain);
+    meter_.reset(ctx_->uptime_ms(), o3_voc03er::InputMeter::kSelectHoldoffMs);
+    return acked;
   }
 
   app::Context* ctx_ = nullptr;
-  static constexpr std::uint64_t kBucketMs = 500;
-  float cur_l_ = 0.0f, cur_r_ = 0.0f, prev_l_ = 0.0f, prev_r_ = 0.0f;
-  std::uint64_t bucket_start_ = 0;
-  unsigned peak_l_ = 0, peak_r_ = 0;
+  o3_voc03er::InputMeter meter_;
+  dsp::UnitId voc_id_ = dsp::kNoUnit;
+  unsigned console_notes_ = 0;  // the notes `voc` holds (main loop only)
 
   enum class Op : std::uint8_t { None, LoadPattern, LoadConfig, SavePattern, SaveConfig };  // the job in flight
   enum class Boot : std::uint8_t { Pattern, Config, Done };                                 // the loads at start, in order
@@ -309,7 +331,7 @@ class MyApp final : public app::App {
     ctx.redraw();
   }
 
-  o3_voc03er::Voice voice_;
+  o3_voc03er::Vocoder voc_;
   o3_voc03er::PlayScreen play_;
 
   Op op_ = Op::None;
@@ -328,9 +350,13 @@ MyApp& instance() noexcept {
   return app;
 }
 
-// `ain <line|left|right|miclow|michigh|radio|usb> [gain 0..100]` selects the input (default gain 50); `ain` alone prints it.
+// `ain <line|left|right|miclow|michigh|radio|usb> [gain 0..100]` selects the input (default gain: 0 for a line source, else 50); `ain` alone prints it.
 void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().ain(args, out);
+}
+
+void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().voc(args, out);
 }
 
 }  // namespace
