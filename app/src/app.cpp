@@ -4,7 +4,7 @@
 // objects (no heap), wires them into the engine in setup() and shows the first screen. The one entry point at the end is all the
 // platform's main and the simulator know of it.
 //
-//   PLAY          MODE: BANDS <-> TALK;  SAMPLE PLAY  the next audio source (line sources start at gain 0)
+//   PLAY          MODE: BANDS <-> TALK (SHIFT + PLAY: the transport); PATTERN: the carrier of the cursor step; SHIFT + LEFT / RIGHT: the cursor;  SAMPLE PLAY  the next audio source (line sources start at gain 0)
 //   pads          a chromatic keyboard (app/include/o3_voc03er/pad_map.h); LEFT / RIGHT move it an octave
 //   F1..F3        point the encoder at a value (tap: latched; hold + turn: for a moment); the encoder changes it (SHIFT: coarse)
 //   pads, DELETE  the pads also record into a 16-step pattern; DELETE clears it
@@ -28,6 +28,7 @@
 // the card as a WAV). The template uses none of them; each is a short call like files() and a line in the app's state.
 
 #include "play_screen.h"
+#include <o3_voc03er/carrier_seq.h>
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pattern.h>
@@ -112,6 +113,8 @@ class MyApp final : public app::App {
     meter_.reset(0, 0);
     console_notes_ = 0;
     play_.init(voice, &meter_, &voc_);
+    carriers_.init(voice);
+    (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
     op_ = Op::None;
     boot_ = Boot::Pattern;
@@ -122,6 +125,7 @@ class MyApp final : public app::App {
   // The file jobs end and start here, once per pass of the main loop (a Screen has an update() too, for what only it needs).
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
+    carriers_.set_all(play_.pattern().carrier);  // the render side's copy of the steps' carriers (relaxed atomics, carrier_seq.h)
     app::Files& files = ctx.files();
     if (op_ != Op::None) {
       const app::Files::Status st = files.status();
@@ -160,8 +164,13 @@ class MyApp final : public app::App {
 
   // The keys the screen does not use: FILE saves the pattern, SAMPLE LOAD loads it. A key pressed while a job runs is ignored (busy()).
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
-    if (in.press(app::Button::Play)) {  // MODE: BANDS <-> TALK
+    if (in.press(app::Button::Play)) {  // MODE: BANDS <-> TALK; SHIFT + PLAY starts or stops the transport (the per-step carriers and the loops' bar lines run on it)
       dsp::Engine& e = ctx.engine();
+      if (in.shift) {
+        (void)(e.playing() ? e.stop() : e.play());
+        ctx.redraw();
+        return true;
+      }
       (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, e.param(voc_id_, o3_voc03er::Vocoder::Mode) >= 0.5f ? 0.0f : 1.0f);
       ctx.redraw();
       return true;
@@ -310,6 +319,8 @@ class MyApp final : public app::App {
     w.sint("octave", play_.octave());
     w.num("steps", play_.pattern().used());
     w.num("cursor", play_.pattern().cursor);
+    w.num("carriers", play_.pattern().carriers_used());
+    w.num("playing", ctx.engine().playing() ? 1u : 0u);
     w.num("focus", focus);
     w.str("value", value);
     const app::AudioIn& in = ctx.audio_in();
@@ -386,6 +397,7 @@ class MyApp final : public app::App {
 
   o3_voc03er::Vocoder voc_;
   o3_voc03er::PlayScreen play_;
+  o3_voc03er::CarrierSeq carriers_;
 
   Op op_ = Op::None;
   Boot boot_ = Boot::Pattern;

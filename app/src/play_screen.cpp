@@ -125,6 +125,12 @@ void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     pattern_.clear();
     note_ = nullptr;
     ctx.redraw();
+  } else if (in.press(Button::Pattern)) {  // the carrier of the step under the cursor: none, synth, noise, loop 1..4 (carrier_seq.h)
+    (void)pattern_.cycle_carrier(pattern_.cursor);
+    ctx.redraw();
+  } else if (in.shift && (in.press(Button::Left) || in.press(Button::Right))) {  // the cursor, a step
+    pattern_.cursor = (pattern_.cursor + (in.press(Button::Left) ? kPatternSteps - 1u : 1u)) % kPatternSteps;
+    ctx.redraw();
   } else if (in.press(Button::Left) || in.press(Button::Right)) {
     octave_ = clamp_octave(octave_ + (in.press(Button::Left) ? -1 : 1));
     ctx.redraw();
@@ -221,7 +227,7 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
   r.text(16, hy, "PADS play chords   F1-F8 pick a value   ENCODER turn it (SHIFT coarse)   LEFT/RIGHT octave", Color::TextDim, Face::Label);
 
   // The pattern: 16 steps, the cursor framed.
-  r.text(16, hy + 20, "PATTERN: pads record   DELETE clear   FILE save   SAMPLE LOAD load", Color::TextDim, Face::Label);
+  r.text(16, hy + 20, "PATTERN: pads record  DELETE clear  FILE save  LOAD load  PATTERN key: carrier  SHIFT+L/R: step", Color::TextDim, Face::Label);
   const int step_w = 40;
   for (unsigned i = 0; i < kPatternSteps; ++i) {
     const Rect c{16 + static_cast<int>(i) * step_w, hy + 38, step_w - 4, 26};
@@ -235,7 +241,11 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
     }
     char name[5];
     note_name(pattern_.note[i], name);
-    r.text(c.x + 4, c.y + 6, name, Color::Text, Face::Micro);
+    r.text(c.x + 4, c.y + 3, name, Color::Text, Face::Micro);
+    if (pattern_.carrier[i] != 0) {  // the step's carrier, under the note
+      static constexpr const char* kTag[] = {"", "SY", "NZ", "L1", "L2", "L3", "L4"};
+      r.text(c.x + 4, c.y + 14, kTag[pattern_.carrier[i]], Color::Accent, Face::Micro);
+    }
   }
 
   if (loops_ != nullptr) {  // the four loops under the pattern: number and state, length, role; the selected one framed
@@ -312,11 +322,12 @@ void PlayScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 // the octave. FILE and SAMPLE LOAD are handled in app.cpp. Look at it: app/scenarios/help.txt (Shift + Config, BUTTONS, PADS).
 void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Play, "MODE: BANDS OR TALK", nullptr},
+      {Button::Play, "MODE: BANDS OR TALK", "START OR STOP THE BAR"},
       {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},
       {Button::File, "SAVE THE PATTERN", nullptr},
       {Button::SampleLoad, "LOAD THE PATTERN", nullptr},
       {Button::Delete, "CLEAR THE PATTERN", nullptr},
+      {Button::Pattern, "STEP CARRIER: SY NZ L1-L4", nullptr},
       {Button::Note, "PICK LOOP 1", nullptr},
       {Button::Instr, "PICK LOOP 2", nullptr},
       {Button::Vol, "PICK LOOP 3", nullptr},
@@ -328,8 +339,8 @@ void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Insert, "LOOP DIRECTION: FWD OR REV", nullptr},
       {Button::SampleEdit, "LOOP LEVEL DOWN 3 DB", nullptr},
       {Button::SampleRec, "LOOP LEVEL UP 3 DB", nullptr},
-      {Button::Left, "KEYBOARD AN OCTAVE DOWN", nullptr},
-      {Button::Right, "KEYBOARD AN OCTAVE UP", nullptr},
+      {Button::Left, "KEYBOARD AN OCTAVE DOWN", "CURSOR ONE STEP BACK"},
+      {Button::Right, "KEYBOARD AN OCTAVE UP", "CURSOR ONE STEP ON"},
   };
   static constexpr app::HelpPadGroup kGroups[] = {
       {"WHITE KEYS", "PLAY THE CARRIER, CHORDS, RECORD", Color::Sel},

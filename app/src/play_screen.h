@@ -3,7 +3,7 @@
 
 // The one screen of the template: the pads play the carrier (chords) and record what they play into a 16-step pattern, F1..F3 + the encoder edit
 // the voice's three values (the kit's controls convention, o3-sdk app/param_keys.h), LEFT / RIGHT move the keyboard an octave, DELETE
-// clears the pattern. NOTE, INSTR, VOL and FX pick loop 1..4; REC arms or stops its recording, UP plays or stops it, DOWN swaps its role. It also shows the card and the last file job. The file keys (FILE saves, SAMPLE LOAD loads) are the app's, in
+// clears the pattern, PATTERN cycles the carrier of the step under the cursor (SHIFT + LEFT / RIGHT move the cursor). NOTE, INSTR, VOL and FX pick loop 1..4; REC arms or stops its recording, UP plays or stops it, DOWN swaps its role. It also shows the card and the last file job. The file keys (FILE saves, SAMPLE LOAD loads) are the app's, in
 // src/app.cpp. Everything here runs in the main loop (o3-sdk app/screen.h).
 
 #include <o3_voc03er/input.h>

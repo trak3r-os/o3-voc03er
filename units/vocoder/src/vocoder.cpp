@@ -9,6 +9,7 @@ namespace {
 
 using o3sdk::core::ParamCurve;
 using o3sdk::core::ParamUnit;
+using o3sdk::dsp::Ramp;
 
 constexpr const char* kWaveNames[] = {"SAW", "PULSE"};
 constexpr const char* kModeNames[] = {"BANDS", "TALK"};
@@ -33,6 +34,8 @@ constexpr o3sdk::core::ParamDesc level_row(const char* name) {
   return {name, "dB", nullptr, nullptr, -24.0f, 12.0f, 0.0f, 72, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0};
 }
 
+constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4"};
+
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"WAVE", "", kWaveNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"NOISE", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
@@ -50,6 +53,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     loop_row("L4 REC", kRecNames), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
     speed_row("L1 SPEED"), dir_row("L1 DIR"), level_row("L1 LEVEL"), speed_row("L2 SPEED"), dir_row("L2 DIR"), level_row("L2 LEVEL"),
     speed_row("L3 SPEED"), dir_row("L3 DIR"), level_row("L3 LEVEL"), speed_row("L4 SPEED"), dir_row("L4 DIR"), level_row("L4 LEVEL"),
+    {"CARRIER", "", kCarNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -115,6 +119,16 @@ void Vocoder::prepare(float sample_rate) noexcept {
   for (Slot& s : slot_) {
     s = Slot{};
   }
+  sel_ = 0;
+  npend_ = 0;
+  synth_gain_.set_length(ramp);
+  noise_amt_.set_length(ramp);
+  synth_gain_.jump(1.0f);
+  noise_amt_.jump(noise_user_);
+  for (Ramp& g : loop_car_) {
+    g.set_length(ramp);
+    g.jump(0.0f);
+  }
   publish_loops();
 }
 
@@ -123,6 +137,10 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     return;
   }
   v = o3sdk::core::param_clamp(kParams[id], v);
+  if (id == CarSrc) {
+    select_carrier(v, 0);
+    return;
+  }
   if (id >= Loop1Rec) {
     return;  // the loops' parameters carry a frame: loop_param_event
   }
@@ -131,7 +149,10 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       carrier_.set_wave(v >= 0.5f ? Carrier::Wave::Pulse : Carrier::Wave::Saw);
       break;
     case Noise:
-      carrier_.set_noise(v);
+      noise_user_ = v;
+      if (sel_ == 0u) {
+        noise_amt_.jump(v);  // the knob acts at once, as it always did; only a carrier switch ramps
+      }
       break;
     case Attack:
       carrier_.set_attack_ms(v);
@@ -181,7 +202,9 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       carrier_.note_off(e.note);
       break;
     case EventKind::Param:
-      if (e.param >= Loop1Rec && e.param < kParamCount) {
+      if (e.param == CarSrc) {
+        select_carrier(o3sdk::core::param_clamp(kParams[CarSrc], e.value), e.frame);
+      } else if (e.param >= Loop1Rec && e.param < CarSrc) {
         loop_param_event(e.param, e.value, e.frame);
       } else {
         set(e.param, e.value);
@@ -226,6 +249,7 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
       break;
     case LoopField::Role:
       s.carrier = on;
+      retarget(frame);
       break;
     case LoopField::Speed:
       s.speed = static_cast<std::uint8_t>(v + 0.5f);
@@ -240,6 +264,85 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
       loops_.set_gain(n, std::exp(v * 0.11512925f));  // dB -> linear, once an event
       break;
   }
+}
+
+// The carrier source changes at `frame`: the synth's gain and the noise amount start their ramps now (the run before this event has been
+// rendered), the loops' at the same frame through pend_.
+void Vocoder::select_carrier(float v, std::uint32_t frame) noexcept {
+  sel_ = static_cast<unsigned>(v + 0.5f);
+  synth_gain_.target(sel_ >= 3u ? 0.0f : 1.0f);
+  noise_amt_.target(noise_target());
+  retarget(frame);
+}
+
+void Vocoder::retarget(std::uint32_t frame) noexcept {
+  if (npend_ == sizeof pend_ / sizeof pend_[0]) {
+    --npend_;  // full: the last entry is replaced, the final state still wins
+  }
+  Retarget& r = pend_[npend_++];
+  r.frame = static_cast<std::uint16_t>(frame);
+  for (unsigned i = 0; i < Loop::kCount; ++i) {
+    r.car[i] = car_target(i);
+  }
+}
+
+// The synth for `n` samples: while a ramp is moving, in slices of 16 so the noise amount follows it (the Carrier takes one value a call) and the
+// gain per sample; settled, one call and at most one multiply.
+void Vocoder::render_carrier(float* out, float* gate, std::uint32_t n) noexcept {
+  if (!synth_gain_.moving() && !noise_amt_.moving()) {
+    carrier_.set_noise(noise_amt_.value());
+    carrier_.render(out, n, gate);
+    const float g = synth_gain_.value();
+    if (g != 1.0f) {
+      for (std::uint32_t i = 0; i < n; ++i) {
+        out[i] *= g;
+      }
+    }
+    return;
+  }
+  for (std::uint32_t off = 0; off < n; off += 16u) {
+    const std::uint32_t k = n - off < 16u ? n - off : 16u;
+    for (std::uint32_t j = 0; j < k; ++j) {
+      (void)noise_amt_.next();
+    }
+    carrier_.set_noise(noise_amt_.value());
+    carrier_.render(out + off, k, gate + off);
+    for (std::uint32_t j = 0; j < k; ++j) {
+      out[off + j] *= synth_gain_.next();
+    }
+  }
+}
+
+// A loop on the carrier side, from frame `from` of this block, through its gain ramp; pend_'s targets start the ramp at their frames. The loop
+// is read in full (its position must advance) even when it is muted.
+void Vocoder::mix_car(unsigned loop, std::uint32_t from, std::uint32_t n, float* car, float* tmp) noexcept {
+  Ramp& g = loop_car_[loop];
+  if (npend_ == 0u && !g.moving() && g.value() == 1.0f) {
+    loops_.mix(loop, car + from, n - from, true);
+    return;
+  }
+  loops_.mix(loop, tmp + from, n - from, false);
+  std::uint32_t pos = from;
+  const auto run = [&](std::uint32_t a, std::uint32_t b) {
+    if (g.moving()) {
+      for (std::uint32_t k = a; k < b; ++k) {
+        car[k] += tmp[k] * g.next();
+      }
+    } else if (g.value() != 0.0f) {
+      const float v = g.value();
+      for (std::uint32_t k = a; k < b; ++k) {
+        car[k] += tmp[k] * v;
+      }
+    }
+  };
+  for (unsigned k = 0; k < npend_; ++k) {
+    if (pend_[k].frame > pos) {
+      run(pos, pend_[k].frame);
+      pos = pend_[k].frame;
+    }
+    g.target(pend_[k].car[loop]);
+  }
+  run(pos, n);
 }
 
 void Vocoder::publish_loops() noexcept {
@@ -281,8 +384,10 @@ Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
 // modulator (a MOD loop; the second one adds) or adds to the carrier (a CAR loop). A loop that does not record or play costs a few compares.
 void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept {
   if (!loops_.bound()) {
+    npend_ = 0;
     return;
   }
+  float tmp[Bands::kMaxFrames];
   std::uint32_t play_from[Loop::kCount] = {};
   for (unsigned i = 0; i < Loop::kCount; ++i) {
     Slot& s = slot_[i];
@@ -334,15 +439,19 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
     }
     if (loops_.playing(i)) {
       const std::uint32_t pf = play_from[i];
-      if (s.carrier) {
-        loops_.mix(i, car + pf, n - pf, true);
+      if (s.carrier || sel_ == 3u + i) {
+        mix_car(i, pf, n, car, tmp);
       } else {
         loops_.mix(i, mod + pf, n - pf, modulated);
         modulated = true;
       }
     }
+    if (!loops_.playing(i) || !(s.carrier || sel_ == 3u + i)) {
+      loop_car_[i].jump(car_target(i));  // not on the carrier side: nothing to fade, the ramp waits at where it will start
+    }
     s.req = 0;
   }
+  npend_ = 0;
   publish_loops();
 }
 
@@ -358,7 +467,7 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   o3sdk::dsp::ProcessArgs run = args;
   run.frames = n;
   o3sdk::dsp::for_each_run(
-      run, [&](std::uint32_t from, std::uint32_t to) { carrier_.render(car + from, to - from, gate + from); },
+      run, [&](std::uint32_t from, std::uint32_t to) { render_carrier(car + from, gate + from, to - from); },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
   run_loops(*args.transport, n, mod, car);
   // Only the active mode runs; both run while the crossfade is under way.

@@ -62,7 +62,7 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V2d | The last per-sample work: ramps out of the sample loop when settled, the unvoiced mix once a block, the follower every second sample, TALK's ramp every 8 | Host tests unchanged, no doubles; the cycles read on the unit | Done (section 4d); listening owed |
 | V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | Built 2026-11-05, host tests green (loop_test: bar-exact start and stop, seam, roles, full loop, transport stopped), no doubles, SDRAM 5.7 MB of 16. Owed on the unit: the CPU of a playing loop, recording through a real source, listening to the roles. |
 | V5b | Loops: speed and reverse, the span copy | Host tests, unit | Built 2026-11-06, host tests green (every speed and direction against an integer oracle, both wraps, loops of 1 to 100 samples, no drift over 16 s, changes while playing), mk66 image builds, no doubles. Per loop speed 0.5x/1x/2x, direction, level (ids 22..33). Owed on the unit: the CPU at each speed (BANDS, 8 notes), listening (melody kept, seam, level balance). |
-| V5c | Per-step carrier switch | Host tests, scenario, unit | |
+| V5c | Per-step carrier switch | Host tests, scenario, unit | Built (host tests, scenario carrier_steps, cross build); the unit check is owed: CPU, click on real sources, a MOD-role loop picked as carrier |
 | V6a | TUNE: detector and gate | Host tests against synthetic voices and three sung phrases; aubio as a host oracle only, never shipped | |
 | V6b | TUNE: shifter, snap, retune | Host tests, unit | |
 | V7 | The 2040 layer, slice by slice | | |

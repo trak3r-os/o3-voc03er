@@ -11,6 +11,9 @@
 // app cannot add a key to it. An app's own values go in a file of its own, as here.
 //
 //   pattern.o3a   type "PATN", one chunk STEP: u16 version (0x0100), u8 step count (16), 16 notes (0: a rest, else 1..127)
+//                 plus, since V5c, an optional chunk CARR: u16 version (0x0100), u8 step count (16), 16 carriers (0: none, follow what is set;
+//                 1 synth, 2 noise, 3..6 loop 1..4: the Vocoder's CARRIER values minus 0 FOLLOW). An absent CARR (every older file) is no carrier
+//                 on any step; a CARR with a wrong count or a value above 6 refuses the whole file. An older reader skips the chunk.
 //   config.o3a    type "CONF", one chunk OCTV: u16 version (0x0100), u8 octave + 3 (so 0..5 for the octaves -3..+2)
 // A newer minor version (the low byte) is read as far as this one knows it; a newer major, a wrong count or a value out of range is refused.
 
@@ -24,14 +27,16 @@
 namespace o3_voc03er {
 
 inline constexpr unsigned kPatternSteps = 16;
+inline constexpr std::uint8_t kCarrierMax = 6;  // a step's carrier: 0 none, 1 synth, 2 noise, 3..6 loop 1..4
 inline constexpr const char* kPatternFile = "pattern.o3a";  // in the app's folder on the card, Apps/<id>/ (the CMake id)
 inline constexpr const char* kConfigFile = "config.o3a";
-// The largest file each makes (54 and 38 bytes) with room to spare; the buffers that hold them are word aligned (Files::save reads them).
-inline constexpr std::size_t kPatternFileMax = 96;
+// The largest file each makes (about 80 and 38 bytes) with room to spare; the buffers that hold them are word aligned (Files::save reads them).
+inline constexpr std::size_t kPatternFileMax = 128;
 inline constexpr std::size_t kConfigFileMax = 64;
 
 struct Pattern {
   std::uint8_t note[kPatternSteps] = {};  // 0: a rest
+  std::uint8_t carrier[kPatternSteps] = {};  // 0: this step does not change the carrier (V5c), else 1..kCarrierMax
   unsigned cursor = 0;                    // the step the next recorded note goes to (not kept in the file)
 
   // Writes `n` into the step under the cursor and moves the cursor on (it wraps). A note out of 1..127 is a rest.
@@ -39,9 +44,27 @@ struct Pattern {
     note[cursor] = n >= 1 && n <= 127 ? static_cast<std::uint8_t>(n) : 0;
     cursor = (cursor + 1u) % kPatternSteps;
   }
+  // The next carrier for step `i` (none, synth, noise, loop 1..4, none ...); false for a step out of range.
+  bool cycle_carrier(unsigned i) noexcept {
+    if (i >= kPatternSteps) {
+      return false;
+    }
+    carrier[i] = carrier[i] >= kCarrierMax ? 0 : static_cast<std::uint8_t>(carrier[i] + 1u);
+    return true;
+  }
+  unsigned carriers_used() const noexcept {
+    unsigned count = 0;
+    for (std::uint8_t c : carrier) {
+      count += c != 0 ? 1u : 0u;
+    }
+    return count;
+  }
   void clear() noexcept {
     for (std::uint8_t& n : note) {
       n = 0;
+    }
+    for (std::uint8_t& c : carrier) {
+      c = 0;
     }
     cursor = 0;
   }
@@ -54,7 +77,7 @@ struct Pattern {
   }
   friend bool operator==(const Pattern& a, const Pattern& b) noexcept {
     for (unsigned i = 0; i < kPatternSteps; ++i) {
-      if (a.note[i] != b.note[i]) {
+      if (a.note[i] != b.note[i] || a.carrier[i] != b.carrier[i]) {
         return false;
       }
     }
@@ -69,6 +92,11 @@ inline std::size_t write_pattern(const Pattern& p, std::uint8_t* out, std::size_
   if (!w.begin("STEP") || !w.u16(0x0100) || !w.u8(kPatternSteps) || !w.bytes(p.note, sizeof p.note) || !w.end()) {
     return 0;
   }
+  if (p.carriers_used() != 0u) {  // no CARR for a pattern without carriers: the file stays what V1 wrote
+    if (!w.begin("CARR") || !w.u16(0x0100) || !w.u8(kPatternSteps) || !w.bytes(p.carrier, sizeof p.carrier) || !w.end()) {
+      return 0;
+    }
+  }
   return w.finish();
 }
 
@@ -81,30 +109,48 @@ inline bool read_pattern(const std::uint8_t* data, std::size_t n, Pattern& p) no
   if (r.open(data, n, "PATN") != chunk::Error::None) {  // the container's checks: length, ids, pads and the CRC
     return false;
   }
+  Pattern got;
+  bool have_step = false;
   while (r.next(c)) {
-    if (!chunk::id_is(c, "STEP")) {
-      continue;  // a chunk of a newer version of the file
-    }
     chunk::Fields f(c);
-    const std::uint16_t version = f.u16();
-    const unsigned steps = f.u8();
-    Pattern got;
-    if ((version >> 8) != 1u || steps != kPatternSteps) {
-      return false;
-    }
-    for (std::uint8_t& note : got.note) {
-      note = f.u8();
-      if (note > 127u) {
+    if (chunk::id_is(c, "STEP")) {
+      const std::uint16_t version = f.u16();
+      const unsigned steps = f.u8();
+      if ((version >> 8) != 1u || steps != kPatternSteps) {
         return false;
       }
-    }
-    if (!f.ok()) {
-      return false;
-    }
-    p = got;
-    return true;
+      for (std::uint8_t& note : got.note) {
+        note = f.u8();
+        if (note > 127u) {
+          return false;
+        }
+      }
+      if (!f.ok()) {
+        return false;
+      }
+      have_step = true;
+    } else if (chunk::id_is(c, "CARR")) {
+      const std::uint16_t version = f.u16();
+      const unsigned steps = f.u8();
+      if ((version >> 8) != 1u || steps != kPatternSteps) {
+        return false;
+      }
+      for (std::uint8_t& car : got.carrier) {
+        car = f.u8();
+        if (car > kCarrierMax) {
+          return false;
+        }
+      }
+      if (!f.ok()) {
+        return false;
+      }
+    }  // any other chunk is a newer version's: skipped
   }
-  return false;
+  if (!have_step) {
+    return false;
+  }
+  p = got;
+  return true;
 }
 
 // The setting as a file.

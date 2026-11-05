@@ -31,6 +31,13 @@
 //            +1 Dir   0 FWD (default), 1 REV: plays backwards (a start begins at the last sample).
 //            +2 Level dB, -24..+12 (default 0): the loop's gain, ramped over a chunk of 64 samples; at 0 dB the sound is what it was.
 //            The loop memory comes from the app (bind_loops); without it the loops do nothing.
+//  34        CarSrc  0 FOLLOW (default), 1 SYNTH, 2 NOISE, 3..6 LOOP1..LOOP4: which source is the carrier, set by the app's pattern step by step
+//            (a Param event, so it lands on the event's frame). FOLLOW changes nothing: the synth with the NOISE knob as set, and the loops
+//            whose role is CAR. SYNTH and NOISE play the synth with noise 0 or 1 and mute the CAR loops; LOOPn mutes the synth and every
+//            other CAR loop, and loop n is the carrier even if its role is MOD (its modulator part then stops at the block, not on the
+//            frame: set it to CAR first for a clean change). Nothing here touches the live input: it cannot be a carrier (its source
+//            switch settles for 200 ms). No click: the synth's gain, the noise amount and each loop's carrier gain move in a 5 ms ramp
+//            from the event's frame (the noise amount in slices of 16 samples, since the Carrier takes it once a run).
 // The bands' followers are fixed (2 ms attack, 25 ms release, 40 ms on the three lowest bands; Bands::set_envelope).
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
@@ -55,7 +62,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            kParamCount };
+                            CarSrc, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
@@ -95,6 +102,12 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
   void run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept;
   void publish_loops() noexcept;
+  void select_carrier(float v, std::uint32_t frame) noexcept;
+  void retarget(std::uint32_t frame) noexcept;
+  float noise_target() const noexcept { return sel_ == 2u ? 1.0f : (sel_ == 1u ? 0.0f : noise_user_); }
+  float car_target(unsigned loop) const noexcept { return (sel_ == 0u ? slot_[loop].carrier : sel_ == 3u + loop) ? 1.0f : 0.0f; }
+  void render_carrier(float* out, float* gate, std::uint32_t n) noexcept;
+  void mix_car(unsigned loop, std::uint32_t from, std::uint32_t n, float* car, float* tmp) noexcept;
 
   // One loop's control state (render context only; the main loop reads status_).
   struct Slot {
@@ -117,6 +130,19 @@ class Vocoder final : public o3sdk::dsp::Unit {
   o3sdk::dsp::Ramp dry_;
   o3sdk::dsp::Ramp talk_mix_;  // 0 Bands .. 1 Talk
   Loop loops_;
+  // The carrier switch (render context only). sel_ is the CarSrc value; the ramps are 5 ms. pend_: the carrier-side loop gains each
+  // event of this block set, in order, so run_loops can start the ramp at the same frame (the oldest are overwritten past 8).
+  unsigned sel_ = 0;
+  float noise_user_ = 0.0f;
+  o3sdk::dsp::Ramp synth_gain_{1.0f};
+  o3sdk::dsp::Ramp noise_amt_;
+  o3sdk::dsp::Ramp loop_car_[Loop::kCount];
+  struct Retarget {
+    std::uint16_t frame = 0;
+    float car[Loop::kCount] = {};
+  };
+  Retarget pend_[8];
+  unsigned npend_ = 0;
   Slot slot_[Loop::kCount];
   std::atomic<std::uint32_t> opts_[Loop::kCount] = {};    // packed speed | reverse << 2 | (level in half dB + 64) << 8, same protocol
   std::atomic<std::uint32_t> status_[Loop::kCount] = {};  // packed LoopStatus: single writer (the render context), word-sized reads
