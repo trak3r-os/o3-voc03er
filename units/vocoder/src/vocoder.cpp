@@ -475,16 +475,18 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
         play_from[i] = static_cast<std::uint32_t>(f);
       }
     }
+    // sel_ is the block's last word: a loop leaving the carrier stays on that side until its fade has run from the event's frame.
+    const bool on_car = s.carrier || sel_ == 3u + i || loop_car_[i].value() > 0.0f;
     if (loops_.playing(i)) {
       const std::uint32_t pf = play_from[i];
-      if (s.carrier || sel_ == 3u + i) {
+      if (on_car) {
         mix_car(i, pf, n, car, tmp);
       } else {
         loops_.mix(i, mod + pf, n - pf, modulated);
         modulated = true;
       }
     }
-    if (!loops_.playing(i) || !(s.carrier || sel_ == 3u + i)) {
+    if (!loops_.playing(i) || !on_car) {
       loop_car_[i].jump(car_target(i));  // not on the carrier side: nothing to fade, the ramp waits at where it will start
     }
     s.req = 0;

@@ -290,6 +290,28 @@ TEST_CASE("vocoder loops: a Rec off on an idle loop leaves a pending play on its
   CHECK(rig.v.loops().position(0) == (rig.at - start - g1) % 640);
 }
 
+TEST_CASE("vocoder loops: a loop leaving the carrier stays out of the modulator while it fades") {
+  Rig rig(Loop::kMaxSamples);
+  std::vector<float> x(6400);
+  for (std::size_t i = 0; i < x.size(); ++i) {
+    x[i] = 0.5f * std::sin(kPi2 * 440.0f * static_cast<float>(i) / kFs);
+  }
+  record_loop(rig, 0, x);
+  // A MOD-role loop selected as the carrier, the live input silent, the modulator heard dry: nothing of the loop may come out.
+  rig.block(nullptr, 64, {dsp::param_change(Vocoder::Dry, 1.0f), dsp::param_change(Vocoder::CarSrc, 3.0f), play(0, true)});
+  std::vector<float> settled;
+  for (unsigned b = 0; b < 700; ++b) {  // a second: the followers let go of what the recording put in them
+    settled = rig.block(nullptr, 64);
+  }
+  REQUIRE(rms(settled, 0, 64) < 1.0e-3f);
+  const auto out = rig.block(nullptr, 64, {dsp::param_change(Vocoder::CarSrc, 1.0f, 32)});
+  float before = 0.0f;
+  for (std::size_t i = 0; i < 32; ++i) {
+    before = std::fmax(before, std::fabs(out[i]));
+  }
+  CHECK(before < 1.0e-3f);  // the block's first half is before the event: the loop is still only a carrier
+}
+
 TEST_CASE("vocoder loops: the role decides where the loop goes") {
   const std::vector<float> tone = rich(64 * 200, 500.0f);
   const auto run_case = [&](bool car, float dry, const std::vector<float>* live, float& e500, float& e3k, float& level) {

@@ -42,8 +42,10 @@ class Autotune {
   static constexpr float kMaxRead = 1016.0f;   // the farthest: kDelayLo + the longest period (630) + the drift of a crossfade fits
   static constexpr unsigned kSeg = Tune::kTick;
   static constexpr unsigned kXfade = 64;       // crossfade length, samples
-  static constexpr float kDelayLo = 40.0f;     // the window's lower edge, samples (covers the drift of a crossfade at +-6 semitones)
+  static constexpr float kDelayLo = 48.0f;     // the window's lower edge, samples (covers the drift of a crossfade at +-6 semitones)
   static constexpr float kRestDelay = 48.0f;   // the delay at reset, a whole number
+  // At +600 cents the old reader falls 0.4143 samples a sample for the whole crossfade, and must still end at or above the nearest read.
+  static_assert(kDelayLo >= kMinRead + 0.4143f * static_cast<float>(kXfade), "the crossfade's old reader would read unwritten samples");
   static constexpr float kSnapBias = 0.20f;    // semitones
   static constexpr float kMaxCents = 600.0f;
   static constexpr unsigned kMaxHeld = 8;

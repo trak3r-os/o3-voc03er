@@ -50,7 +50,7 @@
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
 // block, 35 % of the 261,224 a block has at 44.1 kHz. TALK replaces Bands: Talk about 16,600 at order 16 (talk.h) + the same Carrier
-// and mixing. TUNE: Tune at most 5,500 a block (tune.h) + the shifter, about 25 cycles a sample (about 1,600 a block, 2 reads in a crossfade) +
+// and mixing. TUNE: Tune at most 5,500 difference terms a block (tune.h), about 25,000 cycles [est] + the shifter, about 25 cycles a sample (about 1,600 a block, 2 reads in a crossfade) +
 // a control step per 16 samples; no carrier. [est] Not measured on a unit.
 
 #include <o3_voc03er/units/vocoder/autotune.h>
