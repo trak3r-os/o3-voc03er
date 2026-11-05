@@ -5,4 +5,4 @@ file(GLOB test_sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp)
 # The helper links what the tests need: the kit, the simulator, the host platform and the app library WHOLE (it defines o3sdk_app(),
 # which app_test.cpp names), and hands app/scenarios to the sources as the macro APP_SCENARIO_DIR (app_test.cpp runs every scenario
 # as it is). DEPENDS: the units the tests exercise.
-o3sdk_app_test_suite(o3_voc03er SOURCES ${test_sources} DEPENDS unit_voice)
+o3sdk_app_test_suite(o3_voc03er SOURCES ${test_sources} DEPENDS unit_voice unit_vocoder)
