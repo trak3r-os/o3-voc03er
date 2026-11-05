@@ -53,13 +53,13 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V0 | The repository from the template, this plan | Host green | Done |
 | V1 | The audio-in gate on the template app: console `ain <source> [gain]`, input peaks in `state` | Host test, gate CANDIDATE, unit round run | Done (section 4); the microphone left for later |
 | V2 | `Carrier` and `Bands` (16 bands) in `units/vocoder/`, against a synthetic voice | Host tests, no doubles | Done on the host; revised by V2a and V2b |
-| G0 | Microbench on the unit: the engine's own share, the real `Bands` and `Carrier`, a biquad bank, the YIN and autocorrelation inner loops, SDRAM reads | Numbers from `cpu` on the unit; they fix the band count and TALK's order before V4 | Done (section 4b), on V2's code; bands and order stay at 16 until V4's round |
+| G0 | Microbench on the unit: the engine's own share, the real `Bands` and `Carrier`, a biquad bank, the YIN and autocorrelation inner loops, SDRAM reads | Numbers from `cpu` on the unit; they fix the band count and TALK's order before V4 | Done (section 4b), on V2's code; bands and TALK's order settled at 16 in section 4d |
 | V2a | `Carrier`: second oscillator a voice (DETUNE), noise shared with the unvoiced path | Host tests, no doubles | Done on the host |
 | V2b | `Bands`: the review's geometry and followers, high-pass and AGC, the unvoiced path | Host tests, summed bands flat within 3 dB in a sweep, no doubles | Done on the host |
 | V2c | `Bands` and `Carrier` in fewer instruction cycles (section 4b): same sound, no fused multiply-adds in the sample loops, `b0` folded out of the sections, envelope segments out of the oscillator loop | Host tests unchanged, no doubles, each sample loop's instructions counted before and after; the cycles are read in V4's round | Done on the host: Bands' loop 81 to 47 cycles, Carrier's 122 to 66, by their instructions [est]; output differs by rounding only (3.8e-5 of peak at most) |
 | V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | Done on the host, no doubles; its CPU, its level (`kTalkGain` is a placeholder) and listening are owed to V4's round |
 | V4 | The unit in the app: PLAY screen with the input peak, pads play chords, MODE and the source on the keys, line sources start at gain 0, `ain` clears its peaks, a scenario | Scenario, image, CPU of each mode measured on the unit, a spoken sentence intelligible to the maintainer | Built on the host and for mk66 (2026-11-05): the Vocoder attached as slot 0, PLAY screen with IN peak / CLIP, MODE and SOURCE (PLAY and SAMPLE PLAY keys, F1 is MODE), pads play chords, line sources at gain 0, `ain` clears its peaks (app-side meter reset plus a 300 ms holdoff, no kit change), console `voc`; the unit round (CPU of each mode, line silence, a spoken sentence) is owed |
-| V2d | The last per-sample work: ramps out of the sample loop when settled, the unvoiced mix once a block, the follower every second sample, TALK's ramp every 8 | Host tests unchanged, no doubles; the cycles read on the unit | Next |
+| V2d | The last per-sample work: ramps out of the sample loop when settled, the unvoiced mix once a block, the follower every second sample, TALK's ramp every 8 | Host tests unchanged, no doubles; the cycles read on the unit | Done (section 4d); listening owed |
 | V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | |
 | V5b | Loops: speed and reverse, the span copy | Host tests, unit | |
 | V5c | Per-step carrier switch | Host tests, scenario, unit | |
@@ -153,6 +153,28 @@ What it says:
 - **Eight notes are still over**: by 4 points at worst on a tone, 8 on noise. V2d takes the small per-sample work out, with no change of design. Band count and TALK's order stay at 16 until it is read.
 - **Peaks**: the read straight after `ain` no longer carries the previous source. Line, left and right read 0.39 to 0.47 at gain 0 with the source still plugged in, L equal to R in every read: line silence and line separation stay unmeasured.
 - **Owed, needing a person**: a spoken sentence the maintainer can understand, TALK's level (`kTalkGain`), the microphone.
+
+## 4d. V2d on the unit, 2026-11-05
+
+Image `2a1af86c1d05 / o3sdk f14f247b0847`, CANDIDATE 11/11, CRC F6373160. Same method as section 4c, 24 reads: 0 underruns, 0 late, 0 slips, 0 hardware faults, `guard` shed 0 blocks. The unit was restored to what the round found.
+
+| Step | Render last, third read | Highest max | Before (4c) | Over budget |
+|---|---|---|---|---|
+| `voc bands 0` | 112,078 | 118,832 = 45.5 % | 48.8 % | 0 |
+| `voc bands 4` | 128,341 | 143,798 = 55.0 % | 57.5 % | 0 |
+| `voc bands 8` | 147,819 | 157,017 = 60.1 % | 64.0 % | 1 |
+| `voc talk 0` | 91,550 | 107,929 = 41.3 % | 47.4 % | 0 |
+| `voc talk 4` | 115,339 | 133,553 = 51.1 % | 55.3 % | 0 |
+| `voc talk 8` | 131,839 | 145,334 = 55.6 % | 63.2 % | 0 |
+| `voc bands 8`, noise | 154,379 | 167,665 = 64.2 % | 68.0 % | 3, from about every block |
+| `voc talk 8`, noise | 133,185 | 148,486 = 56.8 % | 60.7 % | 0 |
+
+Decisions:
+
+- **16 bands and TALK at order 16 stay.** Every step's ordinary render is under the budget. What is left is single blocks: eight notes on white noise, the worst input there is, passed the budget 3 times in the round, and nothing was shed. The fallbacks of section 4b change the sound, so they wait for the maintainer's ears, and the optimising stops here.
+- **QUALITY 24 is unmeasured**: `voc` does not set it. Eight notes at order 24 may pass the budget [est].
+- **Headroom for V5**: BANDS with 8 notes has none. Four loops at 2.8 % are fine at 4 notes; the loops' round reads it.
+- **V2d changed the output a little**: the follower every second sample moves the envelopes by 0.3 to 2.1 % of a band's peak, most in the top bands, and the frame level by 0.13 dB at most with the noise path off. TALK's stepped reflection coefficients move it by 2 to 4 % rms. Listening is owed on both, on unvoiced sounds above all.
 
 ## 5. How the work runs
 
