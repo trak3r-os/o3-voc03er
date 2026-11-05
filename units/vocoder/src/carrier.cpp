@@ -25,7 +25,21 @@ inline float blep(float t, float dt) noexcept {
   return 0.0f;
 }
 
+inline float osc(float phase, float dt, bool saw) noexcept {
+  if (saw) {
+    return 2.0f * phase - 1.0f - blep(phase, dt);
+  }
+  float p2 = phase + 0.5f;
+  p2 -= p2 >= 1.0f ? 1.0f : 0.0f;
+  return (phase < 0.5f ? 1.0f : -1.0f) + blep(phase, dt) - blep(p2, dt);
+}
+
 }  // namespace
+
+void Carrier::set_detune_cents(float cents) noexcept {
+  cents = cents < 0.0f ? 0.0f : (cents > 20.0f ? 20.0f : cents);
+  detune_ratio_ = cents > 0.0f ? std::exp2(cents * (1.0f / 1200.0f)) : 1.0f;
+}
 
 void Carrier::prepare(float sample_rate) noexcept {
   fs_ = sample_rate;
@@ -74,6 +88,7 @@ void Carrier::note_on(std::uint8_t note) noexcept {
   }
   if (pick->stage == Stage::Idle) {
     pick->phase = 0.0f;
+    pick->phase2 = 0.0f;
     pick->env = 0.0f;
   }
   pick->note = note;
@@ -116,7 +131,7 @@ bool Carrier::holds(std::uint8_t note) const noexcept {
   return false;
 }
 
-void Carrier::render(float* out, std::uint32_t n) noexcept {
+void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
   if (n > kMaxBlock) {
     n = kMaxBlock;
   }
@@ -125,29 +140,32 @@ void Carrier::render(float* out, std::uint32_t n) noexcept {
     out[i] = 0.0f;
     gate[i] = 0.0f;
   }
+  const bool two = detune_ratio_ != 1.0f;
+  const bool saw = wave_ == Wave::Saw;
   const float osc_gain = kVoiceGain * (1.0f - noise_);
+  const float g1 = two ? 0.5f * osc_gain : osc_gain;  // two oscillators keep the voice's level
   for (Voice& v : voices_) {
     if (v.stage == Stage::Idle) {
       continue;
     }
     float phase = v.phase;
+    float phase2 = two ? v.phase2 : phase;
     float env = v.env;
     Stage stage = v.stage;
     const float dt = v.inc;
-    const bool saw = wave_ == Wave::Saw;
+    float dt2 = dt * detune_ratio_;
+    dt2 = dt2 > 0.45f ? 0.45f : dt2;
     for (std::uint32_t i = 0; i < n; ++i) {
-      float x;
-      if (saw) {
-        x = 2.0f * phase - 1.0f - blep(phase, dt);
-      } else {
-        float p2 = phase + 0.5f;
-        p2 -= p2 >= 1.0f ? 1.0f : 0.0f;
-        x = (phase < 0.5f ? 1.0f : -1.0f) + blep(phase, dt) - blep(p2, dt);
-      }
-      out[i] += x * env * osc_gain;
-      gate[i] += env;
+      float x = osc(phase, dt, saw);
       phase += dt;
       phase -= phase >= 1.0f ? 1.0f : 0.0f;
+      if (two) {
+        x += osc(phase2, dt2, saw);
+        phase2 += dt2;
+        phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
+      }
+      out[i] += x * env * g1;
+      gate[i] += env;
       if (stage == Stage::Attack) {
         env += attack_step_;
         if (env >= 1.0f) {
@@ -164,20 +182,22 @@ void Carrier::render(float* out, std::uint32_t n) noexcept {
       }
     }
     v.phase = phase;
+    v.phase2 = phase2;
     v.env = env;
     v.stage = stage;
   }
+  if (gate_out != nullptr) {
+    for (std::uint32_t i = 0; i < n; ++i) {
+      gate_out[i] = gate[i] < 1.0f ? gate[i] : 1.0f;
+    }
+  }
   if (noise_ > 0.0f) {
-    std::uint32_t s = rng_;
+    float nz[kMaxBlock];
+    (noise_src_ != nullptr ? noise_src_ : &own_noise_)->fill(nz, n);
     const float g = kNoiseGain * noise_;
     for (std::uint32_t i = 0; i < n; ++i) {
-      s ^= s << 13;
-      s ^= s >> 17;
-      s ^= s << 5;
-      const float white = static_cast<float>(static_cast<std::int32_t>(s)) * 4.6566129e-10f;  // 2^-31
-      out[i] += white * g * (gate[i] < 1.0f ? gate[i] : 1.0f);
+      out[i] += nz[i] * g * (gate[i] < 1.0f ? gate[i] : 1.0f);
     }
-    rng_ = s;
   }
 }
 

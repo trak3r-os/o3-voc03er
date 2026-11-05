@@ -11,10 +11,11 @@
 //   3 Release  ms, 5..2000: the carrier voices' release
 //   4 Dry      0..1: the dry modulator mixed into the output (default 0)
 //   5 Level    dB, -48..+6
-// The bands' followers are fixed at 3 ms attack and 30 ms release (Bands::set_envelope).
+//   6 Detune   cents, 0..20 (default 8): the second oscillator of each carrier voice, sharp of the first
+// The bands' followers are fixed (2 ms attack, 25 ms release, 40 ms on the three lowest bands; Bands::set_envelope).
 //
-// Cost [est]: Bands about 870 cycles a sample + Carrier up to 160 + mixing 20: about 1,050 a sample, 67,000 a 64-frame block, 26 % of
-// the 261,224 a block has at 44.1 kHz. Not measured on a unit.
+// Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
+// block, 35 % of the 261,224 a block has at 44.1 kHz. Not measured on a unit.
 
 #include <o3_voc03er/units/vocoder/bands.h>
 #include <o3_voc03er/units/vocoder/carrier.h>
@@ -28,7 +29,7 @@ namespace o3_voc03er {
 
 class Vocoder final : public o3sdk::dsp::Unit {
  public:
-  enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, kParamCount };
+  enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, kParamCount };
 
   const o3sdk::dsp::UnitInfo& info() const noexcept override;
   void prepare(float sample_rate) noexcept override;
@@ -43,6 +44,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
 
   Carrier carrier_;
   Bands bands_;
+  NoiseSource noise_;
   o3sdk::dsp::Ramp level_;
   o3sdk::dsp::Ramp dry_;
 };

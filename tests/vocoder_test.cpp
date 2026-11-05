@@ -155,6 +155,8 @@ TEST_CASE("vocoder: the parameter table is valid and ids are stable") {
   }
   CHECK(Vocoder::Wave == 0);
   CHECK(Vocoder::Level == 5);
+  CHECK(Vocoder::Detune == 6);
+  CHECK(Vocoder::kParamCount == 7);
 }
 
 TEST_CASE("bands: a band responds more to a sine at its centre than at a neighbour's centre") {
@@ -237,7 +239,18 @@ TEST_CASE("vocoder: with noise as the carrier the output follows the modulator's
     b.process(m.data() + at, car.data() + at, out, 64);
   }
   CHECK(b.envelope(band_near(b, 300.0f)) > 2.0f * b.envelope(band_near(b, 750.0f)));
-  CHECK(b.envelope(band_near(b, 2400.0f)) > 2.0f * b.envelope(band_near(b, 1300.0f)));
+  // The second formant: the 2.4 kHz band against the 1.3 kHz band is at least 3 times higher for the vowel I than for the vowel A (the
+  // old absolute "twice" was written for the 100 Hz..8 kHz geometry; with Q 2.3 the 300 Hz formant's skirt reaches the 1.3 kHz band).
+  auto hi_to_mid = [&](const FormantVoice::Formant* vowel) {
+    Bands bb;
+    bb.prepare(kFs);
+    const std::vector<float> mm = speech(vowel, 20000);
+    for (std::size_t at = 0; at + 64 <= mm.size(); at += 64) {
+      bb.process(mm.data() + at, car.data() + at, out, 64);
+    }
+    return bb.envelope(band_near(bb, 2400.0f)) / bb.envelope(band_near(bb, 1300.0f));
+  };
+  CHECK(hi_to_mid(kVowelI) > 3.0f * hi_to_mid(kVowelA));
 }
 
 TEST_CASE("vocoder: the output never exceeds 1.0 at full-scale input") {
@@ -375,4 +388,261 @@ TEST_CASE("vocoder: after a long silence no sample is a denormal") {
     const float e = rig.v.bands().envelope(b);
     REQUIRE((e == 0.0f || e >= FLT_MIN));
   }
+}
+
+namespace {
+
+std::vector<float> noise_vec(std::size_t n, float amp) {
+  std::vector<float> v(n);
+  NoiseSource ns;
+  for (float& x : v) {
+    x = amp * ns.next();
+  }
+  return v;
+}
+
+// Peak-to-peak of the summed synthesis bands (all followers held at 1) over a tone sweep, in dB around the mean.
+float sweep_ripple_db(float* worst_lo, float* worst_hi) {
+  Bands b;
+  b.prepare(kFs);
+  b.hold_envelopes(1.0f);
+  std::vector<float> db;
+  for (float f = 200.0f; f <= 6000.0f; f *= 1.03f) {
+    b.reset();
+    b.hold_envelopes(1.0f);
+    float ph = 0.0f, acc = 0.0f;
+    unsigned cnt = 0;
+    float mod[64] = {}, car[64], out[64];
+    for (int blk = 0; blk < 120; ++blk) {
+      for (float& x : car) {
+        x = std::sin(ph);
+        ph += kPi2 * f / kFs;
+        ph -= ph > kPi2 ? kPi2 : 0.0f;
+      }
+      b.process(mod, car, out, 64);
+      if (blk >= 60) {
+        for (const float y : out) {
+          acc += y * y;
+          ++cnt;
+        }
+      }
+    }
+    db.push_back(20.0f * std::log10(std::sqrt(2.0f * acc / static_cast<float>(cnt))));
+  }
+  float mean = 0.0f;
+  for (const float d : db) {
+    mean += d;
+  }
+  mean /= static_cast<float>(db.size());
+  float lo = 1e9f, hi = -1e9f;
+  for (const float d : db) {
+    lo = std::fmin(lo, d - mean);
+    hi = std::fmax(hi, d - mean);
+  }
+  *worst_lo = lo;
+  *worst_hi = hi;
+  return hi - lo;
+}
+
+}  // namespace
+
+TEST_CASE("bands: the summed synthesis bands are flat within 3 dB from 200 Hz to 6 kHz") {
+  float lo = 0.0f, hi = 0.0f;
+  const float pp = sweep_ripple_db(&lo, &hi);
+  MESSAGE("ripple " << pp << " dB, " << lo << " .. " << hi);
+  CHECK(lo > -3.0f);
+  CHECK(hi < 3.0f);
+}
+
+
+namespace {
+
+// Drives Bands alone block by block; the carrier is a quiet noise, the gate absent.
+struct BandsRun {
+  Bands b;
+  std::vector<float> car;
+  BandsRun() { b.prepare(kFs); }
+  void feed(const std::vector<float>& mod, std::vector<float>* uv_trace = nullptr) {
+    if (car.size() < mod.size()) {
+      car = noise_vec(mod.size(), 0.2f);
+    }
+    float out[64];
+    for (std::size_t at = 0; at + 64 <= mod.size(); at += 64) {
+      b.process(mod.data() + at, car.data() + at, out, 64);
+      if (uv_trace != nullptr) {
+        uv_trace->push_back(b.unvoiced());
+      }
+    }
+  }
+};
+
+}  // namespace
+
+TEST_CASE("bands: a high-shaped noise burst opens the unvoiced path, a vowel does not, and it closes without a jump") {
+  const std::size_t n = 44100 / 2;
+  // a vowel, a burst of noise tilted high (twice differenced), then the vowel again
+  std::vector<float> sig = speech(kVowelA, n * 3);
+  std::vector<float> nz = noise_vec(n, 0.3f);
+  float p1 = 0.0f, p2 = 0.0f;
+  for (std::size_t i = 0; i < n; ++i) {
+    const float d1 = nz[i] - p1;
+    const float d2 = d1 - p2;
+    p1 = nz[i];
+    p2 = d1;
+    sig[n + i] = 0.4f * d2;
+  }
+  BandsRun r;
+  std::vector<float> tr;
+  r.feed(sig, &tr);
+  const std::size_t bl = n / 64;  // blocks a third
+  float vowel1 = 0.0f, burst = 1.0f, vowel2 = 0.0f, max_step = 0.0f;
+  int flips = 0;
+  for (std::size_t k = 1; k < tr.size(); ++k) {
+    max_step = std::fmax(max_step, std::fabs(tr[k] - tr[k - 1]));
+    flips += (tr[k] >= 0.5f) != (tr[k - 1] >= 0.5f) ? 1 : 0;
+  }
+  for (std::size_t k = 0; k < bl; ++k) {
+    vowel1 = std::fmax(vowel1, tr[k]);
+  }
+  for (std::size_t k = bl + 40; k < 2 * bl; ++k) {
+    burst = std::fmin(burst, tr[k]);
+  }
+  for (std::size_t k = 2 * bl + 40; k < 3 * bl; ++k) {
+    vowel2 = std::fmax(vowel2, tr[k]);
+  }
+  CHECK(vowel1 == 0.0f);
+  CHECK(burst == 1.0f);
+  CHECK(vowel2 == 0.0f);
+  CHECK(flips == 2);                          // opens once, closes once: the hysteresis does not chatter
+  CHECK(max_step <= 64.0f * (1.0f / (0.005f * kFs)) + 1.0e-6f);  // the crossfade moves at most 5 ms^-1: no jump
+}
+
+TEST_CASE("bands: the unvoiced noise follows the carrier's gate") {
+  const std::size_t n = 44100 / 4;
+  std::vector<float> nz = noise_vec(n, 0.3f);
+  std::vector<float> sig(n);
+  float p1 = 0.0f, p2 = 0.0f;
+  for (std::size_t i = 0; i < n; ++i) {
+    const float d1 = nz[i] - p1;
+    sig[i] = 0.4f * (d1 - p2);
+    p1 = nz[i];
+    p2 = d1;
+  }
+  const std::vector<float> zero(n, 0.0f);
+  float out[64], gate[64] = {};
+  Bands b;
+  b.prepare(kFs);
+  float pk = 0.0f;
+  for (std::size_t at = 0; at + 64 <= n; at += 64) {  // no carrier, gate 0: silent although the path is open
+    b.process(sig.data() + at, zero.data() + at, out, 64, gate);
+    for (const float y : out) {
+      pk = std::fmax(pk, std::fabs(y));
+    }
+  }
+  CHECK(b.unvoiced() == 1.0f);
+  CHECK(pk == 0.0f);
+}
+
+TEST_CASE("vocoder: the AGC levels the modulator, and silence or a noise floor is not lifted") {
+  const std::size_t n = 44100 * 2;
+  float level[2];
+  const float amps[2] = {0.5f, 0.05f};  // -6 dB and -26 dB peak
+  for (int k = 0; k < 2; ++k) {
+    Rig rig;
+    auto m = speech(kVowelA, n);
+    for (float& x : m) {
+      x *= amps[k] / 0.5f;
+    }
+    const auto out = rig.run(m, at_block0({dsp::note_on(48, 100), dsp::note_on(55, 100), dsp::note_on(60, 100)}));
+    level[k] = rms(out, 44100, n);
+    CHECK(level[k] > 0.01f);
+  }
+  CHECK(std::fabs(20.0f * std::log10(level[0] / level[1])) < 3.0f);
+
+  // a noise floor at -70 dB with a chord held, from the start: a floor lifted by the AGC's maximum gain (x20) would peak near 1; unlifted it is 0.07 (the floor times the wet gain)
+  Rig rig;
+  const auto floor_out = rig.run(noise_vec(n, 3.0e-4f), at_block0({dsp::note_on(48, 100), dsp::note_on(55, 100)}));
+  CHECK(peak(floor_out) < 0.15f);
+  // silence after a loud passage: silent
+  Rig rig2;
+  auto m = speech(kVowelA, n);
+  for (std::size_t i = n / 2; i < n; ++i) {
+    m[i] = 0.0f;
+  }
+  const auto tail = rig2.run(m, at_block0({dsp::note_on(48, 100)}));
+  CHECK(peak(tail, n - 4410) < 1.0e-4f);
+}
+
+namespace {
+
+// Power at one frequency over a Hann-windowed span: resolves tones 2.5 Hz apart in two seconds.
+float hann_power(const std::vector<float>& v, std::size_t from, std::size_t to, float hz) {
+  float re = 0.0f, im = 0.0f;
+  const float len = static_cast<float>(to - from);
+  for (std::size_t i = from; i < to; ++i) {
+    const float t = static_cast<float>(i - from);
+    const float w = 0.5f - 0.5f * std::cos(kPi2 * t / len);
+    const float a = std::fmod(kPi2 * hz * t / kFs, kPi2);
+    re += w * v[i] * std::cos(a);
+    im += w * v[i] * std::sin(a);
+  }
+  return (re * re + im * im) / (len * len);
+}
+
+}  // namespace
+
+TEST_CASE("carrier: the two oscillators of a voice beat at the detune; DETUNE 0 is one pitch") {
+  const float f1 = 220.0f;  // note 57
+  const float cents[2] = {20.0f, 0.0f};
+  float p_f1[2], p_f2[2], p_mid[2];
+  for (int k = 0; k < 2; ++k) {
+    Carrier c;
+    c.prepare(kFs);
+    c.set_detune_cents(cents[k]);
+    c.note_on(57);
+    std::vector<float> buf(44100 * 2 + 4410);
+    for (std::size_t at = 0; at + 64 <= buf.size(); at += 64) {
+      c.render(buf.data() + at, 64);
+    }
+    const float f2 = f1 * std::exp2(20.0f / 1200.0f);  // 222.55 Hz: a beat of 2.55 Hz
+    p_f1[k] = hann_power(buf, 4410, buf.size(), f1);
+    p_f2[k] = hann_power(buf, 4410, buf.size(), f2);
+    p_mid[k] = hann_power(buf, 4410, buf.size(), 0.5f * (f1 + f2));
+  }
+  // detuned: a second line at f1 + 2.55 Hz as strong as the first, and a dip between them
+  CHECK(p_f2[0] > 0.5f * p_f1[0]);
+  CHECK(p_f2[0] < 2.0f * p_f1[0]);
+  CHECK(p_mid[0] < 0.5f * p_f1[0]);
+  // DETUNE 0: one line, nothing 2.55 Hz above it
+  CHECK(p_f2[1] < 0.02f * p_f1[1]);
+}
+
+TEST_CASE("bands: the AGC has no step at its gate") {
+  // A level just under the gate and one just over it read about the same: a step there would flutter on a noise floor.
+  const auto settle = [](float mean_abs) {
+    Bands bands;
+    bands.prepare(44100.0f);
+    const float amp = mean_abs * 1.5707964f;  // a sine's mean-abs is 2/pi of its amplitude
+    float mod[64];
+    const float car[64] = {};
+    float out[64];
+    float phase = 0.0f;
+    for (unsigned block = 0; block < 1400; ++block) {  // 2 s: the AGC's release has settled
+      for (float& m : mod) {
+        m = amp * std::sin(6.2831853f * phase);
+        phase += 1000.0f / 44100.0f;
+        phase -= phase >= 1.0f ? 1.0f : 0.0f;
+      }
+      bands.process(mod, car, out, 64);
+    }
+    float sum = 0.0f;
+    for (unsigned b = 0; b < Bands::kBands; ++b) {
+      sum += bands.envelope(b);
+    }
+    return sum;
+  };
+  const float under = settle(0.0019f);
+  const float over = settle(0.0021f);
+  CHECK(over > 0.0f);
+  CHECK(over < 1.5f * under);
 }

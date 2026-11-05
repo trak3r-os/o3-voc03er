@@ -20,12 +20,13 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"RELEASE", "ms", nullptr, nullptr, 5.0f, 2000.0f, 80.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Log, 0, 0},
     {"DRY", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"LEVEL", "dB", nullptr, nullptr, -48.0f, 6.0f, -6.0f, 108, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},
+    {"DETUNE", "ct", nullptr, nullptr, 0.0f, 20.0f, 8.0f, 20, 5, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
 
 constexpr float kRampMs = 5.0f;
-constexpr float kWetGain = 32.0f;  // the bands' sum is well below the carrier's level (each band passes a slice of it)
+constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC holds at a mean-abs of 0.1, and each band passes a slice of the carrier: a vowel on a three-note saw chord peaks at about 0.9 at LEVEL 0 dB (0.47 at the default -6)
 
 // Cubic soft clip: linear near 0, flat at +-1.5 where it reaches 0.999: the peak never goes above it.
 inline float soft_clip(float x) noexcept {
@@ -38,6 +39,8 @@ inline float soft_clip(float x) noexcept {
 const o3sdk::dsp::UnitInfo& Vocoder::info() const noexcept { return kInfo; }
 
 void Vocoder::prepare(float sample_rate) noexcept {
+  carrier_.set_noise_source(&noise_);  // one generator for the carrier's noise and the unvoiced path
+  bands_.set_noise_source(&noise_);
   carrier_.prepare(sample_rate);
   bands_.prepare(sample_rate);
   const auto ramp = static_cast<std::uint32_t>(kRampMs * 0.001f * sample_rate);
@@ -71,6 +74,9 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     case Dry:
       dry_.target(v);
       break;
+    case Detune:
+      carrier_.set_detune_cents(v);
+      break;
     case Level:
       level_.target(std::exp(v * 0.11512925f));  // dB -> linear
       break;
@@ -102,15 +108,16 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   float mod[Bands::kMaxFrames];
   float car[Bands::kMaxFrames];
   float wet[Bands::kMaxFrames];
+  float gate[Bands::kMaxFrames];
   for (std::uint32_t i = 0; i < n; ++i) {
     mod[i] = args.in_l != nullptr ? Bands::clean(args.in_l[i]) : 0.0f;
   }
   o3sdk::dsp::ProcessArgs run = args;
   run.frames = n;
   o3sdk::dsp::for_each_run(
-      run, [&](std::uint32_t from, std::uint32_t to) { carrier_.render(car + from, to - from); },
+      run, [&](std::uint32_t from, std::uint32_t to) { carrier_.render(car + from, to - from, gate + from); },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
-  bands_.process(mod, car, wet, n);
+  bands_.process(mod, car, wet, n, gate);
   for (std::uint32_t i = 0; i < n; ++i) {
     const float g = level_.next();
     const float d = dry_.next();
