@@ -56,7 +56,7 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | G0 | Microbench on the unit: the engine's own share, the real `Bands` and `Carrier`, a biquad bank, the YIN and autocorrelation inner loops, SDRAM reads | Numbers from `cpu` on the unit; they fix the band count and TALK's order before V4 | Next, beside V2a and V2b |
 | V2a | `Carrier`: second oscillator a voice (DETUNE), noise shared with the unvoiced path | Host tests, no doubles | Next |
 | V2b | `Bands`: the review's geometry and followers, high-pass and AGC, the unvoiced path | Host tests, summed bands flat within 3 dB in a sweep, no doubles | Next |
-| V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | |
+| V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | Done on the host, no doubles; its CPU, its level (`kTalkGain` is a placeholder) and listening are owed to V4's round |
 | V4 | The unit in the app: PLAY screen with the input peak, pads play chords, MODE and the source on the keys, line sources start at gain 0, `ain` clears its peaks, a scenario | Scenario, image, CPU of each mode measured on the unit, a spoken sentence intelligible to the maintainer | |
 | V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | |
 | V5b | Loops: speed and reverse, the span copy | Host tests, unit | |

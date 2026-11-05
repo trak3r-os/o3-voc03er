@@ -156,7 +156,8 @@ TEST_CASE("vocoder: the parameter table is valid and ids are stable") {
   CHECK(Vocoder::Wave == 0);
   CHECK(Vocoder::Level == 5);
   CHECK(Vocoder::Detune == 6);
-  CHECK(Vocoder::kParamCount == 7);
+  CHECK(Vocoder::Mode == 7);  // Talk: MODE, QUALITY and FREEZE appended
+  CHECK(Vocoder::kParamCount == 10);
 }
 
 TEST_CASE("bands: a band responds more to a sine at its centre than at a neighbour's centre") {

@@ -37,6 +37,7 @@ class Bands {
 
   void prepare(float sample_rate) noexcept;  // coefficients, clears all state
   void reset() noexcept;                     // clears state only
+  void restart() noexcept;                   // the same, keeping the AGC: its estimate of the input beats unity gain after a pause
   void set_envelope(float attack_ms, float release_ms, float low_release_ms) noexcept;  // the low release is for bands 0..2
   void set_noise_source(NoiseSource* src) noexcept { noise_src_ = src; }  // null: the bands' own
   float unvoiced() const noexcept { return uv_; }  // 0..1, the noise mix now

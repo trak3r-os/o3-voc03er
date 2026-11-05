@@ -75,6 +75,12 @@ void Bands::hold_envelopes(float level) noexcept {
 }
 
 void Bands::reset() noexcept {
+  restart();
+  level_ = kAgcTarget;  // starts at the target: unity gain, no blast at the first loud sample
+  gain_ = 1.0f;
+}
+
+void Bands::restart() noexcept {
   for (unsigned b = 0; b < kBands; ++b) {
     env_[b] = 0.0f;
     for (unsigned k = 0; k < 4; ++k) {
@@ -85,8 +91,6 @@ void Bands::reset() noexcept {
   pre_prev_ = 0.0f;
   hp_s1_ = 0.0f;
   hp_s2_ = 0.0f;
-  level_ = kAgcTarget;  // starts at the target: unity gain, no blast at the first loud sample
-  gain_ = 1.0f;
   uv_ = 0.0f;
   uv_open_ = false;
 }
