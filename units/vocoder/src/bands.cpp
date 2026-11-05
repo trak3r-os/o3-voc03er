@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include "nofma.h"
+
 namespace o3_voc03er {
 
 namespace {
@@ -47,7 +49,10 @@ void Bands::prepare(float sample_rate) noexcept {
     b0_[b] = alpha / a0;
     a1_[b] = -2.0f * std::cos(w0) / a0;
     a2_[b] = (1.0f - alpha) / a0;
-    sign_[b] = (b & 1u) ? -1.0f : 1.0f;
+    const float sign = (b & 1u) ? -1.0f : 1.0f;
+    const float b02 = b0_[b] * b0_[b];
+    rect_gain_[b] = kRectToPeak * b02;  // the sections run with b0 folded out: the cascade's output is y / b0^2
+    syn_gain_[b] = sign * b02;
   }
   // 80 Hz high-pass, Butterworth (RBJ, Q = 1/sqrt 2)
   const float w = 6.2831853f * kHighpassHz / fs_;
@@ -176,12 +181,12 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
   }
 
   for (unsigned b = 0; b < kBands; ++b) {
-    const float b0 = b0_[b];
     const float a1 = a1_[b];
     const float a2 = a2_[b];
     const float atk = atk_[b];
     const float rel = rel_[b];
-    const float sgn = sign_[b];
+    const float gr = rect_gain_[b];
+    const float gs = syn_gain_[b];
     const float* cin = carrier;
     if (uv_live && b >= kUvFirstBand) {
       for (std::uint32_t i = 0; i < n; ++i) {
@@ -193,25 +198,26 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
     float c1 = car_state_[b][0], c2 = car_state_[b][1], c3 = car_state_[b][2], c4 = car_state_[b][3];
     float env = env_[b];
     for (std::uint32_t i = 0; i < n; ++i) {
-      // analysis: two bandpass sections, transposed direct form II with b1 = 0, b2 = -b0
+      // analysis: two bandpass sections, transposed direct form II with b1 = 0, b2 = -b0, b0 folded out and the state negated:
+      // w = x - n1; n1' = n2 + a1 w; n2' = x + a2 w. The cascade's output is y / b0^2; gr (rectifier) and gs (synthesis) restore it.
       const float x = pre[i];
-      const float y1 = b0 * x + m1;
-      m1 = m2 - a1 * y1;
-      m2 = -b0 * x - a2 * y1;
-      const float y2 = b0 * y1 + m3;
-      m3 = m4 - a1 * y2;
-      m4 = -b0 * y1 - a2 * y2;
-      const float r = (y2 < 0.0f ? -y2 : y2) * kRectToPeak;
-      env += (r - env) * (r > env ? atk : rel);
+      const float w1 = x - m1;
+      m1 = m2 + mulb(a1, w1);
+      m2 = x + mulb(a2, w1);
+      const float w2 = w1 - m3;
+      m3 = m4 + mulb(a1, w2);
+      m4 = w1 + mulb(a2, w2);
+      const float r = std::fabs(w2) * gr;
+      env += mulb(r - env, r > env ? atk : rel);
       // synthesis
       const float u = cin[i];
-      const float z1 = b0 * u + c1;
-      c1 = c2 - a1 * z1;
-      c2 = -b0 * u - a2 * z1;
-      const float z2 = b0 * z1 + c3;
-      c3 = c4 - a1 * z2;
-      c4 = -b0 * z1 - a2 * z2;
-      out[i] += z2 * env * sgn;
+      const float z1 = u - c1;
+      c1 = c2 + mulb(a1, z1);
+      c2 = u + mulb(a2, z1);
+      const float z2 = z1 - c3;
+      c3 = c4 + mulb(a1, z2);
+      c4 = z1 + mulb(a2, z2);
+      out[i] += mulb(z2 * env, gs);
     }
     mod_state_[b][0] = flush(m1);
     mod_state_[b][1] = flush(m2);

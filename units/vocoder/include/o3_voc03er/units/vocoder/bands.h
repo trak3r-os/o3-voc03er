@@ -4,7 +4,7 @@
 // Bands: a 16-band channel vocoder. Band centres are 125 x 2^(0.4 i) Hz, i = 0..15 (125 Hz to 8 kHz, 2.5 bands an octave). Per band: two
 // cascaded RBJ bandpass biquads (Q 2.3 each) on the modulator, a rectifier and a one-pole follower (attack 2 ms, release 25 ms, 40 ms on
 // the three lowest bands), and two cascaded bandpass biquads on the carrier whose output is scaled by the follower and summed. Two
-// cascaded biquads at Q 2.3 are about 0.28 octave wide at -3 dB, narrower than the 0.4-octave spacing, and neighbouring bands cancel at the crossover unless the synthesis polarity of alternate bands is flipped (sign_): with the flip the swept sum is flat within +-1 dB from 200 Hz to 6 kHz, without it 16 dB of ripple (tests/vocoder_test.cpp).
+// cascaded biquads at Q 2.3 are about 0.28 octave wide at -3 dB, narrower than the 0.4-octave spacing, and neighbouring bands cancel at the crossover unless the synthesis polarity of alternate bands is flipped (syn_gain_): with the flip the swept sum is flat within +-1 dB from 200 Hz to 6 kHz, without it 16 dB of ripple (tests/vocoder_test.cpp).
 //
 // Front end on the analysis path only (the dry modulator is the caller's): an 80 Hz high-pass, a slow AGC (the level is a mean-abs
 // follower, attack 5 ms, release 100 ms; the gain is target / level, per block, ramped over the block, clamped to 0.05..20, fading to 1 as the level falls from 0.008 to 0.002) that is gated:
@@ -62,8 +62,10 @@ class Bands {
   alignas(16) float env_[kBands] = {};
   alignas(16) float atk_[kBands] = {};  // follower coefficients a band
   alignas(16) float rel_[kBands] = {};
-  alignas(16) float sign_[kBands] = {};  // +-1: the synthesis polarity
-  alignas(16) float mod_state_[kBands][4] = {};  // two biquads: s1, s2 each
+  alignas(16) float rect_gain_[kBands] = {};  // kRectToPeak x b0^2: the rectifier's gain (the sections run with b0 folded out)
+  alignas(16) float syn_gain_[kBands] = {};   // +-1 (the synthesis polarity) x b0^2
+  // Two biquads, n1 and n2 each, as -s/b0 of the transposed form (b0 folded out, see process): up to 1/b0^2 = 7e4 times the plain state.
+  alignas(16) float mod_state_[kBands][4] = {};
   alignas(16) float car_state_[kBands][4] = {};
   float fs_ = 44100.0f;
   float pre_prev_ = 0.0f;

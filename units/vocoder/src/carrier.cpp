@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include "nofma.h"
+
 namespace o3_voc03er {
 
 namespace {
@@ -12,26 +14,129 @@ constexpr float kNoiseGain = 1.0f;
 constexpr float kIdle = 1.0e-4f;  // -80 dB: a releasing voice ends below it
 constexpr std::uint32_t kMaxBlock = 64;
 
-// PolyBLEP residual for a unit step at phase 0, `dt` the phase increment.
-inline float blep(float t, float dt) noexcept {
-  if (t < dt) {
-    t /= dt;
-    return t + t - t * t - 1.0f;
+// Per-oscillator constants, from the phase increment: the reciprocal (no division in the sample loop) and the upper edge window.
+struct Edge {
+  float dt;
+  float rdt;  // 1 / dt
+  float hi;   // 1 - dt
+};
+
+__attribute__((always_inline)) inline Edge make_edge(float dt) noexcept { return Edge{dt, 1.0f / dt, 1.0f - dt}; }
+
+// PolyBLEP residual for a unit step at phase 0 (t in [0, 1)); the edge windows are the rare path.
+__attribute__((always_inline)) inline float blep(float t, const Edge& e) noexcept {
+  if (__builtin_expect(t < e.dt, 0)) {
+    t *= e.rdt;
+    return t + t - mulb(t, t) - 1.0f;
   }
-  if (t > 1.0f - dt) {
-    t = (t - 1.0f) / dt;
-    return t * t + t + t + 1.0f;
+  if (__builtin_expect(t > e.hi, 0)) {
+    t = (t - 1.0f) * e.rdt;
+    return mulb(t, t) + t + t + 1.0f;
   }
   return 0.0f;
 }
 
-inline float osc(float phase, float dt, bool saw) noexcept {
-  if (saw) {
-    return 2.0f * phase - 1.0f - blep(phase, dt);
+template <bool Saw>
+__attribute__((always_inline)) inline float osc(float phase, const Edge& e) noexcept {
+  if constexpr (Saw) {
+    return (phase + phase - 1.0f) - blep(phase, e);
+  } else {
+    float p2 = phase + 0.5f;
+    p2 -= p2 >= 1.0f ? 1.0f : 0.0f;
+    return (phase < 0.5f ? 1.0f : -1.0f) + blep(phase, e) - blep(p2, e);
   }
-  float p2 = phase + 0.5f;
-  p2 -= p2 >= 1.0f ? 1.0f : 0.0f;
-  return (phase < 0.5f ? 1.0f : -1.0f) + blep(phase, dt) - blep(p2, dt);
+}
+
+enum class Seg { Attack, Hold, Release };
+
+struct VoiceRun {
+  float phase, phase2, env;
+  Edge e1, e2;
+  float attack_step, release_coef;
+};
+
+// Samples i..n of one voice in one envelope segment; Gate: accumulate the held-notes gate. Returns the index it stopped at. Attack stops
+// after the sample that reaches 1 (`done`), Release after the sample that falls under kIdle (`done`), Hold runs to n.
+template <bool Two, bool Saw, bool Gate, Seg S>
+inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint32_t i, std::uint32_t n, float g1, bool& done) noexcept {
+  float phase = v.phase;
+  float phase2 = v.phase2;
+  float env = v.env;
+  done = false;
+  if constexpr (S == Seg::Hold) {
+    const float eg = env * g1;
+    for (; i < n; ++i) {
+      float x = osc<Saw>(phase, v.e1);
+      phase += v.e1.dt;
+      phase -= phase >= 1.0f ? 1.0f : 0.0f;
+      if constexpr (Two) {
+        x += osc<Saw>(phase2, v.e2);
+        phase2 += v.e2.dt;
+        phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
+      }
+      out[i] += mulb(x, eg);
+      if constexpr (Gate) {
+        gate[i] += env;
+      }
+    }
+  } else {
+    for (; i < n;) {
+      float x = osc<Saw>(phase, v.e1);
+      phase += v.e1.dt;
+      phase -= phase >= 1.0f ? 1.0f : 0.0f;
+      if constexpr (Two) {
+        x += osc<Saw>(phase2, v.e2);
+        phase2 += v.e2.dt;
+        phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
+      }
+      out[i] += mulb(x * env, g1);
+      if constexpr (Gate) {
+        gate[i] += env;
+      }
+      ++i;
+      if constexpr (S == Seg::Attack) {
+        env += v.attack_step;
+        if (env >= 1.0f) {
+          env = 1.0f;
+          done = true;
+          break;
+        }
+      } else {
+        env *= v.release_coef;
+        if (env < kIdle) {
+          env = 0.0f;
+          done = true;
+          break;
+        }
+      }
+    }
+  }
+  v.phase = phase;
+  v.phase2 = phase2;
+  v.env = env;
+  return i;
+}
+
+template <bool Two, bool Saw, bool Gate>
+inline void run_voice(VoiceRun& v, std::uint8_t& stage_in, float* out, float* gate, std::uint32_t n, float g1) noexcept {
+  // stage_in: 1 Attack, 2 Hold, 3 Release (the Stage values); written back as the stage the voice ends in
+  std::uint32_t i = 0;
+  bool done = false;
+  if (stage_in == 1) {
+    i = run_segment<Two, Saw, Gate, Seg::Attack>(v, out, gate, i, n, g1, done);
+    if (!done) {
+      return;
+    }
+    stage_in = 2;
+  }
+  if (stage_in == 2) {
+    run_segment<Two, Saw, Gate, Seg::Hold>(v, out, gate, i, n, g1, done);
+    return;
+  }
+  run_segment<Two, Saw, Gate, Seg::Release>(v, out, gate, i, n, g1, done);
+  if (done) {
+    stage_in = 0;
+  }
 }
 
 }  // namespace
@@ -142,49 +247,36 @@ void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
   }
   const bool two = detune_ratio_ != 1.0f;
   const bool saw = wave_ == Wave::Saw;
+  const bool want_gate = gate_out != nullptr || noise_ > 0.0f;
   const float osc_gain = kVoiceGain * (1.0f - noise_);
   const float g1 = two ? 0.5f * osc_gain : osc_gain;  // two oscillators keep the voice's level
   for (Voice& v : voices_) {
     if (v.stage == Stage::Idle) {
       continue;
     }
-    float phase = v.phase;
-    float phase2 = two ? v.phase2 : phase;
-    float env = v.env;
-    Stage stage = v.stage;
-    const float dt = v.inc;
-    float dt2 = dt * detune_ratio_;
+    float dt2 = v.inc * detune_ratio_;
     dt2 = dt2 > 0.45f ? 0.45f : dt2;
-    for (std::uint32_t i = 0; i < n; ++i) {
-      float x = osc(phase, dt, saw);
-      phase += dt;
-      phase -= phase >= 1.0f ? 1.0f : 0.0f;
+    VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(v.inc), make_edge(dt2), attack_step_, release_coef_};
+    std::uint8_t stage = static_cast<std::uint8_t>(v.stage);
+    static_assert(static_cast<unsigned>(Stage::Attack) == 1 && static_cast<unsigned>(Stage::Hold) == 2 &&
+                      static_cast<unsigned>(Stage::Release) == 3, "run_voice reads the Stage values");
+    if (want_gate) {
       if (two) {
-        x += osc(phase2, dt2, saw);
-        phase2 += dt2;
-        phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
+        saw ? run_voice<true, true, true>(r, stage, out, gate, n, g1) : run_voice<true, false, true>(r, stage, out, gate, n, g1);
+      } else {
+        saw ? run_voice<false, true, true>(r, stage, out, gate, n, g1) : run_voice<false, false, true>(r, stage, out, gate, n, g1);
       }
-      out[i] += x * env * g1;
-      gate[i] += env;
-      if (stage == Stage::Attack) {
-        env += attack_step_;
-        if (env >= 1.0f) {
-          env = 1.0f;
-          stage = Stage::Hold;
-        }
-      } else if (stage == Stage::Release) {
-        env *= release_coef_;
-        if (env < kIdle) {
-          env = 0.0f;
-          stage = Stage::Idle;
-          break;
-        }
+    } else {
+      if (two) {
+        saw ? run_voice<true, true, false>(r, stage, out, gate, n, g1) : run_voice<true, false, false>(r, stage, out, gate, n, g1);
+      } else {
+        saw ? run_voice<false, true, false>(r, stage, out, gate, n, g1) : run_voice<false, false, false>(r, stage, out, gate, n, g1);
       }
     }
-    v.phase = phase;
-    v.phase2 = phase2;
-    v.env = env;
-    v.stage = stage;
+    v.phase = r.phase;
+    v.phase2 = two ? r.phase2 : r.phase;  // as before: one oscillator keeps the second in step
+    v.env = r.env;
+    v.stage = static_cast<Stage>(stage);
   }
   if (gate_out != nullptr) {
     for (std::uint32_t i = 0; i < n; ++i) {
