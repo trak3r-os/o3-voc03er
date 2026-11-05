@@ -59,6 +59,7 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V2c | `Bands` and `Carrier` in fewer instruction cycles (section 4b): same sound, no fused multiply-adds in the sample loops, `b0` folded out of the sections, envelope segments out of the oscillator loop | Host tests unchanged, no doubles, each sample loop's instructions counted before and after; the cycles are read in V4's round | Done on the host: Bands' loop 81 to 47 cycles, Carrier's 122 to 66, by their instructions [est]; output differs by rounding only (3.8e-5 of peak at most) |
 | V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | Done on the host, no doubles; its CPU, its level (`kTalkGain` is a placeholder) and listening are owed to V4's round |
 | V4 | The unit in the app: PLAY screen with the input peak, pads play chords, MODE and the source on the keys, line sources start at gain 0, `ain` clears its peaks, a scenario | Scenario, image, CPU of each mode measured on the unit, a spoken sentence intelligible to the maintainer | Built on the host and for mk66 (2026-11-05): the Vocoder attached as slot 0, PLAY screen with IN peak / CLIP, MODE and SOURCE (PLAY and SAMPLE PLAY keys, F1 is MODE), pads play chords, line sources at gain 0, `ain` clears its peaks (app-side meter reset plus a 300 ms holdoff, no kit change), console `voc`; the unit round (CPU of each mode, line silence, a spoken sentence) is owed |
+| V2d | The last per-sample work: ramps out of the sample loop when settled, the unvoiced mix once a block, the follower every second sample, TALK's ramp every 8 | Host tests unchanged, no doubles; the cycles read on the unit | Next |
 | V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | |
 | V5b | Loops: speed and reverse, the span copy | Host tests, unit | |
 | V5c | Per-step carrier switch | Host tests, scenario, unit | |
@@ -126,6 +127,32 @@ What it changes:
 - **TUNE's YIN** at 35.4 % is too much beside a carrier: V6a unrolls it or slices it over 8 blocks.
 - **Loops**: the review's span copy holds, four loops' 256 reads are 2.8 % at 29 cycles a read.
 - **The base is unexplained**: `stage` accounts for about 1,500 of `off`'s 38,958 cycles and shows 0 for render. V4 reads it again with the real voice in place of the template's.
+
+## 4c. V4 on the unit, 2026-11-05
+
+Image `3d659532e661 / o3sdk f14f247b0847`, CANDIDATE 11/11, CRC 4A194638: the real unit in the app, after V2c. Modulator: the USB return, 1 kHz at -12 dBFS, left only, or uniform white noise at the same peak. Three `cpu` reads a step, 30 reads: 0 underruns, 0 late, 0 slips, 0 hardware faults, `guard` shed 0 blocks. The unit was restored to what the round found.
+
+The kit's budget is 60 % of a block, 156,734 cycles (`kGovernorPercent`): `over-budget` counts renders past it.
+
+| Step | Render last, mean | Highest max | Over budget |
+|---|---|---|---|
+| `voc bands 0` | 119,447 | 127,557 = 48.8 % | 0 |
+| `voc bands 1` | 122,437 | 135,860 = 52.0 % | 0 |
+| `voc bands 4` | 137,521 | 150,103 = 57.5 % | 0 |
+| `voc bands 8` | 154,243 | 167,235 = 64.0 % | 7 by the third read |
+| `voc talk 0` | 111,087 | 123,942 = 47.4 % | 0 |
+| `voc talk 4` | 130,922 | 144,491 = 55.3 % | 0 |
+| `voc talk 8` | 150,210 | 165,124 = 63.2 % | 2 |
+| `voc bands 8`, noise | 163,798 | 177,521 = 68.0 % | About every block: 1,600 between reads |
+| `voc talk 8`, noise | 146,142 | 158,458 = 60.7 % | 4 |
+
+What it says:
+
+- **V2c worked where it can be read.** The carrier is 34 cycles an oscillator-sample, from 65: eight notes with two oscillators cost 13.3 % where V2's one oscillator cost 12.7 %. Four notes, the ordinary case, stay under the budget in both modes.
+- **Bands cannot be split out.** Nothing read the base with this app: on G0's base of 38,958, Bands and the unit's shell are about 80,500 cycles, 79 a band-sample at most against V2's 97. V2c's count was 47. Either the base grew or the count was optimistic.
+- **Eight notes are still over**: by 4 points at worst on a tone, 8 on noise. V2d takes the small per-sample work out, with no change of design. Band count and TALK's order stay at 16 until it is read.
+- **Peaks**: the read straight after `ain` no longer carries the previous source. Line, left and right read 0.39 to 0.47 at gain 0 with the source still plugged in, L equal to R in every read: line silence and line separation stay unmeasured.
+- **Owed, needing a person**: a spoken sentence the maintainer can understand, TALK's level (`kTalkGain`), the microphone.
 
 ## 5. How the work runs
 
