@@ -12,6 +12,7 @@
 #include <o3sdk/sim/scenario.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -180,4 +181,42 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
   CHECK(count >= 2u);
   CHECK(std::filesystem::exists(out / "boot.wav"));
   CHECK(std::filesystem::exists(out / "01_boot.png"));
+}
+
+namespace {
+void ain_run(const char* a1, const char* a2, std::string& text) {
+  const app::DiagCommand* rows = nullptr;
+  const std::size_t n = o3sdk_app().diag_commands(rows);
+  REQUIRE(n >= 1);
+  const char* argv[3] = {"ain", a1, a2};
+  const app::DiagArgs args{a1 == nullptr ? 1u : (a2 == nullptr ? 2u : 3u), argv};
+  text.clear();
+  app::DiagOut out(app::DiagSink{[](void* c, const char* d, std::size_t k) { static_cast<std::string*>(c)->append(d, k); }, &text});
+  rows[0].run(args, out);
+}
+}  // namespace
+
+TEST_CASE("app: ain selects the audio input and in_peak_l follows a tone") {
+  platform::host::FakeCapture cap;
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  std::string t;
+  ain_run("bogus", nullptr, t);
+  CHECK(t.find("usage") != std::string::npos);
+  ain_run("line", "70", t);
+  CHECK(t.find("selected line gain 70") != std::string::npos);
+  h->run_ms(400);
+  CHECK(state(*h).find("in_src=line in_gain=70 in_settling=0 in_failed=0 in_peak_l=0 in_peak_r=0") != std::string::npos);
+  cap.input_tone(440.0f, -12.0f);
+  h->run_ms(300);
+  const std::string on = state(*h);
+  const std::size_t at = on.find("in_peak_l=");
+  REQUIRE(at != std::string::npos);
+  CHECK(std::atoi(on.c_str() + at + 10) > 100);
+  cap.input_off();
+  h->run_ms(1300);
+  CHECK(state(*h).find("in_peak_l=0 ") != std::string::npos);
+  ain_run(nullptr, nullptr, t);
+  CHECK(t.find("ain: line gain 70") != std::string::npos);
 }

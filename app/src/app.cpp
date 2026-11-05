@@ -33,14 +33,50 @@
 
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/context.h>
+#include <o3sdk/app/audio_in.h>
+#include <o3sdk/app/diag.h>
 #include <o3sdk/dsp/engine.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace {
 
 using namespace o3sdk;
+
+class MyApp;
+MyApp& instance() noexcept;
+void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+
+constexpr app::DiagCommand kCommands[] = {
+    {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
+};
+
+struct SourceName {
+  const char* name;
+  hal::capture::Source source;
+};
+constexpr SourceName kSources[] = {
+    {"line", hal::capture::Source::LineMix},   {"left", hal::capture::Source::LineLeft},   {"right", hal::capture::Source::LineRight},
+    {"miclow", hal::capture::Source::MicLow},  {"michigh", hal::capture::Source::MicHigh}, {"radio", hal::capture::Source::Radio},
+    {"usb", hal::capture::Source::Usb},
+};
+
+const char* source_name(hal::capture::Source s) noexcept {
+  for (const SourceName& n : kSources) {
+    if (n.source == s) {
+      return n.name;
+    }
+  }
+  return "?";
+}
+
+// Per-mille of full scale, 0..1000+ (saturating far above).
+unsigned permille(float peak) noexcept {
+  const float v = peak * 1000.0f + 0.5f;
+  return v <= 0.0f ? 0u : (v > 100000.0f ? 100000u : static_cast<unsigned>(v));
+}
 
 class MyApp final : public app::App {
  public:
@@ -51,6 +87,7 @@ class MyApp final : public app::App {
 
   // Main loop, once, with the engine in its setup phase: attach and route the units, add hooks, open the first screen.
   void setup(app::Context& ctx) noexcept override {
+    ctx_ = &ctx;  // the console's handlers have no Context argument; they run in the main loop
     dsp::Engine& e = ctx.engine();
     const dsp::UnitId voice = e.attach(voice_);
     // Slot 0 plays the voice; the mixer's level, pan and sends are the slot's. A refused call is counted (Engine::setup_errors) and the
@@ -66,6 +103,7 @@ class MyApp final : public app::App {
 
   // The file jobs end and start here, once per pass of the main loop (a Screen has an update() too, for what only it needs).
   void update(app::Context& ctx) noexcept override {
+    poll_peaks(ctx);
     app::Files& files = ctx.files();
     if (op_ != Op::None) {
       const app::Files::Status st = files.status();
@@ -123,6 +161,50 @@ class MyApp final : public app::App {
     return true;
   }
 
+  std::size_t diag_commands(const app::DiagCommand*& rows) const noexcept override {
+    rows = kCommands;
+    return sizeof kCommands / sizeof kCommands[0];
+  }
+
+  // `ain` (main loop): see ain_command.
+  void ain(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    if (ctx_ == nullptr || !ctx_->audio_in().available()) {
+      out.text("ain: no audio input on this platform").nl();
+      return;
+    }
+    app::AudioIn& in = ctx_->audio_in();
+    if (args.argc >= 2u) {
+      const hal::capture::Source* src = nullptr;
+      for (const SourceName& n : kSources) {
+        if (std::strcmp(args.arg(1), n.name) == 0) {
+          src = &n.source;
+        }
+      }
+      unsigned gain = 50;
+      bool ok = src != nullptr && args.argc <= 3u;
+      if (ok && args.argc == 3u) {
+        const char* g = args.arg(2);
+        unsigned v = 0;
+        std::size_t i = 0;
+        for (; g[i] >= '0' && g[i] <= '9' && i < 4u; ++i) {
+          v = v * 10u + static_cast<unsigned>(g[i] - '0');
+        }
+        ok = i != 0u && g[i] == '\0' && v <= 100u;
+        gain = v;
+      }
+      if (!ok) {
+        out.text("usage: ain [line|left|right|miclow|michigh|radio|usb] [gain 0..100]").nl();
+        return;
+      }
+      const bool acked = in.select(*src, gain);
+      out.text(acked ? "ain: selected " : "ain: select refused ");
+    } else {
+      out.text("ain: ");
+    }
+    out.text(source_name(in.source())).text(" gain ").dec(in.gain()).text(" settling ").dec(in.settling() ? 1u : 0u);
+    out.text(" failed ").dec(in.failed() ? 1u : 0u).text(" peak_l ").dec(peak_l_).text(" peak_r ").dec(peak_r_).nl();
+  }
+
   // The console's `state` after the kit's pairs (`o3console.py state` over USB; the same line is in the simulator's tests): the keyboard
   // octave, the key the encoder drives and its value as the knob strip shows it.
   std::size_t describe_state(const app::Context& ctx, char* out, std::size_t cap) const noexcept override {
@@ -139,10 +221,46 @@ class MyApp final : public app::App {
     w.num("cursor", play_.pattern().cursor);
     w.num("focus", focus);
     w.str("value", value);
+    const app::AudioIn& in = ctx.audio_in();
+    const bool have = in.available();
+    w.str("in_src", have ? source_name(in.source()) : "none");
+    w.num("in_gain", have ? in.gain() : 0u);
+    w.num("in_settling", have && in.settling() ? 1u : 0u);
+    w.num("in_failed", have && in.failed() ? 1u : 0u);
+    w.num("in_peak_l", peak_l_);
+    w.num("in_peak_r", peak_r_);
     return w.size();
   }
 
  private:
+  // Peaks (main loop only, update() writes, describe_state reads): peaks() is polled every pass (it measures only while called at least
+  // once a second) and its per-pass maxima fill two 500 ms buckets; the shown value is the larger of the two, so it covers 0.5..1 s.
+  void poll_peaks(app::Context& ctx) noexcept {
+    app::AudioIn& in = ctx.audio_in();
+    if (!in.available()) {
+      peak_l_ = peak_r_ = 0;
+      return;
+    }
+    const dsp::InputPeaks p = in.peaks();
+    const std::uint64_t now = ctx.uptime_ms();
+    if (now - bucket_start_ >= kBucketMs) {
+      prev_l_ = now - bucket_start_ >= 2u * kBucketMs ? 0.0f : cur_l_;
+      prev_r_ = now - bucket_start_ >= 2u * kBucketMs ? 0.0f : cur_r_;
+      cur_l_ = cur_r_ = 0.0f;
+      bucket_start_ = now;
+    }
+    cur_l_ = p.l > cur_l_ ? p.l : cur_l_;
+    cur_r_ = p.r > cur_r_ ? p.r : cur_r_;
+    peak_l_ = permille(cur_l_ > prev_l_ ? cur_l_ : prev_l_);
+    peak_r_ = permille(cur_r_ > prev_r_ ? cur_r_ : prev_r_);
+  }
+
+  app::Context* ctx_ = nullptr;
+  static constexpr std::uint64_t kBucketMs = 500;
+  float cur_l_ = 0.0f, cur_r_ = 0.0f, prev_l_ = 0.0f, prev_r_ = 0.0f;
+  std::uint64_t bucket_start_ = 0;
+  unsigned peak_l_ = 0, peak_r_ = 0;
+
   enum class Op : std::uint8_t { None, LoadPattern, LoadConfig, SavePattern, SaveConfig };  // the job in flight
   enum class Boot : std::uint8_t { Pattern, Config, Done };                                 // the loads at start, in order
 
@@ -182,9 +300,16 @@ class MyApp final : public app::App {
   static_assert(sizeof save_buf_ % 4 == 0 && sizeof cfg_buf_ % 4 == 0 && sizeof load_buf_ % 4 == 0, "word-aligned buffers are whole words");
 };
 
-}  // namespace
-
-o3sdk::app::App& o3sdk_app() noexcept {
+MyApp& instance() noexcept {
   static MyApp app;
   return app;
 }
+
+// `ain <line|left|right|miclow|michigh|radio|usb> [gain 0..100]` selects the input (default gain 50); `ain` alone prints it.
+void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().ain(args, out);
+}
+
+}  // namespace
+
+o3sdk::app::App& o3sdk_app() noexcept { return instance(); }
