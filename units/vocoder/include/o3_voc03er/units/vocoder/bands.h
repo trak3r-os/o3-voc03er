@@ -19,10 +19,7 @@
 // block, so the biquad and follower state lives in registers; no virtual calls, no branches on the signal in the inner loop. A NaN or Inf
 // in the modulator is replaced by 0 before it reaches any state. State below 1e-15 is flushed to 0 at the end of each block (no denormals).
 //
-// Cost [est]: 4 biquads (4 mul, 4 add each) + a follower (about 6 ops) a band a sample, about 55 cycles x 16 = 870 cycles a sample on the
-// Cortex-M4F, 56,000 a 64-frame block; the front end (high-pass, level, gain, pre-emphasis, about 25 cycles a sample) 1,600 and the
-// unvoiced mix (noise, ramp, five bands' adds, about 12 cycles a sample) 800: 58,400 a block, 22 % of the 261,224 it has (the review's
-// figure). Not measured on a unit (o3-sdk skill rt-optimize).
+// Cost: V2's loop measured 97 cycles a band-sample, 38 % of a block (docs/PLAN.md, section 4b). After V2c, about 47 by its instructions [est].
 
 #include <o3_voc03er/units/vocoder/carrier.h>
 
