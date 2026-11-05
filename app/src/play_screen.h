@@ -49,7 +49,10 @@ class PlayScreen final : public o3sdk::app::Screen {
   const InputMeter* meter_ = nullptr;
   const Vocoder* loops_ = nullptr;
   unsigned loop_sel_ = 0;  // the loop the REC, UP and DOWN keys act on
-  o3sdk::app::ParamPage page_ = {};
+  // F1..F8 table; follows the mode (sync_page), so mutable: draw() syncs it too
+  mutable o3sdk::app::ParamPage page_ = {};
+  mutable bool tune_page_ = false;
+  void sync_page(const o3sdk::dsp::Engine& e) const noexcept;
   o3sdk::app::ParamKeys keys_;
   int octave_ = 0;
   Pattern pattern_;

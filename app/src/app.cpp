@@ -4,7 +4,7 @@
 // objects (no heap), wires them into the engine in setup() and shows the first screen. The one entry point at the end is all the
 // platform's main and the simulator know of it.
 //
-//   PLAY          MODE: BANDS <-> TALK (SHIFT + PLAY: the transport); PATTERN: the carrier of the cursor step; SHIFT + LEFT / RIGHT: the cursor;  SAMPLE PLAY  the next audio source (line sources start at gain 0)
+//   PLAY          MODE: BANDS, TALK, TUNE, round (SHIFT + PLAY: the transport); PATTERN: the carrier of the cursor step; SHIFT + LEFT / RIGHT: the cursor;  SAMPLE PLAY  the next audio source (line sources start at gain 0)
 //   pads          a chromatic keyboard (app/include/o3_voc03er/pad_map.h); LEFT / RIGHT move it an octave
 //   F1..F3        point the encoder at a value (tap: latched; hold + turn: for a moment); the encoder changes it (SHIFT: coarse)
 //   pads, DELETE  the pads also record into a 16-step pattern; DELETE clears it
@@ -63,12 +63,14 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
-    {"voc", "voc <bands|talk> [notes 0..8]: set the vocoder mode, hold N notes", &voc_command},
+    {"voc", "voc <bands|talk|tune> [notes 0..8]: set the vocoder mode, hold N notes", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
 // The console's limits (check_app_row in the mk66 platform). A row past them is dropped on the unit with only a log line, and the host
 // never runs that check, so a long help text costs a whole unit round: the first G0 round measured nothing for this.
+constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
+constexpr unsigned mode_index(float v) noexcept { return v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u); }
 constexpr std::size_t kConsoleNameMax = 7;
 constexpr std::size_t kConsoleHelpMax = 70;
 
@@ -164,14 +166,14 @@ class MyApp final : public app::App {
 
   // The keys the screen does not use: FILE saves the pattern, SAMPLE LOAD loads it. A key pressed while a job runs is ignored (busy()).
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
-    if (in.press(app::Button::Play)) {  // MODE: BANDS <-> TALK; SHIFT + PLAY starts or stops the transport (the per-step carriers and the loops' bar lines run on it)
+    if (in.press(app::Button::Play)) {  // MODE: BANDS, TALK, TUNE, round; SHIFT + PLAY starts or stops the transport (the per-step carriers and the loops' bar lines run on it)
       dsp::Engine& e = ctx.engine();
       if (in.shift) {
         (void)(e.playing() ? e.stop() : e.play());
         ctx.redraw();
         return true;
       }
-      (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, e.param(voc_id_, o3_voc03er::Vocoder::Mode) >= 0.5f ? 0.0f : 1.0f);
+      (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, static_cast<float>((mode_index(e.param(voc_id_, o3_voc03er::Vocoder::Mode)) + 1u) % 3u));
       ctx.redraw();
       return true;
     }
@@ -284,16 +286,16 @@ class MyApp final : public app::App {
     ctx_->redraw();
   }
 
-  // `voc <bands|talk> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
+  // `voc <bands|talk|tune> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
     o3_voc03er::VocCommand c;
     if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
         !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
-      out.text("usage: voc <bands|talk> [notes 0..8]").nl();
+      out.text("usage: voc <bands|talk|tune> [notes 0..8]").nl();
       return;
     }
     dsp::Engine& e = ctx_->engine();
-    (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, c.talk ? 1.0f : 0.0f);
+    (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, static_cast<float>(c.mode));
     for (unsigned i = 0; i < console_notes_; ++i) {
       (void)e.note_off(voc_id_, o3_voc03er::kVocChord[i]);
     }
@@ -301,7 +303,7 @@ class MyApp final : public app::App {
     for (unsigned i = 0; i < console_notes_; ++i) {
       (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100);
     }
-    out.text("voc: ").text(c.talk ? "talk" : "bands").text(" notes ").dec(console_notes_).nl();
+    out.text("voc: ").text(kModeWord[c.mode]).text(" notes ").dec(console_notes_).nl();
     ctx_->redraw();
   }
 
@@ -331,7 +333,7 @@ class MyApp final : public app::App {
     w.num("in_failed", have && in.failed() ? 1u : 0u);
     w.num("in_peak_l", permille(meter_.left()));
     w.num("in_peak_r", permille(meter_.right()));
-    w.str("voc_mode", ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode) >= 0.5f ? "talk" : "bands");
+    w.str("voc_mode", kModeWord[mode_index(ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode))]);
     w.num("voc_notes", console_notes_);
     for (unsigned i = 0; i < o3_voc03er::Loop::kCount; ++i) {
       const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);

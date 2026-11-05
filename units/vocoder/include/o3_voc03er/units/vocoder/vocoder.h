@@ -12,8 +12,10 @@
 //   4 Dry      0..1: the dry modulator mixed into the output (default 0)
 //   5 Level    dB, -48..+6
 //   6 Detune   cents, 0..20 (default 8): the second oscillator of each carrier voice, sharp of the first
-//   7 Mode     0 BANDS, 1 TALK (default BANDS): the Carrier goes through Bands or through Talk (LPC talkbox); a 10 ms crossfade, and
-//              only the active mode runs, except during the crossfade
+//   7 Mode     0 BANDS, 1 TALK, 2 TUNE (default BANDS): the Carrier goes through Bands or through Talk (LPC talkbox); TUNE is the voice
+//              itself, pitch-corrected (autotune.h): the carrier, Bands and Talk do not run (the notes still count: they are the
+//              target of NOTES-IN). A 10 ms crossfade between any two modes (one ramp per mode), and only the active mode runs,
+//              except during the crossfade; a mode that was not running starts from a clean state when it is entered
 //   8 Quality  LPC order 8..24 (default 16), Talk only
 //   9 Freeze   0 off, 1 on: Talk stops updating its reflection coefficients (a held vowel)
 //  10..21    Loops, three for each of the four loops n = 0..3 (ids 10 + 3n + field; Vocoder::loop_param):
@@ -38,12 +40,20 @@
 //            frame: set it to CAR first for a clean change). Nothing here touches the live input: it cannot be a carrier (its source
 //            switch settles for 200 ms). No click: the synth's gain, the noise amount and each loop's carrier gain move in a 5 ms ramp
 //            from the event's frame (the noise amount in slices of 16 samples, since the Carrier takes it once a run).
+//  35..39    TUNE (Autotune; they act in TUNE only, but are stored in every mode):
+//            35 Key     C..B (default C); 36 Scale CHROM, MAJOR, MINOR, MAJ-P, MIN-P, BLUES, DORIAN (default CHROM): the notes to snap to
+//            37 Speed   ms, 0..500 (default 25): the one-pole of the correction; 0 is the hard, stepped sound
+//            38 Amount  0..1 (default 1): how much of the error is corrected (0 passes the voice, delayed 1 ms)
+//            39 NotesIn 0 OFF, 1 ON (default): the most recent held note is the target, in the octave nearest the voice; none held: the scale
+//            Unvoiced input passes unshifted. Range is the Normal detector range (70 to 919 Hz).
 // The bands' followers are fixed (2 ms attack, 25 ms release, 40 ms on the three lowest bands; Bands::set_envelope).
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
 // block, 35 % of the 261,224 a block has at 44.1 kHz. TALK replaces Bands: Talk about 16,600 at order 16 (talk.h) + the same Carrier
-// and mixing. Not measured on a unit.
+// and mixing. TUNE: Tune at most 5,500 a block (tune.h) + the shifter, about 25 cycles a sample (about 1,600 a block, 2 reads in a crossfade) +
+// a control step per 16 samples; no carrier. [est] Not measured on a unit.
 
+#include <o3_voc03er/units/vocoder/autotune.h>
 #include <o3_voc03er/units/vocoder/bands.h>
 #include <o3_voc03er/units/vocoder/carrier.h>
 #include <o3_voc03er/units/vocoder/loop.h>
@@ -62,7 +72,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            CarSrc, kParamCount };
+                            CarSrc, Key, Scale, Speed, Amount, NotesIn, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
@@ -95,6 +105,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   const Carrier& carrier() const noexcept { return carrier_; }
   const Bands& bands() const noexcept { return bands_; }
   const Talk& talk() const noexcept { return talk_; }
+  const Autotune& tune() const noexcept { return tune_; }
 
  private:
   void apply(const o3sdk::dsp::Event& e) noexcept;
@@ -125,10 +136,13 @@ class Vocoder final : public o3sdk::dsp::Unit {
   Carrier carrier_;
   Bands bands_;
   Talk talk_;
+  Autotune tune_;
   NoiseSource noise_;
   o3sdk::dsp::Ramp level_;
   o3sdk::dsp::Ramp dry_;
-  o3sdk::dsp::Ramp talk_mix_;  // 0 Bands .. 1 Talk
+  o3sdk::dsp::Ramp bands_mix_{1.0f};  // one ramp per mode: 1 for the mode that is on, the others 0
+  o3sdk::dsp::Ramp talk_mix_;
+  o3sdk::dsp::Ramp tune_mix_;
   Loop loops_;
   // The carrier switch (render context only). sel_ is the CarSrc value; the ramps are 5 ms. pend_: the carrier-side loop gains each
   // event of this block set, in order, so run_loops can start the ramp at the same frame (the oldest are overwritten past 8).

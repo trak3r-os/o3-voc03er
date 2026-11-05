@@ -68,13 +68,37 @@ void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocoder*
                          {Vocoder::Mode, Vocoder::Quality, Vocoder::Freeze, Vocoder::Dry, Vocoder::Level, Vocoder::Wave, Vocoder::Detune,
                           Vocoder::Release},
                          8};
+  tune_page_ = false;
   keys_.set_pages(&page_, 1);  // the table must outlive the helper: it is a member
   for (auto& n : held_) {
     n = -1;
   }
 }
 
+// F1..F8 follow the mode: TUNE has its own values (key, scale, speed, amount, notes in); the other modes keep the vocoder's page.
+void PlayScreen::sync_page(const dsp::Engine& e) const noexcept {
+  const bool tune = e.param(voice_, Vocoder::Mode) >= 1.5f;
+  if (tune == tune_page_) {
+    return;
+  }
+  tune_page_ = tune;
+  if (tune) {
+    page_.name = "TUNE";
+    const std::uint16_t t[8] = {Vocoder::Mode, Vocoder::Key, Vocoder::Scale, Vocoder::Speed, Vocoder::Amount, Vocoder::NotesIn, Vocoder::Dry, Vocoder::Level};
+    for (unsigned i = 0; i < 8; ++i) {
+      page_.ids[i] = t[i];
+    }
+  } else {
+    page_.name = "VOCODER";
+    const std::uint16_t v[8] = {Vocoder::Mode, Vocoder::Quality, Vocoder::Freeze, Vocoder::Dry, Vocoder::Level, Vocoder::Wave, Vocoder::Detune, Vocoder::Release};
+    for (unsigned i = 0; i < 8; ++i) {
+      page_.ids[i] = v[i];
+    }
+  }
+}
+
 void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
+  sync_page(ctx.engine());
   if (keys_.input(ctx, in)) {  // F1..F8 and the encoder
     return;
   }
@@ -206,10 +230,11 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
   }
   pct[n++] = '%';
   r.text(rx + rw - 54, area.y + 32, clip ? "CLIP" : pct, clip ? Color::Accent : Color::Text, Face::Label);
-  const bool talk = ctx.engine().param(voice_, Vocoder::Mode) >= 0.5f;
+  const float mode_v = ctx.engine().param(voice_, Vocoder::Mode);
+  const char* mode_name = mode_v >= 1.5f ? "TUNE" : (mode_v >= 0.5f ? "TALK" : "BANDS");
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
   r.text(rx, area.y + 54, "MODE", Color::TextDim, Face::Label);
-  r.text(rx + 48, area.y + 54, talk ? "TALK" : "BANDS", Color::Text, Face::Label);
+  r.text(rx + 48, area.y + 54, mode_name, Color::Text, Face::Label);
   r.text(rx + 130, area.y + 54, "PLAY", Color::TextDim, Face::Micro);
   r.text(rx, area.y + 74, "SOURCE", Color::TextDim, Face::Label);
   r.text(rx + 70, area.y + 74, src != nullptr ? src->label : "NONE", Color::Text, Face::Label);
@@ -302,6 +327,7 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
   }
 
   // Eight cells above the soft keys: name, value and a bar (the kit's widget).
+  sync_page(ctx.engine());
   app::knob_strip(r, Rect{0, area.y + area.h - app::kKnobStripH, ui::kScreenW, app::kKnobStripH}, ctx.engine(), keys_);
 }
 
@@ -320,9 +346,9 @@ void PlayScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 // HELP (Shift + Config, o3-sdk app/help.h): the kit draws it from this data, in the screen's theme. Every control this screen uses is here, in upper case, from static tables (the limits are in
 // docs/FRAMEWORK.md, "Help", and tests/app_test.cpp checks them with help_check()). A button with no entry is shown dimmed. The pads' labels are built per call: the note a pad plays moves with
 // the octave. FILE and SAMPLE LOAD are handled in app.cpp. Look at it: app/scenarios/help.txt (Shift + Config, BUTTONS, PADS).
-void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
+void PlayScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Play, "MODE: BANDS OR TALK", "START OR STOP THE BAR"},
+      {Button::Play, "MODE: BANDS, TALK, TUNE", "START OR STOP THE BAR"},
       {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},
       {Button::File, "SAVE THE PATTERN", nullptr},
       {Button::SampleLoad, "LOAD THE PATTERN", nullptr},
@@ -347,14 +373,25 @@ void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
       {"BLACK KEYS", "THE SEMITONES, THE SAME", Color::Instr},
   };
   h.summary = "THE AUDIO INPUT SPEAKS THROUGH THE PADS' CHORD. F1-F8 POINT THE ENCODER AT A VALUE (A TAP LATCHES IT) AND THE ENCODER CHANGES IT.";
-  h.fkey[0] = "BANDS OR TALK";
-  h.fkey[1] = "LPC ORDER";
-  h.fkey[2] = "HOLD THE VOWEL";
-  h.fkey[3] = "DRY INPUT";
-  h.fkey[4] = "OUTPUT LEVEL";
-  h.fkey[5] = "SAW OR PULSE";
-  h.fkey[6] = "DETUNE, CENTS";
-  h.fkey[7] = "NOTE RELEASE";
+  h.fkey[0] = "BANDS, TALK, TUNE";
+  if (ctx.engine().param(voice_, Vocoder::Mode) >= 1.5f) {  // TUNE: the F keys follow sync_page()
+    h.summary = "TUNE: THE VOICE IS PITCH-CORRECTED TO THE KEY AND SCALE, OR TO THE HELD PADS. F1-F8 POINT THE ENCODER AT A VALUE.";
+    h.fkey[1] = "KEY";
+    h.fkey[2] = "SCALE";
+    h.fkey[3] = "SPEED, MS: 0 IS STEPPED";
+    h.fkey[4] = "HOW MUCH IS CORRECTED";
+    h.fkey[5] = "HELD PADS ARE THE TARGET";
+    h.fkey[6] = "DRY INPUT";
+    h.fkey[7] = "OUTPUT LEVEL";
+  } else {
+    h.fkey[1] = "LPC ORDER";
+    h.fkey[2] = "HOLD THE VOWEL";
+    h.fkey[3] = "DRY INPUT";
+    h.fkey[4] = "OUTPUT LEVEL";
+    h.fkey[5] = "SAW OR PULSE";
+    h.fkey[6] = "DETUNE, CENTS";
+    h.fkey[7] = "NOTE RELEASE";
+  }
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "CHANGE VALUE (SHIFT COARSE)";

@@ -251,6 +251,11 @@ TEST_CASE("app: a line source starts at gain 0, a switch clears the peaks, voc s
   CHECK(state(*h).find("voc_mode=talk voc_notes=3") != std::string::npos);
   cmd_run(1, "voc", "bands", nullptr, t);
   CHECK(state(*h).find("voc_mode=bands voc_notes=0") != std::string::npos);
+  cmd_run(1, "voc", "tune", "2", t);
+  CHECK(t.find("voc: tune notes 2") != std::string::npos);
+  h->run_ms(50);
+  CHECK(state(*h).find("voc_mode=tune voc_notes=2") != std::string::npos);
+  cmd_run(1, "voc", "bands", nullptr, t);
   cmd_run(1, "voc", "talk", "9", t);
   CHECK(t.find("usage") != std::string::npos);
   CHECK(h->engine().dropped_commands() == 0u);

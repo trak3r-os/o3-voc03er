@@ -1,0 +1,25 @@
+# TUNE: the mode key cycles BANDS, TALK, TUNE; a 220 Hz tone is snapped to the scale; the F keys show TUNE values; the HELP page.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/tune.txt --out <dir>   (the dir must exist)
+record on
+input tone 226 -12
+wait 300
+snap 01_bands
+tap play
+wait 100
+tap play
+wait 600
+expect state voc_mode=tune
+snap 02_tune
+tap f4
+turn 10
+snap 03_speed
+tap f2
+turn 3
+wait 300
+snap 04_key
+press shift
+tap config
+release shift
+wait 100
+snap 05_help
+wav tune

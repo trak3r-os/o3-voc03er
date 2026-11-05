@@ -158,7 +158,7 @@ TEST_CASE("vocoder: the parameter table is valid and ids are stable") {
   CHECK(Vocoder::Detune == 6);
   CHECK(Vocoder::Mode == 7);  // Talk: MODE, QUALITY and FREEZE appended
   CHECK(Vocoder::Freeze == 9);  // the first ten never move
-  CHECK(Vocoder::kParamCount == 35);  // V5a: the loops appended (ids 10..21), V5b: their speed, direction and level (22..33), V5c: CARRIER (34)
+  CHECK(Vocoder::kParamCount == 40);  // V5a: the loops appended (ids 10..21), V5b: their speed, direction and level (22..33), V5c: CARRIER (34), V6b: KEY, SCALE, SPEED, AMOUNT, NOTES-IN (35..39)
 }
 
 TEST_CASE("bands: a band responds more to a sine at its centre than at a neighbour's centre") {

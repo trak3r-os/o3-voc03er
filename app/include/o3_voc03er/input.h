@@ -101,19 +101,21 @@ class InputMeter {
   std::uint64_t ignore_until_ = 0;
 };
 
-// `voc <bands|talk> [notes 0..8]`: the mode and how many notes the console holds (the unit round has no person at the pads).
+// `voc <bands|talk|tune> [notes 0..8]`: the mode and how many notes the console holds (the unit round has no person at the pads).
 inline constexpr unsigned kVocMaxNotes = 8;
 struct VocCommand {
-  bool talk = false;
+  unsigned mode = 0;  // Vocoder::Mode: 0 bands, 1 talk, 2 tune
   unsigned notes = 0;
 };
 // false (out untouched) for a word that is not a mode, a count that is not 0..8 or an extra word. No count means 0 (release all).
 inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noexcept {
   VocCommand v;
   if (mode != nullptr && std::strcmp(mode, "bands") == 0) {
-    v.talk = false;
+    v.mode = 0;
   } else if (mode != nullptr && std::strcmp(mode, "talk") == 0) {
-    v.talk = true;
+    v.mode = 1;
+  } else if (mode != nullptr && std::strcmp(mode, "tune") == 0) {
+    v.mode = 2;
   } else {
     return false;
   }

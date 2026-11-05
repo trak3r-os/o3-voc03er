@@ -12,8 +12,11 @@ using o3sdk::core::ParamUnit;
 using o3sdk::dsp::Ramp;
 
 constexpr const char* kWaveNames[] = {"SAW", "PULSE"};
-constexpr const char* kModeNames[] = {"BANDS", "TALK"};
+constexpr const char* kModeNames[] = {"BANDS", "TALK", "TUNE"};
 constexpr const char* kFreezeNames[] = {"OFF", "ON"};
+constexpr const char* kKeyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+constexpr const char* kScaleNames[] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
+constexpr const char* kNotesInNames[] = {"OFF", "ON"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
 constexpr const char* kRecNames[] = {"OFF", "ARM"};
@@ -44,7 +47,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"DRY", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"LEVEL", "dB", nullptr, nullptr, -48.0f, 6.0f, -6.0f, 108, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},
     {"DETUNE", "ct", nullptr, nullptr, 0.0f, 20.0f, 8.0f, 20, 5, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
-    {"MODE", "", kModeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"MODE", "", kModeNames, nullptr, 0.0f, 2.0f, 0.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"QUALITY", "", nullptr, nullptr, 8.0f, 24.0f, 16.0f, 16, 2, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"FREEZE", "", kFreezeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     loop_row("L1 REC", kRecNames), loop_row("L1 PLAY", kPlayNames), loop_row("L1 ROLE", kRoleNames),
@@ -54,12 +57,18 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     speed_row("L1 SPEED"), dir_row("L1 DIR"), level_row("L1 LEVEL"), speed_row("L2 SPEED"), dir_row("L2 DIR"), level_row("L2 LEVEL"),
     speed_row("L3 SPEED"), dir_row("L3 DIR"), level_row("L3 LEVEL"), speed_row("L4 SPEED"), dir_row("L4 DIR"), level_row("L4 LEVEL"),
     {"CARRIER", "", kCarNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"KEY", "", kKeyNames, nullptr, 0.0f, 11.0f, 0.0f, 11, 1, 12, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"SCALE", "", kScaleNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"SPEED", "ms", nullptr, nullptr, 0.0f, 500.0f, 25.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"AMOUNT", "%", nullptr, nullptr, 0.0f, 1.0f, 1.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
+    {"NOTES-IN", "", kNotesInNames, nullptr, 0.0f, 1.0f, 1.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
 
 constexpr float kRampMs = 5.0f;
-constexpr float kModeFadeMs = 10.0f;  // Bands <-> Talk crossfade
+constexpr float kModeFadeMs = 10.0f;  // crossfade between the modes
+constexpr float kTuneGain = 1.0f;     // Tune returns the voice itself: unity
 constexpr float kTalkGain = 1.0f;     // Talk's output is a carrier-level signal shaped by the modulator's rms; not tuned (needs the unit's ears)
 constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC holds at a mean-abs of 0.1, and each band passes a slice of the carrier: a vowel on a three-note saw chord peaks at about 0.9 at LEVEL 0 dB (0.47 at the default -6)
 
@@ -105,7 +114,10 @@ void Vocoder::prepare(float sample_rate) noexcept {
   carrier_.prepare(sample_rate);
   bands_.prepare(sample_rate);
   talk_.prepare(sample_rate);
-  talk_mix_.set_length(static_cast<std::uint32_t>(kModeFadeMs * 0.001f * sample_rate));
+  const auto fade = static_cast<std::uint32_t>(kModeFadeMs * 0.001f * sample_rate);
+  bands_mix_.set_length(fade);
+  talk_mix_.set_length(fade);
+  tune_mix_.set_length(fade);
   const auto ramp = static_cast<std::uint32_t>(kRampMs * 0.001f * sample_rate);
   level_.set_length(ramp);
   dry_.set_length(ramp);
@@ -114,7 +126,10 @@ void Vocoder::prepare(float sample_rate) noexcept {
   }
   level_.jump(level_.target_value());
   dry_.jump(dry_.target_value());
+  bands_mix_.jump(1.0f);
   talk_mix_.jump(0.0f);
+  tune_mix_.jump(0.0f);
+  tune_.reset();
   loops_.clear();
   for (Slot& s : slot_) {
     s = Slot{};
@@ -141,7 +156,7 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     select_carrier(v, 0);
     return;
   }
-  if (id >= Loop1Rec) {
+  if (id >= Loop1Rec && id < CarSrc) {
     return;  // the loops' parameters carry a frame: loop_param_event
   }
   switch (id) {
@@ -167,17 +182,37 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       carrier_.set_detune_cents(v);
       break;
     case Mode: {
-      const float t = v >= 0.5f ? 1.0f : 0.0f;
-      if (t != talk_mix_.target_value()) {
-        if (t > 0.5f && talk_mix_.value() <= 0.0f) {
-          talk_.reset();  // Talk was not running: its ring is stale
-        } else if (t < 0.5f && talk_mix_.value() >= 1.0f) {
-          bands_.restart();  // nor were Bands: their followers still hold the voice from before
+      const unsigned m = v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u);
+      Ramp* const ramps[3] = {&bands_mix_, &talk_mix_, &tune_mix_};
+      for (unsigned i = 0; i < 3; ++i) {
+        const float t = i == m ? 1.0f : 0.0f;
+        Ramp& r = *ramps[i];
+        if (t == r.target_value()) continue;
+        if (t > 0.5f && r.value() <= 0.0f) {
+          // The mode was not running: what it remembers is stale.
+          if (i == 0u) bands_.restart();
+          else if (i == 1u) talk_.reset();
+          else tune_.reset();
         }
-        talk_mix_.target(t);
+        r.target(t);
       }
       break;
     }
+    case Key:
+      tune_.set_key(static_cast<unsigned>(v + 0.5f));
+      break;
+    case Scale:
+      tune_.set_scale(static_cast<unsigned>(v + 0.5f));
+      break;
+    case Speed:
+      tune_.set_speed_ms(v);
+      break;
+    case Amount:
+      tune_.set_amount(v);
+      break;
+    case NotesIn:
+      tune_.set_notes_in(v >= 0.5f);
+      break;
     case Quality:
       talk_.set_order(static_cast<std::uint32_t>(v + 0.5f));
       break;
@@ -197,9 +232,11 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
   switch (e.kind) {
     case EventKind::NoteOn:
       carrier_.note_on(e.note);
+      tune_.note_on(e.note);
       break;
     case EventKind::NoteOff:
       carrier_.note_off(e.note);
+      tune_.note_off(e.note);
       break;
     case EventKind::Param:
       if (e.param == CarSrc) {
@@ -212,6 +249,7 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       break;
     case EventKind::AllNotesOff:
       carrier_.all_notes_off();
+      tune_.all_notes_off();
       break;
   }
 }
@@ -467,33 +505,42 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   o3sdk::dsp::ProcessArgs run = args;
   run.frames = n;
   o3sdk::dsp::for_each_run(
-      run, [&](std::uint32_t from, std::uint32_t to) { render_carrier(car + from, gate + from, to - from); },
+      run, [&](std::uint32_t from, std::uint32_t to) {
+        if (tune_mix_.value() >= 1.0f && tune_mix_.target_value() >= 1.0f) {  // TUNE alone: the carrier is not heard
+          for (std::uint32_t i = from; i < to; ++i) car[i] = gate[i] = 0.0f;
+        } else {
+          render_carrier(car + from, gate + from, to - from);
+        }
+      },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
   run_loops(*args.transport, n, mod, car);
-  // Only the active mode runs; both run while the crossfade is under way.
-  const bool to_talk = talk_mix_.target_value() > 0.5f;
-  const bool fading = talk_mix_.value() != talk_mix_.target_value();
-  const bool run_bands = !to_talk || fading;
-  const bool run_talk = to_talk || fading;
+  // Only the active mode runs; two or three run while a crossfade is under way.
+  const auto runs = [](const Ramp& r) { return r.value() > 0.0f || r.target_value() > 0.0f; };
   float tw[Bands::kMaxFrames];
-  if (run_bands) {
+  float tn[Bands::kMaxFrames];
+  if (runs(bands_mix_)) {
     bands_.process(mod, car, wet, n, gate);
   } else {
     for (std::uint32_t i = 0; i < n; ++i) wet[i] = 0.0f;
   }
-  if (run_talk) {
+  if (runs(talk_mix_)) {
     talk_.process(mod, car, tw, n);
   } else {
     for (std::uint32_t i = 0; i < n; ++i) tw[i] = 0.0f;
   }
-  if (!level_.moving() && !dry_.moving() && !talk_mix_.moving()) {
+  if (runs(tune_mix_)) {
+    tune_.process(mod, tn, n);
+  } else {
+    for (std::uint32_t i = 0; i < n; ++i) tn[i] = 0.0f;
+  }
+  if (!level_.moving() && !dry_.moving() && !bands_mix_.moving() && !talk_mix_.moving() && !tune_mix_.moving()) {
     const float g = level_.value();
     const float d = dry_.value();
-    const float m = talk_mix_.value();
-    const float wm = kWetGain * (1.0f - m);
-    const float tm = kTalkGain * m;
+    const float wm = kWetGain * bands_mix_.value();
+    const float tm = kTalkGain * talk_mix_.value();
+    const float um = kTuneGain * tune_mix_.value();
     for (std::uint32_t i = 0; i < n; ++i) {
-      const float y = soft_clip(g * (wet[i] * wm + tw[i] * tm + d * mod[i]));
+      const float y = soft_clip(g * (wet[i] * wm + tw[i] * tm + tn[i] * um + d * mod[i]));
       args.out_l[i] = y;
       args.out_r[i] = y;
     }
@@ -502,8 +549,10 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   for (std::uint32_t i = 0; i < n; ++i) {
     const float g = level_.next();
     const float d = dry_.next();
-    const float m = talk_mix_.next();
-    const float y = soft_clip(g * ((wet[i] * kWetGain) * (1.0f - m) + (tw[i] * kTalkGain) * m + d * mod[i]));
+    const float wm = bands_mix_.next();
+    const float tm = talk_mix_.next();
+    const float um = tune_mix_.next();
+    const float y = soft_clip(g * ((wet[i] * kWetGain) * wm + (tw[i] * kTalkGain) * tm + (tn[i] * kTuneGain) * um + d * mod[i]));
     args.out_l[i] = y;
     args.out_r[i] = y;
   }

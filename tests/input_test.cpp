@@ -52,22 +52,25 @@ TEST_CASE("input: the meter holds a peak for 0.5 to 1 s and a reset forgets it")
 TEST_CASE("input: voc takes a mode and 0..8 notes, nothing else") {
   VocCommand c;
   CHECK(parse_voc("talk", "3", c));
-  CHECK(c.talk);
+  CHECK(c.mode == 1u);
   CHECK(c.notes == 3u);
   CHECK(parse_voc("bands", nullptr, c));
-  CHECK_FALSE(c.talk);
+  CHECK(c.mode == 0u);
   CHECK(c.notes == 0u);
+  CHECK(parse_voc("tune", "2", c));
+  CHECK(c.mode == 2u);
+  CHECK(c.notes == 2u);
   CHECK(parse_voc("bands", "8", c));
   CHECK(c.notes == 8u);
 
-  c = VocCommand{true, 5};
+  c = VocCommand{1, 5};
   CHECK_FALSE(parse_voc("bands", "9", c));
   CHECK_FALSE(parse_voc("bands", "x", c));
   CHECK_FALSE(parse_voc("bands", "", c));
   CHECK_FALSE(parse_voc("bands", "2x", c));
   CHECK_FALSE(parse_voc("vocode", "2", c));
   CHECK_FALSE(parse_voc(nullptr, nullptr, c));
-  CHECK(c.talk);  // a refused line leaves the output alone
+  CHECK(c.mode == 1u);  // a refused line leaves the output alone
   CHECK(c.notes == 5u);
 }
 

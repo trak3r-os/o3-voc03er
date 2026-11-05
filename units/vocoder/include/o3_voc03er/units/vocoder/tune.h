@@ -74,6 +74,10 @@ class Tune {
   // `n` samples (any n; blocks of 1..64 are the use). x is read once.
   void push(const float* x, unsigned n);
 
+  // The native history: the sample with absolute index i (the i-th pushed since reset; valid for the last kNative - 1 pushed, input already clamped
+  // to +-8 and NaN-free). Autotune's shifter reads it instead of keeping a second ring.
+  float native(std::uint32_t i) const { return xn_[i & (kNative - 1u)]; }
+
   float frequency() const { return freq_; }        // Hz of the last accepted voiced estimate; 0 before the first
   float confidence() const { return conf_; }       // 1 - d' of the last verdict, 0..1
   bool voiced() const { return voiced_; }
