@@ -287,7 +287,8 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
       }
       r.text(x + 130, ly + 28, st.length > 0 ? (len[0] == '0' ? len + 1 : len) : "-", Color::TextDim, Face::Label);
     }
-    r.text(16, ly + 60, "LOOPS: NOTE-FX PICK  REC arm/stop at the bar  UP play  DOWN role  COPY speed  INSERT dir  EDIT/REC level", Color::TextDim, Face::Label);
+    r.text(16, ly + 60, "LOOPS: NOTE-FX PICK  REC arm/stop at the bar  UP play  DOWN role", Color::TextDim, Face::Label);
+    r.text(16, ly + 80, "COPY speed  INSERT dir  EDIT/REC level", Color::TextDim, Face::Label);
   }
 
   // Eight cells above the soft keys: name, value and a bar (the kit's widget).
