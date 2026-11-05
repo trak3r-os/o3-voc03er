@@ -37,6 +37,7 @@
 #include <o3sdk/app/context.h>
 #include <o3sdk/app/audio_in.h>
 #include <o3sdk/app/diag.h>
+#include <o3sdk/core/placement.h>
 #include <o3sdk/dsp/engine.h>
 
 #include <cstddef>
@@ -47,14 +48,22 @@ namespace {
 
 using namespace o3sdk;
 
+// The four loops' samples (5.6 MB, mono int16): in the SDRAM on the unit (O3SDK_BIG), handed to the unit with bind_loops(); the unit never
+// places memory. The Vocoder is a member of MyApp, which lives in the SRAM, so it cannot hold them itself. (A section attribute needs a
+// namespace-scope object, not a member.)
+alignas(8) O3SDK_BIG std::int16_t g_loop_mem[o3_voc03er::Loop::kBankSamples] = {};
+static_assert(sizeof g_loop_mem == o3_voc03er::Loop::kBankSamples * sizeof(std::int16_t) && sizeof g_loop_mem % 8 == 0, "the bank is whole words");
+
 class MyApp;
 MyApp& instance() noexcept;
 void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <bands|talk> [notes 0..8]: set the vocoder mode, hold N notes", &voc_command},
+    {"loop", "loop <1-4> rec|stop|play|halt|mod|car: loops; no args: state", &loop_command},
 };
 
 // The console's limits (check_app_row in the mk66 platform). A row past them is dropped on the unit with only a log line, and the host
@@ -94,6 +103,7 @@ class MyApp final : public app::App {
   void setup(app::Context& ctx) noexcept override {
     ctx_ = &ctx;  // the console's handlers have no Context argument; they run in the main loop
     dsp::Engine& e = ctx.engine();
+    voc_.bind_loops(g_loop_mem, o3_voc03er::Loop::kMaxSamples);  // before attach: the unit takes its memory from the app
     const dsp::UnitId voice = e.attach(voc_);  // an Instrument: the engine hands it the codec input as in_l / in_r (the modulator)
     // Slot 0 plays the vocoder; the mixer's level, pan and sends are the slot's. A refused call is counted (Engine::setup_errors) and the
     // simulator and app_test fail on it, so the result need not be checked here.
@@ -101,7 +111,7 @@ class MyApp final : public app::App {
     voc_id_ = voice;
     meter_.reset(0, 0);
     console_notes_ = 0;
-    play_.init(voice, &meter_);
+    play_.init(voice, &meter_, &voc_);
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
     op_ = Op::None;
     boot_ = Boot::Pattern;
@@ -227,6 +237,37 @@ class MyApp final : public app::App {
     out.text(" failed ").dec(in.failed() ? 1u : 0u).text(" peak_l ").dec(permille(meter_.left())).text(" peak_r ").dec(permille(meter_.right())).nl();
   }
 
+  // `loop <1-4> <rec|stop|play|halt|mod|car>` (main loop): the same events as the keys; `loop` alone prints the four loops.
+  void loop(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    o3_voc03er::LoopCommand c;
+    if (args.argc == 1u && ctx_ != nullptr) {
+      for (unsigned i = 0; i < o3_voc03er::Loop::kCount; ++i) {
+        const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);
+        out.text("loop ").dec(i + 1u).text(": ").text(st.carrier ? "car" : "mod").text(" len ").dec(st.length);
+        out.text(" rec ").dec(static_cast<unsigned>(st.rec)).text(" play ").dec(st.playing ? 1u : 0u).nl();
+      }
+      return;
+    }
+    if (ctx_ == nullptr || args.argc != 3u || !o3_voc03er::parse_loop(args.arg(1), args.arg(2), c)) {
+      out.text("usage: loop [1-4 rec|stop|play|halt|mod|car]").nl();
+      return;
+    }
+    using LF = o3_voc03er::Vocoder::LoopField;
+    const unsigned i = c.loop;
+    dsp::Engine& e = ctx_->engine();
+    switch (c.act) {
+      case o3_voc03er::LoopAct::Rec: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Rec), 0.0f);  // 0 then 1: a full loop stays at 1
+                                     (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Rec), 1.0f); break;
+      case o3_voc03er::LoopAct::StopRec: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Rec), 0.0f); break;
+      case o3_voc03er::LoopAct::Play: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Play), 1.0f); break;
+      case o3_voc03er::LoopAct::Halt: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Play), 0.0f); break;
+      case o3_voc03er::LoopAct::Mod: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Role), 0.0f); break;
+      case o3_voc03er::LoopAct::Car: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Role), 1.0f); break;
+    }
+    out.text("loop ").dec(i + 1u).text(" asked").nl();
+    ctx_->redraw();
+  }
+
   // `voc <bands|talk> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
     o3_voc03er::VocCommand c;
@@ -274,6 +315,11 @@ class MyApp final : public app::App {
     w.num("in_peak_r", permille(meter_.right()));
     w.str("voc_mode", ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode) >= 0.5f ? "talk" : "bands");
     w.num("voc_notes", console_notes_);
+    for (unsigned i = 0; i < o3_voc03er::Loop::kCount; ++i) {
+      const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);
+      char key[8] = {'l', 'o', 'o', 'p', static_cast<char>('1' + i), '\0'};
+      w.num(key, st.length);
+    }
     return w.size();
   }
 
@@ -357,6 +403,10 @@ void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
 
 void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().voc(args, out);
+}
+
+void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().loop(args, out);
 }
 
 }  // namespace

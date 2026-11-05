@@ -15,6 +15,14 @@ constexpr const char* kModeNames[] = {"BANDS", "TALK"};
 constexpr const char* kFreezeNames[] = {"OFF", "ON"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
+constexpr const char* kRecNames[] = {"OFF", "ARM"};
+constexpr const char* kPlayNames[] = {"OFF", "ON"};
+constexpr const char* kRoleNames[] = {"MOD", "CAR"};
+
+constexpr o3sdk::core::ParamDesc loop_row(const char* name, const char* const* names) {
+  return {name, "", names, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0};
+}
+
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"WAVE", "", kWaveNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"NOISE", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
@@ -26,6 +34,10 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"MODE", "", kModeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"QUALITY", "", nullptr, nullptr, 8.0f, 24.0f, 16.0f, 16, 2, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"FREEZE", "", kFreezeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    loop_row("L1 REC", kRecNames), loop_row("L1 PLAY", kPlayNames), loop_row("L1 ROLE", kRoleNames),
+    loop_row("L2 REC", kRecNames), loop_row("L2 PLAY", kPlayNames), loop_row("L2 ROLE", kRoleNames),
+    loop_row("L3 REC", kRecNames), loop_row("L3 PLAY", kPlayNames), loop_row("L3 ROLE", kRoleNames),
+    loop_row("L4 REC", kRecNames), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -39,6 +51,32 @@ constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC ho
 inline float soft_clip(float x) noexcept {
   x = x > 1.5f ? 1.5f : (x < -1.5f ? -1.5f : x);
   return (x - 0.14814815f * x * x * x) * 0.999f;
+}
+
+constexpr std::uint32_t kBarTicks = 4u * o3sdk::dsp::kPpqn;  // 4/4: the transport has no time signature
+
+// The frame of this block (below n) at which the transport reaches a bar line, -1 if none. A block is far shorter than a bar.
+int bar_frame(const o3sdk::dsp::Transport& t, std::uint32_t n) noexcept {
+  if (!t.playing || t.frames == 0u) {
+    return -1;
+  }
+  const std::uint32_t k = static_cast<std::uint32_t>(t.pos >> 32) / kBarTicks;
+  for (std::uint32_t c = k; c <= k + 1u; ++c) {
+    const int f = o3sdk::dsp::frame_at(t, static_cast<std::uint64_t>(c) * kBarTicks);
+    if (f >= 0 && static_cast<std::uint32_t>(f) < n) {
+      return f;
+    }
+  }
+  return -1;
+}
+
+// Where a loop action asked at frame `min` of this block happens: at the next bar line, or at once while the transport is stopped.
+int locate(const o3sdk::dsp::Transport& t, std::uint32_t n, std::uint32_t min) noexcept {
+  if (!t.playing) {
+    return static_cast<int>(min);
+  }
+  const int f = bar_frame(t, n);
+  return f >= static_cast<int>(min) ? f : -1;
 }
 
 }  // namespace
@@ -61,6 +99,11 @@ void Vocoder::prepare(float sample_rate) noexcept {
   level_.jump(level_.target_value());
   dry_.jump(dry_.target_value());
   talk_mix_.jump(0.0f);
+  loops_.clear();
+  for (Slot& s : slot_) {
+    s = Slot{};
+  }
+  publish_loops();
 }
 
 void Vocoder::set(std::uint16_t id, float v) noexcept {
@@ -68,6 +111,9 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     return;
   }
   v = o3sdk::core::param_clamp(kParams[id], v);
+  if (id >= Loop1Rec) {
+    return;  // the loops' parameters carry a frame: loop_param_event
+  }
   switch (id) {
     case Wave:
       carrier_.set_wave(v >= 0.5f ? Carrier::Wave::Pulse : Carrier::Wave::Saw);
@@ -123,12 +169,147 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       carrier_.note_off(e.note);
       break;
     case EventKind::Param:
-      set(e.param, e.value);
+      if (e.param >= Loop1Rec && e.param < kParamCount) {
+        loop_param_event(e.param, e.value, e.frame);
+      } else {
+        set(e.param, e.value);
+      }
       break;
     case EventKind::AllNotesOff:
       carrier_.all_notes_off();
       break;
   }
+}
+
+void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept {
+  v = o3sdk::core::param_clamp(kParams[id], v);
+  const unsigned n = (id - Loop1Rec) / 3u;
+  const auto field = static_cast<LoopField>((id - Loop1Rec) % 3u);
+  Slot& s = slot_[n];
+  const bool on = v >= 0.5f;
+  if (!loops_.bound() && field != LoopField::Role) {
+    return;  // no memory: the loops do nothing
+  }
+  switch (field) {
+    case LoopField::Rec:
+      s.want_rec = on;
+      s.req = static_cast<std::uint16_t>(frame);
+      if (on && s.rec == Slot::Rec::Idle) {
+        s.rec = Slot::Rec::Armed;
+        s.want_play = false;  // recording replaces the loop
+      }
+      break;
+    case LoopField::Play:
+      if (!on) {
+        s.want_play = false;
+        loops_.stop(n);
+      } else if (s.rec == Slot::Rec::Idle && loops_.length(n) != 0u && !loops_.playing(n)) {
+        s.want_play = true;
+        s.req = static_cast<std::uint16_t>(frame);
+      }
+      break;
+    case LoopField::Role:
+      s.carrier = on;
+      break;
+  }
+}
+
+void Vocoder::publish_loops() noexcept {
+  for (unsigned i = 0; i < Loop::kCount; ++i) {
+    const Slot& s = slot_[i];
+    std::uint32_t rec = 0;
+    if (s.rec == Slot::Rec::Armed) {
+      rec = 1;
+    } else if (s.rec == Slot::Rec::Recording) {
+      rec = s.want_rec ? 2u : 3u;
+    }
+    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.length(i) << 8);
+    status_[i].store(w, std::memory_order_relaxed);
+  }
+}
+
+Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
+  LoopStatus st;
+  if (loop >= Loop::kCount) {
+    return st;
+  }
+  const std::uint32_t w = status_[loop].load(std::memory_order_relaxed);
+  st.rec = static_cast<LoopStatus::Rec>(w & 3u);
+  st.playing = (w & 4u) != 0u;
+  st.pending = (w & 8u) != 0u;
+  st.carrier = (w & 16u) != 0u;
+  st.length = w >> 8;
+  return st;
+}
+
+// The loops of one block, after the events and the carrier, before Bands or Talk. `mod` holds the live modulator and `car` the synth: a
+// recording takes the live modulator first (a loop is recorded as heard at the input, whatever plays), then each playing loop replaces the
+// modulator (a MOD loop; the second one adds) or adds to the carrier (a CAR loop). A loop that does not record or play costs a few compares.
+void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept {
+  if (!loops_.bound()) {
+    return;
+  }
+  std::uint32_t play_from[Loop::kCount] = {};
+  for (unsigned i = 0; i < Loop::kCount; ++i) {
+    Slot& s = slot_[i];
+    std::uint32_t from = 0;
+    if (s.rec == Slot::Rec::Armed) {
+      if (!s.want_rec) {
+        s.rec = Slot::Rec::Idle;
+      } else {
+        const int f = locate(t, n, s.req);
+        if (f >= 0) {
+          loops_.begin_record(i);
+          s.rec = Slot::Rec::Recording;
+          s.want_play = false;
+          from = static_cast<std::uint32_t>(f);
+        }
+      }
+    }
+    if (s.rec == Slot::Rec::Recording) {
+      std::uint32_t end = n;
+      bool stop = false;
+      if (!s.want_rec) {
+        const int f = locate(t, n, s.req);
+        if (f >= 0) {
+          end = static_cast<std::uint32_t>(f);
+          stop = true;
+        }
+      }
+      if (end > from) {
+        (void)loops_.record(i, mod + from, end - from);
+      }
+      if (!loops_.recording(i)) {  // full: the loop ended itself
+        s.rec = Slot::Rec::Idle;
+        s.want_rec = false;
+      } else if (stop) {
+        loops_.end_record(i);
+        s.rec = Slot::Rec::Idle;
+      }
+    }
+  }
+  bool modulated = false;
+  for (unsigned i = 0; i < Loop::kCount; ++i) {
+    Slot& s = slot_[i];
+    if (s.want_play && s.rec == Slot::Rec::Idle) {
+      const int f = locate(t, n, s.req);
+      if (f >= 0 && loops_.start(i)) {
+        s.want_play = false;
+        play_from[i] = static_cast<std::uint32_t>(f);
+      }
+    }
+    if (loops_.playing(i)) {
+      const std::uint32_t pf = play_from[i];
+      if (s.carrier) {
+        loops_.mix(i, car + pf, n - pf, true);
+      } else {
+        loops_.mix(i, mod + pf, n - pf, modulated);
+        modulated = true;
+      }
+    }
+    s.req = 0;
+  }
+  publish_loops();
 }
 
 void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
@@ -145,6 +326,7 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   o3sdk::dsp::for_each_run(
       run, [&](std::uint32_t from, std::uint32_t to) { carrier_.render(car + from, to - from, gate + from); },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
+  run_loops(*args.transport, n, mod, car);
   // Only the active mode runs; both run while the crossfade is under way.
   const bool to_talk = talk_mix_.target_value() > 0.5f;
   const bool fading = talk_mix_.value() != talk_mix_.target_value();

@@ -1,0 +1,32 @@
+# The four voice loops on the PLAY screen: a tone at the line is recorded into loop 1 (REC, transport stopped so it starts at once),
+# stopped, played as the modulator (UP) with the carrier chord held on the pads, the role swapped (DOWN), a second loop picked (NOTE).
+# The simulator's input is synthetic: this shows the screen and that the loop path runs; it says nothing about how a loop sounds on a
+# real source or what a playing loop costs on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/loops.txt --out <dir>   (the dir must exist)
+record on
+input tone 220 -6
+wait 300
+snap 01_empty
+tap rec
+wait 1000
+snap 02_recording
+tap rec
+wait 200
+input tone 110 -60
+paddown 36
+paddown 40
+tap up
+wait 800
+snap 03_playing_as_modulator
+wav loops_mod
+tap down
+wait 800
+snap 04_role_carrier
+tap note
+tap rec
+wait 400
+snap 05_loop2_recording
+tap rec
+wait 200
+padup 36
+padup 40

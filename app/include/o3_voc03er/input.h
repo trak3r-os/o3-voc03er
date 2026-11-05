@@ -134,4 +134,31 @@ inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noex
 // The i-th held note: C3 major seventh and up, spread over two octaves (a chord that exercises the carrier's voices).
 inline constexpr std::uint8_t kVocChord[kVocMaxNotes] = {48, 52, 55, 59, 60, 64, 67, 71};
 
+// `loop <1-4> <rec|stop|play|halt|mod|car>`: rec arms the recording (it starts at the next bar line), stop ends it at the next bar line,
+// play and halt start and stop playback, mod and car set the role.
+enum class LoopAct : std::uint8_t { Rec, StopRec, Play, Halt, Mod, Car };
+struct LoopCommand {
+  unsigned loop = 0;  // 0..3
+  LoopAct act = LoopAct::Rec;
+};
+// false (out untouched) for a loop that is not 1..4, a word that is not an action or a missing or extra word.
+inline bool parse_loop(const char* num, const char* act, LoopCommand& out) noexcept {
+  static constexpr struct {
+    const char* word;
+    LoopAct act;
+  } kActs[] = {{"rec", LoopAct::Rec}, {"stop", LoopAct::StopRec}, {"play", LoopAct::Play},
+               {"halt", LoopAct::Halt}, {"mod", LoopAct::Mod}, {"car", LoopAct::Car}};
+  if (num == nullptr || act == nullptr || num[0] < '1' || num[0] > '4' || num[1] != '\0') {
+    return false;
+  }
+  for (const auto& a : kActs) {
+    if (std::strcmp(act, a.word) == 0) {
+      out.loop = static_cast<unsigned>(num[0] - '1');
+      out.act = a.act;
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace o3_voc03er

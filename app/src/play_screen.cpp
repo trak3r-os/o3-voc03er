@@ -55,10 +55,12 @@ const char* card_text(const app::Files& files) noexcept {
 
 }  // namespace
 
-void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter) noexcept {
+void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocoder* loops) noexcept {
   // setup() can run again on the same app object (every test starts a fresh simulator on the one o3sdk_app() instance): start from scratch.
   voice_ = voice;
   meter_ = meter;
+  loops_ = loops;
+  loop_sel_ = 0;
   octave_ = 0;
   pattern_ = Pattern{};
   note_ = nullptr;
@@ -75,6 +77,33 @@ void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter) noexcept {
 void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   if (keys_.input(ctx, in)) {  // F1..F8 and the encoder
     return;
+  }
+  if (loops_ != nullptr) {
+    static constexpr Button kPick[Loop::kCount] = {Button::Note, Button::Instr, Button::Vol, Button::Fx};
+    for (unsigned i = 0; i < Loop::kCount; ++i) {
+      if (in.press(kPick[i])) {
+        loop_sel_ = i;
+        ctx.redraw();
+        return;
+      }
+    }
+    const Vocoder::LoopStatus st = loops_->loop_status(loop_sel_);
+    dsp::Engine& e = ctx.engine();
+    if (in.press(Button::Rec)) {  // arm, or stop at the next bar line
+      (void)e.set_param(voice_, Vocoder::loop_param(loop_sel_, Vocoder::LoopField::Rec), st.rec == Vocoder::LoopStatus::Rec::Idle ? 1.0f : 0.0f);
+      ctx.redraw();
+      return;
+    }
+    if (in.press(Button::Up)) {
+      (void)e.set_param(voice_, Vocoder::loop_param(loop_sel_, Vocoder::LoopField::Play), st.playing || st.pending ? 0.0f : 1.0f);
+      ctx.redraw();
+      return;
+    }
+    if (in.press(Button::Down)) {
+      (void)e.set_param(voice_, Vocoder::loop_param(loop_sel_, Vocoder::LoopField::Role), st.carrier ? 0.0f : 1.0f);
+      ctx.redraw();
+      return;
+    }
   }
   if (in.press(Button::Delete)) {
     pattern_.clear();
@@ -193,6 +222,32 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
     r.text(c.x + 4, c.y + 6, name, Color::Text, Face::Micro);
   }
 
+  if (loops_ != nullptr) {  // the four loops under the pattern: number and state, length, role; the selected one framed
+    const int ly = hy + 76;
+    for (unsigned i = 0; i < Loop::kCount; ++i) {
+      const Vocoder::LoopStatus st = loops_->loop_status(i);
+      const int x = 16 + static_cast<int>(i) * 196;
+      const Rect c{x, ly, 188, 52};
+      r.frame(c, i == loop_sel_ ? Color::Accent : Color::Empty);
+      char num[2] = {static_cast<char>('1' + i), '\0'};
+      r.text(x + 8, ly + 8, num, Color::Text, Face::Label);
+      const char* state = st.rec == Vocoder::LoopStatus::Rec::Armed       ? "ARMED"
+                          : st.rec == Vocoder::LoopStatus::Rec::Recording ? "REC"
+                          : st.rec == Vocoder::LoopStatus::Rec::Stopping  ? "STOPPING"
+                          : st.playing                                    ? "PLAY"
+                          : st.pending                                    ? "WAIT"
+                          : st.length > 0                                 ? "STOP"
+                                                                          : "EMPTY";
+      r.text(x + 28, ly + 8, state, st.rec != Vocoder::LoopStatus::Rec::Idle ? Color::Accent : (st.playing ? Color::Play : Color::Text), Face::Label);
+      const unsigned tenths = st.length * 10u / 44100u;  // integer: the screen is not a sample loop, and a length is only shown
+      char len[8] = {static_cast<char>('0' + (tenths / 100u) % 10u), static_cast<char>('0' + (tenths / 10u) % 10u), '.',
+                     static_cast<char>('0' + tenths % 10u), 'S', '\0', '\0', '\0'};
+      r.text(x + 8, ly + 28, st.carrier ? "CARRIER" : "MODULATOR", Color::Text, Face::Label);
+      r.text(x + 130, ly + 28, st.length > 0 ? (len[0] == '0' ? len + 1 : len) : "-", Color::TextDim, Face::Label);
+    }
+    r.text(16, ly + 60, "LOOPS: NOTE FX PICK   REC arm/stop at the bar   UP play   DOWN role", Color::TextDim, Face::Label);
+  }
+
   // Eight cells above the soft keys: name, value and a bar (the kit's widget).
   app::knob_strip(r, Rect{0, area.y + area.h - app::kKnobStripH, ui::kScreenW, app::kKnobStripH}, ctx.engine(), keys_);
 }
@@ -219,6 +274,13 @@ void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::File, "SAVE THE PATTERN", nullptr},
       {Button::SampleLoad, "LOAD THE PATTERN", nullptr},
       {Button::Delete, "CLEAR THE PATTERN", nullptr},
+      {Button::Note, "PICK LOOP 1", nullptr},
+      {Button::Instr, "PICK LOOP 2", nullptr},
+      {Button::Vol, "PICK LOOP 3", nullptr},
+      {Button::Fx, "PICK LOOP 4", nullptr},
+      {Button::Rec, "ARM OR STOP THE LOOP RECORD", nullptr},
+      {Button::Up, "PLAY OR STOP THE LOOP", nullptr},
+      {Button::Down, "LOOP ROLE: MOD OR CAR", nullptr},
       {Button::Left, "KEYBOARD AN OCTAVE DOWN", nullptr},
       {Button::Right, "KEYBOARD AN OCTAVE UP", nullptr},
   };

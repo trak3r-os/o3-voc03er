@@ -1,0 +1,326 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Loop (the bank of recorded loops) and the Vocoder's loop control: recording from the bar lines, the seam, the roles, a full loop,
+// the transport stopped. Synthetic signals only.
+#include <doctest/doctest.h>
+
+#include <o3_voc03er/units/vocoder/loop.h>
+#include <o3_voc03er/units/vocoder/vocoder.h>
+
+#include <o3sdk/dsp/event.h>
+#include <o3sdk/dsp/transport.h>
+
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+using namespace o3_voc03er;
+namespace dsp = o3sdk::dsp;
+
+namespace {
+
+constexpr float kFs = 44100.0f;
+constexpr float kPi2 = 6.2831853f;
+using LF = Vocoder::LoopField;
+
+static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::kParamCount == 22, "ids are append-only: the first ten never move");
+static_assert(Vocoder::loop_param(3, LF::Role) == 21, "four loops of three parameters from id 10");
+
+// A transport at 120 BPM, playing, `tick` ticks into the run (so the bar lines are at multiples of 3840).
+dsp::Transport playing_at(std::uint64_t tick) {
+  dsp::Transport t;
+  t.playing = true;
+  t.tempo_mbpm = 120'000;
+  t.inc = dsp::ticks_per_sample_q32(120'000);
+  t.inc_lo = dsp::ticks_per_sample_lo(120'000);
+  t.pos = tick << 32;
+  t.frames = 64;
+  return t;
+}
+
+// The first sample (counted from `t0`'s block start) whose position reaches `tick`: an oracle that walks Transport::at, not frame_at.
+std::uint32_t first_sample_at(const dsp::Transport& t0, std::uint64_t tick) {
+  for (std::uint32_t g = 0;; ++g) {
+    if (t0.at(g) >= (tick << 32)) {
+      return g;
+    }
+  }
+}
+
+struct Rig {
+  Vocoder v;
+  std::vector<std::int16_t> mem;
+  dsp::Transport tr;
+  std::uint32_t at = 0;  // samples run so far
+  explicit Rig(std::uint32_t per_loop) : mem(static_cast<std::size_t>(Loop::kCount) * per_loop) {
+    v.bind_loops(mem.data(), per_loop);
+    v.prepare(kFs);
+  }
+  // One block of `n` frames from `in` (nullptr: silence) with `ev`; returns the output.
+  std::vector<float> block(const float* in, std::uint32_t n, std::vector<dsp::Event> ev = {}) {
+    std::vector<float> out(n), r(n);
+    std::vector<float> zero(n, 0.0f);
+    dsp::ProcessArgs a{};
+    a.events = ev.data();
+    a.event_count = static_cast<std::uint32_t>(ev.size());
+    a.in_l = in != nullptr ? in : zero.data();
+    a.in_r = a.in_l;
+    a.out_l = out.data();
+    a.out_r = r.data();
+    a.frames = n;
+    tr.frames = n;
+    a.transport = &tr;
+    v.process(a);
+    if (tr.playing) {
+      tr.advance(n);
+    }
+    at += n;
+    return out;
+  }
+};
+
+dsp::Event rec(unsigned loop, bool on) { return dsp::param_change(Vocoder::loop_param(loop, LF::Rec), on ? 1.0f : 0.0f); }
+dsp::Event play(unsigned loop, bool on) { return dsp::param_change(Vocoder::loop_param(loop, LF::Play), on ? 1.0f : 0.0f); }
+dsp::Event role(unsigned loop, bool car) { return dsp::param_change(Vocoder::loop_param(loop, LF::Role), car ? 1.0f : 0.0f); }
+
+float rms(const std::vector<float>& v, std::size_t from, std::size_t to) {
+  float s = 0.0f;
+  for (std::size_t i = from; i < to; ++i) {
+    s += v[i] * v[i];
+  }
+  return std::sqrt(s / static_cast<float>(to - from));
+}
+
+float tone_energy(const std::vector<float>& v, std::size_t from, std::size_t to, float hz) {
+  const float c = 2.0f * std::cos(kPi2 * hz / kFs);
+  float s1 = 0.0f, s2 = 0.0f;
+  for (std::size_t i = from; i < to; ++i) {
+    const float s = v[i] + c * s1 - s2;
+    s2 = s1;
+    s1 = s;
+  }
+  const float n = static_cast<float>(to - from);
+  return (s1 * s1 + s2 * s2 - c * s1 * s2) / (n * n);
+}
+
+// A tone made of a few partials, 0.3 peak-ish, for a modulator or a carrier.
+std::vector<float> rich(std::size_t n, float f0) {
+  std::vector<float> x(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    const float t = static_cast<float>(i) / kFs;
+    x[i] = 0.12f * (std::sin(kPi2 * f0 * t) + std::sin(kPi2 * 3.0f * f0 * t) + std::sin(kPi2 * 7.0f * f0 * t));
+  }
+  return x;
+}
+
+// Records `x` (as many blocks as it holds, transport stopped) into loop `i`, then stops the recording.
+void record_loop(Rig& rig, unsigned i, const std::vector<float>& x) {
+  rig.block(x.data(), 64, {rec(i, true)});
+  for (std::size_t p = 64; p < x.size(); p += 64) {
+    rig.block(x.data() + p, 64);
+  }
+  rig.block(nullptr, 64, {rec(i, false)});
+}
+
+}  // namespace
+
+TEST_CASE("loop: the seam is silent, the length is exact, playback repeats sample for sample") {
+  std::vector<std::int16_t> mem(Loop::kCount * 2000u);
+  Loop l;
+  l.bind(mem.data(), 2000);
+  std::vector<float> in(1000, 0.5f);
+  l.begin_record(0);
+  CHECK(l.record(0, in.data(), 1000) == 1000);
+  l.end_record(0);
+  CHECK(l.length(0) == 1000);
+  CHECK(mem[0] == 0);
+  CHECK(mem[999] == 0);
+  CHECK(mem[500] == 16384);
+  REQUIRE(l.start(0));
+  std::vector<float> out(2500);
+  l.mix(0, out.data(), 700, false);  // uneven chunks: the wrap lands inside one
+  l.mix(0, out.data() + 700, 1800, false);
+  float max_step = 0.0f;
+  for (std::size_t k = 1; k < out.size(); ++k) {
+    max_step = std::fmax(max_step, std::fabs(out[k] - out[k - 1]));
+  }
+  CHECK(max_step < 0.5f / 60.0f);  // the fade's step is 0.5 / 64; a bare seam would jump by 0.5
+  for (std::size_t k = 0; k + 1000 < out.size(); ++k) {
+    CHECK(out[k] == out[k + 1000]);
+  }
+  CHECK(l.position(0) == 500);
+  // add mode sums, a stopped loop is silent and untouched
+  std::vector<float> acc(8, 1.0f);
+  l.mix(0, acc.data(), 8, true);
+  CHECK(acc[0] > 0.99f);
+  l.stop(0);
+  l.mix(0, acc.data(), 8, false);
+  CHECK(acc[7] == doctest::Approx(acc[7]));
+  CHECK(acc[0] > 0.99f);
+}
+
+TEST_CASE("loop: a full loop ends itself, unbound and empty loops do nothing") {
+  std::vector<std::int16_t> mem(Loop::kCount * 100u);
+  Loop l;
+  CHECK_FALSE(l.start(0));
+  l.bind(mem.data(), 100);
+  CHECK_FALSE(l.start(0));  // empty
+  std::vector<float> in(64, 0.25f);
+  l.begin_record(1);
+  CHECK(l.record(1, in.data(), 64) == 64);
+  CHECK(l.recording(1));
+  CHECK(l.record(1, in.data(), 64) == 36);  // only the room left
+  CHECK_FALSE(l.recording(1));
+  CHECK(l.length(1) == 100);
+  CHECK(l.record(1, in.data(), 64) == 0);
+  CHECK(l.start(1));
+  CHECK(Loop::kBankSamples * 2 == 5'644'800);
+  l.bind(mem.data(), 1u << 30);  // clamped to 16 s
+  CHECK(l.capacity() == Loop::kMaxSamples);
+}
+
+TEST_CASE("vocoder loops: recording starts and stops on the bar lines, sample-exact") {
+  Rig rig(Loop::kMaxSamples);
+  // 960 ticks (a quarter, 22,050 samples) before bar line 3 (tick 11,520): bar lines at samples 22,050 and 110,250.
+  rig.tr = playing_at(3840u * 3u - 960u);
+  const std::uint32_t g1 = first_sample_at(rig.tr, 3840u * 3u);
+  const std::uint32_t g2 = first_sample_at(rig.tr, 3840u * 4u);
+  REQUIRE(g1 == 22050);
+  REQUIRE(g2 == 110250);
+  // The input is 0.5 with a marker of 1.0 a hundred samples after the first bar line and a hundred before the second.
+  std::vector<float> x(130000, 0.5f);
+  x[g1 + 100] = 1.0f;
+  x[g2 - 101] = 1.0f;
+  bool saw_armed = false;
+  for (std::uint32_t p = 0; p + 64 <= x.size(); p += 64) {
+    std::vector<dsp::Event> ev;
+    if (p == 0) {
+      ev.push_back(rec(0, true));
+    }
+    if (p == 64u * 700u) {  // between the two bar lines: stop asked, the loop runs on to the line
+      ev.push_back(rec(0, false));
+    }
+    rig.block(x.data() + p, 64, ev);
+    if (p + 64 <= g1) {
+      CHECK(rig.v.loops().length(0) == 0);  // armed, nothing taken before the line
+      saw_armed = saw_armed || rig.v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Armed;
+    }
+    if (p > 64u * 700u && p + 64 <= g2) {
+      CHECK(rig.v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Stopping);
+    }
+  }
+  CHECK(saw_armed);
+  const std::uint32_t len = rig.v.loops().length(0);
+  CHECK(len == g2 - g1);
+  CHECK(len == 88200);
+  CHECK(rig.v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Idle);
+  CHECK(rig.mem[100] == 32767);
+  CHECK(rig.mem[99] == 16384);  // past the 64-sample fade: full 0.5
+  CHECK(rig.mem[len - 101] == 32767);
+  CHECK(rig.mem[len - 1] == 0);
+  CHECK(rig.mem[0] == 0);
+}
+
+TEST_CASE("vocoder loops: with the transport stopped arm and stop act at once") {
+  Rig rig(Loop::kMaxSamples);
+  CHECK_FALSE(rig.tr.playing);
+  std::vector<float> x(64 * 8, 0.4f);
+  rig.block(x.data(), 64, {rec(2, true)});
+  CHECK(rig.v.loops().length(2) == 64);  // started at frame 0 of the block it was asked in
+  CHECK(rig.v.loop_status(2).rec == Vocoder::LoopStatus::Rec::Recording);
+  for (int b = 1; b < 5; ++b) {
+    rig.block(x.data(), 64);
+  }
+  rig.block(x.data(), 64, {rec(2, false)});  // stops at frame 0: this block's samples are not taken
+  CHECK(rig.v.loops().length(2) == 64u * 5u);
+  CHECK(rig.v.loop_status(2).rec == Vocoder::LoopStatus::Rec::Idle);
+  CHECK(rig.v.loop_status(2).length == 320);
+  // an event at frame 40 starts there
+  rig.block(x.data(), 64, {dsp::param_change(Vocoder::loop_param(0, LF::Rec), 1.0f, 40)});
+  CHECK(rig.v.loops().length(0) == 24);
+}
+
+TEST_CASE("vocoder loops: a full loop stops itself and arming again records afresh") {
+  Rig rig(1000);
+  std::vector<float> x(64, 0.3f);
+  rig.block(x.data(), 64, {rec(0, true)});
+  for (int b = 0; b < 20; ++b) {
+    rig.block(x.data(), 64);
+  }
+  CHECK(rig.v.loops().length(0) == 1000);
+  CHECK(rig.v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Idle);
+  rig.block(x.data(), 64, {rec(0, false), rec(0, true)});
+  CHECK(rig.v.loops().length(0) == 64);  // emptied and recording again
+}
+
+TEST_CASE("vocoder loops: a loop plays from the next bar line") {
+  Rig rig(Loop::kMaxSamples);
+  std::vector<float> x(640, 0.5f);
+  record_loop(rig, 0, x);
+  REQUIRE(rig.v.loops().length(0) == 640);
+  rig.tr = playing_at(3840u * 3u - 960u);
+  const std::uint32_t g1 = first_sample_at(rig.tr, 3840u * 3u);
+  rig.block(nullptr, 64, {play(0, true)});
+  CHECK(rig.v.loop_status(0).pending);
+  CHECK_FALSE(rig.v.loop_status(0).playing);
+  const std::uint32_t start = rig.at - 64;  // the play block's first sample: the transport began there
+  while (rig.at - start <= g1 + 64) {
+    rig.block(nullptr, 64);
+  }
+  // the block that holds g1 started the loop at its frame: after the blocks to the one after, the position is what was played since g1
+  CHECK(rig.v.loop_status(0).playing);
+  CHECK_FALSE(rig.v.loop_status(0).pending);
+  CHECK(rig.v.loops().position(0) == (rig.at - start - g1) % 640);
+}
+
+TEST_CASE("vocoder loops: the role decides where the loop goes") {
+  const std::vector<float> tone = rich(64 * 200, 500.0f);
+  const auto run_case = [&](bool car, float dry, const std::vector<float>* live, float& e500, float& e3k, float& level) {
+    Rig rig(Loop::kMaxSamples);
+    record_loop(rig, 0, tone);
+    rig.block(nullptr, 64, {dsp::param_change(Vocoder::Dry, dry), role(0, car), play(0, true)});
+    std::vector<float> out;
+    for (int b = 0; b < 300; ++b) {
+      const float* in = live != nullptr ? live->data() + (static_cast<std::size_t>(b) % 100u) * 64u : nullptr;
+      const std::vector<float> o = rig.block(in, 64);
+      out.insert(out.end(), o.begin(), o.end());
+    }
+    level = rms(out, 64 * 100, out.size());
+    e500 = tone_energy(out, 64 * 100, out.size(), 500.0f);
+    e3k = tone_energy(out, 64 * 100, out.size(), 3000.0f);
+  };
+  float e500, e3k, level;
+  const std::vector<float> live3k = rich(64 * 100, 3000.0f / 7.0f * 1.0f);  // partials at 428, 1285, 3000 Hz
+  // MOD, DRY 1, the live input is a different tone: the output is the loop (500 Hz), not the input
+  run_case(false, 1.0f, &live3k, e500, e3k, level);
+  CHECK(level > 0.01f);
+  CHECK(e500 > 10.0f * e3k);
+  // MOD, DRY 0, no notes: a modulator with no carrier is silent
+  run_case(false, 0.0f, nullptr, e500, e3k, level);
+  CHECK(level < 1.0e-3f);
+  // CAR, DRY 1, no live input: the dry path carries the modulator only, the loop is not it
+  run_case(true, 1.0f, nullptr, e500, e3k, level);
+  CHECK(level < 1.0e-3f);
+  // CAR, DRY 0, a live modulator: the loop is the carrier the bands sing through
+  run_case(true, 0.0f, &live3k, e500, e3k, level);
+  CHECK(level > 0.01f);
+}
+
+TEST_CASE("vocoder loops: without memory the loops do nothing") {
+  Vocoder v;
+  v.prepare(kFs);
+  std::vector<float> in(64, 0.5f), a(64), b(64);
+  const dsp::Transport tr;
+  const dsp::Event ev[] = {rec(0, true), play(0, true)};
+  dsp::ProcessArgs args{};
+  args.events = ev;
+  args.event_count = 2;
+  args.in_l = args.in_r = in.data();
+  args.out_l = a.data();
+  args.out_r = b.data();
+  args.frames = 64;
+  args.transport = &tr;
+  v.process(args);
+  CHECK(v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Idle);
+  CHECK(v.loops().length(0) == 0);
+}

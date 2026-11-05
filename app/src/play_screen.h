@@ -3,11 +3,13 @@
 
 // The one screen of the template: the pads play the carrier (chords) and record what they play into a 16-step pattern, F1..F3 + the encoder edit
 // the voice's three values (the kit's controls convention, o3-sdk app/param_keys.h), LEFT / RIGHT move the keyboard an octave, DELETE
-// clears the pattern. It also shows the card and the last file job. The file keys (FILE saves, SAMPLE LOAD loads) are the app's, in
+// clears the pattern. NOTE, INSTR, VOL and FX pick loop 1..4; REC arms or stops its recording, UP plays or stops it, DOWN swaps its role. It also shows the card and the last file job. The file keys (FILE saves, SAMPLE LOAD loads) are the app's, in
 // src/app.cpp. Everything here runs in the main loop (o3-sdk app/screen.h).
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pattern.h>
+
+#include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/param_keys.h>
@@ -20,7 +22,8 @@ class PlayScreen final : public o3sdk::app::Screen {
  public:
   // Called by the app's setup(): the unit this screen plays and edits.
   // `meter` is the app's input peak meter (it outlives the screen).
-  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter) noexcept;
+  // `loops`: the vocoder, for the state of its four loops (main loop only).
+  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, const Vocoder* loops = nullptr) noexcept;
 
   const char* title() const noexcept override { return "PLAY"; }
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
@@ -44,6 +47,8 @@ class PlayScreen final : public o3sdk::app::Screen {
  private:
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   const InputMeter* meter_ = nullptr;
+  const Vocoder* loops_ = nullptr;
+  unsigned loop_sel_ = 0;  // the loop the REC, UP and DOWN keys act on
   o3sdk::app::ParamPage page_ = {};
   o3sdk::app::ParamKeys keys_;
   int octave_ = 0;

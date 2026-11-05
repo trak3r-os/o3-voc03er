@@ -70,3 +70,20 @@ TEST_CASE("input: voc takes a mode and 0..8 notes, nothing else") {
   CHECK(c.talk);  // a refused line leaves the output alone
   CHECK(c.notes == 5u);
 }
+
+TEST_CASE("parse_loop reads a loop number 1..4 and an action") {
+  LoopCommand c;
+  CHECK(parse_loop("3", "rec", c));
+  CHECK(c.loop == 2u);
+  CHECK(c.act == LoopAct::Rec);
+  CHECK(parse_loop("1", "car", c));
+  CHECK(c.act == LoopAct::Car);
+  CHECK_FALSE(parse_loop("5", "play", c));
+  CHECK_FALSE(parse_loop("0", "play", c));
+  CHECK_FALSE(parse_loop("12", "play", c));
+  CHECK_FALSE(parse_loop("2", "jump", c));
+  CHECK_FALSE(parse_loop("2", nullptr, c));
+  CHECK_FALSE(parse_loop(nullptr, "rec", c));
+  CHECK(c.loop == 0u);  // a refused line leaves the output alone
+  CHECK(c.act == LoopAct::Car);
+}
