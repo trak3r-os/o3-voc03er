@@ -135,26 +135,48 @@ inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noex
 inline constexpr std::uint8_t kVocChord[kVocMaxNotes] = {48, 52, 55, 59, 60, 64, 67, 71};
 
 // `loop <1-4> <rec|stop|play|halt|mod|car>`: rec arms the recording (it starts at the next bar line), stop ends it at the next bar line,
-// play and halt start and stop playback, mod and car set the role.
-enum class LoopAct : std::uint8_t { Rec, StopRec, Play, Halt, Mod, Car };
+// play and halt start and stop playback, mod and car set the role, half x1 x2 the speed, fwd and rev the direction, `lvl <dB>` the level
+// (a whole number, -24..12).
+enum class LoopAct : std::uint8_t { Rec, StopRec, Play, Halt, Mod, Car, Half, X1, X2, Fwd, Rev, Level };
 struct LoopCommand {
   unsigned loop = 0;  // 0..3
   LoopAct act = LoopAct::Rec;
+  int db = 0;         // Level only
 };
-// false (out untouched) for a loop that is not 1..4, a word that is not an action or a missing or extra word.
-inline bool parse_loop(const char* num, const char* act, LoopCommand& out) noexcept {
+// false (out untouched) for a loop that is not 1..4, a word that is not an action or a missing or extra word (`val` is for lvl only).
+inline bool parse_loop(const char* num, const char* act, LoopCommand& out, const char* val = nullptr) noexcept {
   static constexpr struct {
     const char* word;
     LoopAct act;
   } kActs[] = {{"rec", LoopAct::Rec}, {"stop", LoopAct::StopRec}, {"play", LoopAct::Play},
-               {"halt", LoopAct::Halt}, {"mod", LoopAct::Mod}, {"car", LoopAct::Car}};
+               {"halt", LoopAct::Halt}, {"mod", LoopAct::Mod}, {"car", LoopAct::Car}, {"half", LoopAct::Half},
+               {"x1", LoopAct::X1}, {"x2", LoopAct::X2}, {"fwd", LoopAct::Fwd}, {"rev", LoopAct::Rev}, {"lvl", LoopAct::Level}};
   if (num == nullptr || act == nullptr || num[0] < '1' || num[0] > '4' || num[1] != '\0') {
     return false;
   }
   for (const auto& a : kActs) {
     if (std::strcmp(act, a.word) == 0) {
+      int db = 0;
+      if (a.act == LoopAct::Level) {
+        if (val == nullptr) {
+          return false;
+        }
+        const bool neg = val[0] == '-';
+        const char* d = val + (neg ? 1 : 0);
+        if (d[0] < '0' || d[0] > '9' || (d[1] != '\0' && (d[1] < '0' || d[1] > '9' || d[2] != '\0'))) {
+          return false;
+        }
+        db = (d[0] - '0') * (d[1] != '\0' ? 10 : 1) + (d[1] != '\0' ? d[1] - '0' : 0);
+        db = neg ? -db : db;
+        if (db < -24 || db > 12) {
+          return false;
+        }
+      } else if (val != nullptr) {
+        return false;
+      }
       out.loop = static_cast<unsigned>(num[0] - '1');
       out.act = a.act;
+      out.db = db;
       return true;
     }
   }

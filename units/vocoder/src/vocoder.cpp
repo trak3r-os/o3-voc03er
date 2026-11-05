@@ -23,6 +23,16 @@ constexpr o3sdk::core::ParamDesc loop_row(const char* name, const char* const* n
   return {name, "", names, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0};
 }
 
+constexpr const char* kSpeedNames[] = {"0.5X", "1X", "2X"};
+constexpr const char* kDirNames[] = {"FWD", "REV"};
+constexpr o3sdk::core::ParamDesc speed_row(const char* name) {
+  return {name, "", kSpeedNames, nullptr, 0.0f, 2.0f, 1.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0};
+}
+constexpr o3sdk::core::ParamDesc dir_row(const char* name) { return loop_row(name, kDirNames); }
+constexpr o3sdk::core::ParamDesc level_row(const char* name) {
+  return {name, "dB", nullptr, nullptr, -24.0f, 12.0f, 0.0f, 72, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0};
+}
+
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"WAVE", "", kWaveNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"NOISE", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
@@ -38,6 +48,8 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     loop_row("L2 REC", kRecNames), loop_row("L2 PLAY", kPlayNames), loop_row("L2 ROLE", kRoleNames),
     loop_row("L3 REC", kRecNames), loop_row("L3 PLAY", kPlayNames), loop_row("L3 ROLE", kRoleNames),
     loop_row("L4 REC", kRecNames), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
+    speed_row("L1 SPEED"), dir_row("L1 DIR"), level_row("L1 LEVEL"), speed_row("L2 SPEED"), dir_row("L2 DIR"), level_row("L2 LEVEL"),
+    speed_row("L3 SPEED"), dir_row("L3 DIR"), level_row("L3 LEVEL"), speed_row("L4 SPEED"), dir_row("L4 DIR"), level_row("L4 LEVEL"),
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -183,8 +195,10 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
 
 void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept {
   v = o3sdk::core::param_clamp(kParams[id], v);
-  const unsigned n = (id - Loop1Rec) / 3u;
-  const auto field = static_cast<LoopField>((id - Loop1Rec) % 3u);
+  const bool play_ids = id >= Loop1Speed;
+  const unsigned base = play_ids ? Loop1Speed : Loop1Rec;
+  const unsigned n = (id - base) / 3u;
+  const auto field = static_cast<LoopField>((id - base) % 3u + (play_ids ? 3u : 0u));
   Slot& s = slot_[n];
   const bool on = v >= 0.5f;
   if (!loops_.bound() && field != LoopField::Role) {
@@ -213,6 +227,18 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
     case LoopField::Role:
       s.carrier = on;
       break;
+    case LoopField::Speed:
+      s.speed = static_cast<std::uint8_t>(v + 0.5f);
+      loops_.set_speed(n, s.speed);
+      break;
+    case LoopField::Dir:
+      s.reverse = on;
+      loops_.set_reverse(n, on);
+      break;
+    case LoopField::Level:
+      s.level_db = v;
+      loops_.set_gain(n, std::exp(v * 0.11512925f));  // dB -> linear, once an event
+      break;
   }
 }
 
@@ -227,6 +253,8 @@ void Vocoder::publish_loops() noexcept {
     }
     const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.length(i) << 8);
     status_[i].store(w, std::memory_order_relaxed);
+    const std::uint32_t half_db = static_cast<std::uint32_t>(static_cast<int>(std::floor(s.level_db * 2.0f + 0.5f)) + 64);
+    opts_[i].store(s.speed | (s.reverse ? 4u : 0u) | (half_db << 8), std::memory_order_relaxed);
   }
 }
 
@@ -241,6 +269,10 @@ Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
   st.pending = (w & 8u) != 0u;
   st.carrier = (w & 16u) != 0u;
   st.length = w >> 8;
+  const std::uint32_t o = opts_[loop].load(std::memory_order_relaxed);
+  st.speed = static_cast<std::uint8_t>(o & 3u);
+  st.reverse = (o & 4u) != 0u;
+  st.level_db = static_cast<float>(static_cast<int>(o >> 8) - 64) * 0.5f;
   return st;
 }
 

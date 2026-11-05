@@ -25,6 +25,11 @@
 //                     stopped); OFF stops at once. An empty loop does not play.
 //            +2 Role  0 MOD, 1 CAR: a playing MOD loop is the modulator in place of the live input (several are summed); a playing CAR loop is
 //                     summed with what the internal synth plays. Both feed Bands or Talk as usual; DRY mixes the modulator that is used.
+//  22..33    Loop playback, three for each loop n = 0..3 (ids 22 + 3n + field):
+//            +0 Speed 0 0.5X, 1 1X (default), 2 2X: the loop plays at that speed; the pitch of a loop in TALK or BANDS comes from the
+//                     carrier, so the melody stays. Changes act from the block they land in, the position carries over.
+//            +1 Dir   0 FWD (default), 1 REV: plays backwards (a start begins at the last sample).
+//            +2 Level dB, -24..+12 (default 0): the loop's gain, ramped over a chunk of 64 samples; at 0 dB the sound is what it was.
 //            The loop memory comes from the app (bind_loops); without it the loops do nothing.
 // The bands' followers are fixed (2 ms attack, 25 ms release, 40 ms on the three lowest bands; Bands::set_envelope).
 //
@@ -49,10 +54,12 @@ class Vocoder final : public o3sdk::dsp::Unit {
  public:
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
+                            Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
                             kParamCount };
-  enum class LoopField : std::uint16_t { Rec, Play, Role };
+  enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
-    return static_cast<std::uint16_t>(Loop1Rec + 3u * loop + static_cast<unsigned>(f));
+    const unsigned k = static_cast<unsigned>(f);
+    return static_cast<std::uint16_t>(k < 3u ? Loop1Rec + 3u * loop + k : Loop1Speed + 3u * loop + (k - 3u));
   }
 
   // What a loop is doing, for the screen and the console: written by the render context once a block, read by the main loop (one atomic
@@ -63,6 +70,9 @@ class Vocoder final : public o3sdk::dsp::Unit {
     bool playing = false;
     bool pending = false;  // Play asked, waiting for the bar line
     bool carrier = false;  // the role
+    std::uint8_t speed = 1;    // 0 0.5X, 1 1X, 2 2X
+    bool reverse = false;
+    float level_db = 0.0f;
     std::uint32_t length = 0;  // samples recorded so far (while recording) or in the loop
   };
   LoopStatus loop_status(unsigned loop) const noexcept;
@@ -93,6 +103,9 @@ class Vocoder final : public o3sdk::dsp::Unit {
     bool want_rec = false;    // the Rec parameter; false while Recording means stop at the bar line
     bool want_play = false;   // Play asked and not started yet
     bool carrier = false;
+    std::uint8_t speed = 1;
+    bool reverse = false;
+    float level_db = 0.0f;
     std::uint16_t req = 0;    // the frame of the event that asked, this block only (0 afterwards): a bar line before it does not count
   };
 
@@ -105,6 +118,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   o3sdk::dsp::Ramp talk_mix_;  // 0 Bands .. 1 Talk
   Loop loops_;
   Slot slot_[Loop::kCount];
+  std::atomic<std::uint32_t> opts_[Loop::kCount] = {};    // packed speed | reverse << 2 | (level in half dB + 64) << 8, same protocol
   std::atomic<std::uint32_t> status_[Loop::kCount] = {};  // packed LoopStatus: single writer (the render context), word-sized reads
 };
 

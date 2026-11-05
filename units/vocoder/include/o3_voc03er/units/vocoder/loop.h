@@ -10,6 +10,16 @@
 // kFadeSamples (64, 1.5 ms; half the loop at most) ramping linearly from and to zero. Playback then does nothing at the seam (no crossfade
 // path, no per-sample cost), and the wrap cannot click whatever the source was doing at the bar line. The price is a dip of 1.5 ms once a loop.
 //
+// Speed and direction. Each loop plays at 0.5x, 1x or 2x, forward or reverse (set_speed, set_reverse), and has a level (set_gain). The play
+// position is an integer in HALF samples (h, 0..2*length-1): 0.5x advances 1 a sample, 1x 2, 2x 4, so there is no drift over any number of
+// loops, and the output is a linear interpolation between the samples h/2 and h/2+1 (the second wraps to the first). 1x forward on a whole
+// sample with a settled level keeps the plain pass (the fast path); every other case copies, once a chunk of 64 output samples, the span of
+// samples the chunk needs into a stack buffer (one sequential SDRAM pass, forward or backward, wrapping at the loop's end or start, even for
+// a loop shorter than the span) and interpolates there. The fades are in the stored samples, so a wrap is as quiet at any speed and way.
+// A change of speed or direction while playing acts from the next mix() (the position carries over: the signal is continuous, only its
+// slope changes, and going to 1x forward drops an odd half sample). A level change ramps linearly over the next chunk. start() begins at
+// the first sample (the last one in reverse) at the loop's own speed.
+//
 // Memory. The buffer is `kCount * per_loop` int16, 5.6 MB for the full size (kBankSamples): the app declares it with O3SDK_BIG (SDRAM) and
 // gives it here; a unit never places memory itself. Real-time rules: nothing here allocates or blocks; record() and mix() are bounded by
 // the block. mix() reads a loop's samples in one sequential pass (an SDRAM read is about 29 cycles sequential, 35 random, measured) and
@@ -49,14 +59,23 @@ class Loop {
   void mix(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
   bool playing(unsigned i) const noexcept { return i < kCount && playing_[i]; }
 
+  // Per loop, any time (render context): speed 0 = 0.5x, 1 = 1x, 2 = 2x (others clamp to 1x); reverse; gain, linear (default 1).
+  void set_speed(unsigned i, unsigned speed) noexcept;
+  void set_reverse(unsigned i, bool reverse) noexcept;
+  void set_gain(unsigned i, float gain) noexcept;
+
   std::uint32_t length(unsigned i) const noexcept { return i < kCount ? len_[i] : 0u; }  // samples recorded so far / in the loop
-  std::uint32_t position(unsigned i) const noexcept { return i < kCount ? pos_[i] : 0u; }
+  std::uint32_t position(unsigned i) const noexcept { return i < kCount ? (h_[i] >> 1) : 0u; }  // the sample the play position is in
 
  private:
   std::int16_t* mem_ = nullptr;
   std::uint32_t cap_ = 0;
   std::uint32_t len_[kCount] = {};
-  std::uint32_t pos_[kCount] = {};
+  std::uint32_t h_[kCount] = {};  // the play position in half samples
+  std::uint8_t speed_[kCount] = {1, 1, 1, 1};
+  bool rev_[kCount] = {};
+  float gain_[kCount] = {1.0f, 1.0f, 1.0f, 1.0f};   // target
+  float gcur_[kCount] = {1.0f, 1.0f, 1.0f, 1.0f};   // what the last chunk ended at
   bool rec_[kCount] = {};
   bool playing_[kCount] = {};
 };

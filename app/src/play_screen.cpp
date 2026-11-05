@@ -104,6 +104,22 @@ void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       ctx.redraw();
       return;
     }
+    if (in.press(Button::Copy)) {  // speed: 0.5X, 1X, 2X, round
+      (void)e.set_param(voice_, Vocoder::loop_param(loop_sel_, Vocoder::LoopField::Speed), static_cast<float>((st.speed + 1u) % 3u));
+      ctx.redraw();
+      return;
+    }
+    if (in.press(Button::Insert)) {  // direction
+      (void)e.set_param(voice_, Vocoder::loop_param(loop_sel_, Vocoder::LoopField::Dir), st.reverse ? 0.0f : 1.0f);
+      ctx.redraw();
+      return;
+    }
+    if (in.press(Button::SampleEdit) || in.press(Button::SampleRec)) {  // level, 3 dB a press
+      const float db = st.level_db + (in.press(Button::SampleEdit) ? -3.0f : 3.0f);
+      (void)e.set_param(voice_, Vocoder::loop_param(loop_sel_, Vocoder::LoopField::Level), db < -24.0f ? -24.0f : (db > 12.0f ? 12.0f : db));
+      ctx.redraw();
+      return;
+    }
   }
   if (in.press(Button::Delete)) {
     pattern_.clear();
@@ -243,9 +259,35 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
       char len[8] = {static_cast<char>('0' + (tenths / 100u) % 10u), static_cast<char>('0' + (tenths / 10u) % 10u), '.',
                      static_cast<char>('0' + tenths % 10u), 'S', '\0', '\0', '\0'};
       r.text(x + 8, ly + 28, st.carrier ? "CARRIER" : "MODULATOR", Color::Text, Face::Label);
+      {  // speed, direction, level: "0.5X REV -3"
+        char opt[14] = {};
+        unsigned q = 0;
+        const char* sp = st.speed == 0u ? "0.5X" : (st.speed == 2u ? "2X" : "1X");
+        while (*sp != '\0') {
+          opt[q++] = *sp++;
+        }
+        opt[q++] = ' ';
+        const char* dir = st.reverse ? "REV" : "FWD";
+        while (*dir != '\0') {
+          opt[q++] = *dir++;
+        }
+        opt[q++] = ' ';
+        const int db = static_cast<int>(st.level_db);
+        if (db < 0) {
+          opt[q++] = '-';
+        } else if (db > 0) {
+          opt[q++] = '+';
+        }
+        const unsigned a = static_cast<unsigned>(db < 0 ? -db : db);
+        if (a >= 10u) {
+          opt[q++] = static_cast<char>('0' + a / 10u);
+        }
+        opt[q++] = static_cast<char>('0' + a % 10u);
+        r.text(x + 8, ly + 40, opt, Color::TextDim, Face::Micro);
+      }
       r.text(x + 130, ly + 28, st.length > 0 ? (len[0] == '0' ? len + 1 : len) : "-", Color::TextDim, Face::Label);
     }
-    r.text(16, ly + 60, "LOOPS: NOTE FX PICK   REC arm/stop at the bar   UP play   DOWN role", Color::TextDim, Face::Label);
+    r.text(16, ly + 60, "LOOPS: NOTE-FX PICK  REC arm/stop at the bar  UP play  DOWN role  COPY speed  INSERT dir  EDIT/REC level", Color::TextDim, Face::Label);
   }
 
   // Eight cells above the soft keys: name, value and a bar (the kit's widget).
@@ -281,6 +323,10 @@ void PlayScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Rec, "ARM OR STOP THE LOOP RECORD", nullptr},
       {Button::Up, "PLAY OR STOP THE LOOP", nullptr},
       {Button::Down, "LOOP ROLE: MOD OR CAR", nullptr},
+      {Button::Copy, "LOOP SPEED: 0.5X, 1X, 2X", nullptr},
+      {Button::Insert, "LOOP DIRECTION: FWD OR REV", nullptr},
+      {Button::SampleEdit, "LOOP LEVEL DOWN 3 DB", nullptr},
+      {Button::SampleRec, "LOOP LEVEL UP 3 DB", nullptr},
       {Button::Left, "KEYBOARD AN OCTAVE DOWN", nullptr},
       {Button::Right, "KEYBOARD AN OCTAVE UP", nullptr},
   };

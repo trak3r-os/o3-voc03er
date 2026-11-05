@@ -354,7 +354,7 @@ float max_step(const std::vector<float>& x, std::size_t from, std::size_t to) {
 TEST_CASE("vocoder: MODE switches Bands and Talk during sound with no click, and Talk sounds") {
   static Vocoder vo;
   vo.prepare(kFs);
-  CHECK(Vocoder::kParamCount == 22);
+  CHECK(Vocoder::kParamCount == 34);
   const std::size_t sw_a = 700, sw_b = 1100;
   const auto out = run_unit(vo, 1500, sw_a, sw_b);
   CHECK(finite(out));

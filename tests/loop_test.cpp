@@ -23,8 +23,8 @@ constexpr float kFs = 44100.0f;
 constexpr float kPi2 = 6.2831853f;
 using LF = Vocoder::LoopField;
 
-static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::kParamCount == 22, "ids are append-only: the first ten never move");
-static_assert(Vocoder::loop_param(3, LF::Role) == 21, "four loops of three parameters from id 10");
+static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::kParamCount == 34, "ids are append-only: the first ten never move");
+static_assert(Vocoder::loop_param(3, LF::Level) == 33 && Vocoder::loop_param(1, LF::Dir) == 26 && Vocoder::loop_param(3, LF::Role) == 21, "four loops of three parameters from id 10");
 
 // A transport at 120 BPM, playing, `tick` ticks into the run (so the bar lines are at multiples of 3840).
 dsp::Transport playing_at(std::uint64_t tick) {
@@ -340,4 +340,231 @@ TEST_CASE("vocoder loops: without memory the loops do nothing") {
   v.process(args);
   CHECK(v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Idle);
   CHECK(v.loops().length(0) == 0);
+}
+
+// ---- speed, direction and level ----------------------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr float kToFloat16 = 1.0f / 32768.0f;
+
+// A loop of `n` samples of a slow wave (period 1000, 0.5 peak), recorded and sealed (the seam fades baked in).
+void make_loop(Loop& l, std::vector<std::int16_t>& mem, std::uint32_t n, float amp = 0.5f) {
+  mem.assign(Loop::kCount * static_cast<std::size_t>(n), 0);
+  l.bind(mem.data(), n);
+  std::vector<float> in(n);
+  for (std::uint32_t k = 0; k < n; ++k) {
+    in[k] = amp * std::sin(kPi2 * static_cast<float>(k) / 1000.0f + 0.3f) + 0.1f * static_cast<float>((k * 7u) % 5u);
+  }
+  l.begin_record(0);
+  REQUIRE(l.record(0, in.data(), n) == n);
+  if (l.recording(0)) {
+    l.end_record(0);
+  }
+}
+
+// The oracle: the half-sample position of output sample k, in integers (speed 0 = 0.5x: 1, 1x: 2, 2x: 4), and the interpolated value.
+float oracle(const std::vector<std::int16_t>& mem, std::uint32_t n, unsigned speed, bool rev, std::uint64_t k) {
+  const std::int64_t step = speed == 0 ? 1 : (speed == 1 ? 2 : 4);
+  const std::int64_t n2 = 2 * static_cast<std::int64_t>(n);
+  const std::int64_t h0 = rev ? 2 * (static_cast<std::int64_t>(n) - 1) : 0;
+  std::int64_t h = (h0 + (rev ? -1 : 1) * step * static_cast<std::int64_t>(k)) % n2;
+  if (h < 0) {
+    h += n2;
+  }
+  const std::uint32_t a = static_cast<std::uint32_t>(h >> 1);
+  if ((h & 1) == 0) {
+    return static_cast<float>(mem[a]) * kToFloat16;
+  }
+  return 0.5f * (static_cast<float>(mem[a]) + static_cast<float>(mem[(a + 1u) % n])) * kToFloat16;
+}
+
+// Plays `total` samples in chunks of the given sizes (cycled), compares each with the oracle, returns the largest absolute difference.
+float run_against_oracle(Loop& l, const std::vector<std::int16_t>& mem, std::uint32_t n, unsigned speed, bool rev, std::uint64_t total,
+                         const std::vector<std::uint32_t>& chunks) {
+  l.set_speed(0, speed);
+  l.set_reverse(0, rev);
+  REQUIRE(l.start(0));
+  std::vector<float> out(300);
+  float worst = 0.0f;
+  std::uint64_t k = 0;
+  for (std::size_t c = 0; k < total; ++c) {
+    const std::uint32_t m = chunks[c % chunks.size()];
+    l.mix(0, out.data(), m, false);
+    for (std::uint32_t j = 0; j < m; ++j) {
+      worst = std::fmax(worst, std::fabs(out[j] - oracle(mem, n, speed, rev, k + j)));
+    }
+    k += m;
+  }
+  return worst;
+}
+
+}  // namespace
+
+TEST_CASE("loop: every speed and direction reads the stored samples as the position says, across both ends") {
+  for (const std::uint32_t n : {1000u, 999u}) {
+    std::vector<std::int16_t> mem;
+    Loop l;
+    make_loop(l, mem, n);
+    for (unsigned speed = 0; speed < 3; ++speed) {
+      for (const bool rev : {false, true}) {
+        INFO("n " << n << " speed " << speed << " rev " << rev);
+        // five loops' worth: the wrap is crossed at both ends, in chunks that land on it, over it and past it
+        CHECK(run_against_oracle(l, mem, n, speed, rev, 5ull * n * (speed == 0 ? 2 : 1) + 77, {64, 64, 7, 1, 33, 64, 200}) < 1e-6f);
+      }
+    }
+  }
+}
+
+TEST_CASE("loop: the length in time and no drift over a whole 16 s loop at each speed") {
+  const std::uint32_t n = Loop::kMaxSamples;
+  std::vector<std::int16_t> mem;
+  Loop l;
+  make_loop(l, mem, n);
+  for (unsigned speed = 0; speed < 3; ++speed) {
+    for (const bool rev : {false, true}) {
+      INFO("speed " << speed << " rev " << rev);
+      // the period: 2n samples at 0.5x, n at 1x, n/2 at 2x (n is even); two periods, every sample against the integer oracle
+      const std::uint64_t period = speed == 0 ? 2ull * n : (speed == 1 ? n : n / 2u);
+      CHECK(run_against_oracle(l, mem, n, speed, rev, 2 * period, {64}) < 1e-6f);
+      CHECK(l.position(0) == (rev ? n - 1u : 0u));  // after whole periods the position is where it started
+    }
+  }
+}
+
+TEST_CASE("loop: a loop shorter than the span wraps correctly at every speed and direction") {
+  for (const std::uint32_t n : {1u, 2u, 3u, 5u, 31u, 100u}) {
+    std::vector<std::int16_t> mem;
+    Loop l;
+    make_loop(l, mem, n);
+    for (unsigned speed = 0; speed < 3; ++speed) {
+      for (const bool rev : {false, true}) {
+        INFO("n " << n << " speed " << speed << " rev " << rev);
+        CHECK(run_against_oracle(l, mem, n, speed, rev, 900, {64, 5, 64}) < 1e-6f);
+      }
+    }
+  }
+}
+
+TEST_CASE("loop: the seam stays quiet at every speed and direction") {
+  std::vector<std::int16_t> mem;
+  Loop l;
+  std::vector<float> in(1000, 0.5f);
+  mem.assign(Loop::kCount * 2000u, 0);
+  l.bind(mem.data(), 2000);
+  l.begin_record(0);
+  (void)l.record(0, in.data(), 1000);
+  l.end_record(0);
+  for (unsigned speed = 0; speed < 3; ++speed) {
+    for (const bool rev : {false, true}) {
+      l.set_speed(0, speed);
+      l.set_reverse(0, rev);
+      REQUIRE(l.start(0));
+      std::vector<float> out(4200);
+      for (std::size_t p = 0; p < out.size(); p += 700) {
+        l.mix(0, out.data() + p, 700, false);
+      }
+      float max_step = 0.0f;
+      for (std::size_t k = 1; k < out.size(); ++k) {
+        max_step = std::fmax(max_step, std::fabs(out[k] - out[k - 1]));
+      }
+      INFO("speed " << speed << " rev " << rev << " step " << max_step);
+      CHECK(max_step < 0.5f / 60.0f * (speed == 2 ? 2.0f : 1.0f) * 1.05f);  // the fade's slope times the speed; a bare seam would jump 0.5
+    }
+  }
+}
+
+TEST_CASE("loop: speed, direction and level changed while playing do not jump") {
+  std::vector<std::int16_t> mem;
+  Loop l;
+  make_loop(l, mem, 4000, 0.4f);
+  REQUIRE(l.start(0));
+  std::vector<float> out(64 * 12);
+  const auto blk = [&](int b) { l.mix(0, out.data() + 64 * b, 64, false); };
+  blk(0);
+  blk(1);
+  l.set_speed(0, 2);  // 1x -> 2x
+  blk(2);
+  blk(3);
+  l.set_reverse(0, true);  // forward -> reverse
+  blk(4);
+  blk(5);
+  l.set_speed(0, 0);  // 2x -> 0.5x
+  blk(6);
+  l.set_speed(0, 1);  // back to 1x (a reverse 1x: the plain pass is not used)
+  blk(7);
+  l.set_reverse(0, false);
+  blk(8);
+  blk(9);
+  l.set_gain(0, 0.25f);  // a level change ramps over the chunk
+  blk(10);
+  blk(11);
+  float max_step = 0.0f;
+  for (std::size_t k = 1; k < out.size(); ++k) {
+    max_step = std::fmax(max_step, std::fabs(out[k] - out[k - 1]));
+  }
+  // the wave's slope is 0.4 * 2pi / 1000 = 0.0025 a sample, 0.005 at 2x, plus the noise term (0.4 a step of the 5-cycle) is in the content:
+  // content steps up to 0.4 between neighbours would show, so bound it against the content's own largest step times two
+  float content = 0.0f;
+  for (std::size_t k = 1; k < 4000; ++k) {
+    content = std::fmax(content, std::fabs(static_cast<float>(mem[k] - mem[k - 1])) * kToFloat16);
+  }
+  CHECK(max_step <= 2.0f * content + 1e-6f);
+  CHECK(l.playing(0));
+}
+
+TEST_CASE("loop: the level scales the output, the default is exactly the stored sample") {
+  std::vector<std::int16_t> mem;
+  Loop l;
+  make_loop(l, mem, 500);
+  REQUIRE(l.start(0));
+  std::vector<float> a(128), b(128);
+  l.mix(0, a.data(), 128, false);
+  CHECK(a[40] == static_cast<float>(mem[40]) * kToFloat16);  // the fast path, level 1
+  l.set_gain(0, 0.5f);
+  l.mix(0, b.data(), 64, false);  // the ramp
+  l.mix(0, b.data() + 64, 64, false);  // settled, the fast path again
+  CHECK(b[127] == doctest::Approx(0.5f * static_cast<float>(mem[255]) * kToFloat16));
+  l.stop(0);
+  REQUIRE(l.start(0));  // start() takes the level at once
+  l.mix(0, a.data(), 128, false);
+  CHECK(a[40] == doctest::Approx(0.5f * static_cast<float>(mem[40]) * kToFloat16));
+}
+
+TEST_CASE("vocoder loops: a bar line starts a loop sample-exactly at any speed and direction") {
+  struct Case { unsigned speed; bool rev; };
+  for (const Case c : {Case{0, false}, Case{2, false}, Case{1, true}, Case{2, true}, Case{0, true}}) {
+    Rig rig(Loop::kMaxSamples);
+    std::vector<float> x(640, 0.5f);
+    record_loop(rig, 0, x);
+    rig.tr = playing_at(3840u * 3u - 960u);
+    const std::uint32_t g1 = first_sample_at(rig.tr, 3840u * 3u);
+    rig.block(nullptr, 64, {dsp::param_change(Vocoder::loop_param(0, LF::Speed), static_cast<float>(c.speed)),
+                            dsp::param_change(Vocoder::loop_param(0, LF::Dir), c.rev ? 1.0f : 0.0f), play(0, true)});
+    CHECK(rig.v.loop_status(0).speed == c.speed);
+    CHECK(rig.v.loop_status(0).reverse == c.rev);
+    const std::uint32_t start = rig.at - 64;
+    while (rig.at - start <= g1 + 64) {
+      rig.block(nullptr, 64);
+    }
+    const std::int64_t e = static_cast<std::int64_t>(rig.at - start - g1);
+    const std::int64_t step = c.speed == 0 ? 1 : (c.speed == 1 ? 2 : 4);
+    const std::int64_t h0 = c.rev ? 2 * 639 : 0;
+    std::int64_t h = (h0 + (c.rev ? -step : step) * e) % 1280;
+    if (h < 0) {
+      h += 1280;
+    }
+    INFO("speed " << c.speed << " rev " << c.rev);
+    CHECK(rig.v.loops().position(0) == static_cast<std::uint32_t>(h >> 1));
+  }
+}
+
+TEST_CASE("vocoder loops: the level parameter defaults to 0 dB, ids 0..21 did not move") {
+  Rig rig(Loop::kMaxSamples);
+  CHECK(rig.v.loop_status(2).level_db == 0.0f);
+  CHECK(rig.v.loop_status(2).speed == 1);
+  rig.block(nullptr, 64, {dsp::param_change(Vocoder::loop_param(2, LF::Level), -6.0f)});
+  CHECK(rig.v.loop_status(2).level_db == -6.0f);
+  CHECK(rig.v.info().params[Vocoder::loop_param(2, LF::Level)].def == 0.0f);
+  CHECK(rig.v.info().params[Vocoder::Loop4Role].def == 0.0f);
 }

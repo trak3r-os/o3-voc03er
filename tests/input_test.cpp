@@ -87,3 +87,24 @@ TEST_CASE("parse_loop reads a loop number 1..4 and an action") {
   CHECK(c.loop == 0u);  // a refused line leaves the output alone
   CHECK(c.act == LoopAct::Car);
 }
+
+TEST_CASE("parse_loop reads speed, direction and level") {
+  LoopCommand c;
+  CHECK(parse_loop("2", "half", c));
+  CHECK(c.act == LoopAct::Half);
+  CHECK(parse_loop("2", "x2", c));
+  CHECK(c.act == LoopAct::X2);
+  CHECK(parse_loop("4", "rev", c));
+  CHECK(c.act == LoopAct::Rev);
+  CHECK(c.loop == 3u);
+  CHECK(parse_loop("1", "lvl", c, "-6"));
+  CHECK(c.act == LoopAct::Level);
+  CHECK(c.db == -6);
+  CHECK(parse_loop("1", "lvl", c, "12"));
+  CHECK(c.db == 12);
+  CHECK_FALSE(parse_loop("1", "lvl", c, "13"));
+  CHECK_FALSE(parse_loop("1", "lvl", c, "-25"));
+  CHECK_FALSE(parse_loop("1", "lvl", c, "x"));
+  CHECK_FALSE(parse_loop("1", "lvl", c));
+  CHECK_FALSE(parse_loop("1", "rev", c, "3"));
+}

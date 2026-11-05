@@ -63,7 +63,7 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <bands|talk> [notes 0..8]: set the vocoder mode, hold N notes", &voc_command},
-    {"loop", "loop <1-4> rec|stop|play|halt|mod|car: loops; no args: state", &loop_command},
+    {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
 // The console's limits (check_app_row in the mk66 platform). A row past them is dropped on the unit with only a log line, and the host
@@ -244,12 +244,13 @@ class MyApp final : public app::App {
       for (unsigned i = 0; i < o3_voc03er::Loop::kCount; ++i) {
         const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);
         out.text("loop ").dec(i + 1u).text(": ").text(st.carrier ? "car" : "mod").text(" len ").dec(st.length);
-        out.text(" rec ").dec(static_cast<unsigned>(st.rec)).text(" play ").dec(st.playing ? 1u : 0u).nl();
+        out.text(" rec ").dec(static_cast<unsigned>(st.rec)).text(" play ").dec(st.playing ? 1u : 0u);
+        out.text(st.speed == 0u ? " 0.5x" : (st.speed == 2u ? " 2x" : " 1x")).text(st.reverse ? " rev" : " fwd").text(" lvl ").dec(static_cast<std::int32_t>(st.level_db)).nl();
       }
       return;
     }
-    if (ctx_ == nullptr || args.argc != 3u || !o3_voc03er::parse_loop(args.arg(1), args.arg(2), c)) {
-      out.text("usage: loop [1-4 rec|stop|play|halt|mod|car]").nl();
+    if (ctx_ == nullptr || (args.argc != 3u && args.argc != 4u) || !o3_voc03er::parse_loop(args.arg(1), args.arg(2), c, args.argc == 4u ? args.arg(3) : nullptr)) {
+      out.text("usage: loop [1-4 rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl dB]").nl();
       return;
     }
     using LF = o3_voc03er::Vocoder::LoopField;
@@ -263,6 +264,12 @@ class MyApp final : public app::App {
       case o3_voc03er::LoopAct::Halt: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Play), 0.0f); break;
       case o3_voc03er::LoopAct::Mod: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Role), 0.0f); break;
       case o3_voc03er::LoopAct::Car: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Role), 1.0f); break;
+      case o3_voc03er::LoopAct::Half: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Speed), 0.0f); break;
+      case o3_voc03er::LoopAct::X1: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Speed), 1.0f); break;
+      case o3_voc03er::LoopAct::X2: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Speed), 2.0f); break;
+      case o3_voc03er::LoopAct::Fwd: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Dir), 0.0f); break;
+      case o3_voc03er::LoopAct::Rev: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Dir), 1.0f); break;
+      case o3_voc03er::LoopAct::Level: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Level), static_cast<float>(c.db)); break;
     }
     out.text("loop ").dec(i + 1u).text(" asked").nl();
     ctx_->redraw();
