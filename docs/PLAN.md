@@ -53,9 +53,10 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V0 | The repository from the template, this plan | Host green | Done |
 | V1 | The audio-in gate on the template app: console `ain <source> [gain]`, input peaks in `state` | Host test, gate CANDIDATE, unit round run | Done (section 4); the microphone left for later |
 | V2 | `Carrier` and `Bands` (16 bands) in `units/vocoder/`, against a synthetic voice | Host tests, no doubles | Done on the host; revised by V2a and V2b |
-| G0 | Microbench on the unit: the engine's own share, the real `Bands` and `Carrier`, a biquad bank, the YIN and autocorrelation inner loops, SDRAM reads | Numbers from `cpu` on the unit; they fix the band count and TALK's order before V4 | Next, beside V2a and V2b |
-| V2a | `Carrier`: second oscillator a voice (DETUNE), noise shared with the unvoiced path | Host tests, no doubles | Next |
-| V2b | `Bands`: the review's geometry and followers, high-pass and AGC, the unvoiced path | Host tests, summed bands flat within 3 dB in a sweep, no doubles | Next |
+| G0 | Microbench on the unit: the engine's own share, the real `Bands` and `Carrier`, a biquad bank, the YIN and autocorrelation inner loops, SDRAM reads | Numbers from `cpu` on the unit; they fix the band count and TALK's order before V4 | Done (section 4b), on V2's code; bands and order stay at 16 until V4's round |
+| V2a | `Carrier`: second oscillator a voice (DETUNE), noise shared with the unvoiced path | Host tests, no doubles | Done on the host |
+| V2b | `Bands`: the review's geometry and followers, high-pass and AGC, the unvoiced path | Host tests, summed bands flat within 3 dB in a sweep, no doubles | Done on the host |
+| V2c | `Bands` and `Carrier` in fewer instruction cycles (section 4b): same sound, no fused multiply-adds in the sample loops, `b0` folded out of the sections, envelope segments out of the oscillator loop | Host tests unchanged, no doubles, each sample loop's instructions counted before and after; the cycles are read in V4's round | Next |
 | V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | Done on the host, no doubles; its CPU, its level (`kTalkGain` is a placeholder) and listening are owed to V4's round |
 | V4 | The unit in the app: PLAY screen with the input peak, pads play chords, MODE and the source on the keys, line sources start at gain 0, `ain` clears its peaks, a scenario | Scenario, image, CPU of each mode measured on the unit, a spoken sentence intelligible to the maintainer | |
 | V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | |
@@ -98,6 +99,33 @@ What it changes:
 - Line left and right are not proven separate: every read was equal, and most were saturated. The source may be mono. A later round needs a hard-panned source at a level below clipping.
 - A peak read within a second of a switch still carries the previous source: the buckets of `poll_peaks()` are not cleared. Read at least a second after `ain` until `ain` clears them (V4).
 - The maintainer turned the source down and says line and radio work (2026-11-05): their word, not a measurement here, and enough to go on. The microphone is left for later. Line silence, line left and right, and a known radio station are not measured; V4's own unit round reads them if it needs them.
+
+## 4b. G0 on the unit, 2026-11-05
+
+Image `bddfe4bed8f4 / o3sdk f14f247b0847`, CANDIDATE 11/11, CRC BA3A693C, on branch `g0`. Nine steps of three `cpu` reads: 27 reads, 0 underruns, 0 over budget, 0 late, 0 slips, 0 hardware faults. The unit was restored to what the round found.
+
+**These are V2's parts.** The branch left main at 7b9dfad, before V2a and V2b: `bands` has no high-pass, AGC or unvoiced path, and `carrier` has one oscillator a voice with 8 notes held. The bench ran beside the template voice.
+
+| Mode | Work a block | Render last, mean | Net of `off` | % of a block | Highest max | Per unit of work |
+|---|---|---|---|---|---|---|
+| `off` (6 reads) | The app, the template voice, the bench idle | 38,958 | | 14.9 | 45,959 = 17.6 % | |
+| `biquad` | 64 sections x 64 samples | 135,193 | 96,235 | 36.8 | 141,922 = 54.3 % | 23.5 cycles a section-sample |
+| `bands` | V2's 16 bands | 138,694 | 99,736 | 38.2 | 151,748 = 58.1 % | 97 a band-sample |
+| `carrier` | 8 voices, one oscillator each | 72,011 | 33,053 | 12.7 | 82,160 = 31.5 % | 65 an oscillator-sample |
+| `yin` | 10,048 squared differences | 131,492 | 92,534 | 35.4 | 145,568 = 55.7 % | 9.2 a term |
+| `autocorr` | 2,176 multiply-adds, order 16 | 59,306 | 20,348 | 7.8 | 63,254 = 24.2 % | 9.4 a term |
+| `sdram_seq` | 256 reads | 46,347 | 7,389 | 2.8 | 55,112 = 21.1 % | 29 a read |
+| `sdram_rand` | 64 reads | 41,199 | 2,241 | 0.9 | 46,992 = 18.0 % | 35 a read |
+
+What it changes:
+
+- **The ceiling is broken.** Audio stays at 60 % of a block, worst case (`rt-optimize`). BANDS on V2's parts is 65.8 % on average and 72 % at worst (the highest max of `bands`, plus `carrier`'s over `off`). The second oscillator that V2a added doubles the carrier: 78 % and 86 % [est], with eight notes. It fits the block, not the ceiling.
+- **The cost is instruction cycles, not memory.** The bench's data is in SRAM_U and the loop is 13 instructions. The Cortex-M4 issues one at a time, and the sum of their cycles (`vfma` 3, `vldr` 2, as recalled from the TRM) is 21 to 23, against 23.5 measured. Interleaving independent filters would hide nothing. Fewer, cheaper instructions will: V2c. Bands was estimated at 22 %, Carrier at 30 cycles an oscillator: both were about half the truth.
+- **Band count and TALK's order stay at 16 for now.** Neither can be fixed from V2's parts. If V4's round is still over the ceiling after V2c, the fallbacks, in order: one section on the modulator side (48 sections, about a quarter of Bands [est]), then 14 bands.
+- **TALK does not run Bands**, so it has room: autocorrelation is 7.8 % at order 16 and 11.5 % at 24 [est]. The lattice is unmeasured; V4 reads it.
+- **TUNE's YIN** at 35.4 % is too much beside a carrier: V6a unrolls it or slices it over 8 blocks.
+- **Loops**: the review's span copy holds, four loops' 256 reads are 2.8 % at 29 cycles a read.
+- **The base is unexplained**: `stage` accounts for about 1,500 of `off`'s 38,958 cycles and shows 0 for render. V4 reads it again with the real voice in place of the template's.
 
 ## 5. How the work runs
 
