@@ -273,6 +273,23 @@ TEST_CASE("vocoder loops: a loop plays from the next bar line") {
   CHECK(rig.v.loops().position(0) == (rig.at - start - g1) % 640);
 }
 
+TEST_CASE("vocoder loops: a Rec off on an idle loop leaves a pending play on its bar line") {
+  Rig rig(Loop::kMaxSamples);
+  std::vector<float> x(640, 0.5f);
+  record_loop(rig, 0, x);
+  rig.tr = playing_at(3840u * 3u - 960u);
+  const std::uint32_t g1 = first_sample_at(rig.tr, 3840u * 3u);
+  rig.block(nullptr, 64, {play(0, true)});
+  const std::uint32_t start = rig.at - 64;
+  while (rig.at - start + 64 <= g1) {
+    rig.block(nullptr, 64);
+  }
+  REQUIRE(g1 - (rig.at - start) < 63);  // the bar line is in the next block, before the event
+  rig.block(nullptr, 64, {dsp::param_change(Vocoder::loop_param(0, LF::Rec), 0.0f, 63)});
+  CHECK(rig.v.loop_status(0).playing);
+  CHECK(rig.v.loops().position(0) == (rig.at - start - g1) % 640);
+}
+
 TEST_CASE("vocoder loops: the role decides where the loop goes") {
   const std::vector<float> tone = rich(64 * 200, 500.0f);
   const auto run_case = [&](bool car, float dry, const std::vector<float>* live, float& e500, float& e3k, float& level) {

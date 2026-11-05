@@ -193,7 +193,9 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
   switch (field) {
     case LoopField::Rec:
       s.want_rec = on;
-      s.req = static_cast<std::uint16_t>(frame);
+      if (on || s.rec != Slot::Rec::Idle) {  // a Rec off on an idle slot must not move a pending Play's frame past its bar line
+        s.req = static_cast<std::uint16_t>(frame);
+      }
       if (on && s.rec == Slot::Rec::Idle) {
         s.rec = Slot::Rec::Armed;
         s.want_play = false;  // recording replaces the loop
