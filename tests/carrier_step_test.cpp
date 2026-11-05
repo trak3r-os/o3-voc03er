@@ -317,7 +317,6 @@ TEST_CASE("carrier unit: the switch starts on the event's frame (identical befor
   Pair p;
   std::vector<float> oa, ob;
   const std::vector<dsp::Event> chord = {dsp::note_on(48, 100, 0, 0), dsp::note_on(55, 100, 0, 0)};
-  p.a.process(dsp::ProcessArgs{});  // (a no-op call: the unit is ready)
   std::vector<dsp::Event> first = chord;
   // The chord goes to both.
   Pair::run(p.a, 0, chord, oa, p.tr);

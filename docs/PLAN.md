@@ -176,6 +176,10 @@ Decisions:
 - **Headroom for V5**: BANDS with 8 notes has none. Four loops at 2.8 % are fine at 4 notes; the loops' round reads it.
 - **V2d changed the output a little**: the follower every second sample moves the envelopes by 0.3 to 2.1 % of a band's peak, most in the top bands, and the frame level by 0.13 dB at most with the noise path off. TALK's stepped reflection coefficients move it by 2 to 4 % rms. Listening is owed on both, on unvoiced sounds above all.
 
+## 4e. Memory after V6b, 2026-11-06
+
+SRAM_U has about 1.2 KiB left above the link's 32 KiB free floor, and the first V6b link failed it. The next SRAM growth trips the assert: V7 starts by moving something out, for instance the loops' or Talk's cold state to the SDRAM. Autotune reads `Tune`'s native ring instead of its own 4 KB one for this reason.
+
 ## 5. How the work runs
 
 Lanes of one or two subagents, Sonnet for code and review, Haiku for mechanical checks. A brief names the files; agents use LSP and targeted reads
