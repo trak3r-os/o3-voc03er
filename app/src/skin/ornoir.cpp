@@ -233,8 +233,8 @@ void frow_text(ui::Renderer& r, const FKey (&keys)[kFKeys]) noexcept {
     const FKey& k = keys[i];
     const char fn[3] = {'F', static_cast<char>('1' + i), '\0'};
     r.text(x + 8, 460, fn, Color::Vol, Face::Micro);
-    r.text(x + 27, 458, k.name, Color::PlayText, Face::Label);
-    const Color ink = k.hot ? Color::AccentText : k.role == KeyRole::Voice ? Color::Play : k.role == KeyRole::Carrier ? Color::Sel : Color::Text;
+    r.text(x + 27, 458, k.name, k.dim ? Color::Vol : Color::PlayText, Face::Label);
+    const Color ink = k.dim ? Color::TextDim : k.hot ? Color::AccentText : k.role == KeyRole::Voice ? Color::Play : k.role == KeyRole::Carrier ? Color::Sel : Color::Text;
     r.text(x + 10, 425, k.value, ink, Face::Data);
   }
 }

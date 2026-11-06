@@ -52,6 +52,7 @@ struct FKey {
   char value[12] = {};
   int pct = -1;  // 0..100: the little bar under the value; -1 none
   bool hot = false;  // the latched slot: the window turns Accent
+  bool dim = false;  // a value that does not exist yet (the SHIFT row's waiting keys): name and value in the dim ink
   KeyRole role = KeyRole::Plain;
 };
 inline constexpr unsigned kFKeys = 8;

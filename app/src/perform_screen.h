@@ -10,6 +10,8 @@
 //                 moves): the bottom row is a bend strip; the chord rows move up one, or the keyboard keeps the three rows above it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
 //                 about 120 ms after the last one. A tap on an F key takes the encoder back. MIDI pitch bend adds to it (set_wheel)
+//   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, BEND ROW, PRESET); SHIFT + F key focuses
+//                 its value, shown while it has the focus; a plain F tap goes back (perform_logic.h kShiftKeys)
 //   SHIFT         latches the held pad's chord (it keeps sounding); DELETE releases it
 //   UP / DOWN     the bottom row's chord kind;  LEFT / RIGHT  the octave (they repeat when held)
 //   PLAY          the transport (the app's); the other screen buttons open their screen (app.cpp), MODE is F1
@@ -76,6 +78,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void latch(o3sdk::app::Context& ctx, bool on) noexcept;
   void turn(o3sdk::app::Context& ctx, int delta, bool coarse) noexcept;
+  void shift_key(o3sdk::app::Context& ctx, unsigned key) noexcept;
   void toggle_strip(o3sdk::app::Context& ctx) noexcept;
   void apply_bend(o3sdk::app::Context& ctx) noexcept;
   void apply_vib(o3sdk::app::Context& ctx) noexcept;
@@ -92,6 +95,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   const Vocoder* voc_ = nullptr;
   SourceStep step_source_ = nullptr;
   void* source_user_ = nullptr;
+  unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (4 FORMANT, 5 THRU), or kNoShiftFocus; the row stays shown while set
   unsigned focus_ = 5;       // the F key the encoder drives (default F6, CHORD); perform::kBendFocus (8): none, the encoder bends
   int octave_ = 0;
   unsigned bottom_ = 0;      // ChordKind of the bottom row

@@ -10,6 +10,7 @@
 #include <o3sdk/app/context.h>
 #include <o3sdk/core/placement.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -92,6 +93,7 @@ void PerformScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocod
   step_source_ = step;
   source_user_ = user;
   focus_ = 5;
+  sfocus_ = pl::kNoShiftFocus;
   octave_ = 0;
   bottom_ = 0;
   keys_ = false;
@@ -170,6 +172,13 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   }
   if (keys_) {
     const pl::PianoPad pp = pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_);
+    if (pp.fn == pl::PianoFn::Formant) {  // the formant strip: a tap sets Formant and it stays (no note, nothing held)
+      (void)e.set_param(voice_, Vocoder::Formant, static_cast<float>(pp.offset));
+      char val[pl::kLabelChars + 1] = {};
+      pl::strip_label(pp.offset, val);
+      show_flash(ctx, "FORMANT", val);
+      return;
+    }
     if (pl::is_control(pp.fn)) {  // a control: no note; the notes held keep the note they began with
       control_press(ctx, pad, pp.fn);
       return;
@@ -307,6 +316,7 @@ void PerformScreen::apply_bend(app::Context& ctx) noexcept { (void)ctx.engine().
 
 void PerformScreen::free_encoder(app::Context& ctx) noexcept {
   focus_ = pl::kBendFocus;
+  sfocus_ = pl::kNoShiftFocus;
   ctx.redraw();
 }
 
@@ -488,6 +498,18 @@ void PerformScreen::bottom_kind(app::Context& ctx, int delta) noexcept {
 void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   dsp::Engine& e = ctx.engine();
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
+  if (sfocus_ == 4u) {  // SHIFT + F5 FORMANT: one semitone a detent, SHIFT coarse 4
+    (void)e.set_param(voice_, Vocoder::Formant,
+                      static_cast<float>(pl::formant_step(static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f)), delta, coarse)));
+    ctx.redraw();
+    return;
+  }
+  if (sfocus_ == 5u) {  // SHIFT + F6 THRU: 5 % a detent, written in the unit's 0..1
+    const int pct = pl::thru_step(static_cast<int>(e.param(voice_, Vocoder::Thru) * 100.0f + 0.5f), delta, coarse);
+    (void)e.set_param(voice_, Vocoder::Thru, static_cast<float>(pct) * 0.01f);
+    ctx.redraw();
+    return;
+  }
   if (focus_ >= pl::kBendFocus) {  // the encoder is free: it bends
     if (delta != 0) {
       local_ = pl::bend_step(local_, delta, coarse, range_);
@@ -541,11 +563,42 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   ctx.redraw();
 }
 
+// SHIFT + an F key: the SHIFT row (pl::kShiftKeys). A waiting key does nothing; FREEZE and BEND ROW are actions; the others take the encoder
+// (a second tap steps the value on, as the plain row does).
+void PerformScreen::shift_key(app::Context& ctx, unsigned key) noexcept {
+  if (key >= 8u) {
+    return;
+  }
+  switch (pl::kShiftKeys[key].fn) {
+    case pl::ShiftFn::Freeze:
+      (void)ctx.engine().set_param(voice_, Vocoder::Freeze, ctx.engine().param(voice_, Vocoder::Freeze) >= 0.5f ? 0.0f : 1.0f);
+      ctx.redraw();
+      break;
+    case pl::ShiftFn::BendRow:  // the pads' notes end, the strip's and the encoder's bend return to 0
+      toggle_strip(ctx);
+      break;
+    case pl::ShiftFn::Value:
+      if (key == sfocus_) {
+        turn(ctx, 1, false);
+      } else {
+        sfocus_ = key;
+        ctx.redraw();
+      }
+      break;
+    case pl::ShiftFn::Dead:
+      break;
+  }
+}
+
 void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
-    if (k == 6u && in.shift) {  // SHIFT + F7: BEND ROW on or off (the pads' notes end, the strip's and the encoder's bend return to 0)
-      toggle_strip(ctx);
+    if (in.shift) {
+      shift_key(ctx, k);
+    } else if (sfocus_ != pl::kNoShiftFocus) {  // a plain tap goes back to the plain row, its key focused
+      sfocus_ = pl::kNoShiftFocus;
+      focus_ = k;
+      ctx.redraw();
     } else if (k == focus_) {
       turn(ctx, 1, false);  // a second tap steps the value on
     } else {
@@ -610,6 +663,10 @@ void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
         char nm[8] = {};
         (void)ornoir::note_name(note, nm);
         append(out, nm);
+      } else if (pp.fn == pl::PianoFn::Formant) {
+        char lbl[pl::kLabelChars + 1] = {};
+        pl::strip_label(pp.offset, lbl);
+        append(out, lbl);
       } else if (pl::is_control(pp.fn)) {
         append(out, pl::kControlName[app::pad_col(pad)]);
       }
@@ -694,6 +751,42 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     }
   }
 
+  if (ctx.panel().shift() || sfocus_ != pl::kNoShiftFocus) {  // the SHIFT row replaces the plain one (names and values)
+    for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
+      const pl::ShiftKey& sk = pl::kShiftKeys[i];
+      keys[i] = ornoir::FKey{};
+      keys[i].name = sk.name;
+      keys[i].hot = i == sfocus_;
+      char num[12] = {};
+      switch (sk.fn) {
+        case pl::ShiftFn::Freeze:
+          append(keys[i].value, e.param(voice_, Vocoder::Freeze) >= 0.5f ? "ON" : "OFF");
+          break;
+        case pl::ShiftFn::BendRow:
+          append(keys[i].value, strip_ ? "ON" : "OFF");
+          break;
+        case pl::ShiftFn::Value:
+          if (i == 4u) {
+            const int f = static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f));
+            char lbl[pl::kLabelChars + 1] = {};
+            pl::strip_label(f, lbl);
+            append(keys[i].value, lbl);
+            keys[i].pct = pl::bar_percent(static_cast<float>(f), -12.0f, 12.0f);
+          } else {
+            const unsigned pct = static_cast<unsigned>(e.param(voice_, Vocoder::Thru) * 100.0f + 0.5f);
+            (void)pl::format_uint(pct, num);
+            append(keys[i].value, num);
+            keys[i].pct = static_cast<int>(pct > 100u ? 100u : pct);
+          }
+          break;
+        case pl::ShiftFn::Dead:
+          append(keys[i].value, "-");
+          keys[i].dim = true;
+          break;
+      }
+    }
+  }
+
   ornoir::Voiceprint vp;
   vp.bars = mode == 0u;
   std::memcpy(vp.level, g_pd.level, sizeof vp.level);
@@ -743,8 +836,10 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   }
   if (strip_) {
     pads.row_name[pl::kStripRow] = "BEND";
+  } else if (keys_) {
+    pads.row_name[pl::kStripRow] = "FORMANT";
   }
-  pads.key_hint = flash_[0] != '\0' ? flash_ : pl::key_hint(focus_, mode);
+  pads.key_hint = flash_[0] != '\0' ? flash_ : pl::key_hint(focus_, mode, sfocus_);
   if (keys_) {
     pads.hint_left = strip_ ? "BOTTOM ROW BENDS  LEFT RIGHT OCTAVE" : "KEYS  LEFT RIGHT OCTAVE";
   } else {
@@ -764,6 +859,7 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const dsp::Engine& e = ctx.engine();
   const unsigned key = round_param(e, voice_, Vocoder::Key);
   const std::uint16_t cols = pl::scale_cols(key, round_param(e, voice_, Vocoder::Scale));
+  const int formant = static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f));
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     std::uint8_t level = app::kLedOff;
     if (pl::on_strip(pad, strip_)) {  // the middle pair (0) lit dim
@@ -783,6 +879,8 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
         level = e.param(voice_, Vocoder::Level) > kLevelMin ? app::kLedDim : app::kLedOff;
       } else if (pp.fn == pl::PianoFn::VolUp) {
         level = e.param(voice_, Vocoder::Level) < kLevelMax ? app::kLedDim : app::kLedOff;
+      } else if (pp.fn == pl::PianoFn::Formant) {  // the pad of the value in force on, the others dim
+        level = pl::formant_lit(formant, app::pad_col(pad)) ? app::kLedOn : app::kLedDim;
       } else if (pl::is_control(pp.fn)) {  // ROOT, BND, MOD: always dim
         level = app::kLedDim;
       }
@@ -846,6 +944,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {"BLACK KEYS", "THE SEMITONES; NO KEY ON A GAP", ui::Color::Fx},
       {"CONTROLS", "OCT VOL ROOT STEP; HOLD MOD VIBRATO, BND BEND", ui::Color::Instr},
       {"BEND ROW", "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0", ui::Color::Play},
+      {"FORMANT", "A TAP SETS IT, -12 TO +12, AND IT STAYS; LIT ON", ui::Color::Play},
   };
   static constexpr const char* kKindText[4] = {"ROOT, THIRD, FIFTH OF THE SCALE", "THE SEVENTH CHORDS OF THE SCALE", "ROOT, FIFTH, NINTH: SUS2", "ROOT, FIFTH, OCTAVE"};
   static constexpr ui::Color kRowColor[3] = {ui::Color::Vol, ui::Color::Instr, ui::Color::Fx};
@@ -860,7 +959,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   }
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
-              "F KEYS: A TAP POINTS THE ENCODER AT THAT VALUE, A SECOND TAP STEPS IT.";
+              "F KEYS: A TAP POINTS THE ENCODER AT A VALUE, A SECOND TAP STEPS IT. HOLD SHIFT: THE SECOND ROW.";
   h.fkey[0] = "BANDS, TALK, TUNE";
   h.fkey[1] = "THE NEXT AUDIO SOURCE";
   h.fkey[2] = "FOLLOW, SYNTH, NOISE, LOOPS";
@@ -868,14 +967,23 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[4] = "SCALE OF THE CHORDS";
   h.fkey[5] = "BOTTOM ROW KIND";
   h.fkey[6] = "CHORDS OR KEYS";
-  h.fkey_shift[6] = "BEND ROW";
+  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row: GATE, ARP, GLIDE and PRESET wait for slice P3
+    h.fkey_shift[i] = pl::kShiftKeys[i].name;
+  }
   h.fkey[7] = mode == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "VALUE OR BEND (SHIFT COARSE)";
   if (keys_) {
-    h.groups = kKeyGroups;
-    h.group_count = strip_ ? 4u : 3u;
+    h.groups = kKeyGroups;  // the fourth is the strip's (BEND ROW on) or the formant's (off): the row 3 pads are group 4 either way
+    h.group_count = 4u;
+    if (!strip_) {
+      help_groups_[0] = kKeyGroups[0];
+      help_groups_[1] = kKeyGroups[1];
+      help_groups_[2] = kKeyGroups[2];
+      help_groups_[3] = kKeyGroups[4];
+      h.groups = help_groups_;
+    }
   } else if (strip_) {
     h.groups = help_groups_;
     h.group_count = 5;
@@ -908,6 +1016,17 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       if (note >= 0) {
         h.pad_group[pad] = pp.fn == pl::PianoFn::White ? 1 : 2;
         (void)app::help_pad_note(h, g_help_names, pad, note);
+      } else if (pp.fn == pl::PianoFn::Formant) {
+        char lbl[pl::kLabelChars + 1] = {};
+        pl::strip_label(pp.offset, lbl);
+        std::size_t n = 0;
+        while (lbl[n] != '\0' && n < app::kHelpPadLabel) {
+          g_help_names[pad][n] = lbl[n];
+          ++n;
+        }
+        g_help_names[pad][n] = '\0';
+        h.pad_label[pad] = g_help_names[pad];
+        h.pad_group[pad] = 4;
       } else if (pp.fn != pl::PianoFn::None) {
         const char* nm = pl::kControlName[app::pad_col(pad)];
         std::size_t n = 0;

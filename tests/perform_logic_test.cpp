@@ -131,8 +131,11 @@ TEST_CASE("perform: the piano pad map") {
     CHECK(pl::piano_pad(0, c, true).fn == ctl[c]);
     CHECK(pl::piano_note(pl::piano_pad(0, c, false), 0) == -1);  // no control plays a note
   }
-  // Row 3: the strip only with BEND ROW on.
-  CHECK(pl::piano_pad(3, 4, false).fn == F::None);
+  // Row 3: the strip with BEND ROW on, the formant strip otherwise.
+  CHECK(pl::piano_pad(3, 4, false).fn == F::Formant);
+  CHECK(pl::piano_pad(3, 4, false).offset == -2);
+  CHECK(pl::piano_note(pl::piano_pad(3, 4, false), 0) == -1);
+  CHECK_FALSE(pl::is_control(F::Formant));
   CHECK(pl::piano_pad(3, 4, true).fn == F::Strip);
   CHECK(pl::piano_note(pl::piano_pad(3, 4, true), 0) == -1);
   CHECK(pl::is_control(F::Mod));
@@ -196,4 +199,40 @@ TEST_CASE("perform: the bend sums the wheel and the local bend, and the encoder 
   CHECK(pl::wheel_semitones(0, 64, 5) == doctest::Approx(0.0f));
   CHECK(pl::wheel_semitones(127, 127, 5) == doctest::Approx(5.0f * 8191.0f / 8192.0f));
   CHECK(pl::wheel_semitones(0, 0, 12) == doctest::Approx(-12.0f));
+}
+
+TEST_CASE("perform: the formant strip reads -12 to +12 with both middle pads at 0, and the lit pad is the value in force") {
+  const int want[12] = {-12, -9, -6, -4, -2, 0, 0, 2, 4, 6, 9, 12};
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(pl::piano_pad(3, c, false).offset == want[c]);
+    CHECK(pl::piano_pad(3, c, true).fn == pl::PianoFn::Strip);  // BEND ROW on: the bend strip, not the formant's
+  }
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(pl::formant_lit(0, c) == (c == 5u || c == 6u));
+    CHECK(pl::formant_lit(4, c) == (c == 8u));
+    CHECK_FALSE(pl::formant_lit(1, c));  // a value the strip has no pad for lights none
+  }
+}
+
+TEST_CASE("perform: the SHIFT row's steps hold their ranges, and only FREEZE, FORMANT, THRU and BEND ROW are live") {
+  CHECK(pl::formant_step(0, 1, false) == 1);
+  CHECK(pl::formant_step(0, -1, true) == -4);
+  CHECK(pl::formant_step(11, 1, true) == 12);
+  CHECK(pl::formant_step(-12, -1, false) == -12);
+  CHECK(pl::thru_step(0, 1, false) == 5);
+  CHECK(pl::thru_step(98, 1, false) == 100);
+  CHECK(pl::thru_step(3, -1, false) == 0);
+  CHECK(pl::thru_step(50, 1, true) == 70);
+  unsigned live = 0;
+  for (unsigned i = 0; i < 8; ++i) {
+    CHECK(std::string(pl::kShiftKeys[i].name).size() <= 9u);
+    live += pl::kShiftKeys[i].fn != pl::ShiftFn::Dead ? 1u : 0u;
+  }
+  CHECK(live == 4u);
+  CHECK(pl::kShiftKeys[0].fn == pl::ShiftFn::Freeze);
+  CHECK(pl::kShiftKeys[4].fn == pl::ShiftFn::Value);
+  CHECK(pl::kShiftKeys[5].fn == pl::ShiftFn::Value);
+  CHECK(pl::kShiftKeys[6].fn == pl::ShiftFn::BendRow);
+  CHECK(std::string(pl::key_hint(5, 0, 4)).size() <= pl::kKeyHintMax);
+  CHECK(std::string(pl::key_hint(5, 0, 5)).size() <= pl::kKeyHintMax);
 }
