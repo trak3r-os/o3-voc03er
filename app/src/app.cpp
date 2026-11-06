@@ -496,7 +496,7 @@ class MyApp final : public app::App {
     }
     ov::PatCommand c;
     if (!ov::parse_pat(args.argv + 1, args.argc - 1u, c)) {
-      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car c|lvl v|slc n]]").nl();
+      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car follow|synth|noise|s1..s4|lvl v|slc n]]").nl();
       return;
     }
     ov::PatternData& pd = g_bank.pattern[c.pattern];

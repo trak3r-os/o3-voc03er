@@ -5,6 +5,7 @@
 
 #include <o3_voc03er/units/vocoder/agc.h>
 #include <o3_voc03er/units/vocoder/bands.h>
+#include <o3_voc03er/units/vocoder/nofma.h>
 
 #include <cmath>
 
@@ -16,6 +17,7 @@ static_assert(Talk::kHop * 4u == 128u, "a hop is 128 frames (2.9 ms), a power of
 static_assert(Talk::stages_for(Talk::kMaxOrder) == Talk::kMaxStages, "the arrays hold the highest Quality's lattice");
 static_assert(Talk::stages_for(Talk::kMinOrder) >= 1u, "at least one stage");
 static_assert(alignof(Talk) >= 8u, "the buffers are alignas(8)");
+static_assert(Talk::kWin % 4u == 0u && Talk::kHop % 4u == 0u, "the analysis goes four samples at a time, and its share every four low-rate samples");
 
 namespace {
 constexpr float kPreEmph = 0.9f;
@@ -93,7 +95,8 @@ void Talk::reset() noexcept {
   pa_ = run_ = tgt_order_ = stages_for(order_);
   analysing_ = false;
   stage_ = cpos_ = lag_ = total_ = done_ = ramp_left_ = 0;
-  acc_ = emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
+  for (auto& v : acc_) v = 0.0f;
+  emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
   hp_s1_ = hp_s2_ = 0.0f;
   open_ = breath_ = breath_step_ = 0.0f;
   breath_pos_ = 0;
@@ -110,41 +113,72 @@ void Talk::set_order(std::uint32_t order) noexcept {
   order_ = order < kMinOrder ? kMinOrder : (order > kMaxOrder ? kMaxOrder : order);
 }
 
-// Runs `units` of the sliced work: windowing, then the lag sums.
+// Runs `units` of the sliced work, a unit being four samples: first the window and r0, then the lags, four in one pass. Every sample loaded serves
+// four lags and the four sums do not wait on each other; one lag at a time cost two loads a multiply-add and stalled on its own sum. The
+// window's zeros past kWin let every lag run the same length, and the lags past pa_ of the last pass are never read.
 void Talk::slice(std::uint32_t units) noexcept {
-  macs_last_ += units;
+  macs_last_ += units * 16u;
   while (units != 0u && stage_ < 2u) {
+    std::uint32_t c = kQuads - cpos_;
+    c = c < units ? c : units;
+    units -= c;
     if (stage_ == 0u) {
-      std::uint32_t c = kWin - cpos_;
-      c = c < units ? c : units;
-      for (std::uint32_t i = cpos_; i < cpos_ + c; ++i) {
-        win_[i] = ring_[(end_ - kWin + i) & (kRing - 1u)] * wtab_[i];
+      float r0 = acc_[0];
+      const std::uint32_t last = (cpos_ + c) * 4u;
+      for (std::uint32_t i = cpos_ * 4u; i < last; ++i) {
+        const float x = ring_[(end_ - kWin + i) & (kRing - 1u)] * wtab_[i];
+        win_[i] = x;
+        r0 += mulb(x, x);
       }
-      cpos_ += c;
-      units -= c;
-      if (cpos_ == kWin) {
-        stage_ = 1;
-        cpos_ = 0;
-        lag_ = 0;
-        acc_ = 0.0f;
-      }
+      acc_[0] = r0;
     } else {
-      const std::uint32_t len = kWin - lag_;
-      std::uint32_t c = len - cpos_;
-      c = c < units ? c : units;
-      const float* a = win_ + cpos_;
-      const float* b = win_ + cpos_ + lag_;
-      float s = 0.0f;
-      for (std::uint32_t i = 0; i < c; ++i) s += a[i] * b[i];
-      acc_ += s;
-      cpos_ += c;
-      units -= c;
-      if (cpos_ == len) {
-        r_[lag_] = acc_;
-        acc_ = 0.0f;
-        cpos_ = 0;
-        if (++lag_ > pa_) stage_ = 2;
+      const float* a = win_ + cpos_ * 4u;
+      const float* b = a + lag_;
+      float s0 = acc_[0], s1 = acc_[1], s2 = acc_[2], s3 = acc_[3];
+      float b0 = b[0], b1 = b[1], b2 = b[2];
+      for (std::uint32_t q = 0; q < c; ++q) {
+        const float a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3];
+        const float b3 = b[3], b4 = b[4], b5 = b[5], b6 = b[6];
+        s0 += mulb(a0, b0);
+        s1 += mulb(a0, b1);
+        s2 += mulb(a0, b2);
+        s3 += mulb(a0, b3);
+        s0 += mulb(a1, b1);
+        s1 += mulb(a1, b2);
+        s2 += mulb(a1, b3);
+        s3 += mulb(a1, b4);
+        s0 += mulb(a2, b2);
+        s1 += mulb(a2, b3);
+        s2 += mulb(a2, b4);
+        s3 += mulb(a2, b5);
+        s0 += mulb(a3, b3);
+        s1 += mulb(a3, b4);
+        s2 += mulb(a3, b5);
+        s3 += mulb(a3, b6);
+        b0 = b4;
+        b1 = b5;
+        b2 = b6;
+        a += 4;
+        b += 4;
       }
+      acc_[0] = s0;
+      acc_[1] = s1;
+      acc_[2] = s2;
+      acc_[3] = s3;
+    }
+    cpos_ += c;
+    if (cpos_ == kQuads) {
+      cpos_ = 0;
+      if (stage_ == 0u) {
+        r_[0] = acc_[0];
+        stage_ = 1;
+        lag_ = 1;
+      } else {
+        for (std::uint32_t i = 0; i < 4u; ++i) r_[lag_ + i] = acc_[i];
+        lag_ += 4u;
+        if (lag_ > pa_) stage_ = 2;
+      }
+      for (auto& v : acc_) v = 0.0f;
     }
   }
 }
@@ -222,10 +256,8 @@ void Talk::tick(float m, float c, float& y) noexcept {
       end_ = wpos_ & (kRing - 1u);
       pa_ = stages_for(order_);
       stage_ = cpos_ = lag_ = 0;
-      acc_ = 0.0f;
-      std::uint32_t t = kWin;
-      for (std::uint32_t l = 0; l <= pa_; ++l) t += kWin - l;
-      total_ = t;
+      for (auto& v : acc_) v = 0.0f;
+      total_ = kQuads * (1u + (pa_ + 3u) / 4u);  // the window, and a pass for every four lags
       done_ = 0;
     }
   }
@@ -235,8 +267,8 @@ void Talk::tick(float m, float c, float& y) noexcept {
   const float am = m < 0.0f ? -m : m;
   level_ += (am - level_) * (am > level_ ? lvl_att_ : lvl_rel_);
   if (filled_ < kRing) ++filled_;
-  if (analysing_) {
-    // an even share of the work a sample: the cumulative target is total x (pos + 1) / kHop
+  if (analysing_ && (hop_pos_ & 3u) == 3u) {
+    // an even share of the work every four samples: the cumulative target is total x (pos + 1) / kHop
     const std::uint32_t upto = total_ * (hop_pos_ + 1u) / kHop;
     slice(upto - done_);
     done_ = upto;
@@ -245,19 +277,29 @@ void Talk::tick(float m, float c, float& y) noexcept {
   hop_pos_ = hop_pos_ == kHop - 1u ? 0u : hop_pos_ + 1u;
 
   const std::uint32_t run = run_;
-  if (ramp_left_ != 0u) {
-    for (std::uint32_t i = 1; i <= run; ++i) k_[i] += dk_[i];
-    gain_ += dgain_;
+  const bool ramping = ramp_left_ != 0u;
+  if (ramping) gain_ += dgain_;
+  float f = (c - kCarEmph * car_prev_) * gain_;
+  car_prev_ = c;
+  if (ramping) {  // the ramp's step and the lattice in one pass: a hop is ramping in all but one of its samples
+    for (std::uint32_t i = run; i >= 1u; --i) {
+      const float k = k_[i] + dk_[i];
+      const float bp = b_[i - 1u];
+      k_[i] = k;
+      f -= mulb(k, bp);
+      b_[i] = bp + mulb(k, f);
+    }
     if (--ramp_left_ == 0u) {  // the last step lands on the target
       for (std::uint32_t i = 1; i <= run; ++i) k_[i] = kt_[i];
       gain_ = gain_t_;
     }
-  }
-  float f = (c - kCarEmph * car_prev_) * gain_;
-  car_prev_ = c;
-  for (std::uint32_t i = run; i >= 1u; --i) {
-    f -= k_[i] * b_[i - 1u];
-    b_[i] = b_[i - 1u] + k_[i] * f;
+  } else {
+    for (std::uint32_t i = run; i >= 1u; --i) {
+      const float k = k_[i];
+      const float bp = b_[i - 1u];
+      f -= mulb(k, bp);
+      b_[i] = bp + mulb(k, f);
+    }
   }
   b_[0] = f;
   y = f;
@@ -308,19 +350,37 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   float breath = breath_, breath_step = breath_step_;
   std::uint32_t breath_pos = breath_pos_;
   float s1 = hp_s1_, s2 = hp_s2_, open = open_;
-  for (std::uint32_t i = 0; i < n; ++i) {
-    const float x = m0[i];
-    const float h = hp_b0_ * x + s1;
-    s1 = hp_b1_ * x - hp_a1_ * h + s2;
-    s2 = hp_b2_ * x - hp_a2_ * h;
-    open = open < target ? (open + open_step_ < target ? open + open_step_ : target)
-                         : (open - open_step_ > target ? open - open_step_ : target);
+  const float b0 = hp_b0_, b1 = hp_b1_, b2 = hp_b2_, a1 = hp_a1_, a2 = hp_a2_;  // in locals: a store to out must not reload them
+  const float ostep = open_step_;
+  for (std::uint32_t i = 0; i < n;) {
+    constexpr std::uint32_t kGrid = kHop * 4u;
     if (breath_pos == 0u) {
-      breath_step = (kBreath * (0.5f + 0.5f * thru_) * agc_ - breath) * (1.0f / static_cast<float>(kHop * 4u));
+      breath_step = (kBreath * (0.5f + 0.5f * thru_) * agc_ - breath) * (1.0f / static_cast<float>(kGrid));
     }
-    breath_pos = (breath_pos + 1u) & (kHop * 4u - 1u);
-    breath += breath_step;
-    out[i] += breath * open * h;
+    const std::uint32_t left = kGrid - breath_pos;
+    const std::uint32_t run = n - i < left ? n - i : left;
+    breath_pos = (breath_pos + run) & (kGrid - 1u);
+    const std::uint32_t last = i + run;
+    if (open == target) {  // nearly always
+      for (; i < last; ++i) {
+        const float x = m0[i];
+        const float h = mulb(b0, x) + s1;
+        s1 = mulb(b1, x) - mulb(a1, h) + s2;
+        s2 = mulb(b2, x) - mulb(a2, h);
+        breath += breath_step;
+        out[i] += mulb(breath * open, h);
+      }
+    } else {
+      for (; i < last; ++i) {
+        const float x = m0[i];
+        const float h = mulb(b0, x) + s1;
+        s1 = mulb(b1, x) - mulb(a1, h) + s2;
+        s2 = mulb(b2, x) - mulb(a2, h);
+        open = open < target ? (open + ostep < target ? open + ostep : target) : (open - ostep > target ? open - ostep : target);
+        breath += breath_step;
+        out[i] += mulb(breath * open, h);
+      }
+    }
   }
   breath_ = breath;
   breath_step_ = breath_step;

@@ -308,14 +308,14 @@ TEST_CASE("talk: an order change at any moment is safe, every order 8..24 runs")
 namespace {
 
 // The Vocoder with a vowel modulator and two held notes; `hook(block, events)` may add events.
-std::vector<float> run_unit(Vocoder& vo, std::size_t blocks, std::size_t switch_a, std::size_t switch_b) {
+std::vector<float> run_unit(Vocoder& vo, std::size_t blocks, std::size_t switch_a, std::size_t switch_b, float level = 0.3f) {
   Voice v(110.0f);
   v.set_vowel(kA, 2);
   std::vector<float> out(blocks * 64);
   dsp::Transport tr;
   for (std::size_t b = 0; b < blocks; ++b) {
     float m[64], r[64];
-    for (float& x : m) x = 0.3f * v.next();
+    for (float& x : m) x = level * v.next();
     dsp::Event ev[3];
     std::uint32_t n = 0;
     if (b == 0) {
@@ -568,6 +568,29 @@ TEST_CASE("vocoder: a change of MODE keeps the level within 6 dB on a voice and 
   const float talk = rms(3500 * 64, 4000 * 64);
   CHECK(talk / bands > 0.5f);
   CHECK(talk / bands < 2.0f);
+}
+
+// The whole unit, not one engine: a unit round read the OUT meter against the input level and got no clear answer.
+TEST_CASE("vocoder: BANDS and TALK hold their level with the voice 12 and 24 dB down") {
+  static Vocoder vo;
+  const auto level = [&](float in, bool talk) {
+    vo.prepare(kFs);
+    const std::size_t blocks = 3000;
+    const auto out = run_unit(vo, blocks, talk ? 0 : 1000000, 1000000, in);
+    float s = 0.0f;
+    for (std::size_t i = 2000 * 64; i < blocks * 64; ++i) s += out[i] * out[i];
+    return std::sqrt(s / static_cast<float>((blocks - 2000) * 64));
+  };
+  for (bool talk : {false, true}) {
+    // This voice runs hot: at 0.3 it already meets the AGC's lowest gain, so the three levels start under that.
+    const float a = level(0.075f, talk), b = level(0.019f, talk), c = level(0.0047f, talk);
+    MESSAGE("talk " << talk << ": " << a << " " << b << " " << c);
+    CHECK(a > 0.01f);
+    CHECK(b / a > 0.7f);
+    CHECK(b / a < 1.42f);
+    CHECK(c / a > 0.7f);
+    CHECK(c / a < 1.42f);
+  }
 }
 
 TEST_CASE("talk: the lattice's envelope peaks land within 60 Hz of a known vowel's F1 and F2 at Quality 16") {

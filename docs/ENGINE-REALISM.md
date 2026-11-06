@@ -87,7 +87,7 @@ Three separate causes, each one measured.
 | fs/4, order 12, hop 2.9 ms | 0.913 | 12.2 ms | 9.9 dB | -5.1 dB |
 | + carrier difference 0.4, breath 0.5 at 5 kHz (hop 5.8 ms) | 0.911 | 15.0 ms | 10.3 dB | +0.9 dB |
 
-Cost [est]: about 5,800 cycles a block by the count in `talk.h`, against 16,600, and 10 KiB back in SRAM_U (the margin went from 296 B to about 10,500 B). The lattice runs on 16 samples a block instead of 64; the halfbands and the breath filter cost less than that saves.
+Cost: 10 KiB back in SRAM_U (the margin went from 296 B to about 10,500 B), and much less CPU saved than estimated. The count in `talk.h` said about 5,800 cycles a block against 16,600. The unit said otherwise in 6a19f36: 8 notes at `Quality` 16 went from about 138k to 132k, and with 4 loops the mean stayed near 160k, over the budget of 156,734. Each stage cost about 2,000 cycles a block, mostly the autocorrelation, whose one-lag dot product compiled to a single `vfma` loop with two loads a multiply-add and a sum that waits on itself. The fix is under "Unit readings".
 
 **Level.** TALK had no AGC and `kTalkGain` was a placeholder, so a change of MODE fell 15 dB on a tone and about 27 dB on speech: at the default LEVEL, speech in TALK came out at about -40 dBFS. TALK now shares BANDS' slow AGC (`agc.h`), and `kTalkGain` is 28, set so speech on a one-note saw has the same rms in both modes. In `vocoder.txt` the same chord reads 0.27 in BANDS and 0.26 in TALK. A change of MODE hands the AGC's level to the engine coming in; without that, a hot input came in about 20 dB too loud until the follower caught up. From silence the filter now lands at once, so a phrase starts on its formants and not on a glide from flat.
 
@@ -130,9 +130,27 @@ Long-term spectrum, dB below the loudest band:
 
 BANDS keeps more above 8 kHz than a voice has, because its noise goes in whatever the voice's band edge is. That is a vocoder's character and was left alone.
 
+## Unit readings
+
+Candidate 6a19f36, cycles of `render last`, 261,224 a block, budget 60 % = 156,734. Underruns 0, shed 0.
+
+| Row | No notes | 8 notes | 8 notes + 4 loops |
+|---|---|---|---|
+| BANDS | 107k | 142k | 170k |
+| TALK, `Quality` 8 | | | 147k |
+| TALK, `Quality` 16 | 96.5k | 132k | 160k |
+| TALK, `Quality` 24 | | | 171k |
+
+A change of MODE costs one block of 76 to 88 %: the crossfade runs both engines. That settles the 93.9 % left open in `docs/PLAN.md`. THRU costs nothing.
+
+The AGC reading was inconclusive: the OUT meter on a spoken signal gave figures that ran against the input, and they do not hold on the host, where the real engines are flat within 0.3 dB from -6 to -30 dBFS on speech and on a sine, and the whole unit holds its level over 24 dB of a voice (`talk_test.cpp`). It needs a steady signal and repeated reads.
+
+Since then, on the host only, `Talk::slice` runs four lags in a pass and `talk.cpp` is built without contraction: 16 multiply-adds take 8 loads, about 3.5 cycles each against about 8 [est, from the disassembly]. The ramp's step shares the lattice's pass and the breath filter keeps its state in locals. The bench's figures do not move. Expected about 8k less at `Quality` 16 [est]; only the unit can confirm it.
+
 ## Owed
 
-- CPU on the unit, in every row the budget depends on: BANDS is unchanged by design; TALK should fall.
+- CPU on the unit after the autocorrelation change. BANDS with 8 notes and 4 loops stays over the budget at 170k; multi-rate bands would be the way down.
+- The AGC on a steady signal, with repeated reads.
 - Levels by ear, since a slower AGC lets a phrase's dynamics through to the soft clip, and `kTalkGain` is a bench figure.
 - By ear: follower speed, breath level against a real microphone, hop-rate zipper noise on fast vowels.
 - A real talkbox recording, if one can be had for measuring. It would settle the driver, the tube and the top of the spectrum.

@@ -295,6 +295,19 @@ Tool findings, not fixed: `o3console --put` spins at 100 % CPU on a deleted tty 
 
 Owed to the maintainer's ear and hand: glides, gate edges, vibrato and MOD, the eight presets' levels, clicks at the capture switch, the carrier sound, the wheel against the spring, BEND ROW, the formant steps, VOL, ROOT and BND on KEYS (no visible effect on screen).
 
+## 4j. The engines' rework on the unit, 2026-11-06
+
+Candidate 6a19f36 (BANDS with the slow AGC, TALK at fs/4), kit ef6b1a0, SRAM_U margin 10,504 B. Rows 20 to 24, 1, 2, 3 and 10 were read over USB; rows 4 to 9 and 11 to 19 need hands, an output capture or the maintainer's ears, and stay owed. The figures are means of `render last`; the full table and the reading of them are in `docs/ENGINE-REALISM.md`.
+
+- **CPU.** BANDS with 8 notes and 4 loops 170k, 69.5 % at its peak, unchanged. TALK at `Quality` 16 with the same load 160k, mean about 61 %, peak 67.0 %: TALK did not fall as estimated, and the estimate in `talk.h` was wrong. `Quality` 24 with loops 171k, 72.2 %, every block over budget. Underruns 0 and shed 0. The worst peak of the round was 230,435 cycles, 88.2 %.
+- **The 93.9 % of 4h is explained.** Single blocks of 76 to 88 % on each change of MODE: the crossfade runs both engines, for one block's peak, and nothing hung. The 3 dB level check of that row was not run.
+- **AGC: inconclusive.** The OUT meter on a spoken signal, 10 s after each change, read -34, -28 and -6 dB in BANDS and -19, -29 and -5 dB in TALK for inputs at -6, -18 and -30 dBFS. The host's real engines are flat within 0.3 dB over the same range, on speech and on a sine. To read again with a steady signal and repeated reads.
+- **THRU** costs nothing in TALK (132.5k, 133k, 131.7k).
+- **A stopped capture reads 176,448, not 176,400.** The app polls the length once a block, and 176,448 is the first whole block past the target, so this is the smallest a poll can give. The take is 1.09 ms long, and a loop does not resync at the bar, so it would drift by that much every 2 bars once the transport runs. The Load parameter of U7c2 can trim a stopped take to its exact bars: it goes there.
+- **Row 10:** `pat`, `len`, `note`, `lvl`, `slc` and the bank print work. `pat A 3 car 2` was a mistake in the row: `car` takes a word, `follow`, `synth`, `noise`, `s1` to `s4`. The usage line now says so.
+- The tester's found state was restored: the image of the session that holds the unit, one `.ptf` in `Firmware/`. `live.o3a` and `pattern.o3a` were not copied in this round, only their sizes read; the image changes no format.
+- **Console findings:** `o3console --update` rejects a path over 30 characters; `state` reports `screen=` unreliably; a screenshot lags one redraw; `o3console --put` spins on a deleted tty.
+
 ## 5. How the work runs
 
 Lanes of one or two subagents, Sonnet for code and review, Haiku for mechanical checks. A brief names the files; agents use LSP and targeted reads

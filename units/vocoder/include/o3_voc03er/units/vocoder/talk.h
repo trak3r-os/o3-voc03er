@@ -16,7 +16,7 @@
 // count works, and a process() call may produce none) it reads the last kWin = 256 pre-emphasised (0.9) modulator samples from a ring of
 // 512 floats (>= window + hop, so the window is stable while samples keep arriving). The window is asymmetric, sin^2 over the first 80 %
 // and cos^2 over the last 20 %, so the newest samples count and the onset is not smeared. The autocorrelation is sliced evenly over the
-// hop by a cursor (a share per low-rate sample), Levinson-Durbin runs at the end of the hop. The coefficients ramp linearly over the hop,
+// hop by a cursor (a share every 4 low-rate samples), Levinson-Durbin runs at the end of the hop. The coefficients ramp linearly over the hop,
 // one step per low-rate sample, in the reflection domain (stable while |k| < 1), never in direct form.
 //
 // The carrier gets a first difference (c - 0.2 c[-1]) before the lattice, which lifts its highs so the vowel's upper formants are not
@@ -35,12 +35,10 @@
 // 24 gives 18). An order change is applied at the next publish; the lattice runs the larger of the old and new order until the ramp
 // has taken the extra stages to zero. A NaN or Inf in either input is replaced by 0 on entry (the decimators are IIR).
 //
-// Cost [est], Quality 16 (12 stages), per 64-frame block (16 low-rate samples): 288 halfband sections (mod and car decimators 2 x (64 + 32),
-// interpolators 32 + 64) x 5 = 1,440; window and autocorrelation (256 + 13 lags x about 250 = 3,500 MAC) x 16 / 32 = 1,750; Levinson
-// 12 x 12 x 2 = 290 a hop (every 2nd block, 145 a block); lattice 12 stages x 6 x 16 = 1,152; coefficient ramp 12 x 16 = 192; pre-emphasis,
-// ring and carrier difference 16 x 8 = 128; breath (high-pass 64 x 8, open and sum 64 x 6) 900; flush 100 = about 5,800 cycles, 2.2 % of
-// 261,224; at Quality 24 (18 stages, 19 lags) about 7,300. Not measured on a unit.
-// Memory: ring 2 KiB + window 1 KiB + window table 1 KiB, in the object (SRAM).
+// Cost: each stage of the lattice cost about 2,000 cycles a block on the unit in 6a19f36 (Quality 8 to 16 to 24, 8 notes and 4 loops: 147k,
+// 160k, 171k), most of it the autocorrelation, whose one-lag dot product ran at about 8 cycles a multiply-add [est]. It now runs four lags in
+// a pass, 8 loads and 16 multiplies and adds for 16 multiply-adds, about 3.5 cycles each [est, from the disassembly].
+// Memory: ring 2 KiB + window 1 KiB and 80 B of zeros + window table 1 KiB, in the object (SRAM).
 
 #include <o3_voc03er/units/vocoder/halfband.h>
 
@@ -57,6 +55,8 @@ class Talk {
   static constexpr std::uint32_t kMinOrder = 8;   // Quality's limits
   static constexpr std::uint32_t kMaxOrder = 24;
   static constexpr std::uint32_t kMaxStages = 18;  // the lattice's order at Quality 24
+  static constexpr std::uint32_t kQuads = kWin / 4u;  // the analysis' unit, four samples
+  static constexpr std::uint32_t kLagTop = (kMaxStages + 3u) / 4u * 4u;  // the last lag a pass of four reaches
   static constexpr float kMaxK = 0.995f;
 
   // The lattice order Quality q runs.
@@ -89,9 +89,9 @@ class Talk {
 
   // Single thread: everything runs in the audio context (events are applied in process() order).
   alignas(8) float ring_[kRing];
-  alignas(8) float win_[kWin];
+  alignas(8) float win_[kWin + kLagTop];  // the window, then zeros that are never written: a pass reads up to kLagTop past it
   alignas(8) float wtab_[kWin];
-  alignas(8) float r_[kMaxStages + 1];
+  alignas(8) float r_[kLagTop + 1];
   alignas(8) float lagw_[kMaxStages + 1];
   alignas(8) float k_[kMaxStages + 2];   // current reflection coefficients, index 1..order
   alignas(8) float kt_[kMaxStages + 2];  // targets
@@ -111,9 +111,9 @@ class Talk {
   bool freeze_ = false;
   bool odd1_ = false, odd2_ = false;  // sample phases of the two halfband stages (the next input has an odd index), as Bands::fol_odd_
   std::uint32_t stage_ = 0;     // cursor: 0 window, 1 lags
-  std::uint32_t cpos_ = 0;
-  std::uint32_t lag_ = 0;
-  float acc_ = 0.0f;
+  std::uint32_t cpos_ = 0;      // in units of four samples
+  std::uint32_t lag_ = 0;       // the first of the four lags of this pass
+  float acc_[4] = {};
   std::uint32_t total_ = 0;
   std::uint32_t done_ = 0;
   std::uint32_t ramp_left_ = 0;
