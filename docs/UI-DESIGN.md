@@ -96,8 +96,8 @@ Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN met
 Middle: the voiceprint with the MODE word over it. Right, SOUNDS: the carrier chip, the chord being played in big type ("Dm7", "C5") with its
 notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the chord grid or the keys, with the octave.
 
-- F1 MODE (BANDS, TALK, TUNE) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 VOICING
-  (CLOSE, OPEN, WIDE, SMOOTH) · F7 PADS (CHORDS, KEYS) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
+- F1 MODE (BANDS, TALK, TUNE) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 CHORD
+  (TRIAD, 7TH, OPEN, POWER: the kind of the bottom chord row, section 7) · F7 PADS (CHORDS, CHORDS + BEND, KEYS) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
   A tap on F2 or F3 opens its picker as a list over the column (UP / DOWN or the encoder, the key again or F1 takes it, F8 backs out); the
   dimmed rows are the rule of section 2.
 - Pads: CHORDS (default, section 7) or KEYS (a four-octave keyboard, today's `pad_map.h`); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
@@ -109,7 +109,7 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
 Left: the four slots as a column (the selected framed: name, length, 0.5X / 1X / 2X, FWD / REV, the side it is on in that side's ink). Middle:
 the selected slot's overview waveform with its cuts, the play line moving, the sounding slices lit. Right: SOUNDS as on PERFORM, the chord.
 
-- F1 MODE · F2 SIDE (SPEAKS, SOUNDS, NONE: which picker this slot goes to; the pickers of PERFORM see the same thing) · F3 SPEED (0.5X, 1X, 2X)
+- F1 CHORD (the same value as PERFORM's F6; MODE stays on PERFORM and PARAMS) · F2 SIDE (SPEAKS, SOUNDS, NONE: which picker this slot goes to; the pickers of PERFORM see the same thing) · F3 SPEED (0.5X, 1X, 2X)
   · F4 DIR (FWD, REV) · F5 LOOP (the whole slot plays round, from the bar: ON, OFF) · F6 TRIG (GATE: a slice stops at the pad's release; ONE SHOT:
   to its end) · F7 CHOKE (ON: a new slice of this slot cuts the one sounding; OFF: they overlap) · F8 LEVEL (-24 to +12 dB). UP / DOWN the slot.
 - **Pads, the split.** The top two rows (pads 0 to 23) are slices 1 to 24 of the selected slot. The bottom two rows are the chord grid's two
@@ -171,7 +171,7 @@ the cursor there (SHIFT + step pad: a rest in the lane).
 
 Three pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,
 SUB, TILT, NOISE, ATTACK, RELEASE, LEVEL). SHAPE: MODE, QUALITY (24 shows "OVER BUDGET AT 8 NOTES" in the Rec ink: `docs/PLAN.md` 4g), FREEZE,
-DRY, then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. PARAMS again or UP / DOWN page.
+DRY, VOICING, then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. PARAMS again or UP / DOWN page.
 
 ### MASTER
 
@@ -309,9 +309,10 @@ The first thing a new user reaches. KEY and SCALE are the TUNE parameters, so th
 Row 3 (bottom): the triad the scale gives on that root (major, minor or diminished, by the scale: a chord is never out of key unless the root
 is). Row 2: the seventh the scale gives. Row 1: the open chord, root, fifth, ninth (sus2-like, the airy vocoder pad). Row 0 (top): the power
 chord, root, fifth, octave (the classic robot fifth). A root outside the scale still plays (its nearest diatonic quality) and is lit dimmer.
-UP / DOWN on PERFORM swap what the bottom row is (TRIAD, SEVENTH, OPEN, POWER), for the SAMPLE split where only two rows are chords.
+F6 CHORD picks what the bottom chord row is (TRIAD, 7TH, OPEN, POWER; on SAMPLE it is F1; UP / DOWN on PERFORM do the same), so a kind is one press away when fewer rows are chords: the
+SAMPLE split, or the bend strip of section 7b. TRIAD is the default.
 
-**Voicing** (F6): CLOSE (as stacked), OPEN (the third up an octave), WIDE (across two octaves), SMOOTH (the inversion nearest the chord before:
+**Voicing** (PARAMS, page SHAPE): CLOSE (as stacked), OPEN (the third up an octave), WIDE (across two octaves), SMOOTH (the inversion nearest the chord before:
 voice-leading for free, the default). The chord's notes become `note_on`s to the unit, up to five, inside its eight voices.
 
 **LEDs**: roots in the scale `kLedDim`, roots out of it off (visible by their silence in the row), the held or latched pad `kLedOn`, the other
@@ -330,8 +331,8 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
   spring, so the bend returns to 0 by itself about 120 ms after the last detent. BEND RANGE (+-2, +-5, +-12 semitones, default +-2) is on PARAMS page CARRIER. Hold + turn on an F key
   still moves that value, as everywhere.
 - **The pad strip.** F7 PADS gains CHORDS + BEND. The bottom row of 12 stops being chords and becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one
-  semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. The chord rows move up one, TRIAD on the
-  row above the strip, and POWER leaves the grid while the strip is on. On SAMPLE the strip takes the bottom row and one chord row stays. LEDs: the middle pair `kLedDim`, the held pad
+  semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. The chord rows move up one and the
+  row above the strip plays F6 CHORD's kind, so no kind is lost: the three rows are that kind, 7TH and OPEN, or the next ones when that kind is one of them. On SAMPLE the strip takes the bottom row and one chord row stays. LEDs: the middle pair `kLedDim`, the held pad
   `kLedOn`.
 
 ## 8. What the unit and the app need
