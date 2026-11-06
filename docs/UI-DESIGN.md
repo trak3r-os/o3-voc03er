@@ -338,15 +338,27 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
 - **BND- and BND+ (KEYS, row 0).** While held, the local bend grows linearly to -BEND RANGE or +BEND RANGE in 400 ms (the main loop's `uptime_ms`, written only when it changes); on release it returns to 0 through the unit's ramp. The last pressed of these and the strip wins. It sums with the MIDI wheel (clamped +-12).
 - **MOD (KEYS, col 9) and `Vib` (id 43).** The unit adds a vibrato to the bend: about 5.5 Hz, +-0.5 semitone at depth 1. At Vib 0 the output is bit-identical to Bend 0 and the phase resets. Held, the MOD pad raises the depth linearly to 1 in 400 ms; released, it falls to 0 in 400 ms. MIDI CC1 writes Vib too (when it is not learned): the larger of the pad's and the wheel's depth wins.
 
-### Pad ideas, proposed and not decided
+### The SHIFT row of PERFORM
 
-Offered to the maintainer on 2026-11-06, none built. The maintainer wants few pad modes, so F7 PADS stays CHORDS or KEYS until one of these is chosen, and each may fit better as an option or a row than as a third value.
+Asked by the maintainer on 2026-11-06 ("mete todos"): FORMANT, FREEZE, GATE, ARP, GLIDE and presets, with no new pad modes, since the maintainer wants few. They live on a second row of the F keys, on both F7 values. While SHIFT is held the F row shows this row, names and values. SHIFT + an F key focuses its value, the same rule as the plain row: the encoder moves it, a second SHIFT + tap steps it, and the row stays shown while one of its values has the focus.
 
-- **SCALE.** Only the notes of KEY and SCALE on the pads. A change of pad map, nearly free.
-- **STACK.** A pad turns its note on or off and it stays, so a chord is built note by note with the hands free for the microphone.
-- **VOICE.** The carrier plays the sung note and a pad adds an interval over it, snapped to the scale. It needs TUNE's pitch detector running beside BANDS: about 4 to 5 points of CPU [est, TUNE 45.3 % against 40.9 % idle], which takes BANDS 8 from 57.3 % to about 62 %, past the 60 % budget. Its own slice, after measuring the cost and the detector's delay on the unit.
+| Key | Value | What it does |
+|---|---|---|
+| SHIFT + F1 | FREEZE | Holds the vowel (`Freeze`), on or off, an action |
+| SHIFT + F2 | GATE | Cuts the carrier in time: OFF, 1/4, 1/8, 1/16, 1/32 |
+| SHIFT + F3 | ARP | Plays held notes one at a time: OFF, UP, DOWN, UP-DOWN, RANDOM |
+| SHIFT + F4 | GLIDE | Slides between the carrier's notes, 0 to 500 ms |
+| SHIFT + F5 | FORMANT | `Formant`, -12 to +12 st |
+| SHIFT + F6 | THRU | `Thru`, 0 to 100 |
+| SHIFT + F7 | BEND ROW | As above, an action |
+| SHIFT + F8 | PRESET | One of eight factory sounds |
 
-Still empty on KEYS: row 4 with BEND ROW off (a chord row for the left hand is one idea), and the gap pads of row 1.
+- **GATE and ARP** run in the unit on one step clock taken from the tempo, so pads and MIDI notes go the same way and a step lands on its frame. The clock runs with the transport stopped and restarts at the bar when it starts. GATE has soft edges of about 2 ms against clicks, a 50 % duty, and costs a multiply a sample only while on. ARP's rate is GATE's when GATE is on and 1/16 otherwise.
+- **GLIDE** slews each voice's increment once a run, so it costs nothing in the sample loop.
+- **FORMANT strip.** On KEYS with BEND ROW off, row 4 picks the formant: -12, -9, -6, -4, -2, 0, 0, +2, +4, +6, +9, +12. A tap sets it and it stays, the pad lit, because a formant is a voice to pick and not a gesture to spring back from. FORMANT at 0 is the cheap path.
+- **Presets** are a constexpr table of parameter values in flash, each a whole sound: ROBOT, CHOIR, WHISPER, GIANT, ELF, PULSE, ARP, FROZEN. Saved user sounds wait for FILE in U9.
+
+Still proposed and not decided: SCALE (only the scale's notes), STACK (a pad turns its note on and off) and VOICE (the carrier plays the sung note and pads add intervals). VOICE needs TUNE's pitch detector beside BANDS, about 4 to 5 points of CPU [est, TUNE 45.3 % against 40.9 % idle], which takes BANDS 8 from 57.3 % to about 62 %, past the 60 % budget.
 
 ## 7c. MIDI in
 
@@ -444,6 +456,9 @@ screen it touches. The unit checks owed are named, not run here.
 | U1 | The skin's frame: theme and its contrast test, `Chrome::None` header and F row as pure functions, PERFORM on it with the BANDS voiceprint and the chord grid (the chord engine, KEY and SCALE shared with TUNE, voicings, the LEDs); the unit's `View` publish | `perform.txt` (a voice WAV in, a chord pad, SHIFT latch, each MODE, KEYS), the frame's line load |
 | U2 | The buttons of section 3: every screen button opens a screen (stubs for the ones not yet drawn, each saying its name), PLAY the transport, DELETE, the arrows, SHIFT's four; `help()` on each | `buttons.txt` (every button once, a snap each), `help.txt` on every screen, `help_check` in the test |
 | U2b | Pitch bend (section 7b): `Bend`, the free encoder and its spring, the pad strip, BEND RANGE | `bend.txt` (a held chord, the encoder and each strip pad, a WAV showing the glide and the return to 0) |
+| P1 | The SHIFT row on PERFORM, FREEZE, FORMANT, THRU, the formant strip, HELP | `shift_row.txt` |
+| P2 | The unit: `Glide`, the step clock, `Gate`, `Arp`, host tests | a WAV of each, by a doctest |
+| P3 | GATE, ARP, GLIDE on the SHIFT row; the eight presets | `presets.txt` |
 | U3 | The routing: the two pickers, `ModSrc`, CarSrc LIVE, the roles derived, the one-rule rows, the capture gesture on REC and from a dimmed row | `route.txt` (every pair, the dimmed rows snapped, a capture to a slot with its WAV) |
 | U4 | SAMPLE REC and SAMPLE on the four slots as they are (whole play, side, speed, direction, level) | `sample_rec.txt`, `sample.txt` (a take through the chord, then the same as the carrier) |
 | U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, CHOKE and TRIG, the SLICE lane | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
