@@ -33,6 +33,18 @@ constexpr float kUvMinSum = 0.003f;      // followers' sum under which there is 
 constexpr float kUvFadeMs = 5.0f;
 constexpr float kUvNoiseGain = 0.5f;
 
+constexpr unsigned kHalfBands = 13;      // bands 0..12 run at half rate
+constexpr float kHbC0 = 0.12701027f;     // halfband allpass coefficients: branch of the current sample, branch of the previous one
+constexpr float kHbC1 = 0.5664591f;
+
+// First-order allpass in z^-2 on the half-rate grid, one multiply: y = a (x - y[-1]) + x[-1].
+inline float allpass(float a, float& x1, float& y1, float x) noexcept {
+  const float y = mulb(a, x - y1) + x1;
+  x1 = x;
+  y1 = y;
+  return y;
+}
+
 inline float flush(float s) noexcept { return (s > kFlush || s < -kFlush) ? s : 0.0f; }
 inline float one_pole(float ms, float fs) noexcept { return 1.0f - std::exp(-1000.0f / (ms * fs)); }
 
@@ -43,8 +55,12 @@ void Bands::prepare(float sample_rate) noexcept {
   for (unsigned b = 0; b < kBands; ++b) {
     const float f = kLowHz * std::exp2(kOctavesPerBand * static_cast<float>(b));
     center_[b] = f;
-    const float w0 = 6.2831853f * f / fs_;
-    const float alpha = std::sin(w0) / (2.0f * kBandQ);
+    const float w_full = 6.2831853f * f / fs_;
+    // The half-rate bands are designed for fs/2. The bilinear transform warps the frequency axis by tan(w/2); at twice the angle the warp is
+    // steeper near the centre by 1 / cos(w_full), so the Q is lowered by cos(w_full) and the bandwidth in Hz stays what it is at full rate.
+    const bool half = b < kHalfBands;
+    const float w0 = half ? 2.0f * w_full : w_full;
+    const float alpha = std::sin(w0) / (2.0f * (half ? kBandQ * std::cos(w_full) : kBandQ));
     const float a0 = 1.0f + alpha;
     b0_[b] = alpha / a0;
     a1_[b] = -2.0f * std::cos(w0) / a0;
@@ -93,6 +109,13 @@ void Bands::restart() noexcept {
       car_state_[b][k] = 0.0f;
     }
   }
+  dec_mod_ = Halfband{};
+  dec_car_ = Halfband{};
+  dec_uv_ = Halfband{};
+  interp_ = Halfband{};
+  for (float& d : fr_dly_) {
+    d = 0.0f;
+  }
   pre_prev_ = 0.0f;
   hp_s1_ = 0.0f;
   hp_s2_ = 0.0f;
@@ -112,6 +135,49 @@ void Bands::set_envelope(float attack_ms, float release_ms, float low_release_ms
     atk_[b] = ca * (2.0f - ca);
     rel_[b] = cr * (2.0f - cr);
   }
+}
+
+std::uint32_t Bands::decimate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept {
+  std::uint32_t i = 0, k = 0;
+  float pend = h.pend;
+  if (odd && n > 0) {  // in[0] is the earlier sample of a pair: it goes through the z^-1 branch
+    pend = allpass(kHbC1, h.x1, h.y1, in[0]);
+    i = 1;
+  }
+  for (; i + 1 < n; i += 2) {
+    out[k++] = 0.5f * (allpass(kHbC0, h.x0, h.y0, in[i]) + pend);
+    pend = allpass(kHbC1, h.x1, h.y1, in[i + 1]);
+  }
+  if (i < n) {  // a last even sample: its pair completes in the next call
+    out[k++] = 0.5f * (allpass(kHbC0, h.x0, h.y0, in[i]) + pend);
+  }
+  h.pend = pend;
+  return k;
+}
+
+void Bands::interpolate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept {
+  std::uint32_t i = 0;
+  if (odd && n > 0) {  // the second output of the last call's last pair
+    out[0] += h.pend;
+    i = 1;
+  }
+  for (std::uint32_t m = 0; i < n; ++m, i += 2) {
+    out[i] += allpass(kHbC0, h.x0, h.y0, in[m]);
+    const float o1 = allpass(kHbC1, h.x1, h.y1, in[m]);
+    if (i + 1 < n) {
+      out[i + 1] += o1;
+    } else {
+      h.pend = o1;
+    }
+  }
+}
+
+void Bands::settle(Halfband& h) noexcept {
+  h.x0 = flush(h.x0);
+  h.y0 = flush(h.y0);
+  h.x1 = flush(h.x1);
+  h.y1 = flush(h.y1);
+  h.pend = flush(h.pend);
 }
 
 void Bands::process(const float* modulator, const float* carrier, float* out, std::uint32_t n, const float* gate) noexcept {
@@ -187,7 +253,75 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
     }
   }
 
-  for (unsigned b = 0; b < kBands; ++b) {
+  // half rate: bands 0..12 between the decimators and the interpolator
+  float md[kMaxFrames / 2], cd[kMaxFrames / 2], ud[kMaxFrames / 2], cd_uv[kMaxFrames / 2], sh[kMaxFrames / 2];
+  const std::uint32_t nh = decimate(dec_mod_, pre, n, fol_odd_, md);
+  decimate(dec_car_, carrier, n, fol_odd_, cd);
+  if (uv_live) {
+    // the decimator is linear, so the noise has its own: carrier + noise = decimated carrier + decimated noise
+    decimate(dec_uv_, uvn, n, fol_odd_, ud);
+    for (std::uint32_t m = 0; m < nh; ++m) {
+      cd_uv[m] = cd[m] + ud[m];
+    }
+  } else {
+    dec_uv_ = Halfband{};
+  }
+  for (std::uint32_t m = 0; m < nh; ++m) {
+    sh[m] = 0.0f;
+  }
+  for (unsigned b = 0; b < kHalfBands; ++b) {
+    const float a1 = a1_[b];
+    const float a2 = a2_[b];
+    const float atk = atk_[b];
+    const float rel = rel_[b];
+    const float gr = rect_gain_[b];
+    const float gs = syn_gain_[b];
+    const float* cin = (uv_live && b >= kUvFirstBand) ? cd_uv : cd;
+    float m1 = mod_state_[b][0], m2 = mod_state_[b][1], m3 = mod_state_[b][2], m4 = mod_state_[b][3];
+    float c1 = car_state_[b][0], c2 = car_state_[b][1], c3 = car_state_[b][2], c4 = car_state_[b][3];
+    float env = env_[b];
+    for (std::uint32_t m = 0; m < nh; ++m) {
+      // the same two sections as below, on the half-rate sample; the follower updates on every one of them (every second full-rate sample)
+      const float x = md[m];
+      const float w1 = x - m1;
+      m1 = m2 + mulb(a1, w1);
+      m2 = x + mulb(a2, w1);
+      const float w2 = w1 - m3;
+      m3 = m4 + mulb(a1, w2);
+      m4 = w1 + mulb(a2, w2);
+      const float r = std::fabs(w2) * gr;
+      env += mulb(r - env, r > env ? atk : rel);
+      const float u = cin[m];
+      const float z1 = u - c1;
+      c1 = c2 + mulb(a1, z1);
+      c2 = u + mulb(a2, z1);
+      const float z2 = z1 - c3;
+      c3 = c4 + mulb(a1, z2);
+      c4 = z1 + mulb(a2, z2);
+      sh[m] += mulb(z2 * env, gs);
+    }
+    mod_state_[b][0] = flush(m1);
+    mod_state_[b][1] = flush(m2);
+    mod_state_[b][2] = flush(m3);
+    mod_state_[b][3] = flush(m4);
+    car_state_[b][0] = flush(c1);
+    car_state_[b][1] = flush(c2);
+    car_state_[b][2] = flush(c3);
+    car_state_[b][3] = flush(c4);
+    env_[b] = flush(env);
+  }
+  interpolate(interp_, sh, n, fol_odd_, out);
+  settle(dec_mod_);
+  settle(dec_car_);
+  settle(dec_uv_);
+  settle(interp_);
+
+  // full rate: bands 13..15, into their own sum, which is then delayed to line up with the halfbands' group delay
+  float fr[kMaxFrames];
+  for (std::uint32_t i = 0; i < n; ++i) {
+    fr[i] = 0.0f;
+  }
+  for (unsigned b = kHalfBands; b < kBands; ++b) {
     const float a1 = a1_[b];
     const float a2 = a2_[b];
     const float atk = atk_[b];
@@ -225,7 +359,7 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
       const float z2 = z1 - c3;
       c3 = c4 + mulb(a1, z2);
       c4 = z1 + mulb(a2, z2);
-      out[i] += mulb(z2 * env, gs);
+      fr[i] += mulb(z2 * env, gs);
     }
     mod_state_[b][0] = flush(m1);
     mod_state_[b][1] = flush(m2);
@@ -236,6 +370,12 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
     car_state_[b][2] = flush(c3);
     car_state_[b][3] = flush(c4);
     env_[b] = flush(env);
+  }
+  for (std::uint32_t i = 0; i < n; ++i) {
+    out[i] += i < kFullDelay ? fr_dly_[i] : fr[i - kFullDelay];
+  }
+  for (unsigned k = 0; k < kFullDelay; ++k) {  // the last kFullDelay samples of (history, fr)
+    fr_dly_[k] = flush(k + n < kFullDelay ? fr_dly_[k + n] : fr[k + n - kFullDelay]);
   }
   fol_odd_ = ((static_cast<unsigned>(fol_odd_) + n) & 1u) != 0u;
 }

@@ -15,6 +15,15 @@
 // ramp of 5 ms, so it does not click. The noise is multiplied by the carrier's gate (Carrier::render's `gate`, passed to process), so with no
 // note held there is no noise; without a gate (nullptr) the noise is not gated.
 //
+// Half rate: bands 0..12 (125 Hz to 3.5 kHz) run at fs/2 = 22.05 kHz between a halfband decimator on the pre-emphasised modulator, one on the
+// carrier (and one on the unvoiced noise while it is live), and a halfband interpolator on the sum of those 13 bands; bands 13..15 stay at full
+// rate. A halfband is the textbook polyphase pair of first-order allpass sections in z^-2, H = (A0(z^2) + z^-1 A1(z^2)) / 2, coefficients 0.127 and
+// 0.566 (designed for passband 0..0.105 fs flat to 1e-6 dB, stopband from 0.395 fs at -70 dB). The half-rate bands' biquads are designed for
+// 22.05 kHz, so centres and bandwidths are unchanged; the followers update once a half-rate sample, as the full-rate ones update every second sample,
+// so their time constants are unchanged. The band biquads' Q is scaled by cos(w) so the bilinear warping at twice the angle keeps the -3 dB widths.
+// The halfbands delay the half-rate group by about 3 full-rate samples more than the bands left at full rate; those three are delayed by kFullDelay
+// samples before the sum (without it the summed ripple was 3.1 dB, against 1.4 dB at full rate). The sample phase (odd or even) and the interpolator's second output carry across calls: any frame count works.
+//
 // Real time: coefficients are computed in prepare() and set_envelope(), never in process(). process() runs one band at a time over the
 // block, so the biquad and follower state lives in registers; no virtual calls, no branches on the signal in the inner loop. A NaN or Inf
 // in the modulator is replaced by 0 before it reaches any state. State below 1e-15 is flushed to 0 at the end of each block (no denormals).
@@ -64,6 +73,19 @@ class Bands {
   // Two biquads, n1 and n2 each, as -s/b0 of the transposed form (b0 folded out, see process): up to 1/b0^2 = 7e4 times the plain state.
   alignas(16) float mod_state_[kBands][4] = {};
   alignas(16) float car_state_[kBands][4] = {};
+  // A halfband's state: x[n-1] and y[n-1] of the section of each branch, and `pend`, the value the next call needs (the odd-sample branch's
+  // output in a decimator, the second output of the pair in the interpolator).
+  struct Halfband {
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f, pend = 0.0f;
+  };
+  // Returns the number of outputs (one for each even-indexed input, `odd` says whether in[0] is odd-indexed).
+  static std::uint32_t decimate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept;
+  // Adds the interpolated `m` samples (the first output at an even-indexed sample) into out[0..n).
+  static void interpolate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept;
+  static void settle(Halfband& h) noexcept;  // flush tiny state to 0 (no denormals)
+  Halfband dec_mod_, dec_car_, dec_uv_, interp_;
+  static constexpr unsigned kFullDelay = 3;  // samples the full-rate bands' sum is delayed by
+  float fr_dly_[kFullDelay] = {};
   float fs_ = 44100.0f;
   float pre_prev_ = 0.0f;
   float hp_b0_ = 0.0f, hp_b1_ = 0.0f, hp_b2_ = 0.0f, hp_a1_ = 0.0f, hp_a2_ = 0.0f;  // 80 Hz high-pass
@@ -74,7 +96,7 @@ class Bands {
   float uv_ = 0.0f;
   float uv_step_ = 0.0f;
   bool uv_open_ = false;
-  bool fol_odd_ = false;  // follower phase: the next sample is the held one
+  bool fol_odd_ = false;  // sample phase for the followers and the halfbands: the next sample has an odd index (counted from reset)
   NoiseSource own_noise_;
   NoiseSource* noise_src_ = nullptr;
 };

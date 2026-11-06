@@ -648,3 +648,221 @@ TEST_CASE("bands: the AGC has no step at its gate") {
   CHECK(over > 0.0f);
   CHECK(over < 1.5f * under);
 }
+
+// ---- the half-rate low bands (survey item 1): bands 0..12 run at 22.05 kHz between halfband filters; the response must be today's.
+
+namespace {
+
+struct BandShape {
+  float peak_hz;
+  float width_oct;  // the -3 dB width of the follower's response, in octaves
+};
+
+// Each band's follower response to a sine, swept over 1/24-octave steps from 100 Hz to 16 kHz with the AGC at unity (a level of 0.1 mean-abs
+// settles to gain 1); the peak is parabolic-interpolated in log frequency, the width is read at 0.7071 of the peak.
+void measure_shapes(BandShape* shapes) {
+  std::vector<float> freq;
+  for (float f = 100.0f; f < 16000.0f; f *= 1.0293022f) {  // 2^(1/24)
+    freq.push_back(f);
+  }
+  std::vector<std::vector<float>> resp(Bands::kBands, std::vector<float>(freq.size()));
+  Bands b;
+  b.prepare(kFs);
+  for (std::size_t k = 0; k < freq.size(); ++k) {
+    b.reset();
+    float mod[64], out[64];
+    const float car[64] = {};
+    float ph = 0.0f;
+    float acc[Bands::kBands] = {};
+    for (int blk = 0; blk < 450; ++blk) {
+      for (float& x : mod) {
+        x = 0.157f * std::sin(ph);
+        ph += kPi2 * freq[k] / kFs;
+        ph -= ph > kPi2 ? kPi2 : 0.0f;
+      }
+      b.process(mod, car, out, 64);
+      if (blk >= 400) {
+        for (unsigned i = 0; i < Bands::kBands; ++i) {
+          acc[i] += b.envelope(i) / 50.0f;
+        }
+      }
+    }
+    for (unsigned i = 0; i < Bands::kBands; ++i) {
+      resp[i][k] = acc[i];
+    }
+  }
+  for (unsigned i = 0; i < Bands::kBands; ++i) {
+    const std::vector<float>& r = resp[i];
+    std::size_t m = 0;
+    for (std::size_t k = 1; k < r.size(); ++k) {
+      m = r[k] > r[m] ? k : m;
+    }
+    const float step = std::log2(1.0293022f);
+    const float l = std::log(r[m - 1]), c = std::log(r[m]), h = std::log(r[m + 1]);
+    const float off = 0.5f * (l - h) / (l - 2.0f * c + h);
+    const float peak_oct = std::log2(freq[m]) + off * step;
+    const float level = r[m] * 0.70710678f;
+    std::size_t lo = m, hi = m;
+    while (lo > 0 && r[lo] > level) --lo;
+    while (hi + 1 < r.size() && r[hi] > level) ++hi;
+    const float f_lo = std::log2(freq[lo]) + step * (level - r[lo]) / (r[lo + 1] - r[lo]);
+    const float f_hi = std::log2(freq[hi - 1]) + step * (r[hi - 1] - level) / (r[hi - 1] - r[hi]);
+    shapes[i].peak_hz = std::exp2(peak_oct);
+    shapes[i].width_oct = f_hi - f_lo;
+  }
+}
+
+// Today's (full-rate) shapes, measured by this same test on the code before the half-rate bands (e3f675c).
+const BandShape kShapeFullRate[Bands::kBands] = {
+    {125.027f, 0.403625f}, {164.919f, 0.404102f}, {217.671f, 0.402546f}, {287.335f, 0.405329f},
+    {379.166f, 0.402906f}, {500.446f, 0.40341f}, {660.915f, 0.404684f}, {872.801f, 0.402826f},
+    {1153.44f, 0.404266f}, {1525.13f, 0.404154f}, {2018.14f, 0.401229f}, {2670.76f, 0.39884f},
+    {3531.63f, 0.393373f}, {4665.87f, 0.378167f}, {6152.67f, 0.357297f}, {8096.7f, 0.319692f},
+};
+constexpr float kRippleFullRateDb = 1.39393f;  // sweep_ripple_db() on e3f675c
+
+}  // namespace
+
+TEST_CASE("bands: every band keeps its peak frequency and -3 dB width") {
+  BandShape s[Bands::kBands];
+  measure_shapes(s);
+  for (unsigned i = 0; i < Bands::kBands; ++i) {
+    MESSAGE("band " << i << " peak " << s[i].peak_hz << " Hz width " << s[i].width_oct << " oct");
+  }
+  for (unsigned i = 0; i < Bands::kBands; ++i) {
+    INFO("band " << i);
+    CHECK(std::fabs(std::log2(s[i].peak_hz / kShapeFullRate[i].peak_hz)) < 0.003f);  // 0.003 octave, 5 cents (seen: 0.0003)
+    CHECK(std::fabs(s[i].width_oct - kShapeFullRate[i].width_oct) < 0.01f);  // seen: 0.0042 at band 12
+  }
+}
+
+TEST_CASE("bands: the summed response is no more than 1 dB less flat than at full rate") {
+  float lo = 0.0f, hi = 0.0f;
+  const float pp = sweep_ripple_db(&lo, &hi);
+  MESSAGE("ripple " << pp << " dB");
+  CHECK(pp < kRippleFullRateDb + 1.0f);
+}
+
+TEST_CASE("bands: a carrier tone above 11 kHz that would alias onto a low band does not sound there") {
+  // The half-rate bands see f_in and 22.05 kHz - f_in as the same frequency: a tone at 22.05 kHz - c would fold onto the centre c of a band
+  // if the halfband let it through. The product is measured at c (Goertzel), where the full-rate bands' own leakage of the tone does not
+  // fall (it sits at the tone's frequency); the reference is the tone at c itself, same amplitude, measured at c.
+  const auto level = [](float hz, float at_hz) {
+    Bands b;
+    b.prepare(kFs);
+    b.hold_envelopes(1.0f);
+    float mod[64] = {}, car[64], out[64];
+    float ph = 0.0f;
+    std::vector<float> y;
+    for (int blk = 0; blk < 150; ++blk) {
+      for (float& x : car) {
+        x = std::sin(ph);
+        ph += kPi2 * hz / kFs;
+        ph -= ph > kPi2 ? kPi2 : 0.0f;
+      }
+      b.process(mod, car, out, 64);
+      if (blk >= 80) {
+        y.insert(y.end(), out, out + 64);
+      }
+    }
+    return tone_energy(y, 0, y.size(), at_hz);
+  };
+  float worst = -1000.0f;
+  for (unsigned i = 0; i < 13; ++i) {
+    const float c = 125.0f * std::exp2(0.4f * static_cast<float>(i));
+    const float in_band = level(c, c);
+    const float alias = level(22050.0f - c, c);
+    const float db = 10.0f * std::log10(alias / in_band);
+    MESSAGE("band " << i << " centre " << c << " Hz: tone at " << 22050.0f - c << " Hz is " << db << " dB against the tone in band");
+    worst = std::fmax(worst, db);
+  }
+  MESSAGE("worst " << worst << " dB");
+  CHECK(worst < -50.0f);
+}
+
+namespace {
+
+const float kVoiceEnvFullRate[Bands::kBands] = {
+    0.0134829f, 0.00619435f, 0.011672f, 0.00800391f, 0.00934264f, 0.0127339f, 0.0191305f, 0.015925f,
+    0.0074127f, 0.00573096f, 0.0022171f, 0.00102916f, 0.000626447f, 0.000325573f, 0.000179028f, 0.000101804f};  // vowel A, e3f675c, mean of the last 300 blocks
+
+void voice_levels(float* env) {
+  Bands b;
+  b.prepare(kFs);
+  const std::vector<float> m = speech(kVowelA, 64 * 600);
+  const std::vector<float> car = noise_vec(m.size(), 0.2f);
+  float out[64];
+  for (unsigned i = 0; i < Bands::kBands; ++i) {
+    env[i] = 0.0f;
+  }
+  for (std::size_t at = 0, blk = 0; at + 64 <= m.size(); at += 64, ++blk) {
+    b.process(m.data() + at, car.data() + at, out, 64);
+    if (blk >= 300) {
+      for (unsigned i = 0; i < Bands::kBands; ++i) {
+        env[i] += b.envelope(i) / 300.0f;
+      }
+    }
+  }
+}
+
+}  // namespace
+
+TEST_CASE("bands: the followers of a synthetic voice read within 1 dB of the full-rate bands") {
+  float env[Bands::kBands];
+  voice_levels(env);
+  float top = 0.0f;
+  for (unsigned i = 0; i < Bands::kBands; ++i) {
+    top = std::fmax(top, kVoiceEnvFullRate[i]);
+    MESSAGE("band " << i << " env " << env[i]);
+  }
+  for (unsigned i = 0; i < Bands::kBands; ++i) {
+    if (kVoiceEnvFullRate[i] > top * 0.01f) {  // within 40 dB of the strongest; under that the band only holds a skirt
+      INFO("band " << i);
+      CHECK(std::fabs(20.0f * std::log10(env[i] / kVoiceEnvFullRate[i])) < 1.0f);
+    }
+  }
+}
+
+TEST_CASE("bands: any frame count from 1 to 64 gives the output and followers of blocks of 64") {
+  // A level under the AGC gate (gain 1 whatever the block size) and the unvoiced path shut: the result must not depend on the partition.
+  const std::size_t total = 64 * 40;
+  std::vector<float> mod(total);
+  for (std::size_t i = 0; i < total; ++i) {
+    mod[i] = 0.001f * std::sin(0.05f * static_cast<float>(i)) + 0.0005f * std::sin(0.9f * static_cast<float>(i));
+  }
+  const std::vector<float> car = noise_vec(total, 0.3f);
+  const auto run = [&](const std::vector<std::uint32_t>& pattern, std::vector<float>& out, float* env) {
+    Bands b;
+    b.prepare(kFs);
+    float lead[64] = {}, lead_out[64];
+    for (int blk = 0; blk < 300; ++blk) {  // the AGC level starts at its target; 300 silent blocks bring it under the gate
+      b.process(lead, lead, lead_out, 64);
+    }
+    out.assign(total, 0.0f);
+    std::size_t at = 0;
+    for (std::size_t k = 0; at < total; ++k) {
+      std::uint32_t n = pattern[k % pattern.size()];
+      n = n > total - at ? static_cast<std::uint32_t>(total - at) : n;
+      b.process(mod.data() + at, car.data() + at, out.data() + at, n);
+      at += n;
+    }
+    for (unsigned i = 0; i < Bands::kBands; ++i) {
+      env[i] = b.envelope(i);
+    }
+  };
+  std::vector<float> ref, odd;
+  float env_ref[Bands::kBands], env_odd[Bands::kBands];
+  run({64}, ref, env_ref);
+  CHECK(peak(ref) > 1.0e-5f);
+  for (const auto& pattern : {std::vector<std::uint32_t>{1}, {3, 7, 64, 5, 33, 2, 1, 63}, {13}, {2}}) {
+    run(pattern, odd, env_odd);
+    bool same = true;
+    for (std::size_t i = 0; i < total; ++i) {
+      same = same && odd[i] == ref[i];
+    }
+    CHECK(same);
+    for (unsigned i = 0; i < Bands::kBands; ++i) {
+      CHECK(env_odd[i] == env_ref[i]);
+    }
+  }
+}
