@@ -13,7 +13,7 @@ using o3sdk::core::ParamUnit;
 using o3sdk::dsp::Ramp;
 
 constexpr const char* kWaveNames[] = {"SAW", "PULSE"};
-constexpr const char* kModeNames[] = {"BANDS", "TALK", "TUNE"};
+constexpr const char* kModeNames[] = {"BANDS", "TALK", "TUNE", "ROBOT"};
 constexpr const char* kFreezeNames[] = {"OFF", "ON"};
 constexpr const char* kKeyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 constexpr const char* kScaleNames[] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
@@ -66,7 +66,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"DRY", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"LEVEL", "dB", nullptr, nullptr, -48.0f, 6.0f, -6.0f, 108, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},
     {"DETUNE", "ct", nullptr, nullptr, 0.0f, 20.0f, 8.0f, 20, 5, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
-    {"MODE", "", kModeNames, nullptr, 0.0f, 2.0f, 0.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"MODE", "", kModeNames, nullptr, 0.0f, 3.0f, 0.0f, 3, 1, 4, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"QUALITY", "", nullptr, nullptr, 8.0f, 24.0f, 16.0f, 16, 2, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"FREEZE", "", kFreezeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     rec_row("L1 REC"), loop_row("L1 PLAY", kPlayNames), loop_row("L1 ROLE", kRoleNames),
@@ -166,6 +166,8 @@ void Vocoder::prepare(float sample_rate) noexcept {
   bands_mix_.set_length(fade);
   talk_mix_.set_length(fade);
   tune_mix_.set_length(fade);
+  robot_mix_.set_length(fade);
+  comp_.prepare(sample_rate);
   const auto ramp = static_cast<std::uint32_t>(kRampMs * 0.001f * sample_rate);
   level_.set_length(ramp);
   dry_.set_length(ramp);
@@ -185,6 +187,7 @@ void Vocoder::prepare(float sample_rate) noexcept {
   bands_mix_.jump(1.0f);
   talk_mix_.jump(0.0f);
   tune_mix_.jump(0.0f);
+  robot_mix_.jump(0.0f);
   tune_.reset();
   loops_.clear();
   for (Slot& s : slot_) {
@@ -255,18 +258,21 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       carrier_.set_detune_cents(v);
       break;
     case Mode: {
-      const unsigned m = v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u);
-      Ramp* const ramps[3] = {&bands_mix_, &talk_mix_, &tune_mix_};
-      for (unsigned i = 0; i < 3; ++i) {
+      const unsigned m = v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u));
+      Ramp* const ramps[4] = {&bands_mix_, &talk_mix_, &tune_mix_, &robot_mix_};
+      for (unsigned i = 0; i < 4; ++i) {
         const float t = i == m ? 1.0f : 0.0f;
         Ramp& r = *ramps[i];
         if (t == r.target_value()) continue;
         if (t > 0.5f && r.value() <= 0.0f) {
-          // The mode was not running: what it remembers is stale.
+          // The mode was not running: what it remembers is stale. BANDS and ROBOT are one engine: it restarts only when neither was heard.
           const float lvl = talk_mix_.value() > 0.0f ? talk_.agc_level() : bands_.agc_level();  // from the engine that has been hearing the input
-          if (i == 0u) {
-            bands_.restart();
-            bands_.adopt_level(lvl);
+          if (i == 0u || i == 3u) {
+            if (bands_mix_.value() <= 0.0f && robot_mix_.value() <= 0.0f) {
+              bands_.restart();
+              bands_.adopt_level(lvl);
+            }
+            if (i == 3u) comp_.reset();
           } else if (i == 1u) {
             talk_.reset();
             talk_.adopt_level(lvl);
@@ -1047,7 +1053,8 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   const auto runs = [](const Ramp& r) { return r.value() > 0.0f || r.target_value() > 0.0f; };
   float tw[Bands::kMaxFrames];
   float tn[Bands::kMaxFrames];
-  if (runs(bands_mix_)) {
+  const bool robot = runs(robot_mix_);
+  if (runs(bands_mix_) || robot) {  // ROBOT is BANDS through comp_: one engine runs for both ramps
     bands_.process(mod, car, wet, n, gate);
   } else {
     for (std::uint32_t i = 0; i < n; ++i) wet[i] = 0.0f;
@@ -1063,14 +1070,42 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
     for (std::uint32_t i = 0; i < n; ++i) tn[i] = 0.0f;
   }
   publish_view();  // the BANDS followers for the PERFORM screen, once a block
-  if (!level_.moving() && !dry_.moving() && !bands_mix_.moving() && !talk_mix_.moving() && !tune_mix_.moving()) {
+  float rw[Bands::kMaxFrames];  // ROBOT: the wet sum after the compressor (a copy: the BANDS term reads the wet sum itself while they crossfade)
+  if (robot) {
+    for (std::uint32_t i = 0; i < n; ++i) rw[i] = wet[i];
+    comp_.process(rw, n);
+  }
+  if (!level_.moving() && !dry_.moving() && !bands_mix_.moving() && !talk_mix_.moving() && !tune_mix_.moving() && !robot_mix_.moving()) {
     const float g = level_.value();
     const float d = dry_.value();
     const float wm = kWetGain * bands_mix_.value();
     const float tm = kTalkGain * talk_mix_.value();
     const float um = kTuneGain * tune_mix_.value();
+    if (robot) {
+      const float rm = kWetGain * robot_mix_.value();
+      for (std::uint32_t i = 0; i < n; ++i) {
+        const float y = soft_clip(g * (wet[i] * wm + rw[i] * rm + tw[i] * tm + tn[i] * um + d * mod[i]));
+        args.out_l[i] = y;
+        args.out_r[i] = y;
+      }
+      return;
+    }
     for (std::uint32_t i = 0; i < n; ++i) {
       const float y = soft_clip(g * (wet[i] * wm + tw[i] * tm + tn[i] * um + d * mod[i]));
+      args.out_l[i] = y;
+      args.out_r[i] = y;
+    }
+    return;
+  }
+  if (robot) {
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const float g = level_.next();
+      const float d = dry_.next();
+      const float wm = bands_mix_.next();
+      const float tm = talk_mix_.next();
+      const float um = tune_mix_.next();
+      const float rm = robot_mix_.next();
+      const float y = soft_clip(g * ((wet[i] * kWetGain) * wm + (rw[i] * kWetGain) * rm + (tw[i] * kTalkGain) * tm + (tn[i] * kTuneGain) * um + d * mod[i]));
       args.out_l[i] = y;
       args.out_r[i] = y;
     }

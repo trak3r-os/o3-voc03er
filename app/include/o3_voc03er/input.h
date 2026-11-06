@@ -104,7 +104,7 @@ class InputMeter {
 // `voc <bands|talk|tune> [notes 0..8]`: the mode and how many notes the console holds (the unit round has no person at the pads).
 inline constexpr unsigned kVocMaxNotes = 8;
 struct VocCommand {
-  unsigned mode = 0;  // Vocoder::Mode: 0 bands, 1 talk, 2 tune
+  unsigned mode = 0;  // Vocoder::Mode: 0 bands, 1 talk, 2 tune, 3 robot (the console parser still knows three)
   unsigned notes = 0;
 };
 // false (out untouched) for a word that is not a mode, a count that is not 0..8 or an extra word. No count means 0 (release all).

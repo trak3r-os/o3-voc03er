@@ -12,10 +12,12 @@
 //   4 Dry      0..1: the dry modulator mixed into the output (default 0)
 //   5 Level    dB, -48..+6
 //   6 Detune   cents, 0..20 (default 8): the second oscillator of each carrier voice, sharp of the first
-//   7 Mode     0 BANDS, 1 TALK, 2 TUNE (default BANDS): the Carrier goes through Bands or through Talk (LPC talkbox); TUNE is the voice
+//   7 Mode     0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT (default BANDS): the Carrier goes through Bands or through Talk (LPC talkbox); TUNE is the voice
 //              itself, pitch-corrected (autotune.h): the carrier, Bands and Talk do not run (the notes still count: they are the
-//              target of NOTES-IN). A 10 ms crossfade between any two modes (one ramp per mode), and only the active mode runs,
-//              except during the crossfade; a mode that was not running starts from a clean state when it is entered
+//              target of NOTES-IN). ROBOT is BANDS (the same engine, not a second one) followed by a fast compressor on its wet sum
+//              (robot.h: 1 ms attack, 50 ms release, 4:1, make-up), so a voice that changes level comes out nearly flat. A 10 ms
+//              crossfade between any two modes (one ramp per mode), and only the active mode runs, except during the crossfade;
+//              a mode that was not running starts from a clean state when it is entered (a BANDS to ROBOT switch keeps the engine going)
 //   8 Quality  LPC order 8..24 (default 16), Talk only
 //   9 Freeze   0 off, 1 on: Talk stops updating its reflection coefficients (a held vowel)
 //  10..21    Loops, three for each of the four loops n = 0..3 (ids 10 + 3n + field; Vocoder::loop_param):
@@ -85,6 +87,7 @@
 #include <o3_voc03er/units/vocoder/bands.h>
 #include <o3_voc03er/units/vocoder/carrier.h>
 #include <o3_voc03er/units/vocoder/loop.h>
+#include <o3_voc03er/units/vocoder/robot.h>
 #include <o3_voc03er/units/vocoder/talk.h>
 
 #include <o3sdk/dsp/smooth.h>
@@ -228,6 +231,8 @@ class Vocoder final : public o3sdk::dsp::Unit {
   o3sdk::dsp::Ramp bands_mix_{1.0f};  // one ramp per mode: 1 for the mode that is on, the others 0
   o3sdk::dsp::Ramp talk_mix_;
   o3sdk::dsp::Ramp tune_mix_;
+  o3sdk::dsp::Ramp robot_mix_;  // ROBOT: the BANDS wet sum through comp_; bands_ runs for it (one engine for both ramps)
+  RobotComp comp_;
   Loop loops_;
   // The carrier switch (render context only). sel_ is the CarSrc value; the ramps are 5 ms. pend_: the carrier-side loop gains each
   // event of this block set, in order, so run_loops can start the ramp at the same frame (the oldest are overwritten past 8).

@@ -20,7 +20,7 @@ inline constexpr const char* kKeyNames[12] = {"C", "C#", "D", "D#", "E", "F", "F
 inline constexpr const char* kScaleNames[kScaleTableCount] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
 inline constexpr const char* kCarrierNames[8] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE"};  // Vocoder::CarSrc 0..7
 inline constexpr const char* kKindNames[4] = {"TRIAD", "7TH", "OPEN", "POWER"};                                    // ChordKind
-inline constexpr const char* kModeNames[3] = {"BANDS", "TALK", "TUNE"};
+inline constexpr const char* kModeNames[4] = {"BANDS", "TALK", "TUNE", "ROBOT"};
 inline constexpr const char* kRowNames[4] = {"POWER", "OPEN", "7TH", ""};  // the bottom row's name is the kind's
 
 inline constexpr unsigned kLabelChars = 11;  // a pad's label: a chord's name fits kChordNameMax (12) with its terminator
@@ -39,8 +39,11 @@ inline float capture_stop_at(unsigned bars, float bar, bool playing) noexcept {
   return playing ? (static_cast<float>(bars) - 0.5f) * bar : static_cast<float>(bars) * bar;
 }
 
-// The mode index of the unit's Mode value (the app's mode_index).
-constexpr unsigned mode_index(float v) noexcept { return v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u); }
+// The mode index of the unit's Mode value (0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT): it names the mode (kModeNames). The app's own mode_index (app.cpp) still
+// knows three.
+constexpr unsigned mode_index(float v) noexcept { return v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u)); }
+// What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page.
+constexpr unsigned mode_page(unsigned mode) noexcept { return mode == 3u ? 0u : mode; }
 
 // `value` stepped by `delta` and held inside lo..hi (no wrap).
 constexpr int step_clamped(int value, int delta, int lo, int hi) noexcept {
@@ -318,7 +321,7 @@ constexpr unsigned preset_step(unsigned cur, int delta, unsigned count) noexcept
 // The pad of the formant strip in force: `col` holds `formant` (both middle pads at 0).
 constexpr bool formant_lit(int formant, unsigned col) noexcept { return col < 12u && kFormantStrip[col] == formant; }
 
-// The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE) picks F8's word.
+// The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT) picks F8's word.
 inline constexpr unsigned kKeyHintMax = 40;  // characters of the Micro face that fit beside the pads' hint
 // With a picker open the line right of the grid is empty and the left one says what its keys do (perform_screen.cpp).
 inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNoShiftFocus) noexcept {
@@ -344,12 +347,12 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
     return "ENCODER FREE: IT BENDS THE PITCH";
   }
   static constexpr const char* kHints[7] = {
-      "F1 MODE: BANDS, TALK OR TUNE",           "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
+      "F1 MODE: BANDS, TALK, TUNE OR ROBOT",    "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
       "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: THE KIND ON THE BOTTOM ROW",
       "F7 PADS: CHORDS OR KEYS. SHIFT: BEND ROW",
   };
   static constexpr const char* kF8[3] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
-  return focus < 7u ? kHints[focus] : kF8[mode < 3u ? mode : 0u];
+  return focus < 7u ? kHints[focus] : kF8[mode_page(mode < 4u ? mode : 0u)];
 }
 
 }  // namespace o3_voc03er::perform
