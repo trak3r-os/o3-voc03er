@@ -337,6 +337,18 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
   row above the strip plays F6 CHORD's kind, so no kind is lost: the three rows are that kind, 7TH and OPEN, or the next ones when that kind is one of them. On SAMPLE the strip takes the bottom row and one chord row stays. LEDs: the middle pair `kLedDim`, the held pad
   `kLedOn`.
 
+## 7c. MIDI in
+
+Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns played from MIDI in, pitch bend included, so that the machine can sequence what it recorded, from an outside sequencer or from its own PATTERN.
+
+- **The carrier.** `ctx.midi().route(unit, 0)`: the notes of the user's channel reach the unit at their frame, about 1.5 ms after they came in, and play the SYNTH carrier beside the pads, sharing its voices. `Vocoder::apply` takes them already and also gives them to TUNE, so they serve NOTES-IN too. Only SYNTH sounds them: another carrier has no notes to play.
+- **Pitch bend.** `App::midi()` scales the message into BEND RANGE and writes `Bend`, the parameter of section 7b. The encoder's spring does not touch it: the sender holds its own wheel. As in 7b it moves the SYNTH carrier only; a slot reads at three fixed speeds, and bending one needs a variable-speed read that this design does not have.
+- **Controllers.** The kit's MIDI learn, up to 16 bindings, on any parameter of the unit.
+- **Clock.** FOLLOW in the system Config, as the kit gives it.
+- **Slices.** A note fires a slice, the velocity sets its level. These go by `route` and not through `App::midi()`, because at the worst load the main loop runs at about half speed. The slice decides how the unit tells them from the carrier's notes: a note range, or a second channel if a second route to one unit proves to work.
+- **Patterns.** A program change picks pattern A to H at the next bar line, through `App::midi()`, where the main loop's delay does not matter. MIDI notes record into PATTERN's lanes as the pads do, quantised.
+- **Ports.** USB was measured in o3-303 on 2026-11-01, not at this load. DIN has not been run: there is no interface at the bench.
+
 ## 8. What the unit and the app need
 
 **The unit (`units/vocoder/`, parameters appended, never inserted; ids 40 and 41 are FORMANT and THRU, slice V2f of `docs/PLAN.md`; these from 42 on):**
@@ -427,4 +439,7 @@ screen it touches. The unit checks owed are named, not run here.
 | U8 | SAMPLE LOAD and SAVE WAV: the WAV reader, the picker, the load into a slot, the staging region | `sample_load.txt` (`--card` with a mono and a stereo WAV, a 48 kHz one refused) |
 | U9 | TALK and TUNE voiceprints, PARAMS, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `params.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
 | U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
+| M1 | MIDI in, first step (section 7c): notes to the SYNTH carrier and to NOTES-IN, right after U1; then pitch bend to `Bend`, after U2b; learn and FOLLOW checked on this app | `midi.txt` (notes and a bend in, a WAV of each); on the unit, USB notes and a bend at the 72.9 % load |
+| M2 | Slices by MIDI note, velocity as level, after U5 | `midi_slices.txt` (notes over a latched chord, a WAV); timing on the unit against the pads |
+| M3 | Patterns by program change at the bar line, MIDI recorded into PATTERN, after U6 | `midi_pattern.txt`; on the unit, an outside sequencer with FOLLOW on |
 | U11 | The unit round: the skin's frame time against the audio at the 72.9 % case and the 15 Hz policy, the LEDs' levels by eye, HELP's caps legible, the microphone, a capture through a real source, the slices heard, the synth's cost at eight notes with SPREAD | `hw-session` checklist; not a slice of code |

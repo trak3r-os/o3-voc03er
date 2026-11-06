@@ -69,6 +69,7 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V2f | `Bands`: FORMANT, the spectral envelope moved up or down (survey item 5, about 1.2 % of a block [est]), a new value on PARAMS page SHAPE; graded follower rates and the high-band modulator thru, THRU (items 2 and 3), all three accepted by the maintainer 2026-11-06. Parameter ids 40 and 41. After V2e, whose restructure it builds on | Host tests, scenario, unit, ears | Started 2026-11-06 |
 | V7 | The 2040 layer, slice by slice | | |
 | U1 to U11 | The new interface, the sample slots and slices, the chord pads and the carrier synth: `docs/UI-DESIGN.md` section 12. The maintainer accepted the design and its section 11 recommendations on 2026-11-06, with the skin still to choose (`docs/ui-skins.html`) | Each slice as that table says | U1 started 2026-11-06: SRAM relief and the chord engine first |
+| M1 to M3 | MIDI in: the carrier by notes, pitch bend, controllers, the clock, then slices and patterns: `docs/UI-DESIGN.md` section 7c and section 12 | Scenarios, unit over USB at the worst load; DIN owed | Asked by the maintainer 2026-11-06 |
 
 ## 4. The audio-in gate (design section 8)
 
