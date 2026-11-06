@@ -897,7 +897,7 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   }
   switch (focus_) {
     case 0:
-      (void)e.set_param(voice_, Vocoder::Mode, static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, 2)));
+      (void)e.set_param(voice_, Vocoder::Mode, static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, 3)));
       break;
     case 1:
       if (delta != 0) {
@@ -925,7 +925,7 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
       }
       break;
     default:
-      if (mode == 0u) {  // SPREAD: the detune, cents
+      if (pl::mode_page(mode) == 0u) {  // SPREAD: the detune, cents (BANDS and ROBOT)
         (void)e.set_param(voice_, Vocoder::Detune,
                           static_cast<float>(pl::step_clamped(static_cast<int>(round_param(e, voice_, Vocoder::Detune)), delta * (coarse ? 5 : 1), 0, 20)));
       } else if (mode == 1u) {  // QUALITY: the LPC order
@@ -1031,7 +1031,8 @@ namespace {
 // An F key's name: the skin's F row and HELP's caps. F8 is the mode's own value.
 const char* fkey_name(unsigned key, unsigned mode) noexcept {
   static constexpr const char* kNames[] = {"MODE", "SPEAKS", "SOUNDS", "KEY", "SCALE", "CHORD", "PADS"};
-  return key < 7u ? kNames[key] : (mode == 0u ? "SPREAD" : (mode == 1u ? "QUALITY" : "SPEED"));
+  const unsigned page = pl::mode_page(mode);
+  return key < 7u ? kNames[key] : (page == 0u ? "SPREAD" : (page == 1u ? "QUALITY" : "SPEED"));
 }
 
 }  // namespace
@@ -1131,7 +1132,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   set(6, keys_ ? (strip_ ? "KEYS +B" : "KEYS") : (strip_ ? "CHORDS +B" : "CHORDS"));
   {
     char num[12] = {};
-    if (mode == 0u) {
+    if (pl::mode_page(mode) == 0u) {
       const unsigned ct = round_param(e, voice_, Vocoder::Detune);
       (void)pl::format_uint(ct, num);
       append(keys[7].value, num);
@@ -1195,7 +1196,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   }
 
   ornoir::Voiceprint vp;
-  vp.bars = mode == 0u;
+  vp.bars = pl::mode_page(mode) == 0u;  // BANDS and ROBOT draw the bars
   std::memcpy(vp.level, g_pd.level, sizeof vp.level);
   std::memcpy(vp.peak, g_pd.peak, sizeof vp.peak);
 
@@ -1396,7 +1397,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
               "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
-  h.fkey[0] = "BANDS, TALK, TUNE";
+  h.fkey[0] = "BANDS, TALK, TUNE, ROBOT";
   h.fkey[1] = "A LIST OF WHAT TALKS";
   h.fkey[2] = "A LIST OF THE CARRIERS";
   h.fkey[3] = "THE SCALE'S ROOT";
@@ -1406,7 +1407,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row
     h.fkey_shift[i] = pl::kShiftKeys[i].name;
   }
-  h.fkey[7] = mode == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");
+  h.fkey[7] = pl::mode_page(mode) == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "VALUE OR BEND (SHIFT COARSE)";

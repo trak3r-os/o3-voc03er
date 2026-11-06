@@ -81,7 +81,8 @@ void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocoder*
 
 // F1..F8 follow the mode: TUNE has its own values (key, scale, speed, amount, notes in); the other modes keep the vocoder's page.
 void PlayScreen::sync_page(const dsp::Engine& e) const noexcept {
-  const bool tune = e.param(voice_, Vocoder::Mode) >= 1.5f;
+  const float mode_v = e.param(voice_, Vocoder::Mode);
+  const bool tune = mode_v >= 1.5f && mode_v < 2.5f;  // ROBOT (3) keeps the BANDS page
   if (tune == tune_page_) {
     return;
   }
@@ -236,7 +237,7 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
   pct[n++] = '%';
   r.text(rx + rw - 54, area.y + 32, clip ? "CLIP" : pct, clip ? Color::Accent : Color::Text, Face::Label);
   const float mode_v = ctx.engine().param(voice_, Vocoder::Mode);
-  const char* mode_name = mode_v >= 1.5f ? "TUNE" : (mode_v >= 0.5f ? "TALK" : "BANDS");
+  const char* mode_name = mode_v >= 2.5f ? "ROBOT" : (mode_v >= 1.5f ? "TUNE" : (mode_v >= 0.5f ? "TALK" : "BANDS"));
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
   r.text(rx, area.y + 54, "MODE", Color::TextDim, Face::Label);
   r.text(rx + 48, area.y + 54, mode_name, Color::Text, Face::Label);
@@ -383,8 +384,9 @@ void PlayScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {"BLACK KEYS", "THE SEMITONES, THE SAME", Color::Instr},
   };
   h.summary = "THE AUDIO INPUT SPEAKS THROUGH THE PADS' CHORD. F1-F8 POINT THE ENCODER AT A VALUE (A TAP LATCHES IT) AND THE ENCODER CHANGES IT.";
-  h.fkey[0] = "BANDS, TALK, TUNE";
-  if (ctx.engine().param(voice_, Vocoder::Mode) >= 1.5f) {  // TUNE: the F keys follow sync_page()
+  h.fkey[0] = "BANDS, TALK, TUNE, ROBOT";
+  const float help_mode = ctx.engine().param(voice_, Vocoder::Mode);
+  if (help_mode >= 1.5f && help_mode < 2.5f) {  // TUNE: the F keys follow sync_page()
     h.summary = "TUNE: THE VOICE IS PITCH-CORRECTED TO THE KEY AND SCALE, OR TO THE HELD PADS. F1-F8 POINT THE ENCODER AT A VALUE.";
     h.fkey[1] = "KEY";
     h.fkey[2] = "SCALE";

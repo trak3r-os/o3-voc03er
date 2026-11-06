@@ -1,0 +1,37 @@
+# ROBOT: the mode key cycles BANDS, TALK, TUNE, ROBOT; ROBOT draws the bars of BANDS and levels the voice with a fast compressor. The input
+# tone steps 12 dB down and up, and the WAV shows how much of that comes out. The simulator feeds a synthetic tone: it shows the screen and
+# the level behaviour, it cannot say how a voice sounds in ROBOT; that is by ear on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/robot.txt --out <dir>   (the dir must exist)
+record on
+input tone 220 -12
+paddown 36
+paddown 40
+paddown 43
+wait 600
+snap 01_bands
+tap f1
+tap f1
+wait 100
+tap f1
+wait 100
+tap f1
+wait 600
+snap 02_robot
+input tone 220 -24
+wait 500
+snap 03_robot_quiet
+input tone 220 -12
+wait 500
+snap 04_robot_loud
+input tone 220 -24
+wait 500
+input tone 220 -12
+wait 500
+tap f1
+wait 600
+snap 05_f1_stays_at_robot
+padup 36
+padup 40
+padup 43
+wait 300
+wav robot

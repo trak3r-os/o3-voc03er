@@ -131,7 +131,9 @@ void Autotune::new_estimate(float f) {
   period_ = period_ < kMinPeriod ? kMinPeriod : (period_ > kMaxPeriod ? kMaxPeriod : period_);
   inv_period_ = 1.0f / period_;
   m_ = 69.0f + 12.0f * std::log2(f * (1.0f / 440.0f));
-  m_s_ = cur_ < 0 || !was_voiced_ ? m_ : m_s_ + kSmooth * (m_ - m_s_);
+  // At SPEED 0 (alpha_ == 1) the decision pitch is the estimate itself: the smoothing would make the target lag a moving pitch and soften
+  // the hard effect. kSnapBias in pick() still holds the note at an edge. Every other speed keeps the smoothing.
+  m_s_ = alpha_ >= 1.0f || cur_ < 0 || !was_voiced_ ? m_ : m_s_ + kSmooth * (m_ - m_s_);
   float target;
   if (notes_in_ && held_n_ > 0) {
     const float nt = static_cast<float>(held_[held_n_ - 1]);

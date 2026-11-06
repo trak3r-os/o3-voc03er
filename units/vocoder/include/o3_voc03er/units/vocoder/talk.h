@@ -47,6 +47,24 @@
 
 namespace o3_voc03er {
 
+// The talkbox's compression driver, on the carrier at the full rate and before the decimators (they remove what the clip makes above fs/4):
+// a one-pole high-pass at kDriveHz, then a cubic soft clip. A driver in a talkbox is band-limited and saturates. Small-signal gain is
+// kDriveGain; the output is bounded by kDriveOut. In place, no libm and no division per sample.
+class CarDrive {
+ public:
+  static constexpr float kDriveHz = 250.0f;
+  static constexpr float kClipAt = 0.75f;    // the clip's knee: the input at which the cubic flattens
+  static constexpr float kDriveGain = 1.6f;  // make-up (+4 dB): the high-pass takes about 3.5 dB off a 100 Hz saw (docs/ENGINE-REALISM.md); by ear
+  static constexpr float kDriveOut = kDriveGain * kClipAt * (2.0f / 3.0f);  // the bound of |output|
+  void prepare(float sample_rate) noexcept;
+  void reset() noexcept { x1_ = y1_ = 0.0f; }
+  void process(float* x, std::uint32_t n) noexcept;
+
+ private:
+  float a_ = 0.965f;
+  float x1_ = 0.0f, y1_ = 0.0f;
+};
+
 class Talk {
  public:
   static constexpr std::uint32_t kMaxFrames = 64;
@@ -122,6 +140,7 @@ class Talk {
   float sumw2_ = 1.0f;
   float emph_prev_ = 0.0f;
   float car_prev_ = 0.0f;
+  CarDrive drive_;       // the carrier's high-pass and clip, at the full rate
   float gain_ = 0.0f, gain_t_ = 0.0f, dgain_ = 0.0f;
   // Breath: high-pass biquad (transposed direct form II), `open` and its ramp. thru_ is written by set_thru, read by process (one context).
   float hp_b0_ = 0.0f, hp_b1_ = 0.0f, hp_b2_ = 0.0f, hp_a1_ = 0.0f, hp_a2_ = 0.0f;
