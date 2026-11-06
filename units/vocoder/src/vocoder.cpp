@@ -21,6 +21,7 @@ constexpr const char* kNotesInNames[] = {"OFF", "ON"};
 constexpr const char* kGateNames[] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
 constexpr const char* kModNames[] = {"LIVE", "NONE", "-", "SLOT1", "SLOT2", "SLOT3", "SLOT4"};
 constexpr const char* kArpNames[] = {"OFF", "UP", "DOWN", "UP-DOWN", "RANDOM"};
+constexpr const char* kLiveChNames[] = {"L", "R"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
 constexpr const char* kRecNames[] = {"OFF", "ARM"};
@@ -74,6 +75,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"GATE", "", kGateNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"ARP", "", kArpNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"MOD SRC", "", kModNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"LIVE CH", "", kLiveChNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -198,6 +200,9 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
   switch (id) {
     case ModSrc:
       msel_ = static_cast<unsigned>(v + 0.5f);
+      break;
+    case LiveCh:
+      live_r_ = v >= 0.5f;
       break;
     case Wave:
       carrier_.set_wave(v >= 0.5f ? Carrier::Wave::Pulse : Carrier::Wave::Saw);
@@ -892,7 +897,11 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
       },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
   if (live_car_.value() > 0.0f || live_car_.target_value() > 0.0f) {  // CarSrc LIVE: the live input, before run_loops takes it out of mod
-    for (std::uint32_t i = 0; i < n; ++i) car[i] += live_car_.next() * mod[i] * (gated ? gain[i] : 1.0f);  // GATE cuts it like any carrier
+    const float* right = live_r_ ? args.in_r : nullptr;  // USB: SOUNDS takes the right channel, SPEAKS stays on the left
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const float x = right != nullptr ? Bands::clean(right[i]) : mod[i];
+      car[i] += live_car_.next() * x * (gated ? gain[i] : 1.0f);  // GATE cuts it like any carrier
+    }
   }
   if (gated) {  // GATE cuts the loops that play as the carrier by the same envelope as the synth
     float lcar[Bands::kMaxFrames];

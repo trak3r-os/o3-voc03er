@@ -49,6 +49,9 @@ TEST_CASE("route: roles follow the pair") {
   CHECK(roles(Route{kSpeaksLive, kSoundsLive}).adc);
   CHECK(usb_channel(Side::Speaks) == 0u);
   CHECK(usb_channel(Side::Sounds) == 1u);
+  CHECK(std::string(live_name("LINE", false, Side::Sounds)) == "LINE");
+  CHECK(std::string(live_name("USB", true, Side::Speaks)) == "USB L");
+  CHECK(std::string(live_name("USB", true, Side::Sounds)) == "USB R");
 }
 
 TEST_CASE("route: the one rule dims a second live source on the other side") {

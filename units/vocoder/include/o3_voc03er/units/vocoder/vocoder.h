@@ -40,11 +40,12 @@
 //            frame: set it to CAR first for a clean change). Nothing here touches the live input: it cannot be a carrier (its source
 //            switch settles for 200 ms). No click: the synth's gain, the noise amount and each loop's carrier gain move in a 5 ms ramp
 //            from the event's frame (the noise amount in slices of 16 samples, since the Carrier takes it once a run).
-//            7 LIVE: the live input (in_l, the ADC source or USB R) is the carrier: the synth and the CAR loops are muted, the same 5 ms ramp
-//            (from the start of the block the event lands in). GATE and ARP do not act on it. The ADC source itself is the app's.
+//            7 LIVE: the live input (in_l, or in_r with LiveCh) is the carrier: the synth and the CAR loops are muted, the same 5 ms ramp
+//            (from the start of the block the event lands in). GATE cuts it like any carrier, ARP does not act on it. The ADC source itself is the app's.
 //  47        ModSrc  0 LIVE (default, the modulator as before), 1 NONE, 3..6 SLOT 1..4 (CarSrc's values): what speaks. NONE or a slot take the live
 //            input out of the modulator sum (no bleed; a recording still takes it); a slot plays as the modulator whatever its role, unless it
 //            is also the CarSrc. Acts from the block it lands in. 2 acts as NONE.
+//  48        LiveCh  0 L (default), 1 R: the channel CarSrc 7 reads. The app sets R with USB, the one stereo source, so SPEAKS takes USB L and SOUNDS USB R.
 //  35..39    TUNE (Autotune; they act in TUNE only, but are stored in every mode):
 //            35 Key     C..B (default C); 36 Scale CHROM, MAJOR, MINOR, MAJ-P, MIN-P, BLUES, DORIAN (default CHROM): the notes to snap to
 //            37 Speed   ms, 0..500 (default 25): the one-pole of the correction; 0 is the hard, stepped sound
@@ -98,7 +99,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, ModSrc, kParamCount };
+                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, ModSrc, LiveCh, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
@@ -193,6 +194,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   unsigned sel_ = 0;
   unsigned msel_ = 0;                // ModSrc: 0 LIVE, 1 NONE, 3..6 the slot that speaks (any other value acts as NONE)
   o3sdk::dsp::Ramp live_car_;        // the live input on the carrier bus (CarSrc 7), 5 ms
+  bool live_r_ = false;              // LiveCh: that input is in_r
   float noise_user_ = 0.0f;
   o3sdk::dsp::Ramp synth_gain_{1.0f};
   o3sdk::dsp::Ramp noise_amt_;

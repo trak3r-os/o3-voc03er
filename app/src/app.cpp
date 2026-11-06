@@ -479,6 +479,8 @@ class MyApp final : public app::App {
   // The one place a source is chosen (the console's `ain` and the SAMPLE PLAY key): the meter forgets the old source's peaks.
   bool select_source(hal::capture::Source src, unsigned gain) noexcept {
     const bool acked = ctx_->audio_in().select(src, gain);
+    // USB is the one stereo source: a live carrier takes its right channel, what speaks stays on the left.
+    (void)ctx_->engine().set_param(voc_id_, o3_voc03er::Vocoder::LiveCh, src == hal::capture::Source::Usb ? 1.0f : 0.0f);
     meter_.reset(ctx_->uptime_ms(), o3_voc03er::InputMeter::kSelectHoldoffMs);
     return acked;
   }

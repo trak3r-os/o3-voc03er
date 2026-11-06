@@ -68,6 +68,8 @@ constexpr Roles roles(Route r) noexcept {
 
 // The ADC feeds a side's LIVE row; with USB the two sides take its two channels (SPEAKS USB L, SOUNDS USB R). 0 left, 1 right.
 constexpr unsigned usb_channel(Side s) noexcept { return s == Side::Speaks ? 0u : 1u; }
+// The name of a side's LIVE: the source's label, and with USB the channel that side takes.
+constexpr const char* live_name(const char* label, bool usb, Side s) noexcept { return !usb ? label : (usb_channel(s) == 0u ? "USB L" : "USB R"); }
 
 // A picker row: what it offers. Live is the LIVE row with the name of the source in force; Source is any other live source.
 enum class Kind : std::uint8_t { Synth, Noise, Live, Source, Slot };

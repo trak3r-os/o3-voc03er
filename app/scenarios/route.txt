@@ -56,4 +56,17 @@ tap f2
 tap f8
 wait 100
 snap 15_backed_out
+# USB as the live source: the LIVE row and the header read USB L on SPEAKS and USB R on SOUNDS.
+tap f2
+turn 6
+snap 16_usb_cursor
+tap f1
+wait 300
+snap 17_usb_speaks
+tap f3
+tap down
+snap 18_sounds_usb_r
+tap f3
+wait 100
+snap 19_usb_both
 wav route

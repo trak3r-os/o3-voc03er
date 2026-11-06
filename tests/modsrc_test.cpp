@@ -32,14 +32,14 @@ struct Rig {
     tr.playing = false;
     tr.tempo_mbpm = 120'000;
   }
-  std::vector<float> block(const float* in, std::vector<dsp::Event> ev = {}) {
+  std::vector<float> block(const float* in, std::vector<dsp::Event> ev = {}, const float* right = nullptr) {
     constexpr std::uint32_t n = 64;
     std::vector<float> out(n), r(n), zero(n, 0.0f);
     dsp::ProcessArgs a{};
     a.events = ev.data();
     a.event_count = static_cast<std::uint32_t>(ev.size());
     a.in_l = in != nullptr ? in : zero.data();
-    a.in_r = a.in_l;
+    a.in_r = right != nullptr ? right : a.in_l;
     a.out_l = out.data();
     a.out_r = r.data();
     a.frames = n;
@@ -86,7 +86,7 @@ float energy(const std::vector<float>& v, float hz) {
 }  // namespace
 
 TEST_CASE("ModSrc: the ids and the table") {
-  static_assert(Vocoder::ModSrc == 47 && Vocoder::kParamCount == 48, "append only");
+  static_assert(Vocoder::ModSrc == 47 && Vocoder::LiveCh == 48 && Vocoder::kParamCount == 49, "append only");
   Vocoder u;
   const auto& info = u.info();
   CHECK(info.params[Vocoder::ModSrc].max == 6.0f);
@@ -140,6 +140,27 @@ TEST_CASE("CarSrc LIVE: the live input is the carrier, the synth is not") {
   const auto yl = run(lv, x, 80, {dsp::param_change(Vocoder::CarSrc, 7.0f)});
   CHECK(rms(ys) < 1.0e-4f);  // no note held: the synth is silent
   CHECK(rms(yl) > 1.0e-3f);  // the voice through itself
+}
+
+TEST_CASE("LiveCh: USB speaks on the left and sounds on the right") {
+  // The voice is on the left; the right channel is silent or carries the same tone. Only LiveCh R makes the carrier follow the right one.
+  const auto x = tone(8192, 300.0f, 0.4f);
+  const std::vector<float> zero(8192, 0.0f);
+  const auto level = [&](float ch, const std::vector<float>& right) {
+    Rig r;
+    float peak = 0.0f;
+    for (unsigned b = 0; b < 100; ++b) {
+      const std::size_t off = static_cast<std::size_t>(b) * 64u;
+      const std::vector<dsp::Event> ev = b == 0 ? std::vector<dsp::Event>{dsp::param_change(Vocoder::CarSrc, 7.0f), dsp::param_change(Vocoder::LiveCh, ch)}
+                                                : std::vector<dsp::Event>{};
+      const float now = rms(r.block(x.data() + off, ev, right.data() + off));
+      peak = b >= 60 && now > peak ? now : peak;
+    }
+    return peak;
+  };
+  CHECK(level(0.0f, zero) > 1.0e-3f);  // L: the left channel through itself, whatever the right one holds
+  CHECK(level(1.0f, zero) < 1.0e-5f);  // R and a silent right channel: no carrier, no sound
+  CHECK(level(1.0f, x) > 1.0e-3f);     // R and a tone on the right: the voice speaks through it
 }
 
 TEST_CASE("CarSrc LIVE: GATE cuts it like any carrier") {

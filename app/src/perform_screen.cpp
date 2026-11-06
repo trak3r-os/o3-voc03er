@@ -614,7 +614,7 @@ void PerformScreen::build_picker(app::Context& ctx) noexcept {
         break;
       case route::Kind::Live:
         put(pr.name, "LIVE");
-        put(pr.note, kSources[static_cast<unsigned>(cur)].label);
+        put(pr.note, route::live_name(kSources[static_cast<unsigned>(cur)].label, kSources[static_cast<unsigned>(cur)].source == hal::capture::Source::Usb, side));
         pr.on = now == (side == route::Side::Speaks ? route::kSpeaksLive : route::kSoundsLive);
         break;
       case route::Kind::Source:
@@ -1097,10 +1097,11 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
 
   const route::Route rt = route_of(e, voice_);
   const char* live = src != nullptr ? src->label : "NONE";
+  const bool usb = src != nullptr && src->source == hal::capture::Source::Usb;
   ornoir::HeaderState h;
-  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (rt.speaks == route::kSpeaksLive ? live : "NONE");
+  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (rt.speaks == route::kSpeaksLive ? route::live_name(live, usb, route::Side::Speaks) : "NONE");
   h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
-                                                                              : (rt.sounds == route::kSoundsLive ? live : pl::kCarrierNames[car < 8u ? car : 0u]);
+                                                                              : (rt.sounds == route::kSoundsLive ? route::live_name(live, usb, route::Side::Sounds) : pl::kCarrierNames[car < 8u ? car : 0u]);
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = st.tempo_mbpm / 100u;

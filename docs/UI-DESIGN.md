@@ -388,8 +388,9 @@ Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns 
 | 42 | Bend | semitones, -12..12: the SYNTH carrier's increments, once a block through a `dsp::Ramp` (20 ms) |
 | 43 | Vib | 0..1: a ~5.5 Hz vibrato, +-0.5 st at 1, added to Bend; 0 is bit-identical to no vibrato |
 | 47 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
-| 48 .. 59 | Slot n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples (both exact in a float up to 16.7 M; a slot is 705,600) at the slot's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT); a whole-loop play of that slot pauses under a slice and resumes at its position |
-| 60 .. 63 | Slot n Loaded | the length of a sample the app wrote into the slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it |
+| 48 | LiveCh | 0 L, 1 R: the channel a live carrier reads. The app writes R with USB (section 2): SPEAKS takes USB L, SOUNDS USB R. Built in U3c |
+| 49 .. 60 | Slot n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples (both exact in a float up to 16.7 M; a slot is 705,600) at the slot's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT); a whole-loop play of that slot pauses under a slice and resumes at its position |
+| 61 .. 64 | Slot n Loaded | the length of a sample the app wrote into the slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it |
 | CarSrc | value 7 LIVE | `in_l` on the carrier bus: the line, the radio or USB R sounds. A routing inside the unit, instant and click-free with the same 5 ms ramp; the ADC source itself is the app's one `AudioIn::select` |
 
 The slots' roles (`Loop n Role`) stay the unit's mechanism; the app sets them from the two pickers. `Loop` grows `start_region(i, a, b)` and a

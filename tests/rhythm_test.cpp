@@ -180,7 +180,7 @@ TEST_CASE("rhythm: GLIDE is parameter 44, GATE 45 and ARP 46, all default 0") {
   CHECK(Vocoder::Glide == 44);
   CHECK(Vocoder::Gate == 45);
   CHECK(Vocoder::Arp == 46);
-  CHECK(Vocoder::kParamCount == 48);
+  CHECK(Vocoder::kParamCount == 49);
   Vocoder v;
   CHECK(v.info().params[Vocoder::Glide].def == 0.0f);
   CHECK(v.info().params[Vocoder::Glide].max == 500.0f);

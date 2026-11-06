@@ -24,7 +24,7 @@ constexpr float kFs = 44100.0f;
 constexpr float kPi2 = 6.2831853f;
 using LF = Vocoder::LoopField;
 
-static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::CarSrc == 34 && Vocoder::NotesIn == 39 && Vocoder::Bend == 42 && Vocoder::Vib == 43 && Vocoder::Glide == 44 && Vocoder::Gate == 45 && Vocoder::Arp == 46 && Vocoder::ModSrc == 47 && Vocoder::kParamCount == 48, "ids are append-only: the first ten never move");
+static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::CarSrc == 34 && Vocoder::NotesIn == 39 && Vocoder::Bend == 42 && Vocoder::Vib == 43 && Vocoder::Glide == 44 && Vocoder::Gate == 45 && Vocoder::Arp == 46 && Vocoder::ModSrc == 47 && Vocoder::kParamCount == 49, "ids are append-only: the first ten never move");
 static_assert(Vocoder::loop_param(3, LF::Level) == 33 && Vocoder::loop_param(1, LF::Dir) == 26 && Vocoder::loop_param(3, LF::Role) == 21, "four loops of three parameters from id 10");
 
 // A transport at 120 BPM, playing, `tick` ticks into the run (so the bar lines are at multiples of 3840).
