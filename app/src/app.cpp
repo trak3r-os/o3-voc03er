@@ -67,12 +67,8 @@ constexpr app::DiagCommand kCommands[] = {
     {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
-// The console's limits (check_app_row in the mk66 platform). A row past them is dropped on the unit with only a log line, and the host
-// never runs that check, so a long help text costs a whole unit round: the first G0 round measured nothing for this.
 constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
 constexpr unsigned mode_index(float v) noexcept { return v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u); }
-constexpr std::size_t kConsoleNameMax = 7;
-constexpr std::size_t kConsoleHelpMax = 70;
 
 constexpr std::size_t text_length(const char* s) noexcept {
   std::size_t n = 0;
@@ -82,13 +78,16 @@ constexpr std::size_t text_length(const char* s) noexcept {
   return n;
 }
 
+// A row past the console's limits is dropped on the unit with only a log line, and the host never runs that check, so a long help text costs
+// a whole unit round: the first G0 round measured nothing for this.
 constexpr bool commands_fit() noexcept {
   for (const app::DiagCommand& c : kCommands) {
-    if (text_length(c.name) > kConsoleNameMax || text_length(c.help) > kConsoleHelpMax) {
+    const std::size_t name = text_length(c.name);
+    if (name < app::kDiagNameMin || name > app::kDiagNameMax || text_length(c.help) > app::kDiagHelpMax) {
       return false;
     }
   }
-  return true;
+  return sizeof kCommands / sizeof kCommands[0] <= app::kDiagMaxCommands;
 }
 static_assert(commands_fit(), "a console command's name or help is too long: the unit would drop it");
 
