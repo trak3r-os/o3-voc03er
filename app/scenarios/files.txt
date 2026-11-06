@@ -52,7 +52,8 @@ expect state octave=-1
 expect state steps=4
 snap 04_after_reboot
 
-# No card: a save is refused at once and says NO CARD; the card back and it goes through.
+# No card: a save is refused at once and says NO CARD; the card back and it goes through. (FILE saves on the old PLAY screen only, until U9.)
+tap params
 card out
 wait 20
 tap file

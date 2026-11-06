@@ -30,6 +30,7 @@
 #include "perform_screen.h"
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
+#include "stub_screen.h"
 #include <o3_voc03er/carrier_seq.h>
 
 #include <o3_voc03er/input.h>
@@ -62,6 +63,23 @@ alignas(4) O3SDK_BIG std::uint8_t g_save_buf[o3_voc03er::kPatternFileMax] = {};
 alignas(4) O3SDK_BIG std::uint8_t g_cfg_buf[o3_voc03er::kConfigFileMax] = {};
 alignas(4) O3SDK_BIG std::uint8_t g_load_buf[o3_voc03er::kPatternFileMax] = {};
 static_assert(sizeof g_save_buf % 4 == 0 && sizeof g_cfg_buf % 4 == 0 && sizeof g_load_buf % 4 == 0, "word-aligned buffers are whole words");
+
+// The screens a later slice draws (docs/UI-DESIGN.md section 12), one row each: name, lane, the slice, a line of its own, HELP's summary.
+// The order is the one input() indexes.
+constexpr o3_voc03er::StubInfo kStubs[] = {
+    {"MASTER", nullptr, "BUILT IN SLICE U9", nullptr, "MASTER: THE LIVE SOURCE AND GAIN, MONITOR, DRY, OUTPUT LEVEL. NOT DRAWN YET: SLICE U9."},
+    {"SONG", nullptr, "BUILT IN SLICE U9", nullptr, "SONG: A CHAIN OF PATTERNS. NOT DRAWN YET: SLICE U9."},
+    {"FILE", nullptr, "BUILT IN SLICE U9", nullptr, "FILE: THE PROJECTS ON THE CARD. NOT DRAWN YET: SLICE U9."},
+    {"SAMPLE LOAD", nullptr, "BUILT IN SLICE U8", nullptr, "SAMPLE LOAD: THE WAV PICKER. NOT DRAWN YET: SLICE U8."},
+    {"SAMPLE", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE: THE SLOTS AND THEIR SLICES ON THE PADS. NOT DRAWN YET: SLICE U4."},
+    {"SAMPLE EDIT", nullptr, "BUILT IN SLICE U7", nullptr, "SAMPLE EDIT: TRIM AND CUT THE SELECTED SLOT. NOT DRAWN YET: SLICE U7."},
+    {"SAMPLE REC", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE REC: RECORD THE LIVE SOURCE INTO A SLOT. NOT DRAWN YET: SLICE U4."},
+    {"PATTERN", nullptr, "BUILT IN SLICE U6", nullptr, "PATTERN: THE 16-STEP SEQUENCER. NOT DRAWN YET: SLICE U6."},
+    {"PATTERN", "LANE: NOTE", "BUILT IN SLICE U6", nullptr, "PATTERN, THE NOTE LANE. NOT DRAWN YET: SLICE U6."},
+    {"PATTERN", "LANE: CARRIER", "BUILT IN SLICE U6", nullptr, "PATTERN, THE CARRIER LANE. NOT DRAWN YET: SLICE U6."},
+    {"PATTERN", "LANE: LEVEL", "BUILT IN SLICE U6", nullptr, "PATTERN, THE LEVEL LANE. NOT DRAWN YET: SLICE U6."},
+    {"PATTERN", "LANE: SLICE", "BUILT IN SLICE U6", nullptr, "PATTERN, THE SLICE LANE. NOT DRAWN YET: SLICE U6."},
+};
 
 class MyApp;
 MyApp& instance() noexcept;
@@ -126,6 +144,9 @@ class MyApp final : public app::App {
     console_notes_ = 0;
     play_.init(voice, &meter_, &voc_);
     perform_.init(voice, &meter_, &voc_, &step_source_cb, this);
+    stub_.init(voice);
+    // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
+    (void)ctx.midi().route(voice, 0);
     carriers_.init(voice);
     (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
@@ -191,14 +212,36 @@ class MyApp final : public app::App {
       ctx.show(perform_);
       return true;
     }
-    if (in.press(app::Button::Play)) {  // MODE: BANDS, TALK, TUNE, round; SHIFT + PLAY starts or stops the transport (the per-step carriers and the loops' bar lines run on it)
+    if (in.press(app::Button::Play)) {  // the transport, on every screen (the per-step carriers and the loops' bar lines run on it); MODE is F1 on PERFORM
       dsp::Engine& e = ctx.engine();
-      if (in.shift) {
-        (void)(e.playing() ? e.stop() : e.play());
-        ctx.redraw();
-        return true;
+      (void)(e.playing() ? e.stop() : e.play());
+      ctx.redraw();
+      return true;
+    }
+    // The other screen buttons open their screen (docs/UI-DESIGN.md section 3); the ones not yet drawn open the one StubScreen. The old PLAY
+    // screen keeps the buttons its own controls and the card jobs use until U4, so on it these do what they did.
+    if (ctx.screen() != &play_) {
+      struct Open {
+        app::Button button;
+        const o3_voc03er::StubInfo* info;
+      };
+      static constexpr Open kOpen[] = {
+          {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
+          {app::Button::SampleLoad, &kStubs[3]}, {app::Button::SamplePlay, &kStubs[4]}, {app::Button::SampleEdit, &kStubs[5]},
+          {app::Button::SampleRec, &kStubs[6]}, {app::Button::Pattern, &kStubs[7]},    {app::Button::Note, &kStubs[8]},
+          {app::Button::Instr, &kStubs[9]},     {app::Button::Vol, &kStubs[10]},       {app::Button::Fx, &kStubs[11]},
+      };
+      for (const Open& o : kOpen) {
+        if (in.press(o.button)) {
+          stub_.set(o.info);
+          ctx.show(stub_);
+          ctx.redraw();
+          return true;
+        }
       }
-      (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, static_cast<float>((mode_index(e.param(voc_id_, o3_voc03er::Vocoder::Mode)) + 1u) % 3u));
+    } else if (in.press(app::Button::Master) || in.press(app::Button::Song)) {
+      stub_.set(in.press(app::Button::Master) ? &kStubs[0] : &kStubs[1]);
+      ctx.show(stub_);
       ctx.redraw();
       return true;
     }
@@ -446,6 +489,7 @@ class MyApp final : public app::App {
   o3_voc03er::Vocoder voc_;
   o3_voc03er::PlayScreen play_;
   o3_voc03er::PerformScreen perform_;
+  o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::CarrierSeq carriers_;
 
   Op op_ = Op::None;

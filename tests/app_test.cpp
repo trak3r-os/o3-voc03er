@@ -8,6 +8,7 @@
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/platform/host/dir_card.h>
+#include <o3sdk/platform/host/fake_midi.h>
 #include <o3sdk/sim/harness.h>
 #include <o3sdk/sim/scenario.h>
 
@@ -262,4 +263,57 @@ TEST_CASE("app: a line source starts at gain 0, a switch clears the peaks, voc s
   cmd_run(1, "voc", "talk", "9", t);
   CHECK(t.find("usage") != std::string::npos);
   CHECK(h->engine().dropped_commands() == 0u);
+}
+
+TEST_CASE("app: a MIDI note plays the SYNTH carrier (M1: the unit is routed to the user's channel)") {
+  platform::host::FakeCapture cap;  // the vocoder speaks only while it hears a modulator
+  cap.input_tone(220.0f, -12.0f);
+  platform::host::FakeMidi midi;
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, &midi, nullptr, nullptr, &cap);
+  REQUIRE(h->start());
+  h->record(true);
+  h->run_ms(300);
+  CHECK(rms(h->audio(), 0) < 1e-6);  // no note yet: digital silence
+  const std::size_t before = h->audio().size();
+  midi.in(hal::midi::Port::Usb, 0x90, 48, 100);  // note on, channel 1, C3
+  h->run_ms(400);
+  CHECK(rms(h->audio(), before) > 1e-4);
+  CHECK(h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("app: PLAY is the transport and leaves MODE alone; every screen button opens a screen whose HELP holds to the limits") {
+  auto h = std::make_unique<sim::Harness>(o3sdk_app());
+  REQUIRE(h->start());
+  h->run_ms(100);
+  CHECK_FALSE(h->engine().playing());
+  tap(*h, app::Button::Play);
+  CHECK(h->engine().playing());
+  CHECK(state(*h).find("voc_mode=bands") != std::string::npos);
+  tap(*h, app::Button::Play);
+  CHECK_FALSE(h->engine().playing());
+
+  const app::Button screens[] = {app::Button::Performance, app::Button::Params, app::Button::Master, app::Button::Song, app::Button::File,
+                                 app::Button::SampleLoad,  app::Button::SamplePlay, app::Button::SampleEdit, app::Button::SampleRec,
+                                 app::Button::Pattern,     app::Button::Note, app::Button::Instr, app::Button::Vol, app::Button::Fx};
+  for (const app::Button b : screens) {
+    tap(*h, app::Button::Performance);  // from PERFORM the stubs open (the old PLAY screen keeps its own buttons)
+    h->run_ms(50);
+    tap(*h, b);
+    h->run_ms(100);
+    h->press(app::Button::Shift);
+    h->run_ms(2);
+    tap(*h, app::Button::Config);
+    h->release(app::Button::Shift);
+    h->run_ms(60);
+    INFO(std::string(app::button_name(b)));
+    REQUIRE(h->runtime().help_open());
+    app::HelpProblem p;
+    const bool ok = app::help_check(h->runtime().help_overlay().help(), &p);
+    CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+    CHECK(h->runtime().help_overlay().help().summary != nullptr);
+    tap(*h, app::Button::Config);
+    REQUIRE_FALSE(h->runtime().help_open());
+  }
+  CHECK(h->runtime().frame_failures() == 0u);
+  CHECK(h->display().peak_frame_words() < 2048u);
 }

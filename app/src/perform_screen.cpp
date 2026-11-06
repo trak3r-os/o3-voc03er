@@ -502,11 +502,16 @@ void PerformScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Params, "THE OLD PLAY SCREEN", nullptr},
       {Button::Performance, "PERFORM", nullptr},
-      {Button::Play, "MODE: BANDS, TALK, TUNE", "START OR STOP THE BAR"},
-      {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},
-      {Button::File, "SAVE THE PATTERN", nullptr},
-      {Button::SampleLoad, "LOAD THE PATTERN", nullptr},
-      {Button::Shift, "LATCH THE HELD CHORD", nullptr},
+      {Button::Play, "START OR STOP THE BAR", nullptr},
+      {Button::Master, "MASTER (NOT DRAWN YET)", nullptr},
+      {Button::File, "FILE (NOT DRAWN YET)", nullptr},
+      {Button::SampleLoad, "SAMPLE LOAD (NOT DRAWN YET)", nullptr},
+      {Button::SamplePlay, "SAMPLE (NOT DRAWN YET)", nullptr},
+      {Button::SampleEdit, "SAMPLE EDIT (NOT DRAWN YET)", nullptr},
+      {Button::SampleRec, "SAMPLE REC (NOT DRAWN YET)", nullptr},
+      {Button::Song, "SONG (NOT IN THIS VERSION)", nullptr},
+      {Button::Pattern, "PATTERN (NOT DRAWN YET)", nullptr},
+      {Button::Shift, "WITH A PAD: LATCH ITS CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
       {Button::Up, "BOTTOM ROW: NEXT KIND", nullptr},
       {Button::Down, "BOTTOM ROW: PREVIOUS KIND", nullptr},
@@ -535,7 +540,7 @@ void PerformScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.encoder = "CHANGE VALUE (SHIFT COARSE)";
   h.groups = kGroups;
   h.group_count = sizeof kGroups / sizeof kGroups[0];
-  h.pads = keys_ ? "A CHROMATIC KEYBOARD, THE BOTTOM ROW LOWEST." : "ONE CHORD A PAD: THE COLUMN IS THE ROOT, THE ROW THE KIND.";
+  h.pads = keys_ ? "A CHROMATIC KEYBOARD, THE BOTTOM ROW LOWEST." : "A CHORD A PAD: COLUMN ROOT, ROW KIND; - IS MINOR.";
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     if (keys_) {
       const int note = key_note(pad, octave_);
@@ -547,9 +552,19 @@ void PerformScreen::help(const app::Context&, app::Help& h) const noexcept {
     } else {
       const unsigned row = app::pad_row(pad);
       h.pad_group[pad] = static_cast<std::uint8_t>(row + 1u);
+      // HELP draws capitals only: the minor's "m" right after the root becomes "-" (so "Cm7" is "C-7" and "CM7" stays the major seventh).
       std::size_t n = 0;
+      bool minor_done = false;
       while (n < app::kHelpPadLabel && g_pd.label[pad][n] != '\0') {
-        help_names_[pad][n] = g_pd.label[pad][n];
+        char ch = g_pd.label[pad][n];
+        const char prev = n > 0 ? g_pd.label[pad][n - 1] : '\0';
+        if (ch == 'm' && !minor_done && n > 0 && ((prev >= 'A' && prev <= 'Z') || prev == '#')) {
+          ch = '-';
+          minor_done = true;
+        } else if (ch >= 'a' && ch <= 'z') {
+          ch = static_cast<char>(ch - 'a' + 'A');
+        }
+        help_names_[pad][n] = ch;
         ++n;
       }
       help_names_[pad][n] = '\0';

@@ -4,9 +4,10 @@ record on
 input tone 226 -12
 wait 300
 snap 01_bands
-tap play
+tap f1
+tap f1
 wait 100
-tap play
+tap f1
 wait 600
 expect state voc_mode=tune
 snap 02_tune

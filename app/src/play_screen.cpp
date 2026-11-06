@@ -348,7 +348,10 @@ void PlayScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 // the octave. FILE and SAMPLE LOAD are handled in app.cpp. Look at it: app/scenarios/help.txt (Shift + Config, BUTTONS, PADS).
 void PlayScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Play, "MODE: BANDS, TALK, TUNE", "START OR STOP THE BAR"},
+      {Button::Play, "START OR STOP THE BAR", nullptr},
+      {Button::Performance, "PERFORM", nullptr},
+      {Button::Master, "MASTER (NOT DRAWN YET)", nullptr},
+      {Button::Song, "SONG (NOT IN THIS VERSION)", nullptr},
       {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},
       {Button::File, "SAVE THE PATTERN", nullptr},
       {Button::SampleLoad, "LOAD THE PATTERN", nullptr},

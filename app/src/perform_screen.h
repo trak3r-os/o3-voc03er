@@ -9,7 +9,7 @@
 //   pads          CHORDS: a chord a pad (rows: POWER, OPEN, 7TH, and the bottom row's kind); KEYS: a chromatic keyboard
 //   SHIFT         latches the held pad's chord (it keeps sounding); DELETE releases it
 //   UP / DOWN     the bottom row's chord kind;  LEFT / RIGHT  the octave (they repeat when held)
-//   PLAY          the mode (the app's);  SHIFT + PLAY  the transport (the app's)
+//   PLAY          the transport (the app's); the other screen buttons open their screen (app.cpp), MODE is F1
 //
 // Everything runs in the main loop (o3-sdk app/screen.h). The tables (labels, the chord of each pad, the peak holds) are one O3SDK_BIG struct
 // in perform_screen.cpp; the screen keeps a cursor and a few flags in the SRAM.
