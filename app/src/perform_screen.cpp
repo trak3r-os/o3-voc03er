@@ -409,7 +409,7 @@ void PerformScreen::control_press(app::Context& ctx, unsigned pad, pl::PianoFn f
     }
     case pl::PianoFn::Mod:
       mod_held_ = true;
-      mod_t_ = now - static_cast<std::uint64_t>(vib_pad_ * static_cast<float>(pl::kRampMs));  // the rise goes on from the depth in force
+      mod_t_ = now - static_cast<std::uint32_t>(vib_pad_ * static_cast<float>(pl::kRampMs));  // the rise goes on from the depth in force
       ctx.redraw();
       break;
     default:
