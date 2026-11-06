@@ -1,0 +1,585 @@
+<title>VOC03ER Interface</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Everything here is what the FT812 and the kit draw today: flat fills, 1 px rules, round-cornered boxes (Canvas::round_rect), discs and lines
+   (Canvas::point / line), alpha on shapes only, and four monospace pixel faces (16x32, 10x20, 8x16, 6x12). No gradients, no shadows, no other type.
+   The browser's monospace stands in for Terminus and Spleen at the same cell sizes; glyphs on the unit are crisper and squarer. */
+:root{
+  color-scheme:dark;
+  --pane:#0b1020; --chrome:#161d34; --chrometext:#e8ecf5; --chromedim:#8c96b8;
+  --text:#e8ecf5; --textdim:#8c96b8; --empty:#283254;
+  --voice:#c8f531; --voicetext:#0b1020; --car:#4c7dff; --cartext:#fff;
+  --accent:#ffd23f; --accenttext:#0b1020; --rec:#ff3b5c; --sample:#ff8a5b;
+}
+html,body{margin:0;background:#1b1f2a;color:#cfd3dc;font-family:"DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace}
+body{padding-block:24px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font:600 22px/1.3 system-ui,sans-serif;color:#fff;margin:0 0 4px}
+p.lead{font:14px/1.5 system-ui,sans-serif;color:#aab;max-width:900px;margin:0 0 24px}
+h2{font:600 15px/1.3 system-ui,sans-serif;color:#dde;margin:36px 0 8px}
+p.note{font:13px/1.5 system-ui,sans-serif;color:#99a;max-width:800px;margin:6px 0 0}
+.screen,.leds{zoom:var(--z,1)}
+.screen{position:relative;width:800px;height:480px;background:var(--pane);overflow:hidden;color:var(--text);box-sizing:border-box;outline:1px solid #000}
+.screen *{box-sizing:border-box}
+.a{position:absolute;white-space:pre}
+/* the four faces */
+.D{font-size:26.6px;line-height:32px}
+.d{font-size:16.6px;line-height:20px}
+.l{font-size:13.3px;line-height:16px}
+.m{font-size:10px;line-height:12px}
+.dim{color:var(--textdim)} .voice{color:var(--voice)} .car{color:var(--car)} .rec{color:var(--rec)} .acc{color:var(--accent)} .smp{color:var(--sample)}
+.box{position:absolute;border:1px solid var(--empty)}
+.panel{position:absolute;background:var(--chrome)}
+.chip{position:absolute;background:var(--chrome);color:var(--chrometext);border-radius:3px;padding:0 6px;font-size:13.3px;line-height:20px;height:20px;white-space:pre}
+.chip.voice{background:var(--voice);color:var(--voicetext)}
+.chip.car{background:var(--car);color:var(--cartext)}
+.chip.rec{background:var(--rec);color:#fff}
+.chip.acc{background:var(--accent);color:var(--accenttext)}
+.chip.hollow{background:transparent;border:1px solid var(--empty);color:var(--textdim)}
+.rule{position:absolute;background:var(--empty)}
+/* header */
+.hdr{position:absolute;left:0;top:0;width:800px;height:40px;background:var(--chrome)}
+.hdr .wm{position:absolute;left:16px;top:4px;font-size:26.6px;line-height:32px;color:var(--chrometext)}
+.hdr .rt{position:absolute;left:150px;top:10px;height:20px;display:flex;gap:0}
+.hdr .rt span{display:block;padding:0 8px;font-size:13.3px;line-height:20px}
+.hdr .rt .s{background:var(--voice);color:var(--voicetext);border-radius:3px 0 0 3px}
+.hdr .rt .arrow{color:var(--chromedim)}
+.hdr .rt .c{background:var(--car);color:var(--cartext);border-radius:0 3px 3px 0}
+.hdr .mode{position:absolute;left:392px;top:4px;font-size:26.6px;line-height:32px;color:var(--chrometext)}
+.hdr .tempo{position:absolute;left:530px;top:10px;font-size:13.3px;line-height:20px;color:var(--chromedim)}
+.hdr .tempo b{font-weight:normal;color:var(--chrometext)}
+.hdr .tr{position:absolute;left:640px;top:10px;height:20px;padding:0 8px;border-radius:3px;font-size:13.3px;line-height:20px}
+.hdr .tr.play{background:var(--voice);color:var(--voicetext)}
+.hdr .tr.stop{background:var(--chromedim);color:var(--chrome)}
+.hdr .cpu{position:absolute;right:16px;top:12px;font-size:13.3px;line-height:16px;color:var(--chromedim)}
+/* F row */
+.frow{position:absolute;left:0;top:404px;width:800px;height:76px;background:var(--chrome)}
+.frow .k{position:absolute;top:0;width:100px;height:76px;border-left:1px solid var(--empty)}
+.frow .k .tab{position:absolute;left:4px;top:4px;width:18px;height:12px;font-size:10px;line-height:12px;text-align:center;background:var(--chromedim);color:var(--chrome);border-radius:2px}
+.frow .k .nm{position:absolute;left:26px;top:2px;font-size:13.3px;line-height:16px;color:var(--chromedim);white-space:pre}
+.frow .k .vl{position:absolute;left:6px;top:20px;font-size:16.6px;line-height:20px;color:var(--chrometext);white-space:pre}
+.frow .k .bar{position:absolute;left:6px;top:42px;width:88px;height:4px;background:var(--pane)}
+.frow .k .bar i{display:block;height:4px;background:var(--chromedim)}
+.frow .k.hot .tab{background:var(--accent);color:var(--accenttext)}
+.frow .k.hot .bar i{background:var(--accent)}
+.frow .k.hot .vl{color:var(--accent)}
+.frow .k.dim .nm,.frow .k.dim .vl{color:var(--empty)}
+.frow .k.act .vl{color:var(--chrometext);border:1px solid var(--chromedim);border-radius:3px;padding:0 5px;line-height:18px}
+.frow .k .hint{position:absolute;left:6px;top:50px;font-size:10px;line-height:12px;color:var(--chromedim);white-space:pre}
+/* LED strip under a screen */
+.leds{box-sizing:border-box;width:800px;margin:6px 0 0;display:grid;grid-template-columns:repeat(12,1fr);gap:4px;padding:6px;background:#111;outline:1px solid #000}
+.leds i{display:block;height:22px;border-radius:3px;background:#2a2a2a}
+.leds i.d{background:#5a6a2a} .leds i.l{background:#86a03a} .leds i.md{background:#b7d94a} .leds i.on{background:#e6ff6a}
+.leds i.lbl{position:relative}
+/* voiceprint */
+.vp{position:absolute;left:240px;top:48px;width:320px;height:224px;border:1px solid var(--empty)}
+.vp .bars{position:absolute;left:48px;top:8px;width:264px;height:208px}
+.vp .bars i{position:absolute;height:9px;background:var(--voice)}
+.vp .tick{position:absolute;left:6px;font-size:10px;line-height:12px;color:var(--textdim)}
+/* meters */
+.vm{position:absolute;width:14px;background:var(--pane);border:1px solid var(--empty)}
+.vm i{position:absolute;left:0;right:0;bottom:0;background:var(--voice)}
+.vm.c i{background:var(--car)}
+.vm b{position:absolute;left:0;right:0;height:2px;background:var(--text)}
+/* pad drawing */
+.pads{position:absolute;left:64px;top:292px;width:720px;height:96px}
+.pads i{position:absolute;width:57px;height:21px;border:1px solid var(--empty);font-size:10px;line-height:19px;text-align:center;color:var(--textdim);white-space:pre;font-style:normal}
+.pads i.in{background:var(--empty);color:var(--text)}
+.pads i.held{background:var(--car);color:#fff;border-color:var(--car)}
+.pads i.lat{background:rgba(76,125,255,.63);color:#fff;border-color:var(--car)}
+.pads i.sl{background:#3a2a24;border-color:#5a3a30;color:var(--sample)}
+.pads i.slon{background:var(--voice);border-color:var(--voice);color:var(--voicetext)}
+.rowlbl{position:absolute;left:16px;width:44px;font-size:10px;line-height:12px;color:var(--textdim);text-align:right}
+.note{position:absolute;height:20px;padding:0 5px;background:var(--car);color:#fff;border-radius:3px;font-size:13.3px;line-height:20px}
+.note.lat{background:rgba(76,125,255,.63)}
+/* list rows */
+.row{position:relative;display:block;width:100%;height:24px;font-size:16.6px;line-height:24px;padding:0 8px;white-space:pre}
+.row.sel{background:var(--car);color:#fff}
+.row.off{color:var(--empty)}
+.wave{position:absolute}
+.cut{position:absolute;width:1px;background:var(--sample)}
+.cutn{position:absolute;font-size:10px;line-height:12px;color:var(--sample)}
+.legend{font:13px/1.6 system-ui,sans-serif;color:#aab;margin-top:8px;max-width:800px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+</style>
+<h1>VOC03ER: the screens in the skin</h1>
+<p class="lead">Every main screen at 800 x 480, drawn with what the kit draws: flat fills, 1 px rules, round-cornered chips, discs and lines, alpha on shapes only, the four pixel faces.
+One rule: <b style="color:var(--voice)">whatever speaks is the voice ink</b>, <b style="color:var(--car)">whatever sounds is the carrier ink</b>; a slot changes ink with its side.
+Under each screen the 48 pad LEDs as the screen lights them (monochrome: off, dim, low, mid, on). The type is your browser's monospace at the same cell sizes; on the unit it is the kit's pixel faces, crisper and squarer. The design is <code>docs/UI-DESIGN.md</code>.</p>
+<div class="legend"><span class="sw" style="background:var(--pane)"></span>Pane 11,16,32 &nbsp; <span class="sw" style="background:var(--chrome)"></span>Chrome 22,29,52 &nbsp; <span class="sw" style="background:var(--empty)"></span>Empty 40,50,84 &nbsp; <span class="sw" style="background:var(--text)"></span>Text &nbsp; <span class="sw" style="background:var(--textdim)"></span>TextDim &nbsp; <span class="sw" style="background:var(--voice)"></span>Play = voice ink &nbsp; <span class="sw" style="background:var(--car)"></span>Sel = carrier ink &nbsp; <span class="sw" style="background:var(--accent)"></span>Accent = cursor, latched F &nbsp; <span class="sw" style="background:var(--rec)"></span>Rec &nbsp; <span class="sw" style="background:var(--sample)"></span>Instr = the sample's own</div>
+
+<!-- ============================================================ 1 PERFORM, BANDS, chords ============================================================ -->
+<h2>1 · PERFORM (PERFORMANCE): LIVE ▸ SYNTH, BANDS, a latched D minor seventh. The first screen after power-on.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|play|46" data-f="MODE:BANDS:0|SPEAKS:LIVE:0|SOUNDS:SYNTH:0|KEY:C:0|SCALE:MAJOR:0|VOICING:SMOOTH:0:hot|PADS:CHORDS:0|SPREAD:35:35">
+  <!-- SPEAKS -->
+  <div class="a l dim" style="left:16px;top:48px">SPEAKS</div>
+  <div class="chip voice" style="left:16px;top:68px">LIVE  MIC HIGH</div>
+  <div class="a l dim" style="left:16px;top:96px">GAIN 50</div>
+  <div class="vm" style="left:16px;top:120px;height:150px"><i style="height:62%"></i><b style="bottom:71%"></b></div>
+  <div class="a m dim" style="left:36px;top:120px">0</div><div class="a m dim" style="left:36px;top:180px">-12</div><div class="a m dim" style="left:36px;top:258px">-48</div>
+  <div class="chip hollow" style="left:60px;top:120px;color:var(--textdim)">CLIP</div>
+  <div class="a l dim" style="left:16px;top:244px"></div>
+  <div class="chip hollow" style="left:60px;top:150px">REC: CAPTURE</div>
+  <div class="a l" style="left:66px;top:174px">MIC ▸ SLOT 1</div>
+  <div class="a m dim" style="left:66px;top:192px">2 BARS, AT THE BAR</div>
+  <div class="a l dim" style="left:60px;top:222px">SLOTS</div>
+  <div class="chip hollow" style="left:60px;top:242px;width:40px;text-align:center">1</div><div class="chip hollow" style="left:104px;top:242px;width:40px;text-align:center">2</div><div class="chip hollow" style="left:148px;top:242px;width:40px;text-align:center">3</div><div class="chip hollow" style="left:192px;top:242px;width:40px;text-align:center">4</div>
+  <!-- VOICEPRINT -->
+  <div class="vp">
+    <div class="a l dim" style="left:6px;top:6px">VOICEPRINT</div>
+    <div class="chip hollow" style="right:6px;top:6px;height:16px;line-height:14px;font-size:10px;color:var(--voice);border-color:var(--voice)">SSS</div>
+    <div class="tick" style="top:30px">8K</div><div class="tick" style="top:108px">1K</div><div class="tick" style="top:200px">125</div>
+    <div class="bars" style="top:28px;height:188px">
+      <i style="top:0;width:38px"></i><i style="top:12px;width:52px"></i><i style="top:24px;width:44px"></i><i style="top:36px;width:70px"></i>
+      <i style="top:48px;width:96px"></i><i style="top:60px;width:150px"></i><i style="top:72px;width:188px"></i><i style="top:84px;width:132px"></i>
+      <i style="top:96px;width:104px"></i><i style="top:108px;width:176px"></i><i style="top:120px;width:236px"></i><i style="top:132px;width:214px"></i>
+      <i style="top:144px;width:160px"></i><i style="top:156px;width:120px"></i><i style="top:168px;width:86px"></i><i style="top:180px;width:60px"></i>
+    </div>
+  </div>
+  <!-- SOUNDS -->
+  <div class="a l dim" style="left:576px;top:48px">SOUNDS</div>
+  <div class="chip car" style="left:576px;top:68px">SYNTH</div>
+  <div class="a l dim" style="left:660px;top:70px">SPREAD 35</div>
+  <div class="a D car" style="left:576px;top:100px">Dm7</div>
+  <div class="a l dim" style="left:660px;top:116px">LATCHED</div>
+  <div class="note lat" style="left:576px;top:144px">D3</div><div class="note lat" style="left:614px;top:144px">F3</div><div class="note lat" style="left:652px;top:144px">A3</div><div class="note lat" style="left:690px;top:144px">C4</div>
+  <div class="a m dim" style="left:576px;top:172px">SMOOTH: 2ND INVERSION FROM C</div>
+  <div class="a l dim" style="left:576px;top:200px">OUT</div>
+  <div class="vm c" style="left:576px;top:220px;height:14px;width:208px;border-color:var(--empty)"><i style="height:100%;width:58%;right:auto"></i></div>
+  <div class="a m dim" style="left:700px;top:258px">-9 DB</div>
+  <!-- pads -->
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">POWER</div><div class="rowlbl" style="top:320px">OPEN</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="C5|C#5|D5|D#5|E5|F5|F#5|G5|G#5|A5|A#5|B5;Csus|C#|Dsus|D#|Esus|Fsus|F#|Gsus|G#|Asus|A#|Bsus;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1" data-lat="2:2"></div>
+  <div class="a m dim" style="left:16px;top:392px">PADS: CHORDS IN C MAJOR, OCT 3   SHIFT+PAD LATCHES   DELETE RELEASES   LEFT/RIGHT OCTAVE   UP/DOWN BOTTOM ROW KIND</div>
+</div>
+<div class="leds" data-leds="d.d.dd.d.d.d|d.d.dd.d.d.d|d.ond.d.d.d|d.d.dd.d.d.d"></div>
+<p class="note">LEDs: in-scale roots dim, out-of-scale roots off, the latched pad on, the other kinds of the same root low (the column lights up: in the LED strip above, D's column is drawn low). The capture chip says what REC will do before it does it.</p>
+
+<!-- ============================================================ 2 PERFORM with the SOUNDS picker ============================================================ -->
+<h2>2 · PERFORM with the SOUNDS picker open (F3): the one-ADC rule drawn, not refused.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|play|46" data-f="MODE:BANDS:0|SPEAKS:LIVE:0|SOUNDS:PICK...:0:hot|KEY:C:0|SCALE:MAJOR:0|VOICING:SMOOTH:0|PADS:CHORDS:0|TAKE:F3 / F1:0:act">
+  <div class="a l dim" style="left:16px;top:48px">SPEAKS</div>
+  <div class="chip voice" style="left:16px;top:68px">LIVE  MIC HIGH</div>
+  <div class="vm" style="left:16px;top:120px;height:150px"><i style="height:40%"></i></div>
+  <div class="vp"><div class="a l dim" style="left:6px;top:6px">VOICEPRINT</div>
+    <div class="bars" style="top:28px;height:188px"><i style="top:0;width:20px"></i><i style="top:12px;width:30px"></i><i style="top:24px;width:34px"></i><i style="top:36px;width:50px"></i><i style="top:48px;width:76px"></i><i style="top:60px;width:110px"></i><i style="top:72px;width:140px"></i><i style="top:84px;width:100px"></i><i style="top:96px;width:84px"></i><i style="top:108px;width:126px"></i><i style="top:120px;width:170px"></i><i style="top:132px;width:150px"></i><i style="top:144px;width:120px"></i><i style="top:156px;width:90px"></i><i style="top:168px;width:60px"></i><i style="top:180px;width:40px"></i></div></div>
+  <!-- the picker over SOUNDS -->
+  <div class="panel" style="left:568px;top:44px;width:224px;height:236px;border:1px solid var(--car)">
+    <div class="a l dim" style="left:8px;top:4px">SOUNDS: PICK ONE</div>
+    <div style="position:absolute;left:0;top:24px;width:100%">
+      <div class="row">SYNTH          NOW</div>
+      <div class="row sel">NOISE</div>
+      <div class="row">SLOT 1         2.0 S</div>
+      <div class="row off">SLOT 2         EMPTY</div>
+      <div class="row off">SLOT 3         EMPTY</div>
+      <div class="row off">SLOT 4         EMPTY</div>
+      <div class="row">USB            L+R</div>
+      <div class="row off">LINE   CAPTURE FIRST</div>
+    </div>
+    <div class="a m dim" style="left:8px;top:218px">MIC IS LIVE ON SPEAKS. F8 TAKES.</div>
+  </div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">POWER</div><div class="rowlbl" style="top:320px">OPEN</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="C5|C#5|D5|D#5|E5|F5|F#5|G5|G#5|A5|A#5|B5;Csus|C#|Dsus|D#|Esus|Fsus|F#|Gsus|G#|Asus|A#|Bsus;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1"></div>
+  <div class="a m dim" style="left:16px;top:392px">UP/DOWN OR ENCODER: THE ROW   F3 OR F1: TAKE IT   F8: BACK   A DIMMED LIVE SOURCE NEEDS A CAPTURE (REC) FIRST</div>
+</div>
+<div class="leds" data-leds="d.d.dd.d.d.d|d.d.dd.d.d.d|d.d.dd.d.d.d|d.d.dd.d.d.d"></div>
+<p class="note">USB is offered because the return is stereo (L speaks, R sounds). LINE is dimmed with CAPTURE FIRST: choosing it pre-arms the capture, and REC records the microphone into slot 2, gives that slot to SPEAKS, moves the ADC to LINE and gives LINE to SOUNDS.</p>
+
+<!-- ============================================================ 3 PERFORM TALK ============================================================ -->
+<h2>3 · PERFORM in TALK: the LPC envelope over the same axis. SLOT 1 speaks, the synth sounds.</h2>
+<div class="screen" data-hdr="SLOT 1|SYNTH|TALK|120.0|play|58" data-f="MODE:TALK:50:hot|SPEAKS:SLOT 1:0|SOUNDS:SYNTH:0|KEY:C:0|SCALE:MAJOR:0|VOICING:SMOOTH:0|PADS:CHORDS:0|QUALITY:16:50">
+  <div class="a l dim" style="left:16px;top:48px">SPEAKS</div>
+  <div class="chip voice" style="left:16px;top:68px">SLOT 1  2.0 S  1X FWD</div>
+  <div class="a l dim" style="left:16px;top:96px">LIVE MIC HIGH: FREE</div>
+  <div class="vm" style="left:16px;top:120px;height:150px"><i style="height:55%"></i></div>
+  <div class="chip hollow" style="left:60px;top:150px">REC: CAPTURE</div>
+  <div class="a l" style="left:66px;top:174px">MIC ▸ SLOT 2</div>
+  <div class="a l dim" style="left:60px;top:222px">SLOTS</div>
+  <div class="chip voice" style="left:60px;top:242px;width:40px;text-align:center">1</div><div class="chip hollow" style="left:104px;top:242px;width:40px;text-align:center">2</div><div class="chip hollow" style="left:148px;top:242px;width:40px;text-align:center">3</div><div class="chip hollow" style="left:192px;top:242px;width:40px;text-align:center">4</div>
+  <div class="vp"><div class="a l dim" style="left:6px;top:6px">VOICEPRINT  LPC 16</div>
+    <div class="tick" style="top:30px">8K</div><div class="tick" style="top:108px">1K</div><div class="tick" style="top:200px">125</div>
+    <svg class="a" style="left:48px;top:28px" width="264" height="188" viewBox="0 0 264 188">
+      <polyline fill="none" stroke="#c8f531" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+        points="30,0 34,8 40,16 44,24 46,32 52,40 70,48 110,56 150,64 120,72 96,80 100,88 140,96 200,104 236,112 226,120 180,128 160,136 176,144 150,152 120,160 100,168 80,176 60,186"/>
+      <circle cx="236" cy="112" r="3" fill="#c8f531"/><circle cx="200" cy="104" r="3" fill="#c8f531"/><circle cx="150" cy="64" r="3" fill="#c8f531"/>
+    </svg>
+    <div class="a m dim" style="left:200px;top:200px">F1 F2 F3</div>
+  </div>
+  <div class="a l dim" style="left:576px;top:48px">SOUNDS</div>
+  <div class="chip car" style="left:576px;top:68px">SYNTH</div>
+  <div class="a D car" style="left:576px;top:100px">G7</div>
+  <div class="note" style="left:576px;top:144px">G3</div><div class="note" style="left:614px;top:144px">B3</div><div class="note" style="left:652px;top:144px">D4</div><div class="note" style="left:690px;top:144px">F4</div>
+  <div class="a l dim" style="left:576px;top:200px">OUT</div>
+  <div class="vm c" style="left:576px;top:220px;height:14px;width:208px"><i style="height:100%;width:66%"></i></div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">POWER</div><div class="rowlbl" style="top:320px">OPEN</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="C5|C#5|D5|D#5|E5|F5|F#5|G5|G#5|A5|A#5|B5;Csus|C#|Dsus|D#|Esus|Fsus|F#|Gsus|G#|Asus|A#|Bsus;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1" data-held="2:7"></div>
+  <div class="a m dim" style="left:16px;top:392px">PADS: CHORDS IN C MAJOR, OCT 3   F8 QUALITY: 24 IS OVER BUDGET AT 8 NOTES</div>
+</div>
+<div class="leds" data-leds="d.d.dd.d.d.d|d.d.dd.d.d.d|d.d.dd.on.d.d|d.d.dd.l.d.d"></div>
+
+<!-- ============================================================ 4 PERFORM TUNE ============================================================ -->
+<h2>4 · PERFORM in TUNE: the pitch ladder. The voice itself is corrected; no carrier runs, the held pad is the target (NOTES IN).</h2>
+<div class="screen" data-hdr="MIC HIGH|TUNE|TUNE|120.0|stop|41" data-f="MODE:TUNE:100|SPEAKS:LIVE:0|SOUNDS:- -:0:dim|KEY:A:75|SCALE:MINOR:33|VOICING:CLOSE:0|PADS:KEYS:100|SPEED:0 MS:0:hot">
+  <div class="a l dim" style="left:16px;top:48px">SPEAKS</div>
+  <div class="chip voice" style="left:16px;top:68px">LIVE  MIC HIGH</div>
+  <div class="vm" style="left:16px;top:120px;height:150px"><i style="height:70%"></i></div>
+  <div class="chip hollow" style="left:60px;top:150px">REC: CAPTURE</div>
+  <div class="a l" style="left:66px;top:174px">MIC ▸ SLOT 1</div>
+  <div class="vp"><div class="a l dim" style="left:6px;top:6px">PITCH  A MINOR</div>
+    <svg class="a" style="left:0;top:0" width="318" height="222" viewBox="0 0 318 222">
+      <g stroke="#283254" stroke-width="1">
+        <line x1="60" y1="40" x2="300" y2="40"/><line x1="60" y1="60" x2="300" y2="60"/><line x1="60" y1="80" x2="300" y2="80"/><line x1="60" y1="100" x2="300" y2="100"/>
+        <line x1="60" y1="140" x2="300" y2="140"/><line x1="60" y1="160" x2="300" y2="160"/><line x1="60" y1="180" x2="300" y2="180"/><line x1="60" y1="200" x2="300" y2="200"/>
+      </g>
+      <line x1="60" y1="120" x2="300" y2="120" stroke="#8c96b8" stroke-width="1"/>
+      <line x1="60" y1="80" x2="300" y2="80" stroke="#4c7dff" stroke-width="3" stroke-linecap="round"/>
+      <line x1="200" y1="89" x2="200" y2="80" stroke="#c8f531" stroke-width="2"/>
+      <circle cx="200" cy="91" r="7" fill="#c8f531"/>
+    </svg>
+    <div class="a m dim" style="left:8px;top:34px">E4</div><div class="a m dim" style="left:8px;top:54px">D4</div><div class="a m" style="left:8px;top:74px;color:var(--car)">C4</div><div class="a m dim" style="left:8px;top:94px">B3</div><div class="a m dim" style="left:8px;top:114px">A3</div><div class="a m dim" style="left:8px;top:134px">G3</div><div class="a m dim" style="left:8px;top:154px">F3</div><div class="a m dim" style="left:8px;top:174px">E3</div><div class="a m dim" style="left:8px;top:194px">D3</div>
+    <div class="a l voice" style="left:212px;top:96px">-38 C</div>
+    <div class="a m dim" style="left:200px;top:200px">VOICED  HARD</div>
+  </div>
+  <div class="a l dim" style="left:576px;top:48px">TARGET</div>
+  <div class="chip car" style="left:576px;top:68px">HELD PAD</div>
+  <div class="a D car" style="left:576px;top:100px">C4</div>
+  <div class="a m dim" style="left:576px;top:136px">NONE HELD: THE SCALE</div>
+  <div class="a l dim" style="left:576px;top:200px">OUT</div>
+  <div class="vm c" style="left:576px;top:220px;height:14px;width:208px"><i style="height:100%;width:50%"></i></div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">OCT 5</div><div class="rowlbl" style="top:320px">OCT 4</div><div class="rowlbl" style="top:344px">OCT 3</div><div class="rowlbl" style="top:368px">OCT 2</div>
+  <div class="pads" data-rows="C5| |D5| |E5|F5| |G5| |A5| |B5;C4| |D4| |E4|F4| |G4| |A4| |B4;C3| |D3| |E3|F3| |G3| |A3| |B3;C2| |D2| |E2|F2| |G2| |A2| |B2" data-in="1,0,1,0,1,1,0,1,0,1,0,1" data-held="1:0"></div>
+  <div class="a m dim" style="left:16px;top:392px">PADS: KEYS, ONE OCTAVE A ROW   THE MOST RECENT HELD KEY IS THE TARGET</div>
+</div>
+<div class="leds" data-leds="d.d.dd.d.d.d|ond.dd.d.d.d|d.d.dd.d.d.d|d.d.dd.d.d.d"></div>
+
+<!-- ============================================================ 5 SAMPLE ============================================================ -->
+<h2>5 · SAMPLE (SAMPLE PLAY): slot 2 cut in 16, slice 6 sounding over a latched chord; the pads split 24 slices / two chord rows.</h2>
+<div class="screen" data-hdr="SLOT 2|SYNTH|BANDS|120.0|play|55" data-f="MODE:BANDS:0|SIDE:SPEAKS:0|SPEED:1X:50|DIR:FWD:0|LOOP:OFF:0|TRIG:GATE:0|CHOKE:ON:100:hot|LEVEL:0 DB:67">
+  <div class="a l dim" style="left:16px;top:48px">SLOTS</div>
+  <div class="box" style="left:16px;top:68px;width:208px;height:44px"><div class="a l dim" style="left:6px;top:4px">1  </div><div class="a l" style="left:30px;top:4px">VOICE 1   2.0 S</div><div class="a m dim" style="left:30px;top:24px">1X FWD   NONE</div></div>
+  <div class="box" style="left:16px;top:116px;width:208px;height:44px;border-color:var(--voice);background:rgba(200,245,49,.12)"><div class="a l voice" style="left:6px;top:4px">2  </div><div class="a l" style="left:30px;top:4px">TAKE 2    8.0 S</div><div class="a m voice" style="left:30px;top:24px">1X FWD   SPEAKS  16 CUTS</div></div>
+  <div class="box" style="left:16px;top:164px;width:208px;height:44px"><div class="a l dim" style="left:6px;top:4px">3  </div><div class="a l dim" style="left:30px;top:4px">EMPTY</div></div>
+  <div class="box" style="left:16px;top:212px;width:208px;height:44px"><div class="a l dim" style="left:6px;top:4px">4  </div><div class="a l dim" style="left:30px;top:4px">EMPTY</div></div>
+  <div class="a m dim" style="left:16px;top:262px">UP/DOWN PICK   REC ARMS A TAKE</div>
+  <!-- overview -->
+  <div class="box" style="left:240px;top:48px;width:320px;height:224px">
+    <div class="a l dim" style="left:6px;top:6px">SLOT 2  TAKE 2  0:08.0  16 CUTS</div>
+    <svg class="a" style="left:0;top:28px" width="318" height="150" viewBox="0 0 318 150" data-wave="2" data-cuts="16" data-play="98" data-on="5"></svg>
+    <div class="a m dim" style="left:6px;top:184px">SLICE 6  0:02.5 - 0:03.0   GATE   CHOKE</div>
+    <div class="a m dim" style="left:6px;top:200px">PLAY LINE: THE READER'S POSITION, ONCE A BLOCK</div>
+  </div>
+  <div class="a l dim" style="left:576px;top:48px">SOUNDS</div>
+  <div class="chip car" style="left:576px;top:68px">SYNTH</div>
+  <div class="a D car" style="left:576px;top:100px">Am</div>
+  <div class="a l dim" style="left:660px;top:116px">LATCHED</div>
+  <div class="note lat" style="left:576px;top:144px">A3</div><div class="note lat" style="left:614px;top:144px">C4</div><div class="note lat" style="left:652px;top:144px">E4</div>
+  <div class="a l dim" style="left:576px;top:200px">OUT</div>
+  <div class="vm c" style="left:576px;top:220px;height:14px;width:208px"><i style="height:100%;width:60%"></i></div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">SLICE</div><div class="rowlbl" style="top:320px">SLICE</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="1|2|3|4|5|6|7|8|9|10|11|12;13|14|15|16| | | | | | | | ;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1" data-inrows="2,3" data-slices="0:0-11,1:0-3" data-slon="0:5" data-lat="3:9"></div>
+  <div class="a m dim" style="left:16px;top:392px">TOP ROWS: SLICES 1-24 OF SLOT 2   BOTTOM ROWS: CHORDS (F7 PADS ON PERFORM: KEYS)   HOLD A SLICE, CHANGE THE CHORD UNDER IT</div>
+</div>
+<div class="leds" data-leds="ddddd.onddddd.d|dddd........|d.d.dd.d.d.d|d.d.dd.d.ond.d"></div>
+<p class="note">A slice pad plays through the side its slot is on (here SPEAKS: it sings the chord). The overview is one L1 sprite in the slot's ink; the cuts, the play line and the sounding slice are lines and a translucent box over it.</p>
+
+<!-- ============================================================ 6 SAMPLE REC ============================================================ -->
+<h2>6 · SAMPLE REC: recording the microphone into slot 3, bar 2 of 4. The grid pulses on the beat.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|play|52" data-f="SOURCE:MIC HIGH:0|GAIN:50:50|LENGTH:4 BARS:60|AFTER:SPEAKS:0|AUTOPLAY:ON:100|MONITOR:OFF:0|SLOT:3:67|-:-:0:dim">
+  <div class="a l dim" style="left:16px;top:48px">SLOT 3</div>
+  <div class="a D rec" style="left:16px;top:70px">REC</div>
+  <div class="chip rec" style="left:92px;top:76px">BAR 2 / 4</div>
+  <div class="a d" style="left:16px;top:112px">0:03.2  OF 0:08.0</div>
+  <div class="a l dim" style="left:16px;top:140px">LIVE  MIC HIGH  GAIN 50</div>
+  <div class="a l dim" style="left:16px;top:160px">STOPS AT THE BAR BY ITSELF</div>
+  <div class="a l dim" style="left:16px;top:180px">REC: STOP AT THE NEXT BAR</div>
+  <div class="a l dim" style="left:16px;top:200px">DELETE: DISCARD THE TAKE</div>
+  <div class="a m dim" style="left:16px;top:236px">AFTER: SLOT 3 PLAYS LOOPED ON SPEAKS</div>
+  <div class="box" style="left:240px;top:48px;width:320px;height:224px;border-color:var(--rec)">
+    <div class="a l dim" style="left:6px;top:6px">TAKE  3.2 S</div>
+    <svg class="a" style="left:0;top:28px" width="318" height="150" viewBox="0 0 318 150" data-wave="3" data-cuts="0" data-play="128" data-fill="40" data-ink="#ff3b5c"></svg>
+    <div class="a m dim" style="left:6px;top:204px">THE OVERVIEW FOLLOWS THE TAKE, A COLUMN A PASS</div>
+  </div>
+  <div class="a l dim" style="left:576px;top:48px">IN</div>
+  <div class="vm" style="left:576px;top:68px;height:204px;width:40px"><i style="height:78%"></i><b style="bottom:84%"></b></div>
+  <div class="chip hollow" style="left:628px;top:68px;color:var(--textdim)">CLIP</div>
+  <div class="a m dim" style="left:628px;top:96px">0 DB IS THE ADC'S 0:</div><div class="a m dim" style="left:628px;top:108px">A HOT SOURCE IS TURNED</div><div class="a m dim" style="left:628px;top:120px">DOWN AT THE SOURCE</div>
+  <div class="a l dim" style="left:628px;top:200px">OUT</div>
+  <div class="vm c" style="left:628px;top:220px;height:14px;width:156px"><i style="height:100%;width:45%"></i></div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">POWER</div><div class="rowlbl" style="top:320px">OPEN</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="C5|C#5|D5|D#5|E5|F5|F#5|G5|G#5|A5|A#5|B5;Csus|C#|Dsus|D#|Esus|Fsus|F#|Gsus|G#|Asus|A#|Bsus;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1"></div>
+  <div class="a m dim" style="left:16px;top:392px">THE PADS STILL PLAY THE CARRIER: THE TAKE IS THE INPUT, NOT THE OUTPUT</div>
+</div>
+<div class="leds" data-leds="lllllllllll l|llllllllllll|llllllllllll|llllllllllll"></div>
+
+<!-- ============================================================ 7 SAMPLE EDIT ============================================================ -->
+<h2>7 · SAMPLE EDIT: slot 2 across the screen, 16 cuts by beats, the cursor on cut 6, trim brackets.</h2>
+<div class="screen" data-hdr="SLOT 2|SYNTH|BANDS|120.0|stop|38" data-f="CUT EVEN:OFF:0|CUT BEATS:16:100:hot|CUT HITS:0:0|START:0:00.0:0|END:0:08.0:100|NORMALISE:F1 ?:0:act|SAVE WAV:F1 ?:0:act|CLR CUTS:F1 ?:0:act">
+  <div class="a l dim" style="left:16px;top:48px">SLOT 2  TAKE 2  0:08.0  44.1 K  16 CUTS BY BEATS</div>
+  <div class="a l" style="left:560px;top:48px;color:var(--accent)">CURSOR 0:02.50  CUT 6</div>
+  <div class="box" style="left:16px;top:72px;width:768px;height:180px">
+    <svg class="a" style="left:0;top:0" width="766" height="178" viewBox="0 0 766 178" data-wave="2" data-cuts="16" data-cursor="240" data-trim="8,758" data-numbers="1" data-ink="#c8f531"></svg>
+  </div>
+  <div class="a m dim" style="left:16px;top:256px">ENCODER: CURSOR (SHIFT COARSE)   LEFT/RIGHT: CUT TO CUT   INSERT: A CUT HERE   DELETE: THIS CUT   COPY: TO AN EMPTY SLOT</div>
+  <div class="a m dim" style="left:16px;top:270px">F1-F3 REPLACE THE TABLE AND SAY SO FIRST ("REPLACES 16 CUTS")   A CUT LANDS ON A ZERO CROSSING WITHIN 64 SAMPLES</div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">SLICE</div><div class="rowlbl" style="top:320px">SLICE</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="1|2|3|4|5|6|7|8|9|10|11|12;13|14|15|16| | | | | | | | ;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1" data-inrows="2,3" data-slices="0:0-11,1:0-3"></div>
+  <div class="a m dim" style="left:16px;top:392px">A SLICE PAD AUDITIONS IT THROUGH THE CHORD OF THE BOTTOM ROWS</div>
+</div>
+<div class="leds" data-leds="dddddmddddddd|dddd........|d.d.dd.d.d.d|d.d.dd.d.d.d"></div>
+
+<!-- ============================================================ 8 PATTERN ============================================================ -->
+<h2>8 · PATTERN A: four lanes under sixteen steps, the CARRIER lane in force, the playhead on step 6, the cursor on 9.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|play|49" data-f="PATTERN:A:0|LANE:CARRIER:33:hot|LENGTH:16:100|TEMPO:120.0:40|VALUE:NOISE:0|CLEAR LANE:F1 ?:0:act|FOLLOW:OFF:0|SAVE:F1 ?:0:act">
+  <div class="a D" style="left:16px;top:52px">A</div>
+  <div class="a m dim" style="left:16px;top:88px">PATTERN</div>
+  <div class="a m dim" style="left:16px;top:100px">16 STEPS</div>
+  <div class="a l dim" style="left:16px;top:132px">NOTE</div>
+  <div class="a l" style="left:16px;top:160px;color:var(--car)">CARRIER</div>
+  <div class="a l dim" style="left:16px;top:188px">LEVEL</div>
+  <div class="a l dim" style="left:16px;top:216px">SLICE</div>
+  <div id="patgrid" class="a" style="left:88px;top:48px"></div>
+  <div class="a m dim" style="left:16px;top:256px">STEP PADS: ROWS 3-4, COLS 1-8   PATTERNS A-H: ROWS 3-4, COLS 9-12   TOP ROWS: THE LANE'S PALETTE; A PAD WRITES THE STEP</div>
+  <div class="a m dim" style="left:16px;top:270px">REC: WRITE WHILE PLAYING   COPY/INSERT: THE STEP (SHIFT: THE PATTERN)   DELETE: THE STEP   SHIFT+STEP PAD: A REST</div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">PICK</div><div class="rowlbl" style="top:320px"></div><div class="rowlbl" style="top:344px">STEPS</div><div class="rowlbl" style="top:368px">STEPS</div>
+  <div class="pads" data-rows="FOLLOW|SYNTH|NOISE|SLOT 1|SLOT 2|SLOT 3|SLOT 4| | | | | ; | | | | | | | | | | | ;1|2|3|4|5|6|7|8|A|B|C|D;9|10|11|12|13|14|15|16|E|F|G|H" data-in="1,1,1,1,0,0,0,0,0,0,0,0" data-inrows="0" data-held="2:5" data-cur="3:0" data-pat="2:8"></div>
+  <div class="a m dim" style="left:16px;top:392px">CARRIER LANE: THE PALETTE IS SIX PADS   NOTE LANE: THE CHORD ROWS   LEVEL: 24 STEPS   SLICE: SLICES 1-24</div>
+</div>
+<div class="leds" data-leds="dddd........|............|dddddonddmd...|mddd....d...."></div>
+
+<!-- ============================================================ 9 PARAMS ============================================================ -->
+<h2>9 · PARAMS, page CARRIER: the synth's controls, the voiceprint small above them so a change is seen.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|play|47" data-f="SHAPE:SAW+:20|SPREAD:35:35:hot|SUB:40:40|TILT:+3 DB:62|NOISE:12:12|ATTACK:4 MS:5|RELEASE:220 MS:30|LEVEL:-6 DB:78">
+  <div class="a l dim" style="left:16px;top:48px">PARAMS</div>
+  <div class="chip car" style="left:16px;top:68px">CARRIER</div><div class="chip hollow" style="left:98px;top:68px">SHAPE</div><div class="chip hollow" style="left:164px;top:68px">TUNE</div>
+  <div class="a m dim" style="left:16px;top:96px">PARAMS AGAIN OR UP/DOWN: THE NEXT PAGE</div>
+  <div class="a l dim" style="left:16px;top:130px">THE CARRIER SYNTH</div>
+  <div class="a m dim" style="left:16px;top:150px">SHAPE   SAW .. PULSE .. NARROW</div>
+  <div class="a m dim" style="left:16px;top:164px">SPREAD  A THIRD OSCILLATOR A VOICE</div>
+  <div class="a m dim" style="left:16px;top:178px">SUB     AN OCTAVE BELOW, SQUARE</div>
+  <div class="a m dim" style="left:16px;top:192px">TILT    A SHELF ABOUT 1 KHZ</div>
+  <div class="a m dim" style="left:16px;top:206px">NOISE   SHARED WITH THE UNVOICED PATH</div>
+  <div class="a m dim" style="left:16px;top:234px">8 NOTES, 12.7 % OF A BLOCK [EST]</div>
+  <div class="a m" style="left:16px;top:248px;color:var(--rec)">SPREAD AT 8 NOTES: READ ON THE UNIT FIRST</div>
+  <div class="vp"><div class="a l dim" style="left:6px;top:6px">VOICEPRINT</div>
+    <div class="bars" style="top:28px;height:188px"><i style="top:0;width:48px"></i><i style="top:12px;width:60px"></i><i style="top:24px;width:66px"></i><i style="top:36px;width:90px"></i><i style="top:48px;width:120px"></i><i style="top:60px;width:160px"></i><i style="top:72px;width:200px"></i><i style="top:84px;width:150px"></i><i style="top:96px;width:120px"></i><i style="top:108px;width:180px"></i><i style="top:120px;width:240px"></i><i style="top:132px;width:220px"></i><i style="top:144px;width:170px"></i><i style="top:156px;width:130px"></i><i style="top:168px;width:90px"></i><i style="top:180px;width:60px"></i></div></div>
+  <div class="a l dim" style="left:576px;top:48px">SOUNDS</div>
+  <div class="chip car" style="left:576px;top:68px">SYNTH</div>
+  <div class="a D car" style="left:576px;top:100px">C</div>
+  <div class="note" style="left:576px;top:144px">C3</div><div class="note" style="left:614px;top:144px">E3</div><div class="note" style="left:652px;top:144px">G3</div>
+  <div class="a l dim" style="left:576px;top:200px">OUT</div>
+  <div class="vm c" style="left:576px;top:220px;height:14px;width:208px"><i style="height:100%;width:62%"></i></div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">POWER</div><div class="rowlbl" style="top:320px">OPEN</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="C5|C#5|D5|D#5|E5|F5|F#5|G5|G#5|A5|A#5|B5;Csus|C#|Dsus|D#|Esus|Fsus|F#|Gsus|G#|Asus|A#|Bsus;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1" data-held="3:0"></div>
+  <div class="a m dim" style="left:16px;top:392px">THE PADS KEEP PLAYING ON EVERY SCREEN THAT IS NOT A LIST</div>
+</div>
+<div class="leds" data-leds="l.d.dd.d.d.d|l.d.dd.d.d.d|l.d.dd.d.d.d|ond.dd.d.d.d"></div>
+
+<!-- ============================================================ 10 MASTER ============================================================ -->
+<h2>10 · MASTER: the signal path drawn large, with the one rule written on it.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|play|47" data-f="SOURCE:MIC HIGH:57|GAIN:50:50:hot|MONITOR:OFF:0|DRY:0:0|LEVEL:-6 DB:78|RETURN:0:0|SEEK DOWN:-:0:dim|SEEK UP:-:0:dim">
+  <div class="a l dim" style="left:16px;top:48px">LIVE</div>
+  <div class="chip voice" style="left:16px;top:68px">MIC HIGH  GAIN 50</div>
+  <div class="vm" style="left:16px;top:100px;height:172px;width:40px"><i style="height:60%"></i><b style="bottom:71%"></b></div>
+  <div class="chip hollow" style="left:68px;top:100px;color:var(--textdim)">CLIP</div>
+  <div class="a m dim" style="left:68px;top:132px">ONE LIVE SOURCE:</div>
+  <div class="a m dim" style="left:68px;top:144px">MIC, LINE AND RADIO</div>
+  <div class="a m dim" style="left:68px;top:156px">SHARE THE ADC.</div>
+  <div class="a m dim" style="left:68px;top:168px">USB IS STEREO:</div>
+  <div class="a m dim" style="left:68px;top:180px">L SPEAKS, R SOUNDS.</div>
+  <div class="a m dim" style="left:68px;top:204px">GAIN 0 IS THE ADC'S 0 DB</div>
+  <div class="a m dim" style="left:68px;top:216px">RETURN IS USB ONLY</div>
+  <div class="a m dim" style="left:68px;top:240px">RADIO: FREQ, F7/F8 SEEK</div>
+  <svg class="a" style="left:224px;top:48px" width="336" height="224" viewBox="0 0 336 224">
+    <rect x="8" y="80" width="90" height="56" rx="4" fill="none" stroke="#283254"/><rect x="123" y="56" width="90" height="104" rx="4" fill="none" stroke="#283254"/><rect x="238" y="80" width="90" height="56" rx="4" fill="none" stroke="#283254"/>
+    <line x1="98" y1="108" x2="123" y2="108" stroke="#c8f531" stroke-width="3" stroke-linecap="round"/>
+    <line x1="213" y1="108" x2="238" y2="108" stroke="#e8ecf5" stroke-width="3" stroke-linecap="round"/>
+    <line x1="168" y1="20" x2="168" y2="56" stroke="#4c7dff" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="168" cy="14" r="6" fill="#4c7dff"/>
+  </svg>
+  <div class="a l voice" style="left:244px;top:136px">SPEAKS</div><div class="a m dim" style="left:244px;top:152px">MIC HIGH</div>
+  <div class="a l" style="left:368px;top:112px">BANDS</div><div class="a m dim" style="left:362px;top:128px">16 BANDS</div><div class="a m dim" style="left:362px;top:140px">DRY 0</div>
+  <div class="a l car" style="left:392px;top:40px">SOUNDS</div><div class="a m dim" style="left:392px;top:56px">SYNTH</div>
+  <div class="a l" style="left:474px;top:136px">OUT</div><div class="a m dim" style="left:474px;top:152px">-6 DB</div>
+  <div class="a l dim" style="left:576px;top:48px">OUT</div>
+  <div class="vm c" style="left:576px;top:68px;height:204px;width:40px"><i style="height:58%"></i><b style="bottom:66%"></b></div>
+  <div class="vm c" style="left:624px;top:68px;height:204px;width:40px"><i style="height:56%"></i><b style="bottom:64%"></b></div>
+  <div class="a m dim" style="left:576px;top:276px">L        R</div>
+  <div class="a m dim" style="left:680px;top:68px">-6 DB</div>
+  <div class="a m dim" style="left:680px;top:120px">PEAK</div><div class="a m" style="left:680px;top:132px">-4.1</div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="rowlbl" style="top:296px">POWER</div><div class="rowlbl" style="top:320px">OPEN</div><div class="rowlbl" style="top:344px">7TH</div><div class="rowlbl" style="top:368px">TRIAD</div>
+  <div class="pads" data-rows="C5|C#5|D5|D#5|E5|F5|F#5|G5|G#5|A5|A#5|B5;Csus|C#|Dsus|D#|Esus|Fsus|F#|Gsus|G#|Asus|A#|Bsus;CM7|C#|Dm7|D#|Em7|FM7|F#|G7|G#|Am7|A#|Bm7b5;C|C#|Dm|D#|Em|F|F#|G|G#|Am|A#|Bo" data-in="1,0,1,0,1,1,0,1,0,1,0,1"></div>
+  <div class="a m dim" style="left:16px;top:392px">F1 SOURCE CHANGES THE ADC (200 MS SETTLE, THE INPUT GATED MEANWHILE)</div>
+</div>
+<div class="leds" data-leds="d.d.dd.d.d.d|d.d.dd.d.d.d|d.d.dd.d.d.d|d.d.dd.d.d.d"></div>
+
+<!-- ============================================================ 11 SAMPLE LOAD ============================================================ -->
+<h2>11 · SAMPLE LOAD: the kit's file picker, in the skin's theme, loading into slot 3.</h2>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|stop|36" data-f="OPEN:F1:0:act|-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|BACK:F8:0:act">
+  <div class="a l dim" style="left:16px;top:48px">LOAD A WAV INTO</div>
+  <div class="chip hollow" style="left:150px;top:46px">SLOT 3  EMPTY</div>
+  <div class="a m dim" style="left:272px;top:50px">UP/DOWN WITH SHIFT: THE SLOT</div>
+  <div class="a l dim" style="left:600px;top:48px">APPS/O3_VOC03ER/</div>
+  <div class="box" style="left:16px;top:72px;width:768px;height:200px">
+    <div style="position:absolute;left:0;top:4px;width:100%">
+      <div class="row dim">SONG 1/                          FOLDER</div>
+      <div class="row">DRUMS_120_001.WAV           2.0 S  176 KB</div>
+      <div class="row sel">VERSE_TAKE_002.WAV          7.4 S  652 KB</div>
+      <div class="row">RADIO_NEWS_001.WAV         16.0 S  1.4 MB</div>
+      <div class="row dim">CHOIR_48K.WAV               48 KHZ: NOT 44.1</div>
+      <div class="row">LONG_SPEECH.WAV            31.0 S  FIRST 16 S</div>
+      <div class="row">SYNTH_PAD_003.WAV           4.0 S  353 KB  STEREO</div>
+    </div>
+  </div>
+  <div class="a m dim" style="left:16px;top:256px">16-BIT PCM, 44.1 KHZ, MONO OR STEREO (MIXED).  FILES GET HERE WITH CONFIG > CARD AS DISK.  SAVES GO TO SAMPLES/ (SAMPLE EDIT F7).</div>
+  <div class="a m dim" style="left:16px;top:270px">A PAD PICKS THE ROW UNDER IT (THE KIT'S PICKER)   LEFT/RIGHT A PAGE</div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="a l dim" style="left:16px;top:320px">LOADING INTO SLOT 3: THE SLOT IS STOPPED, THE FILE READS INTO THE SDRAM STAGING,
+THEN THE SEAM FADES, THEN THE RENDER ADOPTS THE LENGTH.</div>
+  <div class="a m dim" style="left:16px;top:392px">THE STRIP SHOWS THE JOB'S PROGRESS FOR A FEW SECONDS (THE KIT'S)</div>
+</div>
+<div class="leds" data-leds="ddmdddd.....|............|............|............"></div>
+
+<!-- ============================================================ 12 FILE and SONG ============================================================ -->
+<h2>12 · FILE (projects) and, beside it, SONG before U9: the honest one-line screen.</h2>
+<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+<div>
+<div class="screen" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|stop|36" data-f="LOAD:F1:0:act|SAVE:F2:0:act|SAVE AS:F3:0:act|NEW:F4:0:act|SAVE WAVS:F5:0:act|-:-:0:dim|-:-:0:dim|BACK:F8:0:act">
+  <div class="a l dim" style="left:16px;top:48px">PROJECTS  APPS/O3_VOC03ER/</div>
+  <div class="a l" style="left:560px;top:48px">NOW: SONG 1  SAVED 2 MIN AGO</div>
+  <div class="box" style="left:16px;top:72px;width:768px;height:200px">
+    <div style="position:absolute;left:0;top:4px;width:100%">
+      <div class="row sel">SONG 1/            8 PATTERNS  2 SLOTS  TODAY</div>
+      <div class="row">ROBOT FIFTHS/      3 PATTERNS  4 SLOTS  2026-11-04</div>
+      <div class="row">RADIO TALK/        1 PATTERN   1 SLOT   2026-11-02</div>
+    </div>
+  </div>
+  <div class="a m dim" style="left:16px;top:256px">A PROJECT IS PROJECT.O3A (PATTERNS A-H, THE CHAIN, THE ROUTING, EACH SLOT'S CUTS AND SETTINGS AND THE WAV IT CAME FROM, THE ENGINE'S VALUES)</div>
+  <div class="a m dim" style="left:16px;top:270px">THE SLOTS' WAVS ARE SAVED ON REQUEST (F5): 4 X 1.4 MB AT MOST, ABOUT 17 S A SLOT ON A SLOW CARD, THE STRIP SHOWS IT</div>
+  <div class="rule" style="left:16px;top:284px;width:768px;height:1px"></div>
+  <div class="a l dim" style="left:16px;top:320px">A LOAD READS THE .O3A, THEN THE WAVS IT NAMES, ONE JOB AFTER ANOTHER;
+A SLOT IS GREYED UNTIL ITS FILE HAS LANDED.</div>
+  <div class="a m dim" style="left:16px;top:392px">PATTERN F8 SAVE IS F2 HERE</div>
+</div>
+<div class="leds" data-leds="mdd.........|............|............|............"></div>
+</div>
+</div>
+<div class="screen" style="margin-top:16px" data-hdr="MIC HIGH|SYNTH|BANDS|120.0|stop|36" data-f="-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|-:-:0:dim|BACK:F8:0:act">
+  <div class="a D dim" style="left:16px;top:180px">SONG</div>
+  <div class="a d dim" style="left:16px;top:216px">A CHAIN OF PATTERNS, NOT IN THIS VERSION</div>
+  <div class="a m dim" style="left:16px;top:244px">U9 BRINGS IT: 16 ENTRIES OF A PATTERN LETTER AND A REPEAT COUNT; PLAY PLAYS THE CHAIN FROM THE CURSOR</div>
+</div>
+<div class="leds" data-leds="............|............|............|............"></div>
+
+<script>
+// Stamps the shared chrome from data attributes, draws the overviews and the pattern grid. Static content; nothing here fetches anything.
+(function(){
+  function el(t,c,s){var e=document.createElement(t);if(c)e.className=c;if(s)e.setAttribute('style',s);return e;}
+  // header: "speaks|sounds|mode|tempo|play/stop|cpu"
+  document.querySelectorAll('.screen[data-hdr]').forEach(function(sc){
+    var p=sc.getAttribute('data-hdr').split('|');
+    var h=el('div','hdr');
+    h.innerHTML='<div class="wm">VOC03ER</div><div class="rt"><span class="s">'+p[0]+'</span><span class="arrow">▸</span><span class="c">'+p[1]+'</span></div>'
+      +'<div class="mode">'+p[2]+'</div><div class="tempo">TEMPO <b>'+p[3]+'</b></div><div class="tr '+p[4]+'">'+(p[4]==='play'?'PLAY':'STOP')+'</div><div class="cpu">CPU '+p[5]+'%</div>';
+    sc.insertBefore(h,sc.firstChild);
+  });
+  // F row: "name:value:pct[:hot|dim|act]|..."
+  document.querySelectorAll('.screen[data-f]').forEach(function(sc){
+    var f=el('div','frow');
+    sc.getAttribute('data-f').split('|').forEach(function(k,i){
+      var q=k.split(':');var pct=parseFloat(q[2])||0;var st=q[3]||'';
+      // a value like "0:00.0" splits on ':': rejoin the middle pieces
+      if(q.length>4){q=[q[0],q.slice(1,q.length-2).join(':'),q[q.length-2],q[q.length-1]];pct=parseFloat(q[2])||0;st=q[3];}
+      var d=el('div','k '+st,'left:'+(i*100)+'px');
+      d.innerHTML='<div class="tab">F'+(i+1)+'</div><div class="nm">'+q[0]+'</div><div class="vl">'+q[1]+'</div>'+(st==='act'||st==='dim'?'':'<div class="bar"><i style="width:'+pct+'%"></i></div>');
+      f.appendChild(d);
+    });
+    sc.appendChild(f);
+  });
+  // pads: rows of labels; data-in: in-scale mask per column (or data-inrows: rows it applies to); held "r:c"; lat "r:c"; slices "r:a-b"; slon "r:c"; cur; pat
+  document.querySelectorAll('.pads').forEach(function(pd){
+    var rows=pd.getAttribute('data-rows').split(';').map(function(r){return r.split('|');});
+    var mask=(pd.getAttribute('data-in')||'').split(',');
+    var inrows=pd.getAttribute('data-inrows');inrows=inrows?inrows.split(','):null;
+    var held=pd.getAttribute('data-held'),lat=pd.getAttribute('data-lat'),slon=pd.getAttribute('data-slon'),cur=pd.getAttribute('data-cur'),pat=pd.getAttribute('data-pat');
+    var sl={};(pd.getAttribute('data-slices')||'').split(',').forEach(function(s){if(!s)return;var a=s.split(':'),b=a[1].split('-');for(var c=+b[0];c<=+b[1];c++)sl[a[0]+':'+c]=1;});
+    rows.forEach(function(r,ri){r.forEach(function(lbl,ci){
+      var c='';var key=ri+':'+ci;
+      var inOk=!inrows||inrows.indexOf(String(ri))>=0;
+      if(inOk&&mask[ci]==='1'&&lbl.trim()!=='')c='in';
+      if(sl[key])c='sl';
+      if(slon===key)c='slon';
+      if(lat===key)c='lat';
+      if(held===key)c='held';
+      if(cur===key)c='in';
+      var e=el('i',c,'left:'+(ci*60)+'px;top:'+(ri*24)+'px');
+      if(cur===key)e.style.borderColor='#ffd23f';
+      if(pat===key){e.style.borderColor='#4c7dff';e.style.color='#4c7dff';}
+      e.textContent=lbl.trim();pd.appendChild(e);
+    });});
+  });
+  // LED strips: 4 rows of 12 chars: . off, d dim, l low, m mid, o(n) on
+  document.querySelectorAll('.leds[data-leds]').forEach(function(g){
+    g.getAttribute('data-leds').split('|').forEach(function(row){
+      var chars=row.replace(/on/g,'O').replace(/ /g,'.');
+      for(var i=0;i<12;i++){var ch=chars[i]||'.';var c=ch==='d'?'d':ch==='l'?'l':ch==='m'?'md':ch==='O'?'on':'';g.appendChild(el('i',c));}
+    });
+  });
+  // overview waveforms: a deterministic pseudo-voice envelope drawn as min/max columns (what the L1 bitmap holds)
+  function wave(svg){
+    var W=+svg.getAttribute('width'),H=+svg.getAttribute('height'),seed=+svg.getAttribute('data-wave')||1;
+    var cuts=+svg.getAttribute('data-cuts')||0,fill=svg.getAttribute('data-fill'),ink=svg.getAttribute('data-ink')||'#c8f531';
+    var ns='http://www.w3.org/2000/svg',mid=H*0.5,amp=H*0.42;
+    var g=document.createElementNS(ns,'g');g.setAttribute('stroke',ink);g.setAttribute('stroke-width','1');
+    var limit=fill?W*(+fill/100):W;
+    var s=seed*7919;function rnd(){s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;}
+    for(var x=4;x<limit-4;x+=2){
+      var t=x/W;var env=Math.abs(Math.sin(t*9.3*seed+seed))*0.6+0.15;env*=1-0.7*Math.pow(Math.sin(t*41*seed),8);
+      var v=env*amp*(0.55+0.45*rnd());
+      var l=document.createElementNS(ns,'line');l.setAttribute('x1',x);l.setAttribute('x2',x);l.setAttribute('y1',mid-v);l.setAttribute('y2',mid+v*0.8);g.appendChild(l);
+    }
+    svg.appendChild(g);
+    if(svg.getAttribute('data-on')!=null){var on=+svg.getAttribute('data-on');var w=(W-8)/cuts;var r=document.createElementNS(ns,'rect');r.setAttribute('x',4+on*w);r.setAttribute('y',0);r.setAttribute('width',w);r.setAttribute('height',H);r.setAttribute('fill','#c8f531');r.setAttribute('fill-opacity','0.22');svg.appendChild(r);}
+    for(var i=1;i<cuts;i++){var cx=4+(W-8)*i/cuts;var c=document.createElementNS(ns,'line');c.setAttribute('x1',cx);c.setAttribute('x2',cx);c.setAttribute('y1',0);c.setAttribute('y2',H);c.setAttribute('stroke','#ff8a5b');c.setAttribute('stroke-width','1');svg.appendChild(c);}
+    if(svg.getAttribute('data-numbers')){for(var j=0;j<cuts;j++){var tx=document.createElementNS(ns,'text');tx.setAttribute('x',6+(W-8)*j/cuts);tx.setAttribute('y',11);tx.setAttribute('fill','#ff8a5b');tx.setAttribute('font-size','10');tx.setAttribute('font-family','monospace');tx.textContent=j+1;svg.appendChild(tx);}}
+    var trim=svg.getAttribute('data-trim');if(trim){trim.split(',').forEach(function(tx,k){var b=document.createElementNS(ns,'path');var X=+tx;var d=k===0?('M'+(X+6)+' 2 L'+X+' 2 L'+X+' '+(H-2)+' L'+(X+6)+' '+(H-2)):('M'+(X-6)+' 2 L'+X+' 2 L'+X+' '+(H-2)+' L'+(X-6)+' '+(H-2));b.setAttribute('d',d);b.setAttribute('fill','none');b.setAttribute('stroke','#e8ecf5');b.setAttribute('stroke-width','2');svg.appendChild(b);});}
+    var play=svg.getAttribute('data-play');if(play){var p=document.createElementNS(ns,'line');p.setAttribute('x1',play);p.setAttribute('x2',play);p.setAttribute('y1',0);p.setAttribute('y2',H);p.setAttribute('stroke',fill?'#ff3b5c':'#e8ecf5');p.setAttribute('stroke-width','2');svg.appendChild(p);}
+    var cur=svg.getAttribute('data-cursor');if(cur){var q=document.createElementNS(ns,'line');q.setAttribute('x1',cur);q.setAttribute('x2',cur);q.setAttribute('y1',0);q.setAttribute('y2',H);q.setAttribute('stroke','#ffd23f');q.setAttribute('stroke-width','2');svg.appendChild(q);}
+  }
+  document.querySelectorAll('svg[data-wave]').forEach(wave);
+  // the pattern grid: 16 columns x 4 lanes
+  var pg=document.getElementById('patgrid');
+  if(pg){
+    var notes=['C','Dm','-','G7','C','Am','-','G','F','-','Dm7','G','C5','-','-','G7'];
+    var cars=['SY','-','-','NZ','-','-','L1','-','SY','-','-','-','NZ','-','-','-'];
+    var lvls=['7','7','-','5','7','6','-','7','7','-','6','7','7','-','-','7'];
+    var slc=['-','-','-','-','-','-','3','-','-','-','-','-','-','-','-','-'];
+    var lanes=[notes,cars,lvls,slc];
+    var html='';
+    for(var i=0;i<16;i++){
+      var x=i*43;var ph=i===5,cu=i===8;
+      html+='<div class="a m dim" style="left:'+(x+2)+'px;top:0;width:40px;text-align:center">'+(i+1)+'</div>';
+      for(var l=0;l<4;l++){
+        var val=lanes[l][i];var y=14+l*28+(l===0?64:66);var cls=val==='-'?'dim':(l===1?'car':'');
+        var bg=ph?'background:rgba(200,245,49,.14);':'';var bd=cu?'border:1px solid #ffd23f;':'border:1px solid '+(l===1?'#283254':'transparent')+';';
+        if(l===1)bg+='background:'+(ph?'rgba(200,245,49,.14)':'rgba(76,125,255,.08)')+';';
+        html+='<div class="a l '+cls+'" style="left:'+x+'px;top:'+(84+l*28)+'px;width:41px;height:24px;line-height:22px;text-align:center;'+bg+bd+'">'+val+'</div>';
+      }
+      html+='<div class="a" style="left:'+x+'px;top:16px;width:41px;height:60px;border:1px solid '+(ph?'#c8f531':'#283254')+';'+(ph?'background:rgba(200,245,49,.14)':'')+'"></div>';
+      if(i%4===0)html+='<div class="rule" style="left:'+(x-1)+'px;top:12px;width:1px;height:190px"></div>';
+    }
+    pg.innerHTML=html;
+  }
+  // At phone width the fixed 800 px screens scale down to fit.
+  function fit(){document.documentElement.style.setProperty('--z',Math.min(800,document.documentElement.clientWidth-32)/800);}
+  window.addEventListener('resize',fit);fit();
+})();
+</script>
