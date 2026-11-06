@@ -68,10 +68,24 @@ void frow_text(o3sdk::ui::Renderer& r, const FKey (&keys)[kFKeys]) noexcept;
 
 inline constexpr unsigned kBandCount = 16;
 
+// What a voiceprint without bars draws: nothing (the unlit grid), TALK's envelope or TUNE's ladder.
+enum class Print : std::uint8_t { Grid, Talk, Tune };
+
 struct Voiceprint {
   std::uint8_t level[kBandCount] = {};  // 0..255 (0 is -60 dB, 255 is 0 dBFS), the unit's View
   std::uint8_t peak[kBandCount] = {};   // the held peaks, same scale
-  bool bars = true;                     // false (TALK, TUNE): the frame and the unlit grid only
+  bool bars = true;                     // false (TALK, TUNE): not the bars; `kind` says what is drawn instead
+  Print kind = Print::Grid;             // read when `bars` is false
+  // TALK: the envelope at the 32 points of the bands' axis, 0..255 (app/src/voiceprint_logic.h), and FREEZE.
+  std::uint8_t env[32] = {};
+  bool frozen = false;
+  // TUNE: the ladder (centre note, the scale's pitch classes as bits 0..11 and its KEY), the unit's target note (-1 none), correction and voicing.
+  std::uint16_t scale_mask = 0;
+  std::uint8_t key = 0;
+  std::uint8_t centre = 60;
+  std::int8_t target = -1;
+  std::int16_t shift = 0;  // cents
+  bool voiced = false;
 };
 
 // The voiceprint as a plain strip of w x h at (x, y), shapes only (PARAMS shows it small above its keys).

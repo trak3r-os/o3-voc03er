@@ -1016,6 +1016,11 @@ inline float fast_log2(float x) noexcept {
 }
 }  // namespace
 
+namespace {
+// A reflection coefficient as Q15; NaN and anything at or past +-0.9995 (the engine clamps at 0.995) publish as 0.
+std::int16_t q15(float k) noexcept { return (k > -0.9995f && k < 0.9995f) ? static_cast<std::int16_t>(k * 32767.0f) : std::int16_t{0}; }
+}  // namespace
+
 void Vocoder::publish_view() noexcept {
   for (unsigned w = 0; w < 4; ++w) {
     std::uint32_t word = 0;
@@ -1027,6 +1032,21 @@ void Vocoder::publish_view() noexcept {
     }
     view_[w].store(word, std::memory_order_relaxed);
   }
+  // TALK's lattice and TUNE's correction, copied (see View).
+  const std::uint32_t order = talk_.lattice_order();
+  for (unsigned w = 0; w < 9; ++w) {
+    const unsigned m = w * 2u + 1u;
+    const std::uint32_t lo = static_cast<std::uint16_t>(m <= order ? q15(talk_.reflection(m)) : std::int16_t{0});
+    const std::uint32_t hi = static_cast<std::uint16_t>(m + 1u <= order ? q15(talk_.reflection(m + 1u)) : std::int16_t{0});
+    lpc_[w].store(lo | (hi << 16), std::memory_order_relaxed);
+  }
+  const float sc = tune_.shift_cents();
+  const std::int32_t cents = (sc >= -1200.0f && sc <= 1200.0f) ? static_cast<std::int32_t>(sc) : (sc > 1200.0f ? 1200 : (sc < -1200.0f ? -1200 : 0));
+  const int note = tune_.target_note();
+  const std::uint32_t tn = static_cast<std::uint32_t>(note < 0 ? 0 : (note > 127 ? 128 : note + 1));
+  lpc_meta_.store((order & 31u) | (talk_.freeze() ? 32u : 0u) | (tune_.voiced() ? 64u : 0u) | (tn << 8) |
+                      (static_cast<std::uint32_t>(static_cast<std::uint16_t>(cents)) << 16),
+                  std::memory_order_relaxed);
 }
 
 Vocoder::View Vocoder::view() const noexcept {
@@ -1035,6 +1055,17 @@ Vocoder::View Vocoder::view() const noexcept {
     const std::uint32_t word = view_[w].load(std::memory_order_relaxed);
     for (unsigned k = 0; k < 4; ++k) v.band[w * 4u + k] = static_cast<std::uint8_t>(word >> (8u * k));
   }
+  for (unsigned w = 0; w < 9; ++w) {
+    const std::uint32_t word = lpc_[w].load(std::memory_order_relaxed);
+    v.refl[w * 2u] = static_cast<std::int16_t>(static_cast<std::uint16_t>(word));
+    v.refl[w * 2u + 1u] = static_cast<std::int16_t>(static_cast<std::uint16_t>(word >> 16));
+  }
+  const std::uint32_t meta = lpc_meta_.load(std::memory_order_relaxed);
+  v.order = static_cast<std::uint8_t>(meta & 31u);
+  v.freeze = (meta & 32u) != 0u;
+  v.voiced = (meta & 64u) != 0u;
+  v.target_note = static_cast<std::int8_t>(static_cast<int>((meta >> 8) & 255u) - 1);
+  v.shift_cents = static_cast<std::int16_t>(static_cast<std::uint16_t>(meta >> 16));
   return v;
 }
 

@@ -2,6 +2,7 @@
 #include "ornoir.h"
 
 #include "ornoir_assets.h"
+#include "../voiceprint_logic.h"
 
 #include <o3sdk/eve/dl.h>
 
@@ -63,6 +64,47 @@ void fill(plot::Canvas& c, int x, int y, int w, int h, Color k, std::uint8_t a =
 
 void fill_rect(plot::Canvas& c, int x, int y, int w, int h, Color k) noexcept { fill(c, x, y, w, h, k); }
 
+namespace {
+
+// TALK: the LPC envelope as 31 lines through 32 points, from the left to the right of the area (the bands' axis: 125 Hz to 8 kHz), 255 at the top;
+// FREEZE turns it the carrier ink. 31 lines, about 150 words. q4 coordinates (1/16 px).
+void talk_shapes(plot::Canvas& c, int ax, int ay, int aw, int ah, const Voiceprint& vp) noexcept {
+  const Rgb ink = col(vp.frozen ? Color::Sel : Color::Play);
+  const int span = (aw - 12) * 16;
+  int px = 0, py = 0;
+  for (unsigned j = 0; j < voiceprint::kPoints; ++j) {
+    const int x = (ax + 6) * 16 + static_cast<int>(j) * span / static_cast<int>(voiceprint::kPoints - 1u);
+    const int y = (ay + ah - 2) * 16 - static_cast<int>(vp.env[j]) * (ah - 4) * 16 / 255;
+    if (j != 0u) c.line(px, py, x, y, 16, ink);
+    px = x;
+    py = y;
+  }
+}
+
+// TUNE: the pitch ladder. The scale's notes are rungs (Empty, the KEY's roots TextDim), the target rung is the carrier ink, the detected pitch a
+// voice-ink disc, the correction a line from it to the target; unvoiced, the disc is dim and there is no line.
+void tune_shapes(plot::Canvas& c, int ax, int ay, int aw, int ah, const Voiceprint& vp) noexcept {
+  voiceprint::Rung rung[voiceprint::kSpan];
+  const unsigned n = voiceprint::ladder_rungs(vp.centre, vp.scale_mask, vp.key, ah, rung);
+  const int rx = ax + aw / 16, rw = aw - aw / 8;
+  for (unsigned i = 0; i < n; ++i) {
+    fill(c, rx, ay + rung[i].y - (rung[i].root ? 1 : 0), rw, rung[i].root ? 3 : 2, rung[i].root ? Color::TextDim : Color::Empty);
+  }
+  const bool has = vp.target >= 0;
+  const int ty = ay + voiceprint::ladder_y((vp.target - vp.centre) * 100, ah);
+  const int dy = ay + voiceprint::ladder_y(voiceprint::detected_cents(vp.centre, vp.target, vp.shift), ah);
+  const int cx = ax + aw / 2;
+  if (has) fill(c, rx, ty - 2, rw, 4, Color::Sel);
+  if (has && vp.voiced) {
+    if (dy != ty) c.line(cx * 16, dy * 16, cx * 16, ty * 16, 16, col(Color::Play));
+    c.point(cx * 16, dy * 16, 8 * 16, col(Color::Play));
+  } else {
+    c.point(cx * 16, dy * 16, 7 * 16, col(Color::Play), 70);
+  }
+}
+
+}  // namespace
+
 // The voiceprint as a strip (PARAMS): the frame, the pane and, with `bars`, the sixteen levels from the bottom with the held peaks over them.
 void voiceprint_strip(plot::Canvas& c, int x, int y, int w, int h, const Voiceprint& vp) noexcept {
   fill(c, x, y, w, h, Color::Empty);
@@ -71,6 +113,8 @@ void voiceprint_strip(plot::Canvas& c, int x, int y, int w, int h, const Voicepr
     for (int i = 1; i < 4; ++i) {  // the unlit grid
       fill(c, x + 2, y + i * h / 4, w - 4, 1, Color::Empty);
     }
+    if (vp.kind == Print::Talk) talk_shapes(c, x + 2, y + 2, w - 4, h - 4, vp);
+    if (vp.kind == Print::Tune) tune_shapes(c, x + 2, y + 2, w - 4, h - 4, vp);
     return;
   }
   const int inner = w - 8, ih = h - 8;
@@ -452,6 +496,10 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
   }
   if (vp.bars) {
     fill(c, kVx, kHorizon + 2, 288, 2, Color::Sel);
+  } else if (vp.kind == Print::Talk) {  // over the mask: a line is not a pinhole
+    talk_shapes(c, kVx, kVy, 288, 174, vp);
+  } else if (vp.kind == Print::Tune) {
+    tune_shapes(c, kVx, kVy, 288, 174, vp);
   }
 }
 
@@ -462,7 +510,7 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
   // Voiceprint.
   r.text(250, 52, "VOICEPRINT", Color::TextDim, Face::Label);
   r.text(523, 53, "SSS", Color::PlayText, Face::Micro);
-  if (vp.bars) {
+  if (vp.bars || vp.kind == Print::Talk) {
     static const struct {
       int half_col;
       const char* s;
@@ -470,7 +518,7 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
     for (const auto& a : kAxis) {
       r.text(kVx + a.half_col * kColStride / 2 + 6 - len(a.s) * 3, 254, a.s, Color::TextDim, Face::Micro);
     }
-  } else {
+  } else if (vp.kind == Print::Grid) {
     r.text(240 + (320 - len(placeholder) * 8) / 2, 150, placeholder, Color::TextDim, Face::Label);
   }
 

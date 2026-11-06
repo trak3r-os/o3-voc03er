@@ -178,8 +178,21 @@ class Vocoder final : public o3sdk::dsp::Unit {
   // What the PERFORM screen shows of BANDS (docs/UI-DESIGN.md section 8): the sixteen followers as 8-bit logs (0 is -60 dBFS or less, 255 is 0 dBFS),
   // band 0 (125 Hz) first. Packed four to a word, written by the render context once a block, one relaxed word-sized atomic each: a single writer like
   // LoopStatus, a read is never torn (the four words may be a block apart, which a meter does not show).
+  //
+  // TALK and TUNE (docs/UI-DESIGN.md section 5.3) ride along, plain copies of what the engines already hold, no maths in the render: `refl` the
+  // lattice's reflection coefficients 1..order as Q15 (k = refl[m - 1] / 32768; a value outside +-0.9995 or a NaN is published as 0, so what the
+  // screen reads is always finite), `order` the stages running (0 before the first block), `freeze` TALK's FREEZE, and TUNE's `shift_cents`
+  // (clamped to +-1200, a NaN is 0), `target_note` (-1 before the first voiced estimate) and `voiced`. They are packed into ten words with
+  // the same protocol as the bands (single writer, relaxed word-sized atomics): a read can mix two blocks' coefficients, which draws one odd
+  // frame and nothing worse.
   struct View {
     std::uint8_t band[Bands::kBands] = {};
+    std::int16_t refl[Talk::kMaxStages] = {};
+    std::uint8_t order = 0;
+    bool freeze = false;
+    bool voiced = false;
+    std::int8_t target_note = -1;
+    std::int16_t shift_cents = 0;
   };
   View view() const noexcept;
 
@@ -300,6 +313,9 @@ class Vocoder final : public o3sdk::dsp::Unit {
   std::atomic<std::uint32_t> pos_[Loop::kCount] = {};     // LoopStatus::position: same protocol
   static_assert(Bands::kBands == 16, "the View packs the sixteen followers into four words");
   std::atomic<std::uint32_t> view_[4] = {};  // View::band, four to a word: single writer (the render context), word-sized reads
+  static_assert(Talk::kMaxStages == 18, "the View packs the eighteen coefficients into nine words");
+  std::atomic<std::uint32_t> lpc_[9] = {};   // View::refl, two Q15 to a word, same protocol
+  std::atomic<std::uint32_t> lpc_meta_ = 0;  // View: order bits 0..4, freeze 5, voiced 6, target_note + 1 bits 8..15, shift_cents bits 16..31
 };
 
 }  // namespace o3_voc03er
