@@ -65,8 +65,8 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V5c | Per-step carrier switch | Host tests, scenario, unit | Built (host tests, scenario carrier_steps, cross build); the unit check is owed: CPU, click on real sources, a MOD-role loop picked as carrier CPU on the unit: section 4g; sound not heard. |
 | V6a | TUNE: detector and gate | Host tests against synthetic voices and three sung phrases; aubio as a host oracle only, never shipped |Built 2026-11-06: `Tune` (YIN, 4:1 and bass 8:1 decimation, native refine, 60 ms voiced gate), 13000 bytes, 10 host tests on synthetic voices (saw and glottal through formants, 80 to 800 Hz, worst 0.12 cent; clean sweep 0 octave errors; breathy 70 to 200 Hz 0.65%; vibrato no flips), voiced after 11 to 48 ms, ends 79 ms. Owed: CPU on the unit, the three sung phrases, breathy voice below 80 Hz. CPU on the unit: section 4f; sound not heard. |
 | V6b | TUNE: shifter, snap, retune | Host tests, unit |Built 2026-11-06: `Autotune` (period-jump shifter on Tune's own native ring, 16-sample control step, snap to KEY and SCALE or to NOTES-IN, SPEED 0 = stepped), Mode 2 = TUNE, params 35..39, `voc tune`, F keys and PLAY screen, scenario `tune.txt`; 10 host tests (snap error ~0 cent, no click, block independent, NaN clean, unvoiced bit-exact delay, vibrato no flip). 13 KiB; SRAM_U 138,088 B (about 1.2 KiB above the 32 KiB free floor). Formants move with the shift (centroid ratio equals the pitch ratio); Range Normal only. Owed: CPU of TUNE on the unit [est about 7,100 cycles a block], a sung voice, listening. CPU on the unit: section 4f; sound not heard. |
-| V2e | `Bands`: bands 0 to 12 at half rate (`docs/ports/vocoder-survey.md` item 1) | Host band response, alias rejection; unit read; ears | Host done 2026-11-06 (4b89ce6); unit read and ears owed |
-| V2f | `Bands`: FORMANT, the spectral envelope moved up or down (survey item 5, about 1.2 % of a block [est]), a new value on PARAMS page SHAPE; graded follower rates and the high-band modulator thru, THRU (items 2 and 3), all three accepted by the maintainer 2026-11-06. Parameter ids 40 and 41. After V2e, whose restructure it builds on | Host tests, scenario, unit, ears | Started 2026-11-06 |
+| V2e | `Bands`: bands 0 to 12 at half rate (`docs/ports/vocoder-survey.md` item 1) | Host band response, alias rejection; unit read; ears | Host and unit done 2026-11-06 (4b89ce6, section 4h); ears owed |
+| V2f | `Bands`: FORMANT, the spectral envelope moved up or down (survey item 5, about 1.2 % of a block [est]), a new value on PARAMS page SHAPE; graded follower rates and the high-band modulator thru, THRU (items 2 and 3), all three accepted by the maintainer 2026-11-06. Parameter ids 40 and 41. After V2e, whose restructure it builds on | Host tests, unit, ears | Host and unit done 2026-11-06 (416bea0, section 4h); ears owed, `kThruGain` an estimate, no scenario until PARAMS |
 | V7 | The 2040 layer, slice by slice | | |
 | U1 to U11 | The new interface, the sample slots and slices, the chord pads and the carrier synth: `docs/UI-DESIGN.md` section 12. The maintainer accepted the design and its section 11 recommendations on 2026-11-06, with the skin still to choose (`docs/ui-skins.html`) | Each slice as that table says | U1 started 2026-11-06: SRAM relief and the chord engine first |
 | M1 to M3 | MIDI in: the carrier by notes, pitch bend, controllers, the clock, then slices and patterns: `docs/UI-DESIGN.md` section 7c and section 12 | Scenarios, unit over USB at the worst load; DIN owed | Asked by the maintainer 2026-11-06 |
@@ -240,6 +240,31 @@ slips or hardware faults, 0 blocks shed, no crash.
   mean and 3.9 ms to 6.0 ms max. Key and pad commands were acknowledged in 1 to 4 ms and none was lost. So at the worst case the UI runs at about half speed; whether that shows needs eyes.
 - `midi` reports the kit's service in the image with no traffic. The app has no MIDI code of its own, and whether notes reach the vocoder is untested.
 - `usb` counted 1 output underrun over 7 stream starts during the session. When it happened is unknown, and nothing in `cpu` or `log` matches it. It stays open.
+
+## 4h. V2e, V2f and PERFORM on the unit, 2026-11-06
+
+Image 1bb3c54 on o3-sdk ef6b1a0, CRC 1092751B, tester o3-303-b1. Three reads a row after `cpu reset`; mean and peak of `render last`, 261,224 cycles a block, budget 60 % = 156,734. Shed 0 and underruns 0 in every row. Noise from USB at -12 dBFS.
+
+| Row | Mean | Peak | Peak % | Over budget |
+|---|---|---|---|---|
+| Idle on PERFORM, no player | 93.6k | 106.9k | 40.9 | 0 |
+| BANDS 8 notes alone | 141.3k | 149.8k | 57.3 | 0 |
+| BANDS 8 + 4 loops x2, noise | 166.6k | 175.8k | 67.2 | every block |
+| The same, FORMANT +12 | 172.2k | 182.7k | 69.9 | every block |
+| The same, FORMANT -12 | 172.4k | 186.4k | 71.3 | every block |
+| The same, FORMANT 0, THRU 100 | 169.2k | 180.0k | 68.9 | every block |
+| The same, FORMANT 0, THRU 0 | 167.4k | 177.5k | 67.9 | every block |
+| TALK 8 Q16, loops halted | 138.6k | 150.6k | 57.6 | 0 |
+| TALK 8 Q24 + 4 loops x2 | 179.6k | 191.7k | 73.3 | every block |
+| TUNE alone | 99.2k | 118.4k | 45.3 | 0 |
+
+- **V2e saved 5.7 points of peak** on the worst BANDS case: 72.9 % on b1283df, 67.2 % here. Row 2's mean, 63.8 %, is still past the 60 % budget, so every loop row counts over budget on every block. Nothing passed 75 %.
+- **V2f:** FORMANT costs 2.7 to 4.1 points, THRU 1.7, and both come back to the first figures at 0. The ears are owed.
+- **PERFORM at row 2's load:** `state` mean 2.3 to 2.5 ms, max 5.9 (it was 1.9 to 2.8 mean); key and pad acks 1 to 6 ms, none lost; 69.2 % peak with three screenshots and key and pad taps. A chord pad sounded its notes and lit.
+- **Open: one peak of 245,294 cycles, 93.9 %,** no shed, no underrun, in a run that stepped MODE through BANDS, TALK and TUNE with F1 and took three screenshots. A rerun without the MODE key peaked at 69.2 %. Not isolated. The likely cause is the mode crossfade, during which two engines run (`runs()` in `Vocoder::process`), but that is unmeasured. If it is, a MODE change at TALK Q24 with loops could pass 100 %. The next round times `voc talk` and `voc tune` at this load with no screenshots, and screenshots with no mode change.
+- **Project save and load with the buffers in the SDRAM: passed.** Four steps saved, reset, deleted, loaded back.
+- `files=failed` shows after boot with no config.o3a on the card, probably the quiet config load; not confirmed.
+- The console has no main-loop pass rate and cannot delete a card file: `pattern.o3a` and `.bak` of this round stay in `/Apps/o3_voc03er/`, and the next boot of this app loads them.
 
 ## 5. How the work runs
 
