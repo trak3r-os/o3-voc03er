@@ -261,6 +261,8 @@ The signal path drawn large with the one rule written on it: LIVE (SOURCE, GAIN,
 LINE AND RADIO SHARE THE ADC; USB IS STEREO") → the mode → OUTPUT (DRY, LEVEL, RETURN LEVEL for USB, the tall OUT meter) and, with RADIO, FREQ
 with F7 / F8 seeking. F1 SOURCE · F2 GAIN · F3 MONITOR · F4 DRY · F5 LEVEL · F6 RETURN · F7 SEEK DOWN · F8 SEEK UP (dimmed unless RADIO).
 
+Built in U9b1 (`app/src/master_screen.{h,cpp}`, logic in `master_logic.h`, `tests/master_test.cpp`, `app/scenarios/master.txt`). Every key has a kit API, so none says COMES LATER: a dim key says why when tapped. SOURCE goes through the app's one source path (PERFORM's callback: `AudioIn::select`, the meter's reset, the USB channel), so the settling gate holds; GAIN is `AudioIn::set_gain` (dim on USB), MONITOR is `AudioIn::monitor` (a second tap toggles off / 70), RETURN is `UsbAudio::set_return_level` (live whenever the board has a USB audio device, whatever the source), DRY and LEVEL are the unit's parameters as PARAMS writes them; F7 / F8 are `Radio::seek` (live with RADIO as the source and a receiver that answered). The two tall meters are drawn in the screen with PERFORM's ladder rule (whole 6 px rows, held peak), not its masked dots. No pads, no UP / DOWN: MASTER has no pages. The screen object is about 40 bytes of SRAM_U (`__bss_end` 0x2001F8A8).
+
 ### FILE
 
 The projects: the folders under `Apps/o3_voc03er/` (the picker with folders), F1 LOAD, F2 SAVE, F3 SAVE AS (the kit's `NameEntry`), F4 NEW, F5 SAVE
@@ -558,7 +560,7 @@ screen it touches. The unit checks owed are named, not run here.
 | U8a | SAMPLE LOAD: the WAV reader, the picker, the load into a slot, the staging region (built) | `sample_load.txt` (`--card` with a mono and a stereo WAV over the same slot, a 48 kHz and an 8-bit one refused, a broken one, a 20 s one clipped, a slot that records) |
 | U8b | SAVE WAV: the writer on SAMPLE EDIT's F7 (built) | `sample_load.txt` (it needs the same card) |
 | U9a | PARAMS: three pages of eight values, the voiceprint small above them, COMES LATER for the keys of U10, QUALITY 24 over budget (built) | `params.txt` |
-| U9b | TALK and TUNE voiceprints, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
+| U9b | TALK and TUNE voiceprints, MASTER with the radio's keys (MASTER built in U9b1); FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
 | U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
 | M1 | MIDI in, first step (section 7c): notes to the SYNTH carrier and to NOTES-IN, right after U1; then pitch bend to `Bend`, after U2b; learn and FOLLOW checked on this app | `midi.txt` (notes and a bend in, a WAV of each); on the unit, USB notes and a bend at the 72.9 % load |
 | M2 | Slices by MIDI note, velocity as level, after U5 | `midi_slices.txt` (notes over a latched chord, a WAV); timing on the unit against the pads |

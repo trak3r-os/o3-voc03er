@@ -9,6 +9,7 @@
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/platform/host/dir_card.h>
 #include <o3sdk/platform/host/fake_midi.h>
+#include <o3sdk/platform/host/fake_usb_audio.h>
 #include <o3sdk/sim/harness.h>
 #include <o3sdk/sim/scenario.h>
 
@@ -241,7 +242,8 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
     platform::host::DirCard card(card_dir.path());
     platform::host::FakeCapture cap;
     platform::host::FakeMidi midi;  // for the scenarios with a midi line (bend.txt)
-    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, &midi, &card, nullptr, &cap);
+    platform::host::FakeUsbAudio usb;  // master.txt shows RETURN live, which needs a USB audio device
+    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, &midi, &card, nullptr, &cap, entry.path().filename() == "master.txt" ? &usb : nullptr);
     REQUIRE(h->start());
     const sim::ScenarioResult r = sim::run_scenario(*h, text.str(), out.string());
     CHECK_MESSAGE(r.ok, r.error);

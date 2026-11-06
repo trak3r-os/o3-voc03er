@@ -1,0 +1,41 @@
+# MASTER: the signal path drawn large, LIVE (SOURCE, GAIN, MONITOR, the IN meter) > the mode > OUTPUT (DRY, LEVEL, RETURN, the OUT meter) and, with the
+# radio as the source, FREQ. LINE first (SEEK DOWN and SEEK UP dim), GAIN changed, RADIO (the two seek keys live, the frequency shown), a seek each way,
+# DRY changed, MONITOR on, and a dim key tapped (it says why). A `usb` line gives the board a USB audio device, so RETURN is live.
+# The simulator shows the screen and that the kit takes the values; it cannot say what the frame costs, and the radio is a fake receiver.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/master.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+radio stations 87.9 93.7 98.5 104.3
+usb level 40
+wait 400
+tap master
+wait 500
+snap 01_line
+tap f8
+wait 150
+snap 02_seek_is_dim
+tap f2
+turn 10
+wait 300
+snap 03_gain_changed
+tap f1
+turn 5
+wait 1500
+snap 04_radio
+tap f8
+wait 1500
+snap 05_seek_up
+tap f7
+wait 1500
+snap 06_seek_down
+tap f4
+turn 10
+wait 300
+snap 07_dry_changed
+tap f3
+tap f3
+wait 300
+snap 08_monitor_on
+tap f6
+turn 10
+wait 300
+snap 09_return_changed

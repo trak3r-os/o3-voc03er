@@ -31,6 +31,7 @@
 #include "perform_screen.h"
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
+#include "master_screen.h"
 #include "params_screen.h"
 #include "sample_rec_screen.h"
 #include "sample_edit_screen.h"
@@ -77,7 +78,6 @@ static_assert(sizeof g_save_buf % 4 == 0 && sizeof g_cfg_buf % 4 == 0 && sizeof 
 // The screens a later slice draws (docs/UI-DESIGN.md section 12), one row each: name, lane, the slice, a line of its own, HELP's summary.
 // The order is the one input() indexes.
 constexpr o3_voc03er::StubInfo kStubs[] = {
-    {"MASTER", nullptr, "BUILT IN SLICE U9", nullptr, "MASTER: THE LIVE SOURCE AND GAIN, MONITOR, DRY, OUTPUT LEVEL. NOT DRAWN YET: SLICE U9."},
     {"SONG", nullptr, "BUILT IN SLICE U9", nullptr, "SONG: A CHAIN OF PATTERNS. NOT DRAWN YET: SLICE U9."},
     {"FILE", nullptr, "BUILT IN SLICE U9", nullptr, "FILE: THE PROJECTS ON THE CARD. NOT DRAWN YET: SLICE U9."},
 };
@@ -151,6 +151,7 @@ class MyApp final : public app::App {
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     params_.init(voice, &perform_);
+    master_.init(voice, &meter_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);
     sample_load_.init(&sample_, g_loop_mem);
@@ -284,8 +285,16 @@ class MyApp final : public app::App {
         const o3_voc03er::StubInfo* info;
       };
       static constexpr Open kOpen[] = {
-          {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
+          {app::Button::Song, &kStubs[0]},
+          {app::Button::File, &kStubs[1]},
       };
+      if (in.press(app::Button::Master)) {  // the signal path: source, gain, monitor, dry, level, return
+        if (ctx.screen() != &master_) {
+          ctx.show(master_);
+        }
+        ctx.redraw();
+        return true;
+      }
       struct Lane {
         app::Button button;
         o3_voc03er::pattern::Lane lane;
@@ -320,8 +329,12 @@ class MyApp final : public app::App {
           return true;
         }
       }
-    } else if (in.press(app::Button::Master) || in.press(app::Button::Song)) {
-      stub_.set(in.press(app::Button::Master) ? &kStubs[0] : &kStubs[1]);
+    } else if (in.press(app::Button::Master)) {
+      ctx.show(master_);
+      ctx.redraw();
+      return true;
+    } else if (in.press(app::Button::Song)) {
+      stub_.set(&kStubs[0]);
       ctx.show(stub_);
       ctx.redraw();
       return true;
@@ -680,6 +693,7 @@ class MyApp final : public app::App {
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::ParamsScreen params_;
+  o3_voc03er::MasterScreen master_;
   o3_voc03er::SampleScreen sample_;
   o3_voc03er::SampleEditScreen sample_edit_;
   o3_voc03er::SampleLoadScreen sample_load_;

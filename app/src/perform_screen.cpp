@@ -1368,7 +1368,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
       {Button::Performance, "AGAIN: FREES THE ENCODER", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
-      {Button::Master, "MASTER (SLICE U9)", nullptr},
+      {Button::Master, "MASTER", nullptr},
       {Button::File, "FILE (SLICE U9)", nullptr},
       {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
       {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
