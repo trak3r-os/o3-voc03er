@@ -27,10 +27,18 @@ constexpr std::uint64_t kNoteMs = 2500;
 constexpr std::uint8_t kFocusCursor = 0;  // the encoder moves the cursor
 constexpr std::uint8_t kFocusCut = 1;     // the encoder steps F1 (CUT EVEN)
 constexpr std::uint8_t kFocusBeats = 2;   // the encoder steps F2 (CUT BEATS)
+constexpr std::uint8_t kFocusStart = 3;   // the encoder moves the trim's START bracket (F4)
+constexpr std::uint8_t kFocusEnd = 4;     // ... its END bracket (F5)
+constexpr std::uint8_t kJobNone = 0;      // g_se.job_kind
+constexpr std::uint8_t kJobTrim = 1;
+constexpr std::uint8_t kJobCopy = 2;
+constexpr std::uint32_t kJobMs = 1000;    // how long a job keeps sending Load while the unit has not adopted the length
+constexpr std::uint32_t kResendMs = 100;
+static_assert(se::kTrimFade == Loop::kFadeSamples, "the trim's seam is the unit's own fade");
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"CUT EVEN", "BEATS", "HITS", "START", "END", "NORMALISE", "SAVE WAV", "CLR CUTS"};
-constexpr std::uint8_t kLaterMask = 0x5Cu;  // F3 HITS, F4 START, F5 END and F7 SAVE WAV draw dim: they come later (F2 is dim for a WAV, see beats_dim)
+constexpr std::uint8_t kLaterMask = 0x44u;  // F3 HITS and F7 SAVE WAV draw dim: they come later (F2 is dim for a WAV, see beats_dim)
 
 // The screen's state, in the SDRAM (O3SDK_BIG: zero at start, main loop only), so the screen object is the vtable and two pointers.
 struct EditData {
@@ -42,10 +50,21 @@ struct EditData {
   se::Pending pending;                 // F6 or SHIFT + DELETE asked, F1 confirms (any other input cancels)
   se::Norm norm;                       // the NORMALISE run (main loop: a slice a pass from update())
   std::uint8_t norm_slot;
+  se::Brackets br[sm::kReaders];       // the trim's brackets per slot; valid while br_len[slot] is the slot's length (else {0, length}, see fit_brackets)
+  std::uint32_t br_len[sm::kReaders];
+  se::Job job;                         // the TRIM or COPY move (main loop: a slice a pass from update(), then Load until the unit adopts the length)
+  std::uint8_t job_kind;               // JobKind: 0 none, 1 trim, 2 copy
+  std::uint8_t job_src, job_dst;       // slots (a trim has both the same)
+  std::uint8_t job_edited, job_even;   // a copy's flags for the target
+  bool job_sent;                       // the move is done and Load has gone
+  std::uint32_t job_start;             // a trim's START
+  std::uint32_t job_len;               // the length the target slot must show for the job to be over
+  std::uint64_t job_deadline, job_resend;
+  sm::SliceTable job_table;            // the cuts the target gets once the length is adopted (the unit's own length change would reset them)
   bool key_tap;                        // turn() came from a second tap on F1
   const char* note;                    // a moment's line (a static string or note_buf), until note_until
   std::uint64_t note_until;
-  char note_buf[24];
+  char note_buf[32];
 };
 O3SDK_BIG EditData g_se = {};
 
@@ -111,6 +130,12 @@ void SampleEditScreen::leave(app::Context& ctx) noexcept {
     while (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
       norm_tick(ctx);
     }
+  }
+  if (g_se.job_kind != kJobNone) {  // the move ends now (at most 87 slices) and Load goes; the unit adopts it by itself and SAMPLE's service() makes even cuts
+    while (!g_se.job_sent && g_se.job_kind != kJobNone) {
+      job_tick(ctx);
+    }
+    g_se.job_kind = kJobNone;
   }
   if (sample_ != nullptr) {
     sample_->pad_leave(ctx);
@@ -293,8 +318,7 @@ void SampleEditScreen::turn_beats(app::Context& ctx, int delta) noexcept {
 
 // F6: asks; F1 confirms. SHIFT + DELETE below.
 void SampleEditScreen::ask_normalise(app::Context& ctx) noexcept {
-  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
-    say(ctx, "NORMALISING");
+  if (busy(ctx)) {
     return;
   }
   if (refuse(ctx, true)) {
@@ -305,7 +329,7 @@ void SampleEditScreen::ask_normalise(app::Context& ctx) noexcept {
 }
 
 void SampleEditScreen::ask_empty(app::Context& ctx) noexcept {
-  if (refuse(ctx, true)) {
+  if (busy(ctx) || refuse(ctx, true)) {
     return;
   }
   g_se.pending = se::Pending::Empty;
@@ -316,11 +340,13 @@ void SampleEditScreen::ask_empty(app::Context& ctx) noexcept {
 void SampleEditScreen::confirm(app::Context& ctx) noexcept {
   const se::Pending what = g_se.pending;
   g_se.pending = se::Pending::None;
-  if (refuse(ctx, true)) {
+  if (busy(ctx) || refuse(ctx, true)) {
     return;
   }
   const unsigned slot = sample_->slot() & 3u;
-  if (what == se::Pending::Normalise) {
+  if (what == se::Pending::Copy) {
+    run_copy(ctx);
+  } else if (what == se::Pending::Normalise) {
     if (mem_ == nullptr) {
       return;
     }
@@ -374,6 +400,214 @@ void SampleEditScreen::norm_finish(app::Context& ctx) noexcept {
   say(ctx, g_se.note_buf);
 }
 
+// ---- TRIM (F4, F5) and COPY: a bounded slice a pass, then Load until the unit adopts the length ------------------------------------------------
+
+// True (and says why) while NORMALISE or a job owns the samples.
+bool SampleEditScreen::busy(app::Context& ctx) noexcept {
+  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
+    say(ctx, "NORMALISING");
+    return true;
+  }
+  if (g_se.job_kind != kJobNone) {
+    say(ctx, g_se.job_kind == kJobTrim ? "TRIMMING" : "COPYING");
+    return true;
+  }
+  return false;
+}
+
+// The slot's brackets, {0, length} when the length is not the one they were set for.
+void SampleEditScreen::fit_brackets(unsigned slot) noexcept {
+  const std::uint32_t len = sample_->table(slot).length;
+  if (g_se.br_len[slot] != len) {
+    g_se.br[slot] = se::Brackets{0u, len};
+    g_se.br_len[slot] = len;
+  }
+}
+
+// A slot the trim may rewrite: nothing plays it, waits to, or sounds a region on any reader (a slice may borrow one).
+bool SampleEditScreen::slot_stopped(unsigned slot) const noexcept {
+  const Vocoder::LoopStatus st = sample_->status(slot);
+  if (st.playing || st.pending) {
+    return false;
+  }
+  for (unsigned k = 0; k < sm::kReaders; ++k) {
+    if (sample_->status(k).region) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void SampleEditScreen::send_load(app::Context& ctx) noexcept {
+  const float v = static_cast<float>(static_cast<std::uint32_t>(g_se.job_dst) * Loop::kMaxSamples + g_se.job_len);
+  (void)ctx.engine().set_param(sample_->voice(), Vocoder::Load, v);
+  (void)ctx.engine().set_param(sample_->voice(), Vocoder::Load, 0.0f);  // a saved project must not hold it
+  g_se.job_resend = ctx.uptime_ms() + kResendMs;
+}
+
+// F4 or F5 tapped: points the encoder at the bracket; a second tap puts it back at its end.
+void SampleEditScreen::tap_bracket(app::Context& ctx, bool end_side) noexcept {
+  if (refuse(ctx, true)) {
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  fit_brackets(slot);
+  const std::uint8_t want = end_side ? kFocusEnd : kFocusStart;
+  if (g_se.focus == want) {
+    (end_side ? g_se.br[slot].end : g_se.br[slot].start) = end_side ? g_se.br_len[slot] : 0u;
+  }
+  g_se.focus = want;
+  g_se.note = nullptr;  // the strip now says what F1 does
+  ctx.redraw();
+}
+
+void SampleEditScreen::turn_bracket(app::Context& ctx, int delta, bool shift) noexcept {
+  const unsigned slot = sample_->slot() & 3u;
+  fit_brackets(slot);
+  const std::uint32_t len = g_se.br_len[slot];
+  g_se.br[slot] = se::bracket_move(g_se.br[slot], g_se.focus == kFocusEnd, delta, shift ? se::coarse_step(len) : 1u, len);
+  g_se.note = nullptr;
+  ctx.redraw();
+}
+
+// F1 on a moved bracket: move [start, end) down to 0 in slices, bake the seam, then Load.
+void SampleEditScreen::run_trim(app::Context& ctx) noexcept {
+  if (busy(ctx) || refuse(ctx, true)) {
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  fit_brackets(slot);
+  const se::Brackets b = g_se.br[slot];
+  if (mem_ == nullptr || !se::trim_moved(b, g_se.br_len[slot])) {
+    return;
+  }
+  if (!slot_stopped(slot)) {
+    say(ctx, "STOP THE SLOT FIRST");
+    return;
+  }
+  if (!se::trim_cuts(sample_->table(slot), b.start, b.end, g_se.job_table)) {
+    say(ctx, "NOTHING TO TRIM");
+    return;
+  }
+  se::job_begin(g_se.job, b.end - b.start, true);
+  g_se.job_kind = kJobTrim;
+  g_se.job_src = g_se.job_dst = static_cast<std::uint8_t>(slot);
+  g_se.job_start = b.start;
+  g_se.job_len = b.end - b.start;
+  g_se.job_sent = false;
+  g_se.note = nullptr;
+  se::arm_cancel(g_se.arm);
+  ctx.redraw();
+}
+
+void SampleEditScreen::ask_copy(app::Context& ctx) noexcept {
+  if (busy(ctx) || refuse(ctx, true)) {
+    return;
+  }
+  const unsigned to = copy_target();
+  if (to >= sm::kReaders) {
+    say(ctx, "NO EMPTY SLOT");
+    return;
+  }
+  g_se.pending = se::Pending::Copy;
+  g_se.note_buf[0] = '\0';
+  cat(g_se.note_buf, sizeof g_se.note_buf, "COPY TO SLOT ");
+  cat_uint(g_se.note_buf, sizeof g_se.note_buf, to + 1u);
+  cat(g_se.note_buf, sizeof g_se.note_buf, "? F1 CONFIRMS");
+  say(ctx, g_se.note_buf);
+}
+
+// The next slot after the selected one that holds nothing, records nothing and has no length: kReaders when there is none.
+unsigned SampleEditScreen::copy_target() const noexcept {
+  bool used[sm::kReaders];
+  for (unsigned k = 0; k < sm::kReaders; ++k) {
+    const Vocoder::LoopStatus st = sample_->status(k);
+    used[k] = st.rec != Vocoder::LoopStatus::Rec::Idle || st.length != 0u || sample_->table(k).length != 0u ||
+              (g_se.job_kind != kJobNone && g_se.job_dst == k);
+  }
+  return se::next_empty_slot(used, sample_->slot() & 3u);
+}
+
+void SampleEditScreen::run_copy(app::Context& ctx) noexcept {
+  const unsigned slot = sample_->slot() & 3u;
+  const unsigned to = copy_target();
+  if (mem_ == nullptr) {
+    return;
+  }
+  if (to >= sm::kReaders) {
+    say(ctx, "NO EMPTY SLOT");
+    return;
+  }
+  g_se.job_table = sample_->table(slot);
+  se::job_begin(g_se.job, g_se.job_table.length, false);
+  g_se.job_kind = kJobCopy;
+  g_se.job_src = static_cast<std::uint8_t>(slot);
+  g_se.job_dst = static_cast<std::uint8_t>(to);
+  g_se.job_edited = sample_->edited(slot) ? 1u : 0u;
+  g_se.job_even = static_cast<std::uint8_t>(sample_->even_code(slot));
+  g_se.job_len = g_se.job_table.length;
+  g_se.job_sent = false;
+  g_se.note = nullptr;
+  ctx.redraw();
+}
+
+// One step of the job: a slice of the move, then Load until the target slot shows the length (or the second is up).
+void SampleEditScreen::job_tick(app::Context& ctx) noexcept {
+  const unsigned src = g_se.job_src & 3u;
+  const unsigned dst = g_se.job_dst & 3u;
+  const bool trim = g_se.job_kind == kJobTrim;
+  const std::uint64_t now = ctx.uptime_ms();
+  if (!g_se.job_sent) {
+    if (mem_ == nullptr || sample_->status(src).rec != Vocoder::LoopStatus::Rec::Idle || sample_->table(src).length == 0u) {
+      g_se.job_kind = kJobNone;
+      say(ctx, trim ? "TRIM CANCELLED" : "COPY CANCELLED");
+      return;
+    }
+    std::int16_t* to = mem_ + static_cast<std::size_t>(dst) * Loop::kMaxSamples;
+    const std::int16_t* from = mem_ + static_cast<std::size_t>(src) * Loop::kMaxSamples + (trim ? g_se.job_start : 0u);
+    if (se::job_step(g_se.job, to, from)) {
+      g_se.job_sent = true;
+      g_se.job_deadline = now + kJobMs;
+      send_load(ctx);
+    }
+    ctx.redraw();
+    return;
+  }
+  const Vocoder::LoopStatus st = sample_->status(dst);
+  if (st.rec == Vocoder::LoopStatus::Rec::Idle && st.length == g_se.job_len) {
+    job_finish(ctx);
+  } else if (now >= g_se.job_deadline) {
+    g_se.job_kind = kJobNone;
+    overview::shared().mark_dirty(dst);  // a failed trim has moved the samples under the old length
+    say(ctx, trim ? "TRIM FAILED" : "COPY FAILED");
+  } else if (now >= g_se.job_resend) {
+    send_load(ctx);
+  }
+  ctx.redraw();
+}
+
+// The unit adopted the length: the target's cuts are the job's (SAMPLE's service() had made even ones for the new length), flagged as the hand's.
+void SampleEditScreen::job_finish(app::Context& ctx) noexcept {
+  const unsigned dst = g_se.job_dst & 3u;
+  const bool trim = g_se.job_kind == kJobTrim;
+  g_se.job_kind = kJobNone;
+  sample_->table(dst) = g_se.job_table;
+  table_changed(*sample_, dst, trim ? true : g_se.job_edited != 0u, trim ? 3u : g_se.job_even);
+  g_se.cursor[dst] = 0;
+  char tm[12];
+  g_se.note_buf[0] = '\0';
+  if (trim) {
+    se::time_text(g_se.job_len, tm);
+    cat(g_se.note_buf, sizeof g_se.note_buf, "TRIMMED TO ");
+    cat(g_se.note_buf, sizeof g_se.note_buf, tm);
+    cat(g_se.note_buf, sizeof g_se.note_buf, " S");
+  } else {
+    cat(g_se.note_buf, sizeof g_se.note_buf, "COPIED TO SLOT ");
+    cat_uint(g_se.note_buf, sizeof g_se.note_buf, dst + 1u);
+  }
+  say(ctx, g_se.note_buf);
+}
+
 void SampleEditScreen::clear_cuts(app::Context& ctx) noexcept {
   if (refuse(ctx, true)) {
     return;
@@ -424,6 +658,11 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       return;
     }
     if (k == 0u) {
+      const unsigned bs = sample_->slot() & 3u;
+      if ((g_se.focus == kFocusStart || g_se.focus == kFocusEnd) && (fit_brackets(bs), se::trim_moved(g_se.br[bs], g_se.br_len[bs]))) {
+        run_trim(ctx);  // a bracket in hand and off its end: F1 confirms the trim
+        return;
+      }
       if (g_se.focus == kFocusCut) {  // a second tap steps it
         g_se.key_tap = true;
         turn(ctx, 1);
@@ -446,12 +685,14 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       }
       g_se.focus = kFocusBeats;
       ctx.redraw();
+    } else if (k == 3u || k == 4u) {
+      tap_bracket(ctx, k == 4u);
     } else if (k == 5u) {
       ask_normalise(ctx);
     } else if (k == 7u) {
       clear_cuts(ctx);
     } else {
-      say(ctx, "COMES LATER");  // HITS, START, END, SAVE WAV; the encoder stays where it was
+      say(ctx, "COMES LATER");  // HITS, SAVE WAV; the encoder stays where it was
     }
     return;
   }
@@ -461,6 +702,8 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       turn(ctx, in.delta());
     } else if (g_se.focus == kFocusBeats) {
       turn_beats(ctx, in.delta());
+    } else if (g_se.focus == kFocusStart || g_se.focus == kFocusEnd) {
+      turn_bracket(ctx, in.delta(), in.shift);
     } else {
       const unsigned slot = sample_->slot() & 3u;
       const std::uint32_t len = sample_->table(slot).length;
@@ -487,8 +730,12 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     } else {
       remove(ctx);
     }
-  } else {
-    (void)sample_->pad_input(ctx, in);  // the pads and SHIFT's latch, as on SAMPLE
+  } else if (in.press(Button::Copy)) {
+    if (!in.shift) {  // SHIFT + COPY stays free
+      ask_copy(ctx);
+    }
+  } else if (g_se.job_kind == kJobNone) {
+    (void)sample_->pad_input(ctx, in);  // the pads and SHIFT's latch, as on SAMPLE; none while a job rewrites a slot
   }
 }
 
@@ -502,7 +749,7 @@ void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     out.label[i] = kKeyNames[i];
   }
-  out.hot = g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : 0u);
+  out.hot = static_cast<std::uint8_t>(g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : (g_se.focus == kFocusStart ? 8u : (g_se.focus == kFocusEnd ? 16u : 0u))));
   out.dim = static_cast<std::uint8_t>(kLaterMask | (beats_dim(ctx) ? 2u : 0u));
 }
 
@@ -513,6 +760,9 @@ void SampleEditScreen::update(app::Context& ctx) noexcept {
   sample_->pad_update(ctx);
   if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
     norm_tick(ctx);  // a slice a frame
+  }
+  if (g_se.job_kind != kJobNone) {
+    job_tick(ctx);
   }
   if (g_se.note != nullptr && ctx.uptime_ms() >= g_se.note_until) {
     g_se.note = nullptr;
@@ -530,6 +780,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Right, "NEXT CUT, HOLD REPEATS", nullptr},
       {Button::Insert, "A CUT AT THE CURSOR", nullptr},
       {Button::Delete, "THE CUT AT THE CURSOR", nullptr},
+      {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
       {Button::Shift, "COARSE CURSOR, LATCH CHORD", nullptr},
       {Button::Rec, "SAMPLE REC: A TAKE", nullptr},
       {Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
@@ -552,22 +803,23 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
     sample_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
   }
   h.summary = "INSERT CUTS AT THE CURSOR, DELETE REMOVES THE CUT THERE.\n"
-              "SHIFT + DELETE EMPTIES THE SLOT: F1 CONFIRMS.";
+              "SHIFT + DELETE EMPTIES THE SLOT, COPY COPIES IT, F4 / F5 TRIM: F1 CONFIRMS.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
   }
   h.fkey[0] = "OFF, 8, 16 OR 24 EVEN CUTS";
-  for (unsigned i = 2; i < 7; ++i) {
-    h.fkey[i] = "COMES LATER";
-  }
+  h.fkey[2] = "COMES LATER";
+  h.fkey[6] = "COMES LATER";
   h.fkey[1] = "4, 8 OR 16 CUTS A BAR";
+  h.fkey[3] = "TRIM START, F1 TRIMS";
+  h.fkey[4] = "TRIM END, F1 TRIMS";
   h.fkey[5] = "PEAK TO -1 DB, F1 CONFIRMS";
   h.fkey[7] = "ONE CUT OVER THE SLOT";
   h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: CHORDS (LATCH WITH SHIFT).";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
-  h.encoder = "THE CURSOR, OR THE LIT F KEY";
+  h.encoder = "CURSOR, LIT F KEY, BRACKET";
 }
 
 void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
@@ -598,6 +850,19 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     cat(keys[1].value, sizeof keys[1].value, se::beats_name(shown_beats(*sample_, slot)));
   }
 
+  const bool has = len != 0u;
+  se::Brackets br;
+  bool bracket_on = false;
+  if (has) {
+    fit_brackets(slot);
+    br = g_se.br[slot];
+    keys[3].hot = g_se.focus == kFocusStart;
+    keys[4].hot = g_se.focus == kFocusEnd;
+    se::time_text(br.start, keys[3].value);
+    se::time_text(br.end, keys[4].value);
+    bracket_on = se::trim_moved(br, len) || g_se.focus == kFocusStart || g_se.focus == kFocusEnd;
+  }
+
   ui::plot::Canvas c(r);
   c.open();
   ornoir::header_shapes(c, h);
@@ -610,6 +875,18 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
       ornoir::fill_rect(c, se::mark_x(t.cut[i].start, len), kPicY, 1, kPicH, Color::Accent);
     }
     ornoir::fill_rect(c, se::mark_x(cur, len), kPicY, 1, kPicH, Color::Text);
+  }
+  if (bracket_on) {  // [ START and END ] on the picture and the ruler: one map, the cursor's
+    const int xs = se::mark_x(br.start, len);
+    const int xe = se::mark_x(br.end, len);
+    for (int side = 0; side < 2; ++side) {
+      const int x = side == 0 ? xs : xe - 1;
+      const int serif = side == 0 ? 0 : -6;
+      ornoir::fill_rect(c, x, kPicY, 3, kPicH, Color::Accent);
+      ornoir::fill_rect(c, x + serif, kPicY, 9, 3, Color::Accent);
+      ornoir::fill_rect(c, x + serif, kPicY + kPicH - 3, 9, 3, Color::Accent);
+      ornoir::fill_rect(c, x, kBarY - 14, 3, kBarH + 28, Color::Accent);
+    }
   }
   ornoir::fill_rect(c, kX, kBarY, kW, kBarH, Color::Empty);
   if (len != 0u) {
@@ -658,7 +935,14 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     r.text(tx, kBarY + kBarH + 32, tm, Color::Text, Face::Label);
   }
 
-  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
+  if (g_se.job_kind != kJobNone) {
+    char pb[24];
+    pb[0] = '\0';
+    cat(pb, sizeof pb, g_se.job_kind == kJobTrim ? "TRIMMING " : "COPYING ");
+    cat_uint(pb, sizeof pb, g_se.job_sent ? 100u : se::job_percent(g_se.job));
+    cat(pb, sizeof pb, "%");
+    r.text(kX, 398, pb, Color::Accent, Face::Label);
+  } else if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
     char pb[24];
     pb[0] = '\0';
     cat(pb, sizeof pb, g_se.norm.phase == se::NormPhase::Scan ? "SCANNING " : "NORMALISING ");
@@ -667,6 +951,9 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     r.text(kX, 398, pb, Color::Accent, Face::Label);
   } else if (g_se.note != nullptr) {
     r.text(kX, 398, g_se.note, Color::Accent, Face::Label);
+  } else if (has && se::trim_moved(br, len)) {  // a bracket off its end: say what F1 does now
+    const bool armed = g_se.focus == kFocusStart || g_se.focus == kFocusEnd;
+    r.text(kX, 398, armed ? "TRIM TO THE BRACKETS: F1 CONFIRMS (NO UNDO)" : "BRACKETS MOVED: F4 OR F5, THEN F1 TRIMS", Color::Accent, Face::Label);
   } else {
     r.text(kX, 402, "INSERT CUTS AT THE CURSOR, DELETE REMOVES THE CUT UNDER IT", Color::TextDim, Face::Micro);
   }

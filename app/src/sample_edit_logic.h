@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 namespace o3_voc03er::sample_edit {
 
@@ -381,9 +382,120 @@ inline int gain_tenths_db(float gain) noexcept {
   return static_cast<int>(t + (t >= 0.0f ? 0.5f : -0.5f));
 }
 
+// ---- TRIM (F4 START, F5 END) and COPY: the brackets, the cuts after a trim, and the sliced move ---------------------------------------------
+
+inline constexpr std::uint32_t kJobSlice = 8192;  // samples one job_step moves: 16 KiB read and written in the SDRAM, a frame's share of the main loop
+inline constexpr std::uint32_t kTrimFade = 64;    // the seam on the new start: Loop::kFadeSamples (the .cpp asserts it)
+
+// The trim's two brackets over a slot: [start, end) is what stays. A slot's are {0, length} until the hand moves one.
+struct Brackets {
+  std::uint32_t start = 0, end = 0;
+};
+
+// A bracket `detents` x `step` samples on; START stays in [0, end - kMinCutSamples], END in [start + kMinCutSamples, length]. A slot too short for two
+// brackets that far apart keeps them where they are.
+inline Brackets bracket_move(Brackets b, bool end_side, int detents, std::uint32_t step, std::uint32_t length) noexcept {
+  if (length < 2u * kMinCutSamples || b.end > length || b.end < b.start + kMinCutSamples) {
+    return b;
+  }
+  const std::int64_t d = static_cast<std::int64_t>(detents) * static_cast<std::int64_t>(step);
+  if (end_side) {
+    const std::int64_t v = static_cast<std::int64_t>(b.end) + d;
+    const std::int64_t lo = static_cast<std::int64_t>(b.start) + static_cast<std::int64_t>(kMinCutSamples);
+    b.end = static_cast<std::uint32_t>(v < lo ? lo : (v > static_cast<std::int64_t>(length) ? static_cast<std::int64_t>(length) : v));
+  } else {
+    const std::int64_t v = static_cast<std::int64_t>(b.start) + d;
+    const std::int64_t hi = static_cast<std::int64_t>(b.end) - static_cast<std::int64_t>(kMinCutSamples);
+    b.start = static_cast<std::uint32_t>(v < 0 ? 0 : (v > hi ? hi : v));
+  }
+  return b;
+}
+
+// A bracket is off its end: F1 (with one focused) would trim.
+constexpr bool trim_moved(const Brackets& b, std::uint32_t length) noexcept { return length != 0u && (b.start != 0u || b.end != length); }
+
+// The table after a trim to [start, end): every cut shifted by -start, those wholly outside dropped, the first and last clipped so the cuts tile the
+// new length (end - start); at least one stays. `out` is a copy of `in` edited; false (out untouched) for a range that is empty or beyond `in`.
+inline bool trim_cuts(const sm::SliceTable& in, std::uint32_t start, std::uint32_t end, sm::SliceTable& out) noexcept {
+  if (end <= start || end > in.length) {
+    return false;
+  }
+  sm::SliceTable t;
+  t.length = end - start;
+  for (unsigned i = 0; i < in.count && t.count < sm::kMaxSlices; ++i) {
+    const std::uint32_t a = in.cut[i].start > start ? in.cut[i].start : start;
+    const std::uint64_t e_full = static_cast<std::uint64_t>(in.cut[i].start) + in.cut[i].len;
+    const std::uint32_t b = e_full < end ? static_cast<std::uint32_t>(e_full) : end;
+    if (b <= a) {
+      continue;
+    }
+    t.cut[t.count].start = a - start;
+    t.cut[t.count].len = b - a;
+    ++t.count;
+  }
+  if (t.count == 0u) {  // a table that did not tile: one cut over the new length
+    sm::even_cuts(t, t.length, 1u);
+  }
+  out = t;
+  return true;
+}
+
+// COPY's target: the first slot after `from` (wrapping, never `from`) that is not `used`; kReaders when every other slot is.
+inline unsigned next_empty_slot(const bool (&used)[sm::kReaders], unsigned from) noexcept {
+  for (unsigned k = 1; k < sm::kReaders; ++k) {
+    const unsigned j = (from + k) % sm::kReaders;
+    if (!used[j]) {
+      return j;
+    }
+  }
+  return sm::kReaders;
+}
+
+enum class JobPhase : std::uint8_t { Idle, Move, Fade, Done };  // zeroed is Idle (the SDRAM's start state)
+
+// A slice cursor for both jobs: Move copies `count` samples from src to dst a kJobSlice at a time, then Fade ramps the first `fade` samples of dst in
+// from zero (a trim's seam; COPY has none). src may overlap dst when dst is below it (the trim: memmove per slice, ascending, never writes what is
+// still to be read).
+struct Job {
+  JobPhase phase = JobPhase::Idle;
+  std::uint32_t pos = 0, count = 0, fade = 0;
+};
+
+inline void job_begin(Job& j, std::uint32_t count, bool fade_in) noexcept {
+  j = Job{};
+  j.count = count;
+  j.fade = fade_in ? (count / 2u < kTrimFade ? count / 2u : kTrimFade) : 0u;
+  j.phase = count == 0u ? JobPhase::Done : JobPhase::Move;
+}
+
+// One slice; true once the job is done. Calling it again after that changes nothing.
+inline bool job_step(Job& j, std::int16_t* dst, const std::int16_t* src) noexcept {
+  if (j.phase == JobPhase::Move) {
+    std::uint32_t n = j.count - j.pos;
+    n = n < kJobSlice ? n : kJobSlice;
+    std::memmove(dst + j.pos, src + j.pos, static_cast<std::size_t>(n) * sizeof(std::int16_t));
+    j.pos += n;
+    if (j.pos >= j.count) {
+      j.phase = j.fade != 0u ? JobPhase::Fade : JobPhase::Done;
+    }
+  } else if (j.phase == JobPhase::Fade) {
+    const float step = 1.0f / static_cast<float>(j.fade);
+    for (std::uint32_t k = 0; k < j.fade; ++k) {
+      dst[k] = static_cast<std::int16_t>(static_cast<float>(dst[k]) * (static_cast<float>(k) * step));
+    }
+    j.phase = JobPhase::Done;
+  }
+  return j.phase == JobPhase::Done;
+}
+
+// 0..100 of the move.
+constexpr unsigned job_percent(const Job& j) noexcept {
+  return j.phase == JobPhase::Done ? 100u : (j.count == 0u ? 0u : static_cast<unsigned>(static_cast<std::uint64_t>(j.pos) * 100u / j.count));
+}
+
 // ---- the confirmations: F6 and SHIFT + DELETE ask, F1 confirms ---------------------------------------------------------------------------
 
-enum class Pending : std::uint8_t { None, Normalise, Empty };  // zeroed is None
+enum class Pending : std::uint8_t { None, Normalise, Empty, Copy };  // zeroed is None
 
 // ---- the REPLACES warning ---------------------------------------------------------------------------------------------------------------
 

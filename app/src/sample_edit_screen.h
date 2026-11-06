@@ -8,8 +8,10 @@
 //   start. UP / DOWN: the slot (the one SAMPLE shows). INSERT: a cut at the cursor, snapped to a zero crossing within 64 samples. DELETE: the cut
 //   that starts at the cursor (LEFT / RIGHT put the cursor on one). F1 CUT EVEN: OFF, 8, 16, 24: a tap points the encoder at it, a second tap
 //   steps it, turning re-cuts the slot. F8 CLR CUTS: one cut over the slot. F2 CUT BEATS: OFF, 4, 8, 16 a bar, on the bars a take was recorded on (dim for
-//   a loaded WAV), at most 24 cuts. F6 NORMALISE: the slot's peak to -1 dBFS, a slice of samples a pass. F3, F4, F5 and F7 (HITS, START, END, SAVE WAV)
-//   are drawn dim and say COMES LATER. F6 and SHIFT + DELETE (empty the slot) ask; F1 confirms. A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
+//   a loaded WAV), at most 24 cuts. F6 NORMALISE: the slot's peak to -1 dBFS, a slice of samples a pass. F3 and F7 (HITS, SAVE WAV) are drawn dim and
+//   say COMES LATER. F4 START and F5 END point the encoder at a trim bracket (SHIFT: coarse); with one moved off its end F1 TRIMS the slot to the
+//   brackets (destructive, no undo; a slice of samples a pass, then Load). COPY copies the slot, cuts included, to the next empty slot. F6, SHIFT + DELETE
+//   (empty the slot) and COPY ask; F1 confirms. A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
 //
 // The cut tables are SAMPLE's (SampleScreen::table, in the SDRAM) and live in RAM until U8 and U9 save them. Main loop only; the cursor of each
 // slot, the arm and the line are in the SDRAM (g_se in the .cpp), so this object is two pointers and the vtable.
@@ -62,6 +64,18 @@ class SampleEditScreen final : public o3sdk::app::Screen {
   void confirm(o3sdk::app::Context& ctx) noexcept;
   void norm_tick(o3sdk::app::Context& ctx) noexcept;
   void norm_finish(o3sdk::app::Context& ctx) noexcept;
+  bool busy(o3sdk::app::Context& ctx) noexcept;
+  void fit_brackets(unsigned slot) noexcept;
+  bool slot_stopped(unsigned slot) const noexcept;
+  void send_load(o3sdk::app::Context& ctx) noexcept;
+  void tap_bracket(o3sdk::app::Context& ctx, bool end_side) noexcept;
+  void turn_bracket(o3sdk::app::Context& ctx, int delta, bool shift) noexcept;
+  void run_trim(o3sdk::app::Context& ctx) noexcept;
+  void ask_copy(o3sdk::app::Context& ctx) noexcept;
+  unsigned copy_target() const noexcept;
+  void run_copy(o3sdk::app::Context& ctx) noexcept;
+  void job_tick(o3sdk::app::Context& ctx) noexcept;
+  void job_finish(o3sdk::app::Context& ctx) noexcept;
 
   SampleScreen* sample_ = nullptr;
   std::int16_t* mem_ = nullptr;

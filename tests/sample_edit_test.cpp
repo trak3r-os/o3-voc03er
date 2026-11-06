@@ -527,6 +527,13 @@ struct Rig {
     tap(*h, app::Button::Rec);
     h->run_ms(9000);
   }
+  // A take may loop on after the recording (it depends on SAMPLE's state): the slot stopped, as a trim wants it.
+  void stop_slot() {
+    for (unsigned u = 0; u < 8; ++u) {
+      (void)h->engine().set_param(static_cast<dsp::UnitId>(u), Vocoder::loop_param(0, Vocoder::LoopField::Play), 0.0f);
+    }
+    h->run_ms(100);
+  }
   void open() {
     tap(*h, app::Button::SampleEdit);
     h->run_ms(60);
@@ -945,5 +952,183 @@ TEST_CASE("sample edit: SHIFT + DELETE asks, F1 empties the slot, plain DELETE i
   tap(h, app::Button::F1);
   h.run_ms(300);
   CHECK(cuts_heard(rig) == 0u);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// ---- TRIM (F4 START, F5 END) and COPY (U7c2b) ----
+
+TEST_CASE("sample edit: a bracket moves by detents, stays kMinCutSamples apart and inside the slot") {
+  const std::uint32_t len = 44100;
+  se::Brackets b{0u, len};
+  CHECK_FALSE(se::trim_moved(b, len));
+  b = se::bracket_move(b, false, 3, 100u, len);
+  CHECK(b.start == 300u);
+  CHECK(b.end == len);
+  CHECK(se::trim_moved(b, len));
+  b = se::bracket_move(b, false, -9, 100u, len);  // not below 0
+  CHECK(b.start == 0u);
+  b = se::bracket_move(b, true, 5, 100u, len);  // not above the length
+  CHECK(b.end == len);
+  b = se::bracket_move(b, true, -1000, 1000u, len);  // not closer than kMinCutSamples to START
+  CHECK(b.end == se::kMinCutSamples);
+  b = se::bracket_move(b, false, 1000, 1000u, len);
+  CHECK(b.start == 0u);
+  b = se::Brackets{0u, len};
+  b = se::bracket_move(b, false, 1000, 1000u, len);
+  CHECK(b.start == len - se::kMinCutSamples);
+  CHECK(b.end == len);
+  // A slot too short for two brackets keeps them.
+  const se::Brackets t{0u, se::kMinCutSamples};
+  const se::Brackets m = se::bracket_move(t, true, -4, 1u, se::kMinCutSamples);
+  CHECK(m.start == 0u);
+  CHECK(m.end == se::kMinCutSamples);
+}
+
+TEST_CASE("sample edit: trim_cuts shifts, drops and clips so the cuts still tile") {
+  const sm::SliceTable in = even(8000, 8);  // 1000 each
+  sm::SliceTable out;
+  REQUIRE(se::trim_cuts(in, 1500, 6500, out));
+  CHECK(out.length == 5000u);
+  CHECK(tiles(out));
+  REQUIRE(out.count == 6u);  // cuts 2 (clipped) .. 7 (clipped)
+  CHECK(out.cut[0].start == 0u);
+  CHECK(out.cut[0].len == 500u);
+  CHECK(out.cut[5].len == 500u);
+  // The whole slot: the same cuts.
+  REQUIRE(se::trim_cuts(in, 0, 8000, out));
+  CHECK(out.count == 8u);
+  CHECK(tiles(out));
+  // A range inside one cut: one cut.
+  REQUIRE(se::trim_cuts(in, 2100, 2900, out));
+  CHECK(out.count == 1u);
+  CHECK(out.cut[0].len == 800u);
+  CHECK(tiles(out));
+  // Refused: empty, backwards, past the length; out untouched.
+  const sm::SliceTable keep = out;
+  CHECK_FALSE(se::trim_cuts(in, 500, 500, out));
+  CHECK_FALSE(se::trim_cuts(in, 600, 500, out));
+  CHECK_FALSE(se::trim_cuts(in, 0, 8001, out));
+  CHECK(out.length == keep.length);
+  // A table that does not tile at all falls back to one cut.
+  sm::SliceTable none;
+  none.length = 1000;
+  REQUIRE(se::trim_cuts(none, 100, 900, out));
+  CHECK(out.count == 1u);
+  CHECK(out.length == 800u);
+}
+
+TEST_CASE("sample edit: next_empty_slot walks on from the slot, wraps, never picks it") {
+  bool used[4] = {true, false, true, false};
+  CHECK(se::next_empty_slot(used, 0) == 1u);
+  CHECK(se::next_empty_slot(used, 1) == 3u);
+  CHECK(se::next_empty_slot(used, 3) == 1u);
+  used[1] = used[3] = true;
+  CHECK(se::next_empty_slot(used, 0) == 4u);
+  used[2] = false;
+  CHECK(se::next_empty_slot(used, 2) == 4u);  // only itself is free
+}
+
+TEST_CASE("sample edit: the trim's move reads below what it writes, bakes a 64-sample fade-in, and goes in slices") {
+  const std::uint32_t n = 3u * se::kJobSlice + 500u;
+  std::vector<std::int16_t> m(static_cast<std::size_t>(n) + 4000u);
+  for (std::size_t i = 0; i < m.size(); ++i) {
+    m[i] = static_cast<std::int16_t>(1000 + static_cast<int>(i % 7000));
+  }
+  const std::vector<std::int16_t> ref = m;
+  const std::uint32_t start = 3999;
+  se::Job j;
+  se::job_begin(j, n, true);
+  unsigned steps = 0;
+  while (!se::job_step(j, m.data(), m.data() + start)) {
+    ++steps;
+    REQUIRE(steps < 20u);
+  }
+  CHECK(steps == 4u);  // four slices of move, then the fade
+  CHECK(se::job_percent(j) == 100u);
+  CHECK(m[0] == 0);
+  CHECK(m[32] == ref[start + 32] / 2);
+  CHECK(m[64] == ref[start + 64]);
+  CHECK(m[n - 1] == ref[start + n - 1]);
+  CHECK(se::job_step(j, m.data(), m.data() + start));  // done stays done, changes nothing
+  CHECK(m[n - 1] == ref[start + n - 1]);
+  // COPY: no fade, a different slot.
+  std::vector<std::int16_t> d(1000, 0);
+  se::job_begin(j, 1000, false);
+  CHECK(se::job_step(j, d.data(), ref.data()));
+  CHECK(d[0] == ref[0]);
+  CHECK(d[999] == ref[999]);
+  // An empty job is done at once.
+  se::job_begin(j, 0, true);
+  CHECK(se::job_step(j, d.data(), ref.data()));
+}
+
+TEST_CASE("sample edit: F4 and F5 point the encoder at a bracket; F1 trims, the cuts shift, the slot gets shorter") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0;
+  REQUIRE(rig.audition(0, s0, l0));
+  const float whole = l0 * 8.0f;
+  tap(h, app::Button::F1);  // an F1 with no bracket focused is CUT EVEN: nothing to trim
+  tap(h, app::Button::F4);
+  rig.shift_turn(3);  // START at 3/64 of the slot
+  h.run_ms(60);
+  CHECK(cuts_heard(rig) == 8u);  // moving a bracket changes nothing yet
+  rig.stop_slot();               // a trim refuses while the slot plays or a slice sounds
+  h.run_ms(500);
+  tap(h, app::Button::F1);       // the bracket is off its end: this trims
+  h.run_ms(900);
+  float s = 0, l = 0;
+  REQUIRE(rig.audition(0, s, l));
+  CHECK(s < 1.0f);
+  CHECK(l == doctest::Approx(whole * 5.0f / 64.0f).epsilon(0.02));  // the first cut lost its head
+  CHECK(cuts_heard(rig) == 8u);
+  // END: pull it in by an eighth of the new length; the last cut goes.
+  tap(h, app::Button::F5);
+  rig.shift_turn(-9);
+  rig.stop_slot();
+  h.run_ms(500);
+  tap(h, app::Button::F1);
+  h.run_ms(900);
+  CHECK(cuts_heard(rig) == 7u);
+  CHECK(h.runtime().frame_failures() == 0u);
+  CHECK(h.display().peak_frame_words() < 2048u);
+}
+
+TEST_CASE("sample edit: a trim and a copy on an empty slot, or with nothing moved, change nothing") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.open();
+  tap(h, app::Button::F4);
+  rig.shift_turn(2);
+  tap(h, app::Button::F1);
+  tap(h, app::Button::F5);
+  tap(h, app::Button::Copy);
+  tap(h, app::Button::F1);
+  h.run_ms(600);
+  CHECK(cuts_heard(rig) == 0u);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: COPY asks, F1 confirms, the next empty slot gets the sample; any other key cancels") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  const std::int32_t src = o3_voc03er::overview::shared().peak(0);
+  REQUIRE(src > 100);
+  REQUIRE(o3_voc03er::overview::shared().peak(1) == 0);
+  tap(h, app::Button::Copy);
+  tap(h, app::Button::Right);  // cancels
+  tap(h, app::Button::F6);     // F6 asks NORMALISE; this is only to see that F1 no longer copies
+  tap(h, app::Button::Right);
+  h.run_ms(600);
+  CHECK(o3_voc03er::overview::shared().peak(1) == 0);
+  tap(h, app::Button::Copy);
+  tap(h, app::Button::F1);
+  h.run_ms(900);
+  CHECK(o3_voc03er::overview::shared().peak(1) == src);
+  CHECK(o3_voc03er::overview::shared().peak(0) == src);
   CHECK(h.runtime().frame_failures() == 0u);
 }
