@@ -320,6 +320,20 @@ LEDs cannot name a chord: the screen does, in Display type, with the notes as ti
 
 **Keys** (PADS = KEYS) stay: the four-octave chromatic keyboard of today, for melodies and for anyone who wants to voice by hand.
 
+## 7b. Pitch bend
+
+Asked by the maintainer on 2026-11-06, in two forms. Both bend the SYNTH carrier only: a live source has no pitch to move, and a slot reads at three fixed speeds. Bending the carrier
+under a held vowel is the classic robot glide. The unit gets one parameter, `Bend` in semitones, appended after the ids of section 8, applied to the oscillators' increments through a
+`dsp::Ramp` once a block, so a stepped input arrives as a glide; the cost is a multiply a voice a block [est].
+
+- **The encoder.** On PERFORM and SAMPLE, with no F value latched (a tap on the latched key frees it; the slice checks the kit's helper allows this), the encoder bends. An encoder has no
+  spring, so the bend returns to 0 by itself about 120 ms after the last detent. BEND RANGE (+-2, +-5, +-12 semitones, default +-2) is on PARAMS page CARRIER. Hold + turn on an F key
+  still moves that value, as everywhere.
+- **The pad strip.** F7 PADS gains CHORDS + BEND. The bottom row of 12 stops being chords and becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one
+  semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. The chord rows move up one, TRIAD on the
+  row above the strip, and POWER leaves the grid while the strip is on. On SAMPLE the strip takes the bottom row and one chord row stays. LEDs: the middle pair `kLedDim`, the held pad
+  `kLedOn`.
+
 ## 8. What the unit and the app need
 
 **The unit (`units/vocoder/`, parameters appended, never inserted; ids 40 on):**
@@ -401,6 +415,7 @@ screen it touches. The unit checks owed are named, not run here.
 |---|---|---|
 | U1 | The skin's frame: theme and its contrast test, `Chrome::None` header and F row as pure functions, PERFORM on it with the BANDS voiceprint and the chord grid (the chord engine, KEY and SCALE shared with TUNE, voicings, the LEDs); the unit's `View` publish | `perform.txt` (a voice WAV in, a chord pad, SHIFT latch, each MODE, KEYS), the frame's line load |
 | U2 | The buttons of section 3: every screen button opens a screen (stubs for the ones not yet drawn, each saying its name), PLAY the transport, DELETE, the arrows, SHIFT's four; `help()` on each | `buttons.txt` (every button once, a snap each), `help.txt` on every screen, `help_check` in the test |
+| U2b | Pitch bend (section 7b): `Bend`, the free encoder and its spring, the pad strip, BEND RANGE | `bend.txt` (a held chord, the encoder and each strip pad, a WAV showing the glide and the return to 0) |
 | U3 | The routing: the two pickers, `ModSrc`, CarSrc LIVE, the roles derived, the one-rule rows, the capture gesture on REC and from a dimmed row | `route.txt` (every pair, the dimmed rows snapped, a capture to a slot with its WAV) |
 | U4 | SAMPLE REC and SAMPLE on the four slots as they are (whole play, side, speed, direction, level) | `sample_rec.txt`, `sample.txt` (a take through the chord, then the same as the carrier) |
 | U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, CHOKE and TRIG, the SLICE lane | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
