@@ -14,8 +14,10 @@
 #include <o3_voc03er/units/vocoder/loop.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
+#include "../app/src/overview.h"
 #include "../app/src/sample_edit_logic.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -311,6 +313,178 @@ TEST_CASE("sample edit: the REPLACES arm warns once per key while the table is t
   CHECK(zero.key1 == 0u);  // a zeroed one (SDRAM) is closed
 }
 
+TEST_CASE("sample edit: CUT BEATS steps OFF, 4, 8, 16; a detent stops at the ends, a tap wraps") {
+  CHECK(se::beats_per_bar(0) == 0u);
+  CHECK(se::beats_per_bar(1) == 4u);
+  CHECK(se::beats_per_bar(2) == 8u);
+  CHECK(se::beats_per_bar(3) == 16u);
+  CHECK(std::string(se::beats_name(0)) == "OFF");
+  CHECK(std::string(se::beats_name(3)) == "16");
+  CHECK(se::step_beats(0, 1, false) == 1u);
+  CHECK(se::step_beats(3, 1, false) == 3u);  // stops
+  CHECK(se::step_beats(3, 1, true) == 0u);   // a tap wraps
+  CHECK(se::step_beats(0, -1, true) == 3u);
+  CHECK(se::step_beats(1, -5, false) == 0u);
+}
+
+TEST_CASE("sample edit: a slot is a take when it is a whole number of bars at the tempo") {
+  const float bar = 88200.0f;  // 120 BPM
+  CHECK(se::is_take(88200, bar));
+  CHECK(se::is_take(4u * 88200u, bar));
+  CHECK_FALSE(se::is_take(88200u + 20000u, bar));  // 1.2 bars: a WAV
+  CHECK_FALSE(se::is_take(44100, bar));             // half a bar
+  CHECK_FALSE(se::is_take(0, bar));
+  CHECK_FALSE(se::is_take(88200, 100000.0f));       // another tempo
+}
+
+TEST_CASE("sample edit: beat_cuts tile the slot on whole beats of the bar") {
+  const float bar = 88200.0f;
+  sm::SliceTable t;
+  se::BeatCut r = se::beat_cuts(t, 88200, bar, 4);  // one bar, 4 a bar
+  CHECK(r.count == 4u);
+  CHECK_FALSE(r.capped);
+  CHECK(tiles(t));
+  CHECK(t.cut[1].start == 22050u);
+  r = se::beat_cuts(t, 2u * 88200u, bar, 8);  // two bars, 8 a bar: 16
+  CHECK(r.count == 16u);
+  CHECK(tiles(t));
+  CHECK(t.cut[1].start == 11025u);
+  r = se::beat_cuts(t, 4u * 88200u, bar, 16);  // four bars, 16 a bar: 64 steps, 24 cuts
+  CHECK(r.beats == 64u);
+  CHECK(r.count == 24u);
+  CHECK(r.capped);
+  CHECK(tiles(t));
+  CHECK(t.cut[1].start == 5513u);                          // the grid is still the 16th (5512.5 rounded)
+  CHECK(t.cut[23].start + t.cut[23].len == 4u * 88200u);  // the last cut runs on to the slot's end
+  r = se::beat_cuts(t, 6u * 88200u, bar, 4);  // 24 steps exactly: not capped
+  CHECK(r.count == 24u);
+  CHECK_FALSE(r.capped);
+  CHECK(tiles(t));
+  r = se::beat_cuts(t, 7u * 88200u, bar, 4);  // 28 steps
+  CHECK(r.capped);
+  CHECK(r.count == 24u);
+  // A take a few samples short of its bars still cuts whole beats, and the cuts tile it.
+  r = se::beat_cuts(t, 2u * 88200u - 3u, bar, 4);
+  CHECK(r.count == 8u);
+  CHECK(tiles(t));
+}
+
+TEST_CASE("sample edit: beat_cuts refuses what cannot be cut and leaves the table alone") {
+  sm::SliceTable t = even(88200, 8);
+  CHECK(se::beat_cuts(t, 0, 88200.0f, 4).count == 0u);
+  CHECK(se::beat_cuts(t, 88200, 88200.0f, 0).count == 0u);
+  CHECK(se::beat_cuts(t, 88200, 500.0f, 16).count == 0u);  // a step under 64 samples
+  CHECK(t.count == 8u);
+  CHECK(tiles(t));
+}
+
+TEST_CASE("sample edit: a position is at one x on the picture, its marks and the ruler") {
+  CHECK(se::kPicX == 28);
+  CHECK(se::kPicW == 744u);
+  CHECK(se::kPicX + static_cast<int>(se::kPicW) == 26 + 748 - 2);  // the picture fills the rectangle inside its border
+  for (std::uint32_t len : {1000u, 44100u, 88200u, 705600u}) {
+    CHECK(se::mark_x(0, len) == se::kPicX);
+    CHECK(se::mark_x(len - 1u, len) == se::kPicX + 743);
+    CHECK(se::mark_x(len, len) == se::kPicX + 743);
+    int last = 0;
+    for (std::uint32_t pos = 0; pos < len; pos += len / 97u + 1u) {
+      const int x = se::mark_x(pos, len);
+      CHECK(x == se::kPicX + static_cast<int>(o3_voc03er::overview::x_of(pos, len, se::kPicW)));  // the picture's own map
+      CHECK(x >= last);
+      last = x;
+    }
+    // A cut's x over the picture is its x on the ruler: both draw at mark_x(start).
+    const sm::SliceTable t = even(len, 8);
+    for (unsigned i = 0; i < t.count; ++i) {
+      const int on_picture = se::mark_x(t.cut[i].start, len);
+      const int on_ruler = se::mark_x(t.cut[i].start, len);
+      CHECK(on_picture == on_ruler);
+      CHECK(on_picture >= se::kPicX);
+      CHECK(on_picture <= se::kPicX + 743);
+    }
+  }
+}
+
+TEST_CASE("sample edit: NORMALISE scales the peak to -1 dBFS in slices") {
+  std::vector<std::int16_t> d(10000);
+  for (std::size_t i = 0; i < d.size(); ++i) d[i] = static_cast<std::int16_t>(std::lround(8000.0 * std::sin(0.05 * static_cast<double>(i))));
+  d[5000] = -8192;  // the peak, negative
+  se::Norm n;
+  se::norm_begin(n, 10000);
+  CHECK(n.phase == se::NormPhase::Scan);
+  unsigned steps = 1;
+  while (!se::norm_step(n, d.data())) {
+    ++steps;
+    REQUIRE(steps < 100u);
+  }
+  CHECK(n.phase == se::NormPhase::Done);
+  CHECK(steps == 6u);  // 3 slices to scan (4,096 each), 3 to apply
+  CHECK(n.peak == 8192);
+  CHECK(n.gain == doctest::Approx(29204.0f / 8192.0f));
+  std::int32_t peak = 0;
+  for (auto v : d) peak = std::max<std::int32_t>(peak, v < 0 ? -v : v);
+  CHECK(peak == 29204);
+  CHECK(d[5000] == -29204);
+  CHECK(se::gain_tenths_db(n.gain) == 110);  // +11.0 dB
+  CHECK(se::norm_percent(n) == 100u);
+  CHECK(se::norm_step(n, d.data()));  // done stays done, and changes nothing
+  CHECK(d[5000] == -29204);
+}
+
+TEST_CASE("sample edit: NORMALISE reads a slice a call, and the percent climbs") {
+  std::vector<std::int16_t> d(3u * se::kNormSlice, 100);
+  se::Norm n;
+  se::norm_begin(n, static_cast<std::uint32_t>(d.size()));
+  CHECK(se::norm_percent(n) == 0u);
+  CHECK_FALSE(se::norm_step(n, d.data()));
+  CHECK(n.pos == se::kNormSlice);
+  CHECK(se::norm_percent(n) == 16u);  // a third of the scan
+  CHECK_FALSE(se::norm_step(n, d.data()));
+  CHECK_FALSE(se::norm_step(n, d.data()));
+  CHECK(n.phase == se::NormPhase::Apply);
+  CHECK(se::norm_percent(n) == 50u);
+  CHECK(d[0] == 100);  // nothing written during the scan
+  CHECK_FALSE(se::norm_step(n, d.data()));
+  CHECK(d[0] != 100);
+  CHECK(d[se::kNormSlice] == 100);  // the second slice has not been reached
+}
+
+TEST_CASE("sample edit: NORMALISE refuses silence, never clips and keeps a quiet slot's sign") {
+  std::vector<std::int16_t> z(5000, 0);
+  se::Norm n;
+  se::norm_begin(n, 5000);
+  while (!se::norm_step(n, z.data())) {
+  }
+  CHECK(n.phase == se::NormPhase::Silent);
+  CHECK(z[0] == 0);
+  se::norm_begin(n, 0);
+  CHECK(se::norm_step(n, z.data()));
+  CHECK(n.phase == se::NormPhase::Silent);
+  // Full scale comes down to the target.
+  std::vector<std::int16_t> f(100, 32767);
+  f[1] = -32768;
+  se::norm_begin(n, 100);
+  while (!se::norm_step(n, f.data())) {
+  }
+  CHECK(f[0] <= 29204);
+  CHECK(f[0] >= 29203);
+  CHECK(f[1] >= -29204);
+  CHECK(se::gain_tenths_db(n.gain) == -10);
+  // A quiet one goes up with its signs.
+  std::vector<std::int16_t> q = {1, -1, 2, -2, 0};
+  se::norm_begin(n, 5);
+  while (!se::norm_step(n, q.data())) {
+  }
+  CHECK(q[3] == -29204);
+  CHECK(q[2] == 29204);
+  CHECK(q[0] > 0);
+  CHECK(q[1] < 0);
+  CHECK(q[4] == 0);
+  CHECK(se::gain_tenths_db(0.0f) == 0);
+  CHECK(se::gain_tenths_db(1.0f) == 0);
+  CHECK(se::gain_tenths_db(2.0f) == 60);
+}
+
 // ---- on the engine ----
 
 namespace {
@@ -573,7 +747,8 @@ TEST_CASE("sample edit: HELP gives a row to every button the screen answers") {
   CHECK(help.summary != nullptr);
   CHECK(std::string(help.summary).find("INSERT") != std::string::npos);
   CHECK(std::string(help.summary).find("DELETE") != std::string::npos);
-  CHECK(std::string(help.summary).find("COME LATER") != std::string::npos);
+  CHECK(std::string(help.summary).find("EMPTIES THE SLOT") != std::string::npos);
+  CHECK(std::string(help.fkey[5]).find("-1 DB") != std::string::npos);
 }
 
 // ---- the cuts reach the step sequencer ----
@@ -640,4 +815,135 @@ TEST_CASE("sample edit: an inserted cut reaches the map after the forced publish
   const std::uint32_t pos = r.v.loop_status(1).position;
   CHECK(pos >= kPer + 1500u);
   CHECK(pos < kPer + 1500u + 2500u);
+}
+
+namespace {
+std::int32_t best_peak() {
+  std::int32_t m = 0;
+  for (unsigned s = 0; s < 4; ++s) m = std::max(m, o3_voc03er::overview::shared().peak(s));
+  return m;
+}
+unsigned cuts_heard(Rig& rig) {
+  unsigned n = 0;
+  float s = 0, l = 0;
+  for (unsigned p = 0; p < 24; ++p) {
+    if (rig.audition(p, s, l)) ++n;
+  }
+  return n;
+}
+}  // namespace
+
+TEST_CASE("sample edit: F2 CUT BEATS cuts 4, 8 or 16 a bar on a take, and warns before it replaces a hand's cut") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l0 = 0, l = 0;
+  REQUIRE(rig.audition(0, s, l0));  // eight even cuts: the whole take is 8 * l0, a whole number of bars
+  const float bar = 88200.0f;       // 120 BPM at 44.1 kHz
+  // SAMPLE REC keeps its length from one Harness to the next, so the take's bars are read and not assumed.
+  const unsigned bars = static_cast<unsigned>(l0 * 8.0f / bar + 0.5f);
+  REQUIRE(bars >= 1u);
+  // `n` a bar: every cut a beat long, as many as the bars hold, at most 24.
+  auto check = [&](unsigned n) {
+    REQUIRE(rig.audition(0, s, l));
+    CHECK(l == doctest::Approx(bar / static_cast<float>(n)).epsilon(0.01));
+    const unsigned cuts = std::min(bars * n, 24u);
+    CHECK(rig.audition(cuts - 1u, s, l));
+    if (cuts < 24u) {
+      CHECK_FALSE(rig.audition(cuts, s, l));
+    }
+  };
+  tap(h, app::Button::F2);  // points the encoder at the key
+  h.turn(1);
+  h.run_ms(40);
+  check(4u);
+  for (unsigned n : {8u, 16u}) {
+    h.turn(1);  // warns: a pad has dropped the arm
+    h.run_ms(20);
+    h.turn(1);
+    h.run_ms(40);
+    check(n);
+  }
+  // A hand's cut: the first try on F2 warns and changes nothing, the second takes it.
+  h.turn(-2);  // back to 4 a bar: a re-cut warns as well, once a pad has dropped the arm
+  h.run_ms(20);
+  h.turn(-2);
+  h.run_ms(40);
+  check(4u);
+  const unsigned cuts = bars * 4u;
+  tap(h, app::Button::Right);  // the cursor goes back to the waveform
+  rig.shift_turn(3);
+  tap(h, app::Button::Insert);
+  h.run_ms(60);
+  REQUIRE(rig.audition(cuts, s, l));  // one more: the hand's
+  tap(h, app::Button::F2);
+  h.turn(1);  // F2 reads OFF on a hand's table, so this asks for 4 a bar: warns, changes nothing
+  h.run_ms(20);
+  CHECK(rig.audition(cuts, s, l));  // this pad drops the arm: the next detent warns again
+  h.turn(1);
+  h.run_ms(20);
+  h.turn(1);  // the same detent again takes it
+  h.run_ms(20);
+  CHECK_FALSE(rig.audition(cuts, s, l));
+  CHECK(h.runtime().frame_failures() == 0u);
+  CHECK(h.display().peak_frame_words() < 2048u);
+}
+
+TEST_CASE("sample edit: F6 asks, F1 confirms, the peak goes to -1 dBFS, any other key cancels") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  const std::int32_t before = best_peak();
+  REQUIRE(before > 100);
+  REQUIRE(before < 29000);
+  tap(h, app::Button::F6);
+  tap(h, app::Button::Right);  // cancels
+  tap(h, app::Button::F1);     // a plain F1 now is the cut-even key, not a confirm
+  h.run_ms(600);
+  CHECK(best_peak() == before);
+  tap(h, app::Button::F6);
+  tap(h, app::Button::F1);
+  h.run_ms(600);  // a few slices a frame
+  h.run_ms(600);
+  CHECK(best_peak() == doctest::Approx(29204.0f).epsilon(0.01));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: F6 on an empty slot or while recording says why and changes nothing") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.open();
+  const std::int32_t before = best_peak();  // the overview is shared by every test of the run
+  tap(h, app::Button::F6);
+  tap(h, app::Button::F1);
+  h.run_ms(300);
+  CHECK(best_peak() == before);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: SHIFT + DELETE asks, F1 empties the slot, plain DELETE is unchanged") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  REQUIRE(cuts_heard(rig) == 8u);
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Delete);
+  h.release(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, app::Button::Right);  // cancels
+  h.run_ms(60);
+  CHECK(cuts_heard(rig) == 8u);
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Delete);
+  h.release(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, app::Button::F1);
+  h.run_ms(300);
+  CHECK(cuts_heard(rig) == 0u);
+  CHECK(h.runtime().frame_failures() == 0u);
 }

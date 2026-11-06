@@ -204,6 +204,8 @@ cuts. The cuts live in RAM until U8 and U9 save them, and the screen draws no wa
 INSERT and DELETE return it to the cursor. F2 to F7 say COMES LATER. Rec does nothing special here, as on SAMPLE. No new unit parameter.
 
 Built in U7b (`overview.{h,cpp}`, pure logic in `overview_logic.h`, `tests/overview_test.cpp`, `app/scenarios/overview.txt`): the overview waveform of each slot. Per slot
+
+Built in U7c1 (`sample_edit_screen.cpp`, `overview.{h,cpp}`, logic in `sample_edit_logic.h` and `overview_logic.h`): the big picture is 744 x 96 and spans the rectangle, one function maps a sample to x for the picture, the cursor and the ruler; the small picture comes from the same peaks, and a slot goes up in chunks, one a frame, shown only after the last. F2 CUT BEATS re-cuts OFF, 4, 8, 16 a bar under F1's rules and caps at 24 with a note on the strip. Nothing records that a slot came from a take, so a slot of a whole number of bars at the current tempo counts as one; a take at another tempo reads as a WAV and F2 is dimmed. F6 NORMALISE scans and scales in slices, F1 confirms, to -1 dBFS, refused while recording and on silence. SHIFT + DELETE empties the slot through Rec value 2, F1 confirms.
 the main loop keeps 384 columns of min and max (int16, SDRAM) and two L1 pictures in the app's RAM_G: 384 x 48 (2,304 bytes) and 240 x 48 (1,440 bytes, the same
 columns merged), side by side, 3,744 bytes a slot, from byte 10,240 of the app region (after the skin's assets), four slots up to byte 25,216, each slot sent
 in one upload. They are drawn through bitmap handle 0 (`kHandleApp`, the one the kit leaves to the app) as one sprite tinted in the side's ink (SPEAKS, SOUNDS,
@@ -522,7 +524,8 @@ screen it touches. The unit checks owed are named, not run here.
 | U6 | PATTERN with lanes, chords in the NOTE lane, pads, patterns A to H in the SDRAM; LEVEL as velocity | `pattern.txt` |
 | U7a | SAMPLE EDIT: the cursor and the cut table (INSERT, DELETE, LEFT, RIGHT, CUT EVEN, CLR CUTS) | `sample_edit.txt` |
 | U7b | SAMPLE EDIT: the waveform bitmap of the slot | `sample_edit.txt` grows (the snaps show the waveform) |
-| U7c | SAMPLE EDIT: START, END, NORMALISE, COPY, BEATS, SHIFT + DELETE | `sample_edit.txt` grows |
+| U7c1 | SAMPLE EDIT: the picture across the rectangle, CUT BEATS, NORMALISE, SHIFT + DELETE | `sample_edit.txt` grows |
+| U7c2 | SAMPLE EDIT: `Load` (id 61), START, END, COPY | `sample_edit.txt` grows |
 | U7d | SAMPLE EDIT: CUT HITS with the scan job | `sample_edit.txt` (a drum WAV in, hits at 40 and 80, the snaps count the marks) |
 | U8 | SAMPLE LOAD and SAVE WAV: the WAV reader, the picker, the load into a slot, the staging region | `sample_load.txt` (`--card` with a mono and a stereo WAV, a 48 kHz one refused) |
 | U9 | TALK and TUNE voiceprints, PARAMS, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `params.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |

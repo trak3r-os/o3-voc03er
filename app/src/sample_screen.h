@@ -52,6 +52,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void update(o3sdk::app::Context& ctx) noexcept override;
 
   unsigned slot() const noexcept { return slot_; }
+  o3sdk::dsp::UnitId voice() const noexcept { return voice_; }  // the loop unit: SAMPLE EDIT's SHIFT + DELETE writes its Rec CLEAR
 
   // What SAMPLE EDIT (sample_edit_screen.h) shares with this screen: the selected slot, the cut tables (g_sd), the pads and the header.
   void set_slot(unsigned slot) noexcept;

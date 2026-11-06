@@ -2,6 +2,7 @@
 #include "sample_edit_screen.h"
 
 #include "overview.h"
+#include "perform_logic.h"
 #include "sample_edit_logic.h"
 #include "skin/ornoir.h"
 
@@ -25,16 +26,22 @@ namespace {
 constexpr std::uint64_t kNoteMs = 2500;
 constexpr std::uint8_t kFocusCursor = 0;  // the encoder moves the cursor
 constexpr std::uint8_t kFocusCut = 1;     // the encoder steps F1 (CUT EVEN)
+constexpr std::uint8_t kFocusBeats = 2;   // the encoder steps F2 (CUT BEATS)
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"CUT EVEN", "BEATS", "HITS", "START", "END", "NORMALISE", "SAVE WAV", "CLR CUTS"};
-constexpr std::uint8_t kLaterMask = 0x7Eu;  // F2..F7 draw dim: they come later
+constexpr std::uint8_t kLaterMask = 0x5Cu;  // F3 HITS, F4 START, F5 END and F7 SAVE WAV draw dim: they come later (F2 is dim for a WAV, see beats_dim)
 
 // The screen's state, in the SDRAM (O3SDK_BIG: zero at start, main loop only), so the screen object is the vtable and two pointers.
 struct EditData {
   std::uint32_t cursor[sm::kReaders];  // per slot, in samples
   se::Arm arm;                         // the REPLACES warning
-  std::uint8_t focus;                  // kFocusCursor or kFocusCut
+  std::uint8_t focus;                  // kFocusCursor, kFocusCut or kFocusBeats
+  std::uint8_t beats[sm::kReaders];    // per slot, F2's value (se::beats_per_bar's code); valid while beats_len[slot] is the slot's length
+  std::uint32_t beats_len[sm::kReaders];
+  se::Pending pending;                 // F6 or SHIFT + DELETE asked, F1 confirms (any other input cancels)
+  se::Norm norm;                       // the NORMALISE run (main loop: a slice a pass from update())
+  std::uint8_t norm_slot;
   bool key_tap;                        // turn() came from a second tap on F1
   const char* note;                    // a moment's line (a static string or note_buf), until note_until
   std::uint64_t note_until;
@@ -72,14 +79,16 @@ constexpr int kX = 26;
 constexpr int kW = 748;
 constexpr int kWaveY = 140;  // the rectangle the overview picture sits in
 constexpr int kWaveH = 176;
-constexpr int kPicX = kX + (kW - static_cast<int>(overview::kCols)) / 2;  // the overview picture, centred in the rectangle
-constexpr int kPicY = kWaveY + (kWaveH - static_cast<int>(overview::kRows)) / 2;
+constexpr int kPicX = se::kPicX;  // the overview picture spans the rectangle inside its 2 px border: 744 x 96, centred vertically
+constexpr int kPicY = kWaveY + (kWaveH - static_cast<int>(overview::kBigRows)) / 2;
+constexpr int kPicH = static_cast<int>(overview::kBigRows);
+static_assert(kPicX == kX + 2 && kPicX + static_cast<int>(se::kPicW) == kX + kW - 2, "the picture fills the rectangle less its border");
 constexpr int kBarY = 330;
 constexpr int kBarH = 14;
 
 }  // namespace
 
-void SampleEditScreen::init(SampleScreen* sample, const std::int16_t* mem) noexcept {
+void SampleEditScreen::init(SampleScreen* sample, std::int16_t* mem) noexcept {
   sample_ = sample;
   mem_ = mem;
   overview::shared().bind(mem, Loop::kMaxSamples);
@@ -91,11 +100,18 @@ const ui::Theme* SampleEditScreen::theme(const app::Context&) const noexcept { r
 void SampleEditScreen::enter(app::Context& ctx) noexcept {
   se::arm_cancel(g_se.arm);
   g_se.focus = kFocusCursor;
+  g_se.pending = se::Pending::None;
   g_se.note = nullptr;
   ctx.redraw();
 }
 
 void SampleEditScreen::leave(app::Context& ctx) noexcept {
+  g_se.pending = se::Pending::None;
+  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {  // never leave a slot half scaled: finish now (at most 173 slices)
+    while (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
+      norm_tick(ctx);
+    }
+  }
   if (sample_ != nullptr) {
     sample_->pad_leave(ctx);
   }
@@ -147,6 +163,7 @@ static void table_changed(SampleScreen& s, unsigned slot, bool edited, unsigned 
   s.set_edited(slot, edited);
   s.set_even_code(slot, code);
   s.cuts_changed();
+  g_se.beats[slot & 3u] = 0;  // F2's own call sets it again after this
 }
 
 void SampleEditScreen::insert(app::Context& ctx) noexcept {
@@ -214,6 +231,149 @@ void SampleEditScreen::recut(app::Context& ctx, unsigned code) noexcept {
   ctx.redraw();
 }
 
+// The F2 value the slot shows: OFF unless its cuts are the ones F2 made at this length.
+static unsigned shown_beats(SampleScreen& s, unsigned slot) noexcept {
+  return g_se.beats_len[slot] == s.table(slot).length && s.table(slot).length != 0u ? g_se.beats[slot] : 0u;
+}
+
+bool SampleEditScreen::beats_dim(const app::Context& ctx) const noexcept {
+  if (sample_ == nullptr) {
+    return true;
+  }
+  const std::uint32_t len = sample_->table(sample_->slot()).length;
+  return len == 0u || !se::is_take(len, perform::bar_samples(ctx.engine().stats().tempo_mbpm));
+}
+
+// F2's value `code` (se::beats_per_bar): OFF only leaves the cuts as they are. Same rules as F1: a table the hand edited is replaced on the second try.
+void SampleEditScreen::recut_beats(app::Context& ctx, unsigned code) noexcept {
+  if (refuse(ctx, true)) {
+    return;
+  }
+  if (beats_dim(ctx)) {
+    say(ctx, "NOT A TAKE: WHOLE BARS ONLY");
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  if (code == shown_beats(*sample_, slot)) {
+    return;
+  }
+  if (code == 0u) {
+    g_se.beats[slot] = 0;
+    ctx.redraw();
+    return;
+  }
+  sm::SliceTable& t = sample_->table(slot);
+  if (se::arm_step(g_se.arm, 1u, sample_->edited(slot)) == se::Gate::Warn) {
+    g_se.note_buf[0] = '\0';
+    cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
+    cat_uint(g_se.note_buf, sizeof g_se.note_buf, t.count);
+    cat(g_se.note_buf, sizeof g_se.note_buf, " CUTS");
+    say(ctx, g_se.note_buf);
+    return;
+  }
+  const se::BeatCut r = se::beat_cuts(t, t.length, perform::bar_samples(ctx.engine().stats().tempo_mbpm), se::beats_per_bar(code));
+  if (r.count == 0u) {
+    say(ctx, "BEAT TOO SHORT");
+    return;
+  }
+  table_changed(*sample_, slot, true, 3u);
+  g_se.beats[slot] = static_cast<std::uint8_t>(code);
+  g_se.beats_len[slot] = t.length;
+  g_se.note = nullptr;  // the warning has been answered
+  if (r.capped) {
+    say(ctx, "CAPPED AT 24 CUTS");
+  }
+  ctx.redraw();
+}
+
+// F2's step: `delta` is the encoder's detents (or +1 for a second tap, which wraps).
+void SampleEditScreen::turn_beats(app::Context& ctx, int delta) noexcept {
+  recut_beats(ctx, se::step_beats(shown_beats(*sample_, sample_->slot() & 3u), delta, g_se.key_tap));
+}
+
+// F6: asks; F1 confirms. SHIFT + DELETE below.
+void SampleEditScreen::ask_normalise(app::Context& ctx) noexcept {
+  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
+    say(ctx, "NORMALISING");
+    return;
+  }
+  if (refuse(ctx, true)) {
+    return;
+  }
+  g_se.pending = se::Pending::Normalise;
+  say(ctx, "NORMALISE TO -1 DB? F1 CONFIRMS");
+}
+
+void SampleEditScreen::ask_empty(app::Context& ctx) noexcept {
+  if (refuse(ctx, true)) {
+    return;
+  }
+  g_se.pending = se::Pending::Empty;
+  say(ctx, "EMPTY THE SLOT? F1 CONFIRMS");
+}
+
+// F1 while something waits: takes it.
+void SampleEditScreen::confirm(app::Context& ctx) noexcept {
+  const se::Pending what = g_se.pending;
+  g_se.pending = se::Pending::None;
+  if (refuse(ctx, true)) {
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  if (what == se::Pending::Normalise) {
+    if (mem_ == nullptr) {
+      return;
+    }
+    se::norm_begin(g_se.norm, sample_->table(slot).length);
+    g_se.norm_slot = static_cast<std::uint8_t>(slot);
+    g_se.note = nullptr;
+    ctx.redraw();
+  } else if (what == se::Pending::Empty) {
+    const dsp::UnitId v = sample_->voice();  // the existing Rec CLEAR (value 2), then back to OFF; the table follows the length (SampleScreen::service)
+    (void)ctx.engine().set_param(v, Vocoder::loop_param(slot, Vocoder::LoopField::Play), 0.0f);
+    (void)ctx.engine().set_param(v, Vocoder::loop_param(slot, Vocoder::LoopField::Rec), 2.0f);
+    (void)ctx.engine().set_param(v, Vocoder::loop_param(slot, Vocoder::LoopField::Rec), 0.0f);
+    g_se.cursor[slot] = 0;
+    g_se.beats[slot] = 0;
+    say(ctx, "SLOT EMPTIED");
+  }
+}
+
+// One slice of the NORMALISE run; ends it when the slot changed under it (a take) or when the run is over.
+void SampleEditScreen::norm_tick(app::Context& ctx) noexcept {
+  const unsigned slot = g_se.norm_slot & 3u;
+  if (mem_ == nullptr || sample_->table(slot).length != g_se.norm.len ||
+      sample_->status(slot).rec != Vocoder::LoopStatus::Rec::Idle) {
+    g_se.norm = se::Norm{};
+    say(ctx, "NORMALISE CANCELLED");
+    return;
+  }
+  if (se::norm_step(g_se.norm, mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples)) {
+    norm_finish(ctx);
+  }
+  ctx.redraw();
+}
+
+void SampleEditScreen::norm_finish(app::Context& ctx) noexcept {
+  if (g_se.norm.phase == se::NormPhase::Silent) {
+    g_se.norm = se::Norm{};
+    say(ctx, "SILENT");
+    return;
+  }
+  const int db = se::gain_tenths_db(g_se.norm.gain);
+  const unsigned a = static_cast<unsigned>(db < 0 ? -db : db);
+  g_se.note_buf[0] = '\0';
+  cat(g_se.note_buf, sizeof g_se.note_buf, "NORMALISED ");
+  cat(g_se.note_buf, sizeof g_se.note_buf, db < 0 ? "-" : "+");
+  cat_uint(g_se.note_buf, sizeof g_se.note_buf, a / 10u);
+  cat(g_se.note_buf, sizeof g_se.note_buf, ".");
+  cat_uint(g_se.note_buf, sizeof g_se.note_buf, a % 10u);
+  cat(g_se.note_buf, sizeof g_se.note_buf, " DB");
+  g_se.norm = se::Norm{};
+  overview::shared().mark_dirty(g_se.norm_slot);  // the samples changed in place: the picture is built again
+  say(ctx, g_se.note_buf);
+}
+
 void SampleEditScreen::clear_cuts(app::Context& ctx) noexcept {
   if (refuse(ctx, true)) {
     return;
@@ -245,8 +405,17 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   unsigned k = 0;
   const bool fk = in.fkey_press(k);
-  const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 7u)) ||
-                         (in.turn() && g_se.focus == kFocusCut);
+  if (g_se.pending != se::Pending::None && in.type != app::Input::Type::Release) {  // F1 takes what F6 or SHIFT + DELETE asked; anything else drops it
+    if (fk && !in.shift && k == 0u) {
+      confirm(ctx);
+      return;
+    }
+    g_se.pending = se::Pending::None;
+    g_se.note = nullptr;
+    ctx.redraw();
+  }
+  const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 1u || k == 7u)) ||
+                         (in.turn() && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats));
   if (!keeps_arm) {
     se::arm_cancel(g_se.arm);
   }
@@ -262,10 +431,27 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       }
       g_se.focus = kFocusCut;
       ctx.redraw();
+    } else if (k == 1u) {
+      if (refuse(ctx, true)) {
+        return;
+      }
+      if (beats_dim(ctx)) {
+        say(ctx, "NOT A TAKE: WHOLE BARS ONLY");
+        return;
+      }
+      if (g_se.focus == kFocusBeats) {  // a second tap steps it
+        g_se.key_tap = true;
+        turn_beats(ctx, 1);
+        g_se.key_tap = false;
+      }
+      g_se.focus = kFocusBeats;
+      ctx.redraw();
+    } else if (k == 5u) {
+      ask_normalise(ctx);
     } else if (k == 7u) {
       clear_cuts(ctx);
     } else {
-      say(ctx, "COMES LATER");  // BEATS, HITS, START, END, NORMALISE, SAVE WAV; the encoder stays where it was
+      say(ctx, "COMES LATER");  // HITS, START, END, SAVE WAV; the encoder stays where it was
     }
     return;
   }
@@ -273,6 +459,8 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     g_se.key_tap = false;
     if (g_se.focus == kFocusCut) {
       turn(ctx, in.delta());
+    } else if (g_se.focus == kFocusBeats) {
+      turn_beats(ctx, in.delta());
     } else {
       const unsigned slot = sample_->slot() & 3u;
       const std::uint32_t len = sample_->table(slot).length;
@@ -294,7 +482,11 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     insert(ctx);
   } else if (in.press(Button::Delete)) {
     g_se.focus = kFocusCursor;
-    remove(ctx);
+    if (in.shift) {
+      ask_empty(ctx);
+    } else {
+      remove(ctx);
+    }
   } else {
     (void)sample_->pad_input(ctx, in);  // the pads and SHIFT's latch, as on SAMPLE
   }
@@ -306,12 +498,12 @@ void SampleEditScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   }
 }
 
-void SampleEditScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
+void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     out.label[i] = kKeyNames[i];
   }
-  out.hot = g_se.focus == kFocusCut ? 1u : 0u;
-  out.dim = kLaterMask;
+  out.hot = g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : 0u);
+  out.dim = static_cast<std::uint8_t>(kLaterMask | (beats_dim(ctx) ? 2u : 0u));
 }
 
 void SampleEditScreen::update(app::Context& ctx) noexcept {
@@ -319,8 +511,12 @@ void SampleEditScreen::update(app::Context& ctx) noexcept {
     return;
   }
   sample_->pad_update(ctx);
+  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
+    norm_tick(ctx);  // a slice a frame
+  }
   if (g_se.note != nullptr && ctx.uptime_ms() >= g_se.note_until) {
     g_se.note = nullptr;
+    g_se.pending = se::Pending::None;
   }
   ctx.redraw();  // the slot's length can change under a take
 }
@@ -355,16 +551,18 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   if (sample_ != nullptr) {
     sample_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
   }
-  h.summary = "INSERT CUTS THE SLOT AT THE CURSOR; DELETE REMOVES THE CUT THAT STARTS THERE.\n"
-              "F2 TO F7 (BEATS TO SAVE WAV) COME LATER.";
+  h.summary = "INSERT CUTS AT THE CURSOR, DELETE REMOVES THE CUT THERE.\n"
+              "SHIFT + DELETE EMPTIES THE SLOT: F1 CONFIRMS.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
   }
   h.fkey[0] = "OFF, 8, 16 OR 24 EVEN CUTS";
-  for (unsigned i = 1; i < 7; ++i) {
+  for (unsigned i = 2; i < 7; ++i) {
     h.fkey[i] = "COMES LATER";
   }
+  h.fkey[1] = "4, 8 OR 16 CUTS A BAR";
+  h.fkey[5] = "PEAK TO -1 DB, F1 CONFIRMS";
   h.fkey[7] = "ONE CUT OVER THE SLOT";
   h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: CHORDS (LATCH WITH SHIFT).";
   h.buttons = kButtons;
@@ -393,6 +591,12 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   }
   keys[0].hot = g_se.focus == kFocusCut;
   cat(keys[0].value, sizeof keys[0].value, se::even_name(sample_->even_code(slot)));
+  const bool bdim = beats_dim(ctx);
+  keys[1].dim = bdim;
+  keys[1].hot = g_se.focus == kFocusBeats;
+  if (!bdim) {
+    cat(keys[1].value, sizeof keys[1].value, se::beats_name(shown_beats(*sample_, slot)));
+  }
 
   ui::plot::Canvas c(r);
   c.open();
@@ -403,19 +607,19 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   if (len != 0u && overview::shared().shown(slot)) {  // the picture at 1x (the kit has no bitmap scaling), centred; the cuts and the cursor are lines over it
     overview::shared().draw(c, slot, true, kPicX, kPicY, sample_->slot_ink(ctx, slot));
     for (unsigned i = 0; i < t.count; ++i) {
-      ornoir::fill_rect(c, kPicX + static_cast<int>(sm::bar_x(t.cut[i].start, len, overview::kCols - 2)), kPicY, 1, static_cast<int>(overview::kRows), Color::Accent);
+      ornoir::fill_rect(c, se::mark_x(t.cut[i].start, len), kPicY, 1, kPicH, Color::Accent);
     }
-    ornoir::fill_rect(c, kPicX + static_cast<int>(sm::bar_x(cur, len, overview::kCols - 2)), kPicY, 1, static_cast<int>(overview::kRows), Color::Text);
+    ornoir::fill_rect(c, se::mark_x(cur, len), kPicY, 1, kPicH, Color::Text);
   }
   ornoir::fill_rect(c, kX, kBarY, kW, kBarH, Color::Empty);
   if (len != 0u) {
     for (std::uint32_t s = se::kRateHz; s < len; s += se::kRateHz) {  // a tick a second
-      ornoir::fill_rect(c, kX + static_cast<int>(sm::bar_x(s, len, kW - 2)), kBarY + kBarH - 4, 1, 4, Color::TextDim);
+      ornoir::fill_rect(c, se::mark_x(s, len), kBarY + kBarH - 4, 1, 4, Color::TextDim);
     }
     for (unsigned i = 0; i < t.count; ++i) {
-      ornoir::fill_rect(c, kX + static_cast<int>(sm::bar_x(t.cut[i].start, len, kW - 2)), kBarY - 14, 2, kBarH + 28, Color::Accent);
+      ornoir::fill_rect(c, se::mark_x(t.cut[i].start, len), kBarY - 14, 2, kBarH + 28, Color::Accent);
     }
-    ornoir::fill_rect(c, kX + static_cast<int>(sm::bar_x(cur, len, kW - 2)), kBarY - 24, 2, kBarH + 48, Color::Text);
+    ornoir::fill_rect(c, se::mark_x(cur, len), kBarY - 24, 2, kBarH + 48, Color::Text);
   }
   c.close();
   ornoir::header_text(r, h);
@@ -440,7 +644,7 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
       char num[4];
       num[0] = '\0';
       cat_uint(num, sizeof num, i + 1u);
-      const int x = kX + static_cast<int>(sm::bar_x(t.cut[i].start, len, kW - 2)) + 4;
+      const int x = se::mark_x(t.cut[i].start, len) + 4;
       if (x >= last + 20) {
         r.text(x, kBarY - 30, num, Color::Accent, Face::Micro);
         last = x;
@@ -448,13 +652,20 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     }
     char tm[12];
     se::time_text(cur, tm);
-    int tx = kX + static_cast<int>(sm::bar_x(cur, len, kW - 2)) - r.text_width(tm, Face::Label) / 2;
+    int tx = se::mark_x(cur, len) - r.text_width(tm, Face::Label) / 2;
     const int right = kX + kW - r.text_width(tm, Face::Label);
     tx = tx < kX ? kX : (tx > right ? right : tx);
     r.text(tx, kBarY + kBarH + 32, tm, Color::Text, Face::Label);
   }
 
-  if (g_se.note != nullptr) {
+  if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
+    char pb[24];
+    pb[0] = '\0';
+    cat(pb, sizeof pb, g_se.norm.phase == se::NormPhase::Scan ? "SCANNING " : "NORMALISING ");
+    cat_uint(pb, sizeof pb, se::norm_percent(g_se.norm));
+    cat(pb, sizeof pb, "%");
+    r.text(kX, 398, pb, Color::Accent, Face::Label);
+  } else if (g_se.note != nullptr) {
     r.text(kX, 398, g_se.note, Color::Accent, Face::Label);
   } else {
     r.text(kX, 402, "INSERT CUTS AT THE CURSOR, DELETE REMOVES THE CUT UNDER IT", Color::TextDim, Face::Micro);

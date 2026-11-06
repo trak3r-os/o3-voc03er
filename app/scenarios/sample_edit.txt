@@ -85,3 +85,25 @@ snap 12_other_slot
 tap up
 wait 100
 snap 13_back
+# U7c1: F2 CUT BEATS on the bar's take, F6 NORMALISE asked and confirmed, SHIFT + DELETE asked and confirmed.
+tap f2
+turn 1
+wait 150
+snap 20_beats_ask
+turn 1
+wait 150
+snap 21_beats
+tap f6
+wait 150
+snap 22_normalise_ask
+tap f1
+wait 1500
+snap 23_normalised
+press shift
+tap delete
+release shift
+wait 150
+snap 24_clear_ask
+tap f1
+wait 300
+snap 25_cleared

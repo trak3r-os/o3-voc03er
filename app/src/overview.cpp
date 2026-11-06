@@ -12,7 +12,8 @@ namespace {
 namespace plot = o3sdk::ui::plot;
 static_assert(kRamGOffset >= ornoir::kAtlasOffset + ornoir::kAtlasBytes && kRamGOffset % 4 == 0, "the pictures sit after the skin's assets");
 static_assert(kRamGEnd <= plot::kRamGAppBytes, "the pictures fit the app's RAM_G region");
-static_assert(kSlotBytes <= o3sdk::hal::kMaxUploadBytes, "a slot's two pictures go up in one upload, so a failure never leaves half of one");
+static_assert(kChunkBytes % o3sdk::hal::kUploadAlign == 0 && kChunkBytes % 4 == 0, "every chunk's address and size are words");
+static_assert(kChunks * kChunkBytes >= kSlotBytes && kSlots * kSlotBytes <= plot::kRamGAppBytes - kRamGOffset, "the chunks cover the slot, four slots fit");
 O3SDK_BIG Overview g_overview;
 }  // namespace
 
@@ -53,26 +54,45 @@ void Overview::service(const std::uint32_t (&length)[kSlots]) noexcept {
   if (phase_ != Phase::Building) return;
   const std::uint32_t len = want_[active_];
   if (mem_ == nullptr || !step(mem_ + static_cast<std::uint64_t>(active_) * stride_, len, peaks_, cur_)) return;
-  render(peaks_, kCols, stage_);
-  render(peaks_, kSmallCols, stage_ + kBigBytes);
+  std::int32_t pk = 0;
+  for (unsigned i = 0; i < kCols; ++i) {
+    const std::int32_t a = peaks_.hi[i], b = -static_cast<std::int32_t>(peaks_.lo[i]);
+    pk = a > pk ? a : pk;
+    pk = b > pk ? b : pk;
+  }
+  peak_[active_] = pk;
+  render(peaks_, kCols, kBigRows, stage_);
+  render(peaks_, kSmallCols, kRows, stage_ + kBigBytes);
+  chunk_ = 0;
+  fails_ = 0;
   phase_ = Phase::Staged;
 }
 
 void Overview::pump(o3sdk::hal::Display& d) noexcept {
   if (phase_ != Phase::Staged) return;
-  if (d.upload(slot_addr(active_), stage_, kSlotBytes) == o3sdk::hal::UploadResult::Ok) {
-    shown_[active_] = true;
-    phase_ = Phase::Idle;
+  const unsigned off = chunk_ * kChunkBytes;
+  const unsigned n = (kSlotBytes - off < kChunkBytes) ? kSlotBytes - off : kChunkBytes;
+  if (d.upload(slot_addr(active_) + off, stage_ + off, n) == o3sdk::hal::UploadResult::Ok) {
+    fails_ = 0;
+    if (chunk_ == 0) shown_[active_] = false;  // from the first chunk on the picture in RAM_G is half old, half new
+    if (++chunk_ >= kChunks) {
+      shown_[active_] = true;
+      phase_ = Phase::Idle;
+    }
     return;
   }
-  if (++fails_ >= kRetries) phase_ = Phase::Idle;  // given up: the old picture stays, until the length changes
+  if (++fails_ >= kRetries) {  // given up: not shown until the length changes or the slot is marked dirty
+    shown_[active_] = false;
+    phase_ = Phase::Idle;
+  }
 }
 
 void Overview::draw(plot::Canvas& c, unsigned slot, bool big, int x, int y, o3sdk::ui::Rgb ink) const noexcept {
   if (!shown_[slot & 3u]) return;
   const unsigned w = big ? kCols : kSmallCols;
+  const unsigned h = big ? kBigRows : kRows;
   const plot::BitmapDesc d{slot_addr(slot) + (big ? 0u : kBigBytes), o3sdk::eve::BitmapFormat::L1, static_cast<std::uint16_t>(w / 8u),
-                           static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(kRows), static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(kRows)};
+                           static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(h), static_cast<std::uint16_t>(w), static_cast<std::uint16_t>(h)};
   c.bind(d);
   c.sprite(0, x, y, ink);
 }

@@ -7,8 +7,9 @@
 //   Encoder: the cursor, one sample a detent (the kit's acceleration applies); SHIFT: a 64th of the slot. LEFT / RIGHT: the previous / next cut's
 //   start. UP / DOWN: the slot (the one SAMPLE shows). INSERT: a cut at the cursor, snapped to a zero crossing within 64 samples. DELETE: the cut
 //   that starts at the cursor (LEFT / RIGHT put the cursor on one). F1 CUT EVEN: OFF, 8, 16, 24: a tap points the encoder at it, a second tap
-//   steps it, turning re-cuts the slot. F8 CLR CUTS: one cut over the slot. F2..F7 are drawn dim and say COMES LATER (BEATS, HITS, START, END,
-//   NORMALISE, SAVE WAV). A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
+//   steps it, turning re-cuts the slot. F8 CLR CUTS: one cut over the slot. F2 CUT BEATS: OFF, 4, 8, 16 a bar, on the bars a take was recorded on (dim for
+//   a loaded WAV), at most 24 cuts. F6 NORMALISE: the slot's peak to -1 dBFS, a slice of samples a pass. F3, F4, F5 and F7 (HITS, START, END, SAVE WAV)
+//   are drawn dim and say COMES LATER. F6 and SHIFT + DELETE (empty the slot) ask; F1 confirms. A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
 //
 // The cut tables are SAMPLE's (SampleScreen::table, in the SDRAM) and live in RAM until U8 and U9 save them. Main loop only; the cursor of each
 // slot, the arm and the line are in the SDRAM (g_se in the .cpp), so this object is two pointers and the vtable.
@@ -24,8 +25,8 @@ namespace o3_voc03er {
 
 class SampleEditScreen final : public o3sdk::app::Screen {
  public:
-  // `sample` is SAMPLE (the slot, the tables, the pads); `mem` the loop bank (slot n starts at n * Loop::kMaxSamples), read only, or nullptr.
-  void init(SampleScreen* sample, const std::int16_t* mem) noexcept;
+  // `sample` is SAMPLE (the slot, the tables, the pads); `mem` the loop bank (slot n starts at n * Loop::kMaxSamples), or nullptr; read, and written only by NORMALISE.
+  void init(SampleScreen* sample, std::int16_t* mem) noexcept;
 
   const char* title() const noexcept override { return "SAMPLE EDIT"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -53,9 +54,17 @@ class SampleEditScreen final : public o3sdk::app::Screen {
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void set_cursor(o3sdk::app::Context& ctx, std::uint32_t pos) noexcept;
   const std::int16_t* samples() const noexcept;
+  void recut_beats(o3sdk::app::Context& ctx, unsigned code) noexcept;
+  void turn_beats(o3sdk::app::Context& ctx, int delta) noexcept;
+  bool beats_dim(const o3sdk::app::Context& ctx) const noexcept;
+  void ask_normalise(o3sdk::app::Context& ctx) noexcept;
+  void ask_empty(o3sdk::app::Context& ctx) noexcept;
+  void confirm(o3sdk::app::Context& ctx) noexcept;
+  void norm_tick(o3sdk::app::Context& ctx) noexcept;
+  void norm_finish(o3sdk::app::Context& ctx) noexcept;
 
   SampleScreen* sample_ = nullptr;
-  const std::int16_t* mem_ = nullptr;
+  std::int16_t* mem_ = nullptr;
 };
 
 }  // namespace o3_voc03er
