@@ -203,6 +203,17 @@ second one takes it; any other key closes the warning. The pads audition the cut
 cuts. The cuts live in RAM until U8 and U9 save them, and the screen draws no waveform until U7b. F1 tap points the encoder at CUT EVEN; UP, DOWN, LEFT, RIGHT,
 INSERT and DELETE return it to the cursor. F2 to F7 say COMES LATER. Rec does nothing special here, as on SAMPLE. No new unit parameter.
 
+Built in U7b (`overview.{h,cpp}`, pure logic in `overview_logic.h`, `tests/overview_test.cpp`, `app/scenarios/overview.txt`): the overview waveform of each slot. Per slot
+the main loop keeps 384 columns of min and max (int16, SDRAM) and two L1 pictures in the app's RAM_G: 384 x 48 (2,304 bytes) and 240 x 48 (1,440 bytes, the same
+columns merged), side by side, 3,744 bytes a slot, from byte 10,240 of the app region (after the skin's assets), four slots up to byte 25,216, each slot sent
+in one upload. They are drawn through bitmap handle 0 (`kHandleApp`, the one the kit leaves to the app) as one sprite tinted in the side's ink (SPEAKS, SOUNDS,
+or the neutral rule colour); the kit cannot scale a bitmap, so every picture is 1x: SAMPLE EDIT centres the 384 one in its rectangle, SAMPLE draws the 240 one above
+the play line, SAMPLE REC beside the slot cards, and the cuts, the cursor and the play line stay rects over it. Full height is the slot's own peak, never below
+about -40 dB (silence stays a flat line); a column lights the rows from its minimum to its maximum, one row when they are the same. A rebuild starts when a slot's
+length changes (a take starts it, length 0 clears the picture at once), one slot at a time in slot order, 4,096 samples a main-loop pass (about 170 passes for a
+16 s slot); the old picture stays until the new one is up. The upload runs from `draw()` (the only place with the display), one a pass; a refused one is tried
+again 3 times, then dropped until the next length change. Nothing runs in the render. RAM cost: about 7 KB of SDRAM, a few bytes of SRAM_U. A sprite costs 7 display-list words. No new unit parameter.
+
 Built in U6c (`sample_logic.h` publish_slices, `stepseq.h`, `tests/slice_lane_test.cpp`, `app/scenarios/slice_lane.txt`): a step's slice fires a cut of the
 SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and CHOKE do not apply). Stop releases it
 (Trig 0, once). A slice above the slot's cut count stays silent, and LEVEL does not touch a slice. The palette's two upper rows are slices 1 to 24, lit up to

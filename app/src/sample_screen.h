@@ -73,6 +73,9 @@ class SampleScreen final : public o3sdk::app::Screen {
   // sequencer when the slot or its cuts changed.
   void service(o3sdk::app::Context& ctx) noexcept;
 
+  // The side's ink of a slot (SPEAKS, SOUNDS, or the neutral rule colour): the tint of its overview picture.
+  o3sdk::ui::Rgb slot_ink(o3sdk::app::Context& ctx, unsigned slot) const noexcept;
+
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;

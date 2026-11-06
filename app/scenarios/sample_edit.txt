@@ -1,6 +1,6 @@
 # SAMPLE EDIT (U7a): a 1 BAR take with the even cuts (8), then SAMPLE EDIT: the cursor by the encoder and by SHIFT + encoder, INSERT, LEFT and RIGHT,
 # DELETE (and a refused one), CUT EVEN to 8 and 16 with the REPLACES step, CLR CUTS, a pad auditioned, UP to another slot. The simulator shows the
-# screen and that the unit is asked for the cuts; it cannot say how it sounds or feels. No waveform yet (U7b).
+# screen and that the unit is asked for the cuts; it cannot say how it sounds or feels. The picture is in overview.txt (U7b).
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_edit.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300

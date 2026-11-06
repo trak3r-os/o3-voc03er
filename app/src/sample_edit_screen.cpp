@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sample_edit_screen.h"
 
+#include "overview.h"
 #include "sample_edit_logic.h"
 #include "skin/ornoir.h"
 
@@ -69,8 +70,10 @@ int centred(ui::Renderer& r, const char* s, Face f, int cx) noexcept { return cx
 
 constexpr int kX = 26;
 constexpr int kW = 748;
-constexpr int kWaveY = 140;  // the rectangle U7b draws the waveform in
+constexpr int kWaveY = 140;  // the rectangle the overview picture sits in
 constexpr int kWaveH = 176;
+constexpr int kPicX = kX + (kW - static_cast<int>(overview::kCols)) / 2;  // the overview picture, centred in the rectangle
+constexpr int kPicY = kWaveY + (kWaveH - static_cast<int>(overview::kRows)) / 2;
 constexpr int kBarY = 330;
 constexpr int kBarH = 14;
 
@@ -79,6 +82,7 @@ constexpr int kBarH = 14;
 void SampleEditScreen::init(SampleScreen* sample, const std::int16_t* mem) noexcept {
   sample_ = sample;
   mem_ = mem;
+  overview::shared().bind(mem, Loop::kMaxSamples);
   g_se = EditData{};
 }
 
@@ -372,6 +376,7 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   if (sample_ == nullptr) {
     return;
   }
+  overview::shared().pump(r.display());  // a staged overview picture goes up to RAM_G (main loop, before the display list uses it)
   const unsigned slot = sample_->slot() & 3u;
   const sm::SliceTable& t = sample_->table(slot);
   const std::uint32_t len = t.length;
@@ -393,8 +398,15 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   c.open();
   ornoir::header_shapes(c, h);
   ornoir::frow_shapes(c, keys);
-  ornoir::fill_rect(c, kX, kWaveY, kW, kWaveH, Color::Empty);  // U7b's rectangle
+  ornoir::fill_rect(c, kX, kWaveY, kW, kWaveH, Color::Empty);  // the overview's rectangle
   ornoir::fill_rect(c, kX + 2, kWaveY + 2, kW - 4, kWaveH - 4, Color::Pane);
+  if (len != 0u && overview::shared().shown(slot)) {  // the picture at 1x (the kit has no bitmap scaling), centred; the cuts and the cursor are lines over it
+    overview::shared().draw(c, slot, true, kPicX, kPicY, sample_->slot_ink(ctx, slot));
+    for (unsigned i = 0; i < t.count; ++i) {
+      ornoir::fill_rect(c, kPicX + static_cast<int>(sm::bar_x(t.cut[i].start, len, overview::kCols - 2)), kPicY, 1, static_cast<int>(overview::kRows), Color::Accent);
+    }
+    ornoir::fill_rect(c, kPicX + static_cast<int>(sm::bar_x(cur, len, overview::kCols - 2)), kPicY, 1, static_cast<int>(overview::kRows), Color::Text);
+  }
   ornoir::fill_rect(c, kX, kBarY, kW, kBarH, Color::Empty);
   if (len != 0u) {
     for (std::uint32_t s = se::kRateHz; s < len; s += se::kRateHz) {  // a tick a second

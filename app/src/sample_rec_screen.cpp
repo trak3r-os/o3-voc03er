@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sample_rec_screen.h"
 
+#include "overview.h"
 #include "perform_logic.h"
 #include "skin/ornoir.h"
 
@@ -25,6 +26,7 @@ namespace {
 constexpr std::uint64_t kStartMs = 250;  // the unit shows the Rec within this, or the take failed (as PERFORM's capture)
 constexpr std::uint64_t kNoteMs = 2500;
 constexpr unsigned kGainTap = 5;  // a second tap on F2 moves the gain this much (a detent moves 1)
+constexpr int kPicX = 548, kPicY = 210;  // the overview picture (240 x 48), right of the slot cards, under the BAR chip
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"SOURCE", "GAIN", "LENGTH", "AFTER", "AUTOPLAY", "MONITOR", "SLOT", ""};
@@ -457,6 +459,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
 // ---- draw ---------------------------------------------------------------------------------------------------------------------------
 
 void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
+  overview::shared().pump(r.display());  // a staged overview picture goes up to RAM_G (main loop, before the display list uses it)
   const dsp::Engine& e = ctx.engine();
   const app::AudioIn& ain = ctx.audio_in();
   const bool have = ain.available();
@@ -546,6 +549,10 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
     const bool cur = i == shown;
     ornoir::fill_rect(c, x, 272, 104, 52, cur ? Color::Accent : Color::Empty);
     ornoir::fill_rect(c, x + 2, 274, 100, 48, Color::Pane);
+  }
+  if (view != View::Recording && view != View::Stopping && overview::shared().shown(shown)) {  // the armed slot's picture, at 1x, in its side's ink
+    const Color ink = rt.speaks == sv ? Color::Play : (rt.sounds == sv ? Color::Sel : Color::TextDim);
+    overview::shared().draw(c, shown, false, kPicX, kPicY, ornoir::theme().rgb(ink));
   }
   c.close();
   ornoir::header_text(r, h);

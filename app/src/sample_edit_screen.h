@@ -2,7 +2,7 @@
 #pragma once
 
 // SAMPLE EDIT (docs/UI-DESIGN.md, "SAMPLE EDIT"), first cut (slice U7a), in the OR NOIR skin: the selected slot as a bar the full width of its length,
-// the cuts as numbered marks, the cursor as a bright line with its time under it. No waveform yet (U7b draws it in the rectangle left for it).
+// the cuts as numbered marks, the cursor as a bright line with its time under it. The overview waveform (U7b) sits in the rectangle above the bar.
 //
 //   Encoder: the cursor, one sample a detent (the kit's acceleration applies); SHIFT: a 64th of the slot. LEFT / RIGHT: the previous / next cut's
 //   start. UP / DOWN: the slot (the one SAMPLE shows). INSERT: a cut at the cursor, snapped to a zero crossing within 64 samples. DELETE: the cut

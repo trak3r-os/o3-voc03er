@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sample_screen.h"
 
+#include "overview.h"
 #include "perform_logic.h"
 #include "sample_logic.h"
 #include "sample_rec_logic.h"
@@ -19,6 +20,7 @@ using namespace o3sdk;
 namespace pl = perform;
 namespace sm = sample;
 namespace sr = sample_rec;
+namespace ov = overview;
 using ui::Color;
 using ui::Face;
 using Button = app::Button;
@@ -312,6 +314,9 @@ void SampleScreen::service(app::Context& ctx) noexcept {
       g_sd.even_code[j] = 0;
     }
   }
+  std::uint32_t lens[ov::kSlots];  // the overview waveform follows the lengths too (a take starts it, an empty slot clears it)
+  for (unsigned j = 0; j < ov::kSlots; ++j) lens[j] = g_sd.table[j].length;
+  ov::shared().service(lens);
   if (seq_ != nullptr && perform_ != nullptr) {  // the SPEAKS slot's slices go to the step sequencer when the slot or its length changed
     const route::Route rt = perform_->route_now(ctx);
     const unsigned slot = route::is_slot(rt.speaks) ? static_cast<unsigned>(rt.speaks - route::kFirstSlot) : sm::kReaders;
@@ -575,12 +580,24 @@ constexpr int kRightX = 592;
 
 // The play line of the selected slot: a bar, a tick at each cut (lit while its slice sounds), a head for every reader whose position is in the slot
 // (the slot's own loop or a slice on another reader). Rects only, so the display list grows by 2 + the cuts + the heads.
-void SampleScreen::draw_line(app::Context&, ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept {
+o3sdk::ui::Rgb SampleScreen::slot_ink(app::Context& ctx, unsigned slot) const noexcept {
+  const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
+  return ornoir::theme().rgb(side_ink(sm::side_of(rt, slot & 3u)));
+}
+
+void SampleScreen::draw_line(app::Context& ctx, ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept {
   const sm::SliceTable& t = g_sd.table[slot & 3u];
   const std::uint32_t on = sounding_mask(slot);
   const std::uint32_t base = slot * Loop::kMaxSamples;
   ui::plot::Canvas c(r);
   c.open();
+  if (ov::shared().shown(slot)) {  // the overview picture (240 wide) above the line, the cuts over it
+    ov::shared().draw(c, slot, false, x, kRowY + 50, slot_ink(ctx, slot));
+    for (unsigned i = 0; i < t.count; ++i) {
+      ornoir::fill_rect(c, x + static_cast<int>(sm::bar_x(t.cut[i].start, length, static_cast<std::uint32_t>(w - 2))), kRowY + 50, 1, static_cast<int>(ov::kRows),
+                        ((on >> i) & 1u) != 0u ? Color::Play : Color::TextDim);
+    }
+  }
   ornoir::fill_rect(c, x, y, w, 10, Color::Empty);
   for (unsigned i = 0; i < t.count; ++i) {
     const int tx = x + static_cast<int>(sm::bar_x(t.cut[i].start, length, static_cast<std::uint32_t>(w - 2)));
@@ -614,6 +631,7 @@ void SampleScreen::fill_header(app::Context& ctx, ornoir::HeaderState& h) const 
 }
 
 void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
+  ov::shared().pump(r.display());  // a staged overview picture goes up to RAM_G (main loop, before the display list uses it)
   const dsp::Engine& e = ctx.engine();
   const unsigned tempo = e.stats().tempo_mbpm;
   const float bar = pl::bar_samples(tempo);

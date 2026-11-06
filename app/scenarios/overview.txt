@@ -1,0 +1,31 @@
+# The overview waveform (U7b): a 1 BAR take into a slot, the picture rebuilt in slices of 4,096 samples a pass (the old one, here none, stays meanwhile),
+# then the same slot in SAMPLE EDIT (384 x 48 at 1x, the cuts and the cursor as lines over it), on SAMPLE (240 wide above the play line) and on
+# SAMPLE REC (armed slot). The simulator stores the uploads and draws the sprite; it cannot say how it looks on the unit's panel.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/overview.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+snap 01_rec_after_take
+tap sampleedit
+wait 4000
+snap 02_edit_picture
+turn 40
+tap insert
+wait 150
+snap 03_edit_cuts_cursor
+tap sampleplay
+wait 500
+snap 04_sample_picture
+tap samplerec
+wait 500
+snap 05_rec_picture
