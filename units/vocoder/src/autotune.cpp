@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3_voc03er/units/vocoder/autotune.h>
+#include <o3_voc03er/units/vocoder/scale.h>
 
 #include "nofma.h"
 
@@ -9,6 +10,8 @@
 
 namespace o3_voc03er {
 
+static_assert(kScaleTableCount == Autotune::kScaleCount, "the scale table and the Scale enum agree");
+
 namespace {
 
 constexpr float kMinPeriod = 32.0f;
@@ -17,15 +20,6 @@ constexpr float kRelax = 0.012f;        // per segment: about 30 ms to forget th
 constexpr float kSmooth = 0.35f;        // the decision pitch follows the estimates with this weight per hop
 constexpr float kInvXf = 1.0f / static_cast<float>(Autotune::kXfade + 1u);
 constexpr float kInvSeg = 1.0f / static_cast<float>(Autotune::kSeg);
-
-constexpr unsigned bits(std::initializer_list<unsigned> l) {
-  unsigned m = 0;
-  for (unsigned b : l) m |= 1u << b;
-  return m;
-}
-constexpr unsigned kScaleMask[Autotune::kScaleCount] = {
-    0xFFFu, bits({0, 2, 4, 5, 7, 9, 11}), bits({0, 2, 3, 5, 7, 8, 10}), bits({0, 2, 4, 7, 9}),
-    bits({0, 3, 5, 7, 10}), bits({0, 3, 5, 6, 7, 10}), bits({0, 2, 3, 5, 7, 9, 10})};
 
 inline float clean(float x) noexcept { return (x == x && x <= 8.0f && x >= -8.0f) ? x : 0.0f; }
 

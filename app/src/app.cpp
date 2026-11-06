@@ -54,6 +54,12 @@ using namespace o3sdk;
 // namespace-scope object, not a member.)
 alignas(8) O3SDK_BIG std::int16_t g_loop_mem[o3_voc03er::Loop::kBankSamples] = {};
 static_assert(sizeof g_loop_mem == o3_voc03er::Loop::kBankSamples * sizeof(std::int16_t) && sizeof g_loop_mem % 8 == 0, "the bank is whole words");
+// The buffers of the file jobs (main loop only: the card is polled by the core, so SDRAM is legal, mem_map.h): word aligned, and a save's stays
+// unchanged until its job ends, so each file has its own; one load at a time shares one (the files service runs one job at a time).
+alignas(4) O3SDK_BIG std::uint8_t g_save_buf[o3_voc03er::kPatternFileMax] = {};
+alignas(4) O3SDK_BIG std::uint8_t g_cfg_buf[o3_voc03er::kConfigFileMax] = {};
+alignas(4) O3SDK_BIG std::uint8_t g_load_buf[o3_voc03er::kPatternFileMax] = {};
+static_assert(sizeof g_save_buf % 4 == 0 && sizeof g_cfg_buf % 4 == 0 && sizeof g_load_buf % 4 == 0, "word-aligned buffers are whole words");
 
 class MyApp;
 MyApp& instance() noexcept;
@@ -144,22 +150,22 @@ class MyApp final : public app::App {
     // the user did not ask for them.
     if (boot_ == Boot::Pattern) {
       files.set_quiet(true);
-      op_ = files.load("", o3_voc03er::kPatternFile, load_buf_, sizeof load_buf_) ? Op::LoadPattern : Op::None;
+      op_ = files.load("", o3_voc03er::kPatternFile, g_load_buf, sizeof g_load_buf) ? Op::LoadPattern : Op::None;
       boot_ = Boot::Config;
       return;
     }
     if (boot_ == Boot::Config) {
       files.set_quiet(true);
-      op_ = files.load("", o3_voc03er::kConfigFile, load_buf_, sizeof load_buf_) ? Op::LoadConfig : Op::None;
+      op_ = files.load("", o3_voc03er::kConfigFile, g_load_buf, sizeof g_load_buf) ? Op::LoadConfig : Op::None;
       boot_ = Boot::Done;
       return;
     }
-    // The setting saves itself when it changes (and the card is there): the file's bytes are made now and stay in cfg_buf_ until the job ends.
+    // The setting saves itself when it changes (and the card is there): the file's bytes are made now and stay in g_cfg_buf until the job ends.
     if (play_.octave() != saved_octave_) {
       saved_octave_ = play_.octave();  // (even when refused: it is tried again at the next change, not every pass)
-      const std::size_t n = o3_voc03er::write_config(saved_octave_, cfg_buf_, sizeof cfg_buf_);
+      const std::size_t n = o3_voc03er::write_config(saved_octave_, g_cfg_buf, sizeof g_cfg_buf);
       files.set_quiet(true);
-      op_ = n != 0u && files.save("", o3_voc03er::kConfigFile, cfg_buf_, n) ? Op::SaveConfig : Op::None;
+      op_ = n != 0u && files.save("", o3_voc03er::kConfigFile, g_cfg_buf, n) ? Op::SaveConfig : Op::None;
     }
   }
 
@@ -193,10 +199,10 @@ class MyApp final : public app::App {
       files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
       play_.set_note(nullptr);
       if (save) {
-        const std::size_t n = o3_voc03er::write_pattern(play_.pattern(), save_buf_, sizeof save_buf_);
-        op_ = n != 0u && files.save("", o3_voc03er::kPatternFile, save_buf_, n) ? Op::SavePattern : Op::None;
+        const std::size_t n = o3_voc03er::write_pattern(play_.pattern(), g_save_buf, sizeof g_save_buf);
+        op_ = n != 0u && files.save("", o3_voc03er::kPatternFile, g_save_buf, n) ? Op::SavePattern : Op::None;
       } else {
-        op_ = files.load("", o3_voc03er::kPatternFile, load_buf_, sizeof load_buf_) ? Op::LoadPattern : Op::None;
+        op_ = files.load("", o3_voc03er::kPatternFile, g_load_buf, sizeof g_load_buf) ? Op::LoadPattern : Op::None;
       }
       ctx.redraw();
     }
@@ -380,14 +386,14 @@ class MyApp final : public app::App {
     const std::size_t got = ctx.files().loaded();
     if (done && op_ == Op::LoadPattern) {
       o3_voc03er::Pattern p;
-      if (o3_voc03er::read_pattern(load_buf_, got, p)) {
+      if (o3_voc03er::read_pattern(g_load_buf, got, p)) {
         play_.set_pattern(p);
       } else {
         play_.set_note("BAD FILE");
       }
     } else if (done && op_ == Op::LoadConfig) {
       int octave = 0;
-      if (o3_voc03er::read_config(load_buf_, got, octave)) {
+      if (o3_voc03er::read_config(g_load_buf, got, octave)) {
         play_.set_octave(octave);
         saved_octave_ = play_.octave();  // what the card holds: nothing to save
       }
@@ -403,12 +409,6 @@ class MyApp final : public app::App {
   Op op_ = Op::None;
   Boot boot_ = Boot::Pattern;
   int saved_octave_ = 0;  // the octave the card holds (or was last asked to)
-  // The buffers of the file jobs: word aligned, and a save's stays unchanged until its job ends, so each file has its own; one load at a
-  // time shares one (the files service runs one job at a time).
-  alignas(4) std::uint8_t save_buf_[o3_voc03er::kPatternFileMax] = {};
-  alignas(4) std::uint8_t cfg_buf_[o3_voc03er::kConfigFileMax] = {};
-  alignas(4) std::uint8_t load_buf_[o3_voc03er::kPatternFileMax] = {};
-  static_assert(sizeof save_buf_ % 4 == 0 && sizeof cfg_buf_ % 4 == 0 && sizeof load_buf_ % 4 == 0, "word-aligned buffers are whole words");
 };
 
 MyApp& instance() noexcept {
