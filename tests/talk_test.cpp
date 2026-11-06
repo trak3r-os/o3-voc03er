@@ -2,6 +2,7 @@
 // Talk (the LPC talkbox) and the Vocoder's MODE switch, against synthetic signals only: saw voices through formant resonators.
 #include <doctest/doctest.h>
 
+#include <o3_voc03er/units/vocoder/robot.h>
 #include <o3_voc03er/units/vocoder/talk.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
@@ -10,6 +11,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <limits>
 #include <vector>
 
 using namespace o3_voc03er;
@@ -547,6 +551,7 @@ TEST_CASE("talk: the AGC keeps the level of a voice 12 dB down, and leaves a noi
   };
   const float loud = level(0.1f);  // a hotter voice meets the AGC's lowest gain
   const float quiet = level(0.025f);
+  std::printf("talk: AGC rms loud %.5f quiet %.5f\n", static_cast<double>(loud), static_cast<double>(quiet));
   CHECK(loud > 0.0f);
   CHECK(quiet / loud > 0.8f);  // 12 dB less at the input, within 2 dB at the output
   CHECK(quiet / loud < 1.25f);
@@ -566,6 +571,7 @@ TEST_CASE("vocoder: a change of MODE keeps the level within 6 dB on a voice and 
   };
   const float bands = rms(1500 * 64, sw * 64);
   const float talk = rms(3500 * 64, 4000 * 64);
+  std::printf("talk: unit rms bands %.5f talk %.5f ratio %.4f\n", static_cast<double>(bands), static_cast<double>(talk), static_cast<double>(talk / bands));
   CHECK(talk / bands > 0.5f);
   CHECK(talk / bands < 2.0f);
 }
@@ -585,6 +591,7 @@ TEST_CASE("vocoder: BANDS and TALK hold their level with the voice 12 and 24 dB 
     // This voice runs hot: at 0.3 it already meets the AGC's lowest gain, so the three levels start under that.
     const float a = level(0.075f, talk), b = level(0.019f, talk), c = level(0.0047f, talk);
     MESSAGE("talk " << talk << ": " << a << " " << b << " " << c);
+    std::printf("talk: unit 12/24 dB rms talk %d: %.5f %.5f %.5f\n", talk ? 1 : 0, static_cast<double>(a), static_cast<double>(b), static_cast<double>(c));
     CHECK(a > 0.01f);
     CHECK(b / a > 0.7f);
     CHECK(b / a < 1.42f);
@@ -755,4 +762,268 @@ TEST_CASE("talk: Quality maps to the lattice order (q x 3 + 2) / 4 and stays in 
   CHECK(t.order() == 8);
   t.set_order(99);
   CHECK(t.order() == 24);
+}
+
+// The carrier's driver (a one-pole high-pass at 250 Hz and a cubic soft clip), alone.
+namespace {
+
+float drive_rms(float hz, float amp) {
+  CarDrive d;
+  d.prepare(kFs);
+  std::vector<float> x(8192);
+  for (std::size_t i = 0; i < x.size(); ++i) x[i] = amp * std::sin(kPi2 * hz * static_cast<float>(i) / kFs);
+  for (std::size_t i = 0; i < x.size(); i += 64) d.process(x.data() + i, 64);
+  float s = 0.0f;
+  for (std::size_t i = 4096; i < x.size(); ++i) s += x[i] * x[i];
+  return std::sqrt(s / 4096.0f);
+}
+
+}  // namespace
+
+TEST_CASE("talk: the carrier driver attenuates below its corner and keeps a small signal above it") {
+  const float low = drive_rms(60.0f, 0.05f), mid = drive_rms(1000.0f, 0.05f), at = drive_rms(250.0f, 0.05f);
+  const float in_rms = 0.05f * 0.70710678f * CarDrive::kDriveGain;  // the small-signal gain is the make-up
+  std::printf("talk: driver gain at 60 Hz %.3f, 250 Hz %.3f, 1 kHz %.3f (small signal)\n", static_cast<double>(low / in_rms),
+              static_cast<double>(at / in_rms), static_cast<double>(mid / in_rms));
+  CHECK(low / in_rms < 0.3f);                  // 60 Hz: about 0.24 for the one pole
+  CHECK(at / in_rms > 0.6f);                   // the corner: about -3 dB
+  CHECK(at / in_rms < 0.8f);
+  CHECK(mid / in_rms > 0.95f);
+  CHECK(mid / in_rms < 1.0f + 1.0e-3f);
+  // A DC offset does not get through.
+  CarDrive d;
+  d.prepare(kFs);
+  std::vector<float> dc(4096, 0.3f);
+  for (std::size_t i = 0; i < dc.size(); i += 64) d.process(dc.data() + i, 64);
+  CHECK(std::fabs(dc.back()) < 1.0e-6f);
+}
+
+TEST_CASE("talk: a hot carrier through the driver stays bounded and finite") {
+  CarDrive d;
+  d.prepare(kFs);
+  std::vector<float> x(16384);
+  std::uint32_t s = 12345u;
+  for (std::size_t i = 0; i < x.size(); ++i) {
+    s = s * 1664525u + 1013904223u;
+    // +-1e6 noise, a +-50 square at 300 Hz and a sine, in turn
+    const float r = static_cast<float>(s >> 8) / 8388608.0f - 1.0f;
+    x[i] = i < 4096 ? 1.0e6f * r : (i < 8192 ? ((i / 73) % 2 == 0 ? 50.0f : -50.0f) : 20.0f * std::sin(kPi2 * 700.0f * static_cast<float>(i) / kFs));
+  }
+  for (std::size_t i = 0; i < x.size(); i += 64) d.process(x.data() + i, 64);
+  float mx = 0.0f;
+  for (float v : x) {
+    REQUIRE(std::isfinite(v));
+    mx = std::max(mx, std::fabs(v));
+  }
+  std::printf("talk: driver peak out for a hot carrier %.4f (bound %.4f)\n", static_cast<double>(mx), static_cast<double>(CarDrive::kDriveOut));
+  CHECK(mx <= CarDrive::kDriveOut * (1.0f + 1.0e-6f));
+  CHECK(mx > 0.9f * CarDrive::kDriveOut);  // and it does saturate
+}
+
+// BANDS must come out of the unit exactly as it did before ROBOT existed: an FNV-1a digest of the bit patterns of the BANDS stretches of a run
+// that goes to TALK and back (so the crossfade's mixing path is in it too). The value was taken from the build before ROBOT was added.
+TEST_CASE("vocoder: the BANDS output is bit-identical to what it was before ROBOT") {
+  static Vocoder vo;
+  vo.prepare(kFs);
+  const auto out = run_unit(vo, 1500, 700, 1100);
+  std::uint32_t d = 2166136261u;
+  const auto eat = [&](std::size_t from, std::size_t to) {
+    for (std::size_t i = from; i < to; ++i) {
+      std::uint32_t u;
+      std::memcpy(&u, &out[i], sizeof u);
+      d = (d ^ u) * 16777619u;
+    }
+  };
+  eat(0, 690 * 64);
+  eat(1300 * 64, 1500 * 64);
+  std::printf("vocoder: BANDS digest %08X\n", d);
+  CHECK(d == 0xE55118E5u);
+}
+
+// ---- ROBOT: BANDS followed by a fast compressor on the wet sum ------------------------------------------------------------------------
+
+namespace {
+
+// The Vocoder in `mode` with the vowel modulator at level(block) and two held notes.
+template <typename LevelFn>
+std::vector<float> run_mode(Vocoder& vo, std::size_t blocks, float mode, std::size_t switch_to, float mode2, LevelFn level) {
+  Voice v(110.0f);
+  v.set_vowel(kA, 2);
+  std::vector<float> out(blocks * 64);
+  dsp::Transport tr;
+  for (std::size_t b = 0; b < blocks; ++b) {
+    float m[64], r[64];
+    const float lv = level(b);
+    for (float& x : m) x = lv * v.next();
+    dsp::Event ev[3];
+    std::uint32_t n = 0;
+    if (b == 0) {
+      ev[n++] = dsp::param_change(Vocoder::Mode, mode);
+      ev[n++] = dsp::note_on(48, 100);
+      ev[n++] = dsp::note_on(55, 100);
+    }
+    if (b == switch_to) ev[n++] = dsp::param_change(Vocoder::Mode, mode2);
+    dsp::ProcessArgs a{};
+    a.events = ev;
+    a.event_count = n;
+    a.in_l = m;
+    a.in_r = m;
+    a.out_l = out.data() + b * 64;
+    a.out_r = r;
+    a.frames = 64;
+    a.transport = &tr;
+    vo.process(a);
+  }
+  return out;
+}
+
+float rms_blocks(const std::vector<float>& x, std::size_t b0, std::size_t b1) {
+  float s = 0.0f;
+  for (std::size_t i = b0 * 64; i < b1 * 64; ++i) s += x[i] * x[i];
+  return std::sqrt(s / static_cast<float>((b1 - b0) * 64));
+}
+
+constexpr std::size_t kSeg = 120;  // blocks per level segment: 174 ms, faster than the BANDS AGC's 500 ms release
+
+}  // namespace
+
+TEST_CASE("robot: MODE has four values, ROBOT is the fourth and takes no new parameter") {
+  static Vocoder vo;
+  vo.prepare(kFs);
+  const auto& p = vo.info().params[Vocoder::Mode];
+  CHECK(p.max == 3.0f);
+  CHECK(p.def == 0.0f);
+  CHECK(Vocoder::kParamCount == 62);
+}
+
+TEST_CASE("robot: the compressor flattens a level that alternates 12 dB, and BANDS does not as much") {
+  static Vocoder vo;
+  const auto alt = [](std::size_t b) { return (b / kSeg) % 2 == 0 ? 0.075f : 0.019f; };
+  float ratio[2] = {};
+  for (int robot = 0; robot < 2; ++robot) {
+    vo.prepare(kFs);
+    const std::size_t blocks = kSeg * 12;
+    const auto out = run_mode(vo, blocks, robot ? 3.0f : 0.0f, 1000000, 0.0f, alt);
+    CHECK(finite(out));
+    float loud = 0.0f, quiet = 0.0f;
+    unsigned n = 0;
+    for (std::size_t s = 6; s + 1 < 12; s += 2) {  // later cycles, the last 60 blocks of each segment
+      loud += rms_blocks(out, s * kSeg + 60, (s + 1) * kSeg);
+      quiet += rms_blocks(out, (s + 1) * kSeg + 60, (s + 2) * kSeg);
+      ++n;
+    }
+    loud /= static_cast<float>(n);
+    quiet /= static_cast<float>(n);
+    ratio[robot] = quiet / loud;
+    std::printf("robot: alternating 12 dB, mode %d: loud %.5f quiet %.5f ratio %.3f (the input's is 0.253)\n", robot ? 3 : 0, static_cast<double>(loud),
+                static_cast<double>(quiet), static_cast<double>(ratio[robot]));
+    CHECK(loud > 0.01f);
+  }
+  // 1 would be flat. ROBOT must be much nearer to it than BANDS: the 12 dB the input falls by comes out as under half of that.
+  CHECK(ratio[1] > ratio[0] + 0.15f);
+  CHECK(ratio[1] > 0.6f);
+}
+
+TEST_CASE("robot: BANDS to ROBOT and back, during sound, makes no click and no level jump") {
+  static Vocoder vo;
+  vo.prepare(kFs);
+  const std::size_t sw_a = 700, sw_b = 1100;
+  const auto level = [](std::size_t) { return 0.075f; };
+  // two runs would need two switches: the helper has one, so go to ROBOT first and back in a second run of the same length
+  const auto to_robot = run_mode(vo, 1000, 0.0f, sw_a, 3.0f, level);
+  CHECK(finite(to_robot));
+  CHECK(peak(to_robot) < 1.0f);
+  const std::size_t a0 = sw_a * 64;
+  const float step_before = max_step(to_robot, 300 * 64, a0);
+  CHECK(step_before > 0.0f);
+  CHECK(max_step(to_robot, a0 - 64, a0 + 40 * 64) <= 1.5f * step_before + 0.0f);
+  float mid = 0.0f;
+  for (std::size_t i = a0 - 40 * 64; i < a0; ++i) mid = std::max(mid, std::fabs(to_robot[i]));
+  float after = 0.0f;
+  for (std::size_t i = a0 + 40 * 64; i < to_robot.size(); ++i) after = std::max(after, std::fabs(to_robot[i]));
+  std::printf("robot: peak before the switch %.4f, after %.4f, max step before %.5f across %.5f\n", static_cast<double>(mid), static_cast<double>(after),
+              static_cast<double>(step_before), static_cast<double>(max_step(to_robot, a0 - 64, a0 + 40 * 64)));
+
+  vo.prepare(kFs);
+  const auto back = run_mode(vo, 1500, 3.0f, sw_b, 0.0f, level);
+  CHECK(finite(back));
+  CHECK(peak(back) < 1.0f);
+  const std::size_t b0 = sw_b * 64;
+  const float step_robot = max_step(back, 600 * 64, b0);
+  CHECK(step_robot > 0.0f);
+  CHECK(max_step(back, b0 - 64, b0 + 40 * 64) <= 1.5f * std::max(step_robot, max_step(back, b0 + 100 * 64, 1500 * 64)));
+}
+
+TEST_CASE("robot: a hot voice, NaN and Inf at the input leave ROBOT finite and bounded") {
+  static Vocoder vo;
+  vo.prepare(kFs);
+  const auto hot = run_mode(vo, 600, 3.0f, 1000000, 0.0f, [](std::size_t) { return 1.0f; });
+  CHECK(finite(hot));
+  CHECK(peak(hot) < 1.5f);
+
+  vo.prepare(kFs);
+  dsp::Transport tr;
+  float m[64], r[64], o[64];
+  bool ok = true;
+  for (std::size_t b = 0; b < 400; ++b) {
+    for (std::size_t i = 0; i < 64; ++i) m[i] = 0.1f * std::sin(0.05f * static_cast<float>(b * 64 + i));
+    if (b == 100) m[3] = std::numeric_limits<float>::quiet_NaN();
+    if (b == 120) m[9] = std::numeric_limits<float>::infinity();
+    dsp::Event ev[3];
+    std::uint32_t n = 0;
+    if (b == 0) {
+      ev[n++] = dsp::param_change(Vocoder::Mode, 3.0f);
+      ev[n++] = dsp::note_on(48, 100);
+    }
+    dsp::ProcessArgs a{};
+    a.events = ev;
+    a.event_count = n;
+    a.in_l = m;
+    a.in_r = m;
+    a.out_l = o;
+    a.out_r = r;
+    a.frames = 64;
+    a.transport = &tr;
+    vo.process(a);
+    if (b >= 300)
+      for (float x : o) ok = ok && std::isfinite(x);
+  }
+  CHECK(ok);
+}
+
+TEST_CASE("robot: the compressor alone, 4:1 above its threshold, make-up below, silence stays silence") {
+  RobotComp c;
+  c.prepare(kFs);
+  const auto run = [&](float amp) {
+    c.reset();
+    std::vector<float> x(4096);
+    for (std::size_t i = 0; i < x.size(); ++i) x[i] = amp * std::sin(0.3f * static_cast<float>(i));
+    c.process(x.data(), static_cast<std::uint32_t>(x.size()));
+    float s = 0.0f;
+    for (std::size_t i = 2048; i < x.size(); ++i) s += x[i] * x[i];
+    return std::sqrt(s / 2048.0f) / (amp * 0.70710678f);  // the gain it settled at
+  };
+  CHECK(run(RobotComp::kThreshold * 0.1f) == doctest::Approx(RobotComp::kMakeup).epsilon(0.02));
+  const float g1 = run(RobotComp::kThreshold * 4.0f);
+  const float g2 = run(RobotComp::kThreshold * 16.0f);
+  // 12 dB more in comes out 9 dB more (the exponent 0.75): the gain falls by 9 dB, a factor of 4^-0.75 = 0.3536
+  CHECK(g2 / g1 == doctest::Approx(0.35355f).epsilon(0.05));
+  c.reset();
+  std::vector<float> z(256, 0.0f);
+  c.process(z.data(), 256);
+  for (float v : z) CHECK(v == 0.0f);
+  // any block length, any alignment
+  std::vector<float> y(37, 0.01f);
+  c.process(y.data(), 37);
+  for (float v : y) CHECK(std::isfinite(v));
+}
+
+TEST_CASE("robot: the whole run is deterministic, two runs give the same bits") {
+  static Vocoder vo;
+  const auto alt = [](std::size_t b) { return (b / kSeg) % 2 == 0 ? 0.075f : 0.019f; };
+  vo.prepare(kFs);
+  const auto a = run_mode(vo, 400, 3.0f, 1000000, 0.0f, alt);
+  vo.prepare(kFs);
+  const auto b = run_mode(vo, 400, 3.0f, 1000000, 0.0f, alt);
+  CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
 }

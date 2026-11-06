@@ -345,7 +345,7 @@ TEST_CASE("vocoder: TUNE is mode 2 after TALK, the new parameters are appended, 
   CHECK(Vocoder::Key == 35);
   CHECK(Vocoder::NotesIn == 39);
   const auto& info = vo.info();
-  CHECK(info.params[Vocoder::Mode].max == 2.0f);
+  CHECK(info.params[Vocoder::Mode].max == 3.0f);
   CHECK(std::string(info.params[Vocoder::Mode].names[2]) == "TUNE");
   CHECK(std::string(info.params[Vocoder::Mode].names[1]) == "TALK");
   CHECK(std::string(info.params[Vocoder::Key].name) == "KEY");
@@ -377,4 +377,84 @@ TEST_CASE("vocoder: MODE switches into and out of TUNE, in every pair, are click
   }
   // Back in BANDS after TUNE the output is Bands' again (not silent, not the dry voice).
   CHECK(rms(out, 1400 * 64, 1500 * 64) > 0.01);
+}
+
+namespace {
+
+// A glide of the input pitch from 69 to 72 (A4 to C5) over 0.3 s, after 0.6 s steady on A4: the sample (from the start of the glide) at
+// which the target note first reaches B4 (-1 if never), the number of target changes, and the last target.
+struct Glide {
+  long to_70;
+  unsigned changes;
+  int last;
+};
+
+Glide glide_run(float speed_ms) {
+  Autotune& a = fresh();
+  a.set_speed_ms(speed_ms);
+  Voice v;
+  const std::size_t pre = static_cast<std::size_t>(0.6 * kFs), glide = static_cast<std::size_t>(0.3 * kFs), tail = static_cast<std::size_t>(0.4 * kFs);
+  std::vector<float> in(pre + glide + tail), out(in.size());
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    const double m = i < pre ? 69.0 : (i < pre + glide ? 69.0 + 3.0 * static_cast<double>(i - pre) / static_cast<double>(glide) : 72.0);
+    in[i] = v.next(hz(m));
+  }
+  Glide g{-1, 0, -1};
+  for (std::size_t i = 0; i + 16 <= in.size(); i += 16) {
+    a.process(in.data() + i, out.data() + i, 16);
+    const int t = a.target_note();
+    if (i >= pre && g.to_70 < 0 && t == 70) g.to_70 = static_cast<long>(i - pre);
+    if (i >= pre && g.last >= 0 && t != g.last) ++g.changes;
+    if (i >= pre) g.last = t;
+  }
+  return g;
+}
+
+}  // namespace
+
+TEST_CASE("autotune: SPEED 0 takes the note decision from the estimate itself, a higher SPEED keeps its smoothing") {
+  const Glide s0 = glide_run(0.0f), s5 = glide_run(5.0f), s120 = glide_run(120.0f);
+  std::printf("autotune: glide A4->C5, samples until the target is B4: speed 0 %ld, 5 ms %ld, 120 ms %ld; changes %u %u %u\n", s0.to_70, s5.to_70,
+              s120.to_70, s0.changes, s5.changes, s120.changes);
+  REQUIRE(s0.to_70 >= 0);
+  REQUIRE(s5.to_70 >= 0);
+  REQUIRE(s120.to_70 >= 0);
+  // The smoothed decision lags the pitch: B4 is chosen later at 5 ms and 120 ms than at 0.
+  CHECK(s0.to_70 < s5.to_70);
+  CHECK(s0.to_70 < s120.to_70);
+  // Above 0.5 ms the decision is the same smoothed pitch whatever the speed.
+  CHECK(s5.to_70 == s120.to_70);
+  // The glide passes three note edges (A4 to C5) and ends on C5; the snap bias stops any flicker at them.
+  CHECK(s0.changes == 3u);
+  CHECK(s0.last == 72);
+  CHECK(s5.last == 72);
+  CHECK(s120.last == 72);
+}
+
+TEST_CASE("autotune: at SPEED 0 a pitch wobbling across a note edge does not flicker the note") {
+  // 69.5 and 70.5 are edges between chromatic notes. kSnapBias (0.2 semitone) is a hysteresis of +-10 cents around an edge: a wobble of +-6 cents
+  // at 7 Hz, or none, sitting on the edge, must hold the first note chosen, with the estimate used unsmoothed.
+  for (double centre : {69.5, 70.5}) {
+   for (double wob : {0.0, 0.06}) {
+    Autotune& a = fresh();
+    Voice v;
+    const std::size_t n = static_cast<std::size_t>(2.0 * kFs);
+    std::vector<float> in(n), out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+      const double t = static_cast<double>(i) / kFs;
+      in[i] = v.next(hz(centre + wob * std::sin(2.0 * kPi * 7.0 * t)));
+    }
+    unsigned flips = 0;
+    int last = -1;
+    for (std::size_t i = 0; i + 16 <= n; i += 16) {
+      a.process(in.data() + i, out.data() + i, 16);
+      if (i > static_cast<std::size_t>(0.5 * kFs) && a.target_note() >= 0) {
+        if (last >= 0 && a.target_note() != last) ++flips;
+        last = a.target_note();
+      }
+    }
+    INFO("centre " << centre << " wobble " << wob);
+    CHECK(flips == 0u);
+   }
+  }
 }

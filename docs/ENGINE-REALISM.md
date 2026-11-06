@@ -158,6 +158,19 @@ TALK is now inside the budget at every `Quality` by its mean. `Quality` 16 went 
 
 The AGC on a steady vowel, OUT meter, five reads a level at -6, -18 and -30 dBFS: BANDS -12.8, -12.4, -11.6 dB; TALK -13.8, -13.0, -11.8 dB. The means hold within 1.2 and 2.0 dB over 24 dB of input, and the spread from read to read, 1 to 5 dB, does not follow the level. That passes at the meter's resolution; the host's 0.3 dB is not something this meter can show.
 
+## E1: instant TUNE at SPEED 0, a driver on the TALK carrier, ROBOT
+
+Three sound changes, all built and host-tested, none heard. Every cost below is an estimate; the figures are host figures.
+
+- **SPEED 0 decides at once.** With `alpha_ == 1` the TUNE note decision was still smoothed (`m_s_` followed `m_`); now `m_s_ = m_`, so a stepped correction lands on the first voiced block. Other speeds are untouched. Test: `autotune_test.cpp` (the glide reaches the target note sooner at 0 than at 5 ms, and a wobble inside the hysteresis does not flicker).
+- **A talkbox driver on the TALK carrier** (`CarDrive` in `talk.cpp`). A 250 Hz one-pole high-pass and a cubic soft clip (knee 0.75, gain 1.6) at the full rate, before the halfband decimators, with `mulb` and no libm or division per sample. A compression driver does not pass the low end and clips what is left, which is the point of the sound; whether this one sounds like one is for the ear. No new parameter. Level kept close: the unit's talk/bands ratio went from 0.7928 to 0.8422 (talk rms 0.16763), the AGC test's rms from 0.01519 to 0.01237, the 12 and 24 dB rows hold at 0.12187. Driver gain at 60 Hz 0.230, 250 Hz 0.692, 1 kHz 0.952 (small signal); a hot carrier peaks at 0.8000.
+- **ROBOT, the fourth MODE value** (parameter 7 now runs 0 to 3; 62 of 64 parameter ids used, no id added). It is BANDS (the same `Bands` instance and wet sum, so it costs no second filter bank) followed by `RobotComp`: a feed-forward peak compressor, 1 ms attack, 50 ms release, 4:1 above a threshold, make-up 3.0, the gain computed every 16 samples (two divides and three square roots per block) and ramped linearly across it. ROBOT draws what BANDS draws (the screens use `mode_page()` for behaviour and `mode_index()` for the name); the preset named ROBOT uses it. BANDS stays bit-identical: `talk_test.cpp` takes a digest of a fixed run (E55118E5, the same before and after the change), and the BANDS output loops are the original code, branched on ROBOT.
+  Measured on the host with the voice alternating 12 dB every 174 ms (faster than the AGC's 500 ms release): the quiet/loud level ratio is 0.319 in BANDS and 0.751 in ROBOT (the input's is 0.253). Threshold 0.0008 on the raw wet sum and make-up 3.0 are first guesses; ROBOT's loud level came out 2.8 dB under BANDS' there.
+
+Estimated cost: well under 1 % of a core for ROBOT, the driver a few cycles per carrier sample. Estimates only. The unit object grows by 998 bytes of text (talk +88, autotune +16, `robot.cpp` +356, `vocoder.cpp` +538), no bss.
+
+Owed: by ear (the driver, ROBOT's threshold, make-up and release, SPEED 0 on a real voice) and the CPU on the unit. ROBOT has to be measured on the BANDS 8 notes + 4 loops row, whose peak was 65.5 % against a limit now 69 %, because it runs the BANDS engine and the compressor on top.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.

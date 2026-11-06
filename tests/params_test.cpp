@@ -96,7 +96,8 @@ TEST_CASE("params: stepping clamps the linear keys and wraps the round ones") {
   CHECK(pm::step_display(quality, 20, 1, true) == 24);
   CHECK(pm::step_display(quality, 24, 1, false) == 24);
   const pm::KeyDef& mode = pm::key_def(1, 0);
-  CHECK(pm::step_display(mode, 2, 1, false) == 2);
+  CHECK(pm::step_display(mode, 2, 1, false) == 3);  // ROBOT, the last mode
+  CHECK(pm::step_display(mode, 3, 1, false) == 3);
 
   const pm::KeyDef& level = pm::key_def(0, 7);
   CHECK(pm::step_display(level, 0, 1, false) == 5);

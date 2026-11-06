@@ -62,6 +62,9 @@ TEST_CASE("input: voc takes a mode and 0..8 notes, nothing else") {
   CHECK(parse_voc("tune", "2", c));
   CHECK(c.mode == 2u);
   CHECK(c.notes == 2u);
+  CHECK(parse_voc("robot", "1", c));
+  CHECK(c.mode == 3u);
+  CHECK(c.notes == 1u);
   CHECK(parse_voc("bands", "8", c));
   CHECK(c.notes == 8u);
 

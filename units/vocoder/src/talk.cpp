@@ -40,6 +40,27 @@ constexpr float kOpenMs = 5.0f;
 inline float flush(float x) noexcept { return (x > kTiny || x < -kTiny) ? x : 0.0f; }
 }  // namespace
 
+void CarDrive::prepare(float sample_rate) noexcept {
+  a_ = std::exp(-kPi2 * kDriveHz / sample_rate);
+  reset();
+}
+
+void CarDrive::process(float* x, std::uint32_t n) noexcept {
+  const float a = a_;
+  float x1 = x1_, y1 = y1_;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const float in = x[i];
+    y1 = mulb(a, y1 + (in - x1));  // y[n] = a (y[n-1] + x[n] - x[n-1])
+    x1 = in;
+    float t = mulb(y1, 1.0f / kClipAt);
+    t = t > 1.0f ? 1.0f : (t < -1.0f ? -1.0f : t);
+    const float t3 = mulb(mulb(t, t), t);
+    x[i] = mulb(kDriveGain * kClipAt, t - mulb(t3, 1.0f / 3.0f));  // t - t^3/3, flat at +-1 where it is +-2/3
+  }
+  x1_ = flush(x1);
+  y1_ = flush(y1);
+}
+
 void Talk::prepare(float sample_rate) noexcept {
   const std::uint32_t rise = static_cast<std::uint32_t>(static_cast<float>(kWin) * kWinRise);
   const std::uint32_t fall = kWin - rise;
@@ -74,6 +95,7 @@ void Talk::prepare(float sample_rate) noexcept {
   lvl_att_ = 1.0f - std::exp(-1000.0f / (kAgcAttackMs * fl));
   lvl_rel_ = 1.0f - std::exp(-1000.0f / (kAgcReleaseMs * fl));
   level_ = kAgcTarget;  // starts at the target: unity gain, no blast at the first loud sample
+  drive_.prepare(sample_rate);
   reset();
 }
 
@@ -90,6 +112,7 @@ void Talk::reset() noexcept {
   for (auto& h : dec_mod_) h = Halfband{};
   for (auto& h : dec_car_) h = Halfband{};
   for (auto& h : interp_) h = Halfband{};
+  drive_.reset();
   odd1_ = odd2_ = false;
   wpos_ = filled_ = hop_pos_ = end_ = 0;
   pa_ = run_ = tgt_order_ = stages_for(order_);
@@ -328,6 +351,8 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
     const float a = c0[i] < 0.0f ? -c0[i] : c0[i];
     peak = a > peak ? a : peak;
   }
+  // The driver, at the full rate and before the halfbands: the carrier's peak above was read before it, so the breath's gate is unchanged.
+  drive_.process(c0, n);
   const bool odd1 = odd1_, odd2 = odd2_;
   const std::uint32_t n1 = decimate(dec_mod_[0], m0, n, odd1, m1);
   decimate(dec_car_[0], c0, n, odd1, c1);

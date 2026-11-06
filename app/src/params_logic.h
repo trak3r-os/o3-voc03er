@@ -58,7 +58,7 @@ inline constexpr KeyDef kTable[kPages][kKeys] = {
      {"ATTACK", Kind::Value, Vocoder::Attack, Fmt::MsLog, 1, 500, 1, 1},
      {"RELEASE", Kind::Value, Vocoder::Release, Fmt::MsLog, 5, 2000, 1, 1},
      {"LEVEL", Kind::Value, Vocoder::Level, Fmt::Db, -480, 60, 5, 60}},
-    {{"MODE", Kind::Value, Vocoder::Mode, Fmt::Mode, 0, 2, 1, 1},
+    {{"MODE", Kind::Value, Vocoder::Mode, Fmt::Mode, 0, 3, 1, 1},
      {"QUALITY", Kind::Value, Vocoder::Quality, Fmt::Int, 8, 24, 1, 4},
      {"FREEZE", Kind::Value, Vocoder::Freeze, Fmt::OnOff, 0, 1, 1, 1},
      {"DRY", Kind::Value, Vocoder::Dry, Fmt::Pct, 0, 100, 2, 10},
@@ -179,7 +179,7 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
       put(u == 1u ? "PULSE" : "SAW");
       break;
     case Fmt::Mode:
-      put(perform::kModeNames[u < 3u ? u : 0u]);
+      put(perform::kModeNames[u < 4u ? u : 0u]);
       break;
     case Fmt::Key:
       put(perform::kKeyNames[u % 12u]);

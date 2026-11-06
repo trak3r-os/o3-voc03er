@@ -96,8 +96,8 @@ constexpr app::DiagCommand kCommands[] = {
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
 };
 
-constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
-constexpr unsigned mode_index(float v) noexcept { return v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u); }
+constexpr const char* kModeWord[4] = {"bands", "talk", "tune", "robot"};
+constexpr unsigned mode_index(float v) noexcept { return v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u)); }
 
 constexpr std::size_t text_length(const char* s) noexcept {
   std::size_t n = 0;
@@ -533,7 +533,7 @@ class MyApp final : public app::App {
     }
   }
 
-  // `voc <bands|talk|tune> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
+  // `voc <bands|talk|tune|robot> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
     o3_voc03er::VocShape shape;
     if (ctx_ != nullptr && args.argc == 3u && o3_voc03er::parse_voc_shape(args.arg(1), args.arg(2), shape)) {
@@ -562,7 +562,7 @@ class MyApp final : public app::App {
     o3_voc03er::VocCommand c;
     if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
         !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
-      out.text("usage: voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100> | glide <0..500> | gate <0..4> | arp <0..4> | speaks <0..6> | sounds <0..7> | bendrange <2|5|12>").nl();
+      out.text("usage: voc <bands|talk|tune|robot> [notes 0..8] | formant <st> | thru <0..100> | glide <0..500> | gate <0..4> | arp <0..4> | speaks <0..6> | sounds <0..7> | bendrange <2|5|12>").nl();
       return;
     }
     dsp::Engine& e = ctx_->engine();

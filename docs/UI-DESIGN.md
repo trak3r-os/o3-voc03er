@@ -20,7 +20,7 @@ picks its source:
 The maintainer's two modes are the two common pairs: **REALTIME** is LIVE > SYNTH (sing, play chords), **SAMPLE** is SLOT > anything (a recording or
 a WAV speaks through a carrier chosen apart). They are not a switch: the header always shows the pair in force ("MIC > SYNTH", "SLOT 2 > LINE"),
 PERFORM changes it with two keys, and the two homes (PERFORM for playing, SAMPLE for the slots and slices) are reached by PERFORMANCE and SAMPLE
-PLAY without touching the routing. BANDS, TALK and TUNE stay as they are: the three ways the voiceprint is taken and applied, on F1 of either
+PLAY without touching the routing. BANDS, TALK, TUNE and ROBOT (BANDS with a fast compressor after it) stay as they are: the ways the voiceprint is taken and applied, on F1 of either
 home. TUNE corrects what SPEAKS and runs no carrier.
 
 **The four loops become the four slots.** A slot is 16 s of mono audio in the existing 5.6 MB bank, recorded (SAMPLE REC, or a capture) or loaded
@@ -96,7 +96,7 @@ Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN met
 Middle: the voiceprint with the MODE word over it. Right, SOUNDS: the carrier chip, the chord being played in big type ("Dm7", "C5") with its
 notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the chord grid or the keys, with the octave.
 
-- F1 MODE (BANDS, TALK, TUNE) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 CHORD
+- F1 MODE (BANDS, TALK, TUNE, ROBOT) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 CHORD
   (TRIAD, 7TH, OPEN, POWER: the kind of the bottom chord row, section 7) · F7 PADS (CHORDS, CHORDS + BEND, KEYS) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
   A tap on F2 or F3 opens its picker as a list over the column (UP / DOWN or the encoder, the key again or F1 takes it, F8 backs out); the
   dimmed rows are the rule of section 2.
