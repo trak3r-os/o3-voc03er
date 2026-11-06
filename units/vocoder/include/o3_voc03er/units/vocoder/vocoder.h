@@ -99,11 +99,20 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, ModSrc, LiveCh, kParamCount };
+                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, ModSrc, LiveCh,
+                            R1Start, R1Len, R1Trig, R2Start, R2Len, R2Trig, R3Start, R3Len, R3Trig, R4Start, R4Len, R4Trig, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
     return static_cast<std::uint16_t>(k < 3u ? Loop1Rec + 3u * loop + k : Loop1Speed + 3u * loop + (k - 3u));
+  }
+
+  // Region play (U5a): ids 49..60, three for each reader n = 0..3 (ids 49 + 3n + field). Start counts samples from the start of the whole bank
+  // (0 .. Loop::kBankSamples - 1), Len is in samples; both are read at the Trig. Trig 1 starts the reader on that region at the event's frame at
+  // the reader's own speed, direction and level; Trig 0 releases it; otherwise it ends at its end. See Loop (Regions).
+  enum class RegionField : std::uint16_t { Start, Len, Trig };
+  static constexpr std::uint16_t region_param(unsigned reader, RegionField f) noexcept {
+    return static_cast<std::uint16_t>(R1Start + 3u * reader + static_cast<unsigned>(f));
   }
 
   // What a loop is doing, for the screen and the console: written by the render context once a block, read by the main loop (one atomic
@@ -118,6 +127,8 @@ class Vocoder final : public o3sdk::dsp::Unit {
     bool reverse = false;
     float level_db = 0.0f;
     std::uint32_t length = 0;  // samples recorded so far (while recording) or in the loop
+    bool region = false;       // sounding a region (the whole loop, if it was playing, is paused under it)
+    std::uint32_t position = 0;  // where the reader is, in samples from the start of the bank (the region's, else the loop's), as of the block's end
   };
   LoopStatus loop_status(unsigned loop) const noexcept;
   // Main loop, before the engine starts: the loop memory, Loop::kCount * per_loop int16 (per_loop up to Loop::kMaxSamples), 2-byte aligned,
@@ -146,6 +157,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void apply(const o3sdk::dsp::Event& e) noexcept;
   void set(std::uint16_t id, float v) noexcept;
   void loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
+  void region_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
   void run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept;
   void publish_loops() noexcept;
   void publish_view() noexcept;
@@ -234,6 +246,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   Slot slot_[Loop::kCount];
   std::atomic<std::uint32_t> opts_[Loop::kCount] = {};    // packed speed | reverse << 2 | (level in half dB + 64) << 8, same protocol
   std::atomic<std::uint32_t> status_[Loop::kCount] = {};  // packed LoopStatus: single writer (the render context), word-sized reads
+  std::atomic<std::uint32_t> pos_[Loop::kCount] = {};     // LoopStatus::position: same protocol
   static_assert(Bands::kBands == 16, "the View packs the sixteen followers into four words");
   std::atomic<std::uint32_t> view_[4] = {};  // View::band, four to a word: single writer (the render context), word-sized reads
 };

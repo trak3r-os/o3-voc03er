@@ -24,6 +24,16 @@
 // gives it here; a unit never places memory itself. Real-time rules: nothing here allocates or blocks; record() and mix() are bounded by
 // the block. mix() reads a loop's samples in one sequential pass (an SDRAM read is about 29 cycles sequential, 35 random, measured) and
 // converts as it goes: no division, no libm. A loop that is not playing costs nothing (the caller does not call mix()).
+//
+// Regions. A reader can also play a region of the whole bank (set_region_start / set_region_len, then trig_region at a frame): `start` counts
+// from the first sample of the bank, so any reader plays any slot's memory, `len` is in samples (start + len is clamped to the memory, len 0
+// does nothing). It plays once, no wrap, at the reader's own speed, direction and level, and ends by itself at its end (reverse: from the
+// end back to the start). Every start, release, natural end and retrigger goes through a kFadeSamples linear level ramp (an integer count,
+// so exact); a retrigger fades the old region out first and then starts the new one. A whole-loop play on that reader is paused under the
+// region (its position is kept, h_) and ducked over the first ramp with the loop's own level ramp, then resumes where it paused. play() is
+// what the caller mixes with: the region when there is one, else mix() (which is unchanged). set_region_start / len are staged and read when
+// the region begins, so a write between a retrigger and the end of the old region's fade changes the new one. One command a block and reader
+// (the last wins; a release of a start in the same block cancels it).
 // Threads: all of it runs in the render context, except bind() (main loop, before the engine starts).
 
 #include <cstdint>
@@ -65,10 +75,29 @@ class Loop {
   void set_reverse(unsigned i, bool reverse) noexcept;
   void set_gain(unsigned i, float gain) noexcept;
 
+  // Regions (render context). trig_region: start (or retrigger) at `frame` of the next play() block; false when ignored (unbound, recording,
+  // nothing to play). release_region: fade out from `frame`; nothing when no region sounds.
+  void set_region_start(unsigned i, std::uint32_t start) noexcept;
+  void set_region_len(unsigned i, std::uint32_t len) noexcept;
+  bool trig_region(unsigned i, std::uint32_t frame) noexcept;
+  void release_region(unsigned i, std::uint32_t frame) noexcept;
+  bool region(unsigned i) const noexcept { return i < kCount && (act_[i] || cmd_[i] != Cmd::None); }  // sounding or about to
+  bool region_sounding(unsigned i) const noexcept { return i < kCount && act_[i]; }
+  void play(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;  // the region if any, else mix()
+  // Where reader i is, in samples from the start of the bank: its region's position, else its loop's.
+  std::uint32_t bank_position(unsigned i) const noexcept;
+
   std::uint32_t length(unsigned i) const noexcept { return i < kCount ? len_[i] : 0u; }  // samples recorded so far / in the loop
   std::uint32_t position(unsigned i) const noexcept { return i < kCount ? (h_[i] >> 1) : 0u; }  // the sample the play position is in
 
  private:
+  enum class Cmd : std::uint8_t { None, Start, Release };
+  std::uint32_t bank_samples() const noexcept { return kCount * cap_; }
+  bool begin_region(unsigned i) noexcept;
+  std::uint32_t region_chunk(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  std::uint32_t advance(unsigned i, float* dst, std::uint32_t from, std::uint32_t to, bool add) noexcept;
+  void mix_region(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  void region_off(unsigned i) noexcept;
   std::int16_t* mem_ = nullptr;
   std::uint32_t cap_ = 0;
   std::uint32_t len_[kCount] = {};
@@ -79,6 +108,20 @@ class Loop {
   float gcur_[kCount] = {1.0f, 1.0f, 1.0f, 1.0f};   // what the last chunk ended at
   bool rec_[kCount] = {};
   bool playing_[kCount] = {};
+  // Regions: staged span, the sounding one (rs_, rl_, rh_ in half samples from its start), the level it ended the last chunk at, the fade
+  // (fn_ of kFadeSamples, dir_ +1 in, 0 steady, -1 out), a retrigger waiting for the fade-out (rst_), the command and its frame.
+  std::uint32_t st_s_[kCount] = {};
+  std::uint32_t st_l_[kCount] = {};
+  std::uint32_t rs_[kCount] = {};
+  std::uint32_t rl_[kCount] = {};
+  std::uint32_t rh_[kCount] = {};
+  float rg_[kCount] = {};
+  std::uint16_t cf_[kCount] = {};
+  std::uint8_t fn_[kCount] = {};
+  std::int8_t dir_[kCount] = {};
+  Cmd cmd_[kCount] = {};
+  bool act_[kCount] = {};
+  bool rst_[kCount] = {};
 };
 
 }  // namespace o3_voc03er

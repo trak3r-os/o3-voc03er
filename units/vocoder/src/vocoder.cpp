@@ -45,6 +45,17 @@ constexpr o3sdk::core::ParamDesc level_row(const char* name) {
   return {name, "dB", nullptr, nullptr, -24.0f, 12.0f, 0.0f, 72, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0};
 }
 
+// Region play: positions and lengths in samples of the bank (2,822,400: exact in a float), written before the Trig.
+constexpr float kBankMax = static_cast<float>(Loop::kBankSamples);
+constexpr o3sdk::core::ParamDesc region_start_row(const char* name) {
+  return {name, "", nullptr, nullptr, 0.0f, kBankMax - 1.0f, 0.0f, 2048, 16, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0};
+}
+constexpr o3sdk::core::ParamDesc region_len_row(const char* name) {
+  return {name, "", nullptr, nullptr, 0.0f, kBankMax, 0.0f, 2048, 16, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0};
+}
+constexpr const char* kTrigNames[] = {"OFF", "TRIG"};
+constexpr o3sdk::core::ParamDesc region_trig_row(const char* name) { return loop_row(name, kTrigNames); }
+
 constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE"};
 
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
@@ -79,6 +90,10 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"ARP", "", kArpNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"MOD SRC", "", kModNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"LIVE CH", "", kLiveChNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    region_start_row("R1 START"), region_len_row("R1 LEN"), region_trig_row("R1 TRIG"),
+    region_start_row("R2 START"), region_len_row("R2 LEN"), region_trig_row("R2 TRIG"),
+    region_start_row("R3 START"), region_len_row("R3 LEN"), region_trig_row("R3 TRIG"),
+    region_start_row("R4 START"), region_len_row("R4 LEN"), region_trig_row("R4 TRIG"),
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -199,6 +214,10 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
   }
   if (id >= Loop1Rec && id < CarSrc) {
     return;  // the loops' parameters carry a frame: loop_param_event
+  }
+  if (id >= R1Start) {
+    region_param_event(id, v, 0);
+    return;
   }
   switch (id) {
     case ModSrc:
@@ -329,6 +348,8 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
         select_carrier(o3sdk::core::param_clamp(kParams[CarSrc], e.value), e.frame);
       } else if (e.param >= Loop1Rec && e.param < CarSrc) {
         loop_param_event(e.param, e.value, e.frame);
+      } else if (e.param >= R1Start && e.param < kParamCount) {
+        region_param_event(e.param, e.value, e.frame);
       } else {
         set(e.param, e.value);
       }
@@ -396,6 +417,32 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
     case LoopField::Level:
       s.level_db = v;
       loops_.set_gain(n, std::exp(v * 0.11512925f));  // dB -> linear, once an event
+      break;
+  }
+}
+
+// A region parameter (ids 49..60). Start and Len are staged in the Loop; Trig 1 starts the reader's region at `frame` unless its slot is
+// armed or recording (the recording has priority), Trig 0 releases it.
+void Vocoder::region_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept {
+  v = o3sdk::core::param_clamp(kParams[id], v);
+  const unsigned k = id - R1Start;
+  const unsigned n = k / 3u;
+  if (!loops_.bound() || n >= Loop::kCount) {
+    return;
+  }
+  switch (static_cast<RegionField>(k % 3u)) {
+    case RegionField::Start:
+      loops_.set_region_start(n, static_cast<std::uint32_t>(v + 0.5f));
+      break;
+    case RegionField::Len:
+      loops_.set_region_len(n, static_cast<std::uint32_t>(v + 0.5f));
+      break;
+    case RegionField::Trig:
+      if (v < 0.5f) {
+        loops_.release_region(n, frame);
+      } else if (slot_[n].rec == Slot::Rec::Idle) {
+        (void)loops_.trig_region(n, frame);
+      }
       break;
   }
 }
@@ -662,10 +709,10 @@ void Vocoder::render_carrier(float* out, float* gate, std::uint32_t n) noexcept 
 void Vocoder::mix_car(unsigned loop, std::uint32_t from, std::uint32_t n, float* car, float* tmp) noexcept {
   Ramp& g = loop_car_[loop];
   if (npend_ == 0u && !g.moving() && g.value() == 1.0f) {
-    loops_.mix(loop, car + from, n - from, true);
+    loops_.play(loop, car + from, n - from, true);
     return;
   }
-  loops_.mix(loop, tmp + from, n - from, false);
+  loops_.play(loop, tmp + from, n - from, false);
   std::uint32_t pos = from;
   const auto run = [&](std::uint32_t a, std::uint32_t b) {
     if (g.moving()) {
@@ -698,7 +745,8 @@ void Vocoder::publish_loops() noexcept {
     } else if (s.rec == Slot::Rec::Recording) {
       rec = s.want_rec ? 2u : 3u;
     }
-    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.length(i) << 8);
+    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.length(i) << 8);
+    pos_[i].store(loops_.bank_position(i), std::memory_order_relaxed);
     status_[i].store(w, std::memory_order_relaxed);
     const std::uint32_t half_db = static_cast<std::uint32_t>(static_cast<int>(std::floor(s.level_db * 2.0f + 0.5f)) + 64);
     opts_[i].store(s.speed | (s.reverse ? 4u : 0u) | (half_db << 8), std::memory_order_relaxed);
@@ -715,7 +763,9 @@ Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
   st.playing = (w & 4u) != 0u;
   st.pending = (w & 8u) != 0u;
   st.carrier = (w & 16u) != 0u;
+  st.region = (w & 32u) != 0u;
   st.length = w >> 8;
+  st.position = pos_[loop].load(std::memory_order_relaxed);
   const std::uint32_t o = opts_[loop].load(std::memory_order_relaxed);
   st.speed = static_cast<std::uint8_t>(o & 3u);
   st.reverse = (o & 4u) != 0u;
@@ -790,16 +840,17 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
     }
     // sel_ is the block's last word: a loop leaving the carrier stays on that side until its fade has run from the event's frame.
     const bool on_car = sel_ == 3u + i || (msel_ != 3u + i && (s.carrier || loop_car_[i].value() > 0.0f));
-    if (loops_.playing(i)) {
-      const std::uint32_t pf = play_from[i];
+    const bool sounds = loops_.playing(i) || loops_.region(i);
+    if (sounds) {
+      const std::uint32_t pf = loops_.region(i) ? 0u : play_from[i];  // a region's command frames count from the block's start
       if (on_car) {
         mix_car(i, pf, n, car, tmp);
       } else {
-        loops_.mix(i, mod + pf, n - pf, modulated);
+        loops_.play(i, mod + pf, n - pf, modulated);
         modulated = true;
       }
     }
-    if (!loops_.playing(i) || !on_car) {
+    if (!sounds || !on_car) {
       loop_car_[i].jump(car_target(i));  // not on the carrier side: nothing to fade, the ramp waits at where it will start
     }
     s.req = 0;

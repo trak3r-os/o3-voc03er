@@ -404,6 +404,8 @@ per-reader end; `mix()` is unchanged in cost. The carrier synth of section 6 rep
 unvoiced mix, the talk coefficients as 16 x 8-bit in four words at each publish, the tune triple, and each slot's position in a word. About 60
 bytes of atomics in the unit, no SDRAM; the packing under 300 cycles a block [est].
 
+Built in U5a, ids 49 to 60 (R1Start on). One command a block and reader, the last wins; a release in the block of its start cancels it. A whole loop asked for while a region sounds waits at position 0 and starts when the region ends, off the bar line. Regions under 128 samples can end on a step of up to 2/64, and under 256 samples the loop under them is not ducked: both far below the shortest cut SAMPLE EDIT makes. A region stays in its memory: CLEAR on a slot does not stop another reader that is reading it.
+
 **Polyphony and cost.** A slice voice is a loop reader: 3,000 to 8,000 cycles a block from the unit reads (1x to 2x, `docs/PLAN.md` 4f), so four at
 once are 1.1 to 3 % each, the 4.6 to 12 % the four loops already cost; past four the oldest is stolen. BANDS with eight notes and four readers at
 2x is the 72.9 % peak already measured (4g): slices add no new worst case, and SAMPLE's defaults (CHOKE ON, a four-note chord) keep the ordinary
