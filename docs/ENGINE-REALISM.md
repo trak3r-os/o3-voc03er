@@ -160,7 +160,7 @@ The AGC on a steady vowel, OUT meter, five reads a level at -6, -18 and -30 dBFS
 
 ## Owed
 
-- Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit is now 66 % at its peak. Multi-rate bands wait, and the third modulator section with them.
+- Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.
 - That load has not been read together with card work or dense MIDI, nor with FORMANT and THRU on this image.
 - Levels by ear, since a slower AGC lets a phrase's dynamics through to the soft clip, and `kTalkGain` is a bench figure.
 - By ear: follower speed, breath level against a real microphone, hop-rate zipper noise on fast vowels.
