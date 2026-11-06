@@ -37,7 +37,8 @@
 //
 // Cost: each stage of the lattice cost about 2,000 cycles a block on the unit in 6a19f36 (Quality 8 to 16 to 24, 8 notes and 4 loops: 147k,
 // 160k, 171k), most of it the autocorrelation, whose one-lag dot product ran at about 8 cycles a multiply-add [est]. It now runs four lags in
-// a pass, 8 loads and 16 multiplies and adds for 16 multiply-adds, about 3.5 cycles each [est, from the disassembly].
+// a pass, 8 loads and 16 multiplies and adds for 16 multiply-adds, about 3.5 cycles each [est, from the disassembly]. Measured in 37fa85f at the
+// same load: 138k, 143k, 150k.
 // Memory: ring 2 KiB + window 1 KiB and 80 B of zeros + window table 1 KiB, in the object (SRAM).
 
 #include <o3_voc03er/units/vocoder/halfband.h>
