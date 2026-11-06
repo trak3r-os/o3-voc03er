@@ -181,14 +181,14 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const unsigned tempo = e.stats().tempo_mbpm;
 
   ornoir::Voiceprint vp;
-  vp.bars = mode == 0u;  // TALK and TUNE: the frame and the unlit grid, as on PERFORM today
+  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the frame and the unlit grid, as on PERFORM today
   if (perform_ != nullptr) {
     perform_->follow_bands(ctx, vp.level, vp.peak);
   }
 
   ornoir::HeaderState h;
   h.speaks = src != nullptr ? src->label : "NONE";
-  h.sounds = perform::kCarrierNames[car < 8u ? car : 0u];
+  h.sounds = perform::kCarrierNames[car < 9u ? car : 0u];
   h.mode = perform::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = tempo / 100u;
