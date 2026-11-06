@@ -60,11 +60,11 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V3 | `Talk`: streaming lattice, analysis sliced across blocks, freeze-a-vowel | Host tests, no block spike, the carrier path not delayed | Done on the host, no doubles; its CPU, its level (`kTalkGain` is a placeholder) and listening are owed to V4's round |
 | V4 | The unit in the app: PLAY screen with the input peak, pads play chords, MODE and the source on the keys, line sources start at gain 0, `ain` clears its peaks, a scenario | Scenario, image, CPU of each mode measured on the unit, a spoken sentence intelligible to the maintainer | Built on the host and for mk66 (2026-11-05): the Vocoder attached as slot 0, PLAY screen with IN peak / CLIP, MODE and SOURCE (PLAY and SAMPLE PLAY keys, F1 is MODE), pads play chords, line sources at gain 0, `ain` clears its peaks (app-side meter reset plus a 300 ms holdoff, no kit change), console `voc`; the unit round (CPU of each mode, line silence, a spoken sentence) is owed |
 | V2d | The last per-sample work: ramps out of the sample loop when settled, the unvoiced mix once a block, the follower every second sample, TALK's ramp every 8 | Host tests unchanged, no doubles; the cycles read on the unit | Done (section 4d); listening owed |
-| V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | Built 2026-11-05, host tests green (loop_test: bar-exact start and stop, seam, roles, full loop, transport stopped), no doubles, SDRAM 5.7 MB of 16. Owed on the unit: the CPU of a playing loop, recording through a real source, listening to the roles. |
-| V5b | Loops: speed and reverse, the span copy | Host tests, unit | Built 2026-11-06, host tests green (every speed and direction against an integer oracle, both wraps, loops of 1 to 100 samples, no drift over 16 s, changes while playing), mk66 image builds, no doubles. Per loop speed 0.5x/1x/2x, direction, level (ids 22..33). Owed on the unit: the CPU at each speed (BANDS, 8 notes), listening (melody kept, seam, level balance). |
+| V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | Built 2026-11-05, host tests green (loop_test: bar-exact start and stop, seam, roles, full loop, transport stopped), no doubles, SDRAM 5.7 MB of 16. Owed on the unit: the CPU of a playing loop, recording through a real source, listening to the roles. CPU on the unit: section 4f; sound not heard. |
+| V5b | Loops: speed and reverse, the span copy | Host tests, unit | Built 2026-11-06, host tests green (every speed and direction against an integer oracle, both wraps, loops of 1 to 100 samples, no drift over 16 s, changes while playing), mk66 image builds, no doubles. Per loop speed 0.5x/1x/2x, direction, level (ids 22..33). Owed on the unit: the CPU at each speed (BANDS, 8 notes), listening (melody kept, seam, level balance). CPU on the unit: section 4f; sound not heard. |
 | V5c | Per-step carrier switch | Host tests, scenario, unit | Built (host tests, scenario carrier_steps, cross build); the unit check is owed: CPU, click on real sources, a MOD-role loop picked as carrier |
-| V6a | TUNE: detector and gate | Host tests against synthetic voices and three sung phrases; aubio as a host oracle only, never shipped |Built 2026-11-06: `Tune` (YIN, 4:1 and bass 8:1 decimation, native refine, 60 ms voiced gate), 13000 bytes, 10 host tests on synthetic voices (saw and glottal through formants, 80 to 800 Hz, worst 0.12 cent; clean sweep 0 octave errors; breathy 70 to 200 Hz 0.65%; vibrato no flips), voiced after 11 to 48 ms, ends 79 ms. Owed: CPU on the unit, the three sung phrases, breathy voice below 80 Hz. |
-| V6b | TUNE: shifter, snap, retune | Host tests, unit |Built 2026-11-06: `Autotune` (period-jump shifter on Tune's own native ring, 16-sample control step, snap to KEY and SCALE or to NOTES-IN, SPEED 0 = stepped), Mode 2 = TUNE, params 35..39, `voc tune`, F keys and PLAY screen, scenario `tune.txt`; 10 host tests (snap error ~0 cent, no click, block independent, NaN clean, unvoiced bit-exact delay, vibrato no flip). 13 KiB; SRAM_U 138,088 B (about 1.2 KiB above the 32 KiB free floor). Formants move with the shift (centroid ratio equals the pitch ratio); Range Normal only. Owed: CPU of TUNE on the unit [est about 7,100 cycles a block], a sung voice, listening. |
+| V6a | TUNE: detector and gate | Host tests against synthetic voices and three sung phrases; aubio as a host oracle only, never shipped |Built 2026-11-06: `Tune` (YIN, 4:1 and bass 8:1 decimation, native refine, 60 ms voiced gate), 13000 bytes, 10 host tests on synthetic voices (saw and glottal through formants, 80 to 800 Hz, worst 0.12 cent; clean sweep 0 octave errors; breathy 70 to 200 Hz 0.65%; vibrato no flips), voiced after 11 to 48 ms, ends 79 ms. Owed: CPU on the unit, the three sung phrases, breathy voice below 80 Hz. CPU on the unit: section 4f; sound not heard. |
+| V6b | TUNE: shifter, snap, retune | Host tests, unit |Built 2026-11-06: `Autotune` (period-jump shifter on Tune's own native ring, 16-sample control step, snap to KEY and SCALE or to NOTES-IN, SPEED 0 = stepped), Mode 2 = TUNE, params 35..39, `voc tune`, F keys and PLAY screen, scenario `tune.txt`; 10 host tests (snap error ~0 cent, no click, block independent, NaN clean, unvoiced bit-exact delay, vibrato no flip). 13 KiB; SRAM_U 138,088 B (about 1.2 KiB above the 32 KiB free floor). Formants move with the shift (centroid ratio equals the pitch ratio); Range Normal only. Owed: CPU of TUNE on the unit [est about 7,100 cycles a block], a sung voice, listening. CPU on the unit: section 4f; sound not heard. |
 | V7 | The 2040 layer, slice by slice | | |
 
 ## 4. The audio-in gate (design section 8)
@@ -179,6 +179,41 @@ Decisions:
 ## 4e. Memory after V6b, 2026-11-06
 
 SRAM_U has about 1.2 KiB left above the link's 32 KiB free floor, and the first V6b link failed it. The next SRAM growth trips the assert: V7 starts by moving something out, for instance the loops' or Talk's cold state to the SDRAM. Autotune reads `Tune`'s native ring instead of its own 4 KB one for this reason.
+
+## 4f. Loops and TUNE on the unit, 2026-11-06
+
+The first unit read of both, on images eb42e3f and 55ff640 (the word reads), o3-sdk f14f247. Signals came in over the USB return at -12 dBFS peak, one player at a
+time, with `pgrep -a aplay` logged before each read and `in_peak_l` 251 in every log. Loops 1 to 4 were recorded on the 1 kHz tone and played on the carrier side. An
+earlier pass on eb42e3f leaked player processes, so which signal it read cannot be proved: its numbers are discarded.
+
+Mean is of three `render last` reads, peak is the window's `max`, of 261,224 cycles a block. The budget is 156,734 cycles, 60 %.
+
+| Case | Signal | eb42e3f mean | eb42e3f peak | 55ff640 mean | 55ff640 peak |
+| --- | --- | --- | --- | --- | --- |
+| BANDS 8 notes, 4 loops 1x | tone | 161,917 | 66.8 % | 159,358 | 65.1 % |
+| BANDS 8 notes, 4 loops 1x | noise | 165,168 | 66.2 % | 163,518 | 67.3 % |
+| BANDS 8 notes, 4 loops 2x | tone | 176,980 | 71.6 % | 171,907 | 71.9 % |
+| BANDS 8 notes, 4 loops 2x | noise | 181,272 | 75.0 % | 177,051 | 72.1 % |
+| BANDS 8 notes, 4 loops half, reverse | noise | not read | not read | 171,280 | 69.8 % |
+| TALK 8 notes, 4 loops 2x | noise | 164,610 | 65.8 % | 157,085 | 65.7 % |
+| TUNE, 4 loops 2x | noise | alternates | 57.1 % | alternates | 55.0 % |
+
+On eb42e3f, with no loops: TUNE peaked at 51.7 % on the 1 kHz tone, 52.7 % on 233 Hz and 46.6 % on noise, its `render last` alternating between about 65,000 and 128,000
+cycles. BANDS with no notes and the loops halted peaked at 47.4 %. All 51 reads: 0 underruns, mutes, late blocks, slips or hardware faults, 0 blocks shed, no crash.
+
+What it says:
+
+- TUNE fits the budget, alone and under four loops at 2x.
+- Four loops recorded, played, changed role, speed and direction with no early stop or wrong state. Nothing has been listened to yet.
+- BANDS at 8 notes with four carrier loops is over budget on every block, on tone and on noise. Its worst peak is 72.1 %.
+- TALK at 8 notes with four loops sits on the budget, so a small gain moved its over-budget count a long way: 7,311 to 2,498 at the third read. That count is a threshold, not a
+  measure of how much was saved.
+- The word reads saved 1,700 to 7,500 cycles a block, against an estimate of 8,000 to 16,000. The estimate priced a read per bus access, but the SDRAM port is 16 bits
+  (`sdramc_config.h`), so a word is still two beats: the likely reason, not measured. Peaks move about a point between windows (the 1x noise peak rose while its mean fell),
+  so compare the means.
+
+Decision: optimising stops here, as in section 4d, and the word reads stay. Capping notes cannot reach 60 %: a note is about 1.3 points (section 4d) and the excess is 12. What
+is left is fewer loops on the carrier side or fewer bands, and both are sound choices that wait for the maintainer's ears. The UI and MIDI were not measured at this load.
 
 ## 5. How the work runs
 
