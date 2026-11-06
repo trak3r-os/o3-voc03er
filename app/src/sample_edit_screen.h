@@ -67,6 +67,7 @@ class SampleEditScreen final : public o3sdk::app::Screen {
   void scan_tick(o3sdk::app::Context& ctx) noexcept;
   bool beats_dim(const o3sdk::app::Context& ctx) const noexcept;
   void ask_normalise(o3sdk::app::Context& ctx) noexcept;
+  void save_wav(o3sdk::app::Context& ctx) noexcept;
   void ask_empty(o3sdk::app::Context& ctx) noexcept;
   void confirm(o3sdk::app::Context& ctx) noexcept;
   void norm_tick(o3sdk::app::Context& ctx) noexcept;

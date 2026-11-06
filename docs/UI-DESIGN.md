@@ -204,7 +204,7 @@ DELETE needs the cursor exactly on the cut it removes (LEFT and RIGHT put it the
 (OFF, 8, 16, 24); when the cuts are the hand's (INSERT or DELETE since the take or the last CUT EVEN) the first try on F1 or F8 only says REPLACES n CUTS and a
 second one takes it; any other key closes the warning. The pads audition the cuts as on SAMPLE, and a new take of another length starts again from eight even
 cuts. The cuts live in RAM until U9 saves them, and the screen draws no waveform until U7b. F1 tap points the encoder at CUT EVEN; UP, DOWN, LEFT, RIGHT,
-INSERT and DELETE return it to the cursor. F7 says COMES LATER (F3 was built in U7d). Rec does nothing special here, as on SAMPLE. No new unit parameter.
+INSERT and DELETE return it to the cursor. F7 was built in U8b and F3 in U7d. Rec does nothing special here, as on SAMPLE. No new unit parameter.
 
 Built in U7b (`overview.{h,cpp}`, pure logic in `overview_logic.h`, `tests/overview_test.cpp`, `app/scenarios/overview.txt`): the overview waveform of each slot. Per slot
 
@@ -231,6 +231,11 @@ touched. A slot that holds a sample is cleared first (Play 0, Rec 2, Rec 0) and 
 cleared and F2 is dim for a length that is not whole bars, as for any take. SAMPLE EDIT's tables and the overview follow because the clear goes through length 0; a replacement of the same length takes the same
 road (the clear), and `SampleEditScreen::slot_replaced` zeroes the slot's hop energies, beats and cursor and `overview::shared().mark_dirty` makes the picture stale, as NORMALISE does. A
 file of exactly 16 s is a whole number of bars at 120 BPM, so F2 stays on for it. Cost: SRAM_U `__bss_end` 0x2001F818 (the screen is 192 bytes, the limit 0x20022000), `.sdram_bss` 8,607,776 bytes in all. Not built: the picker has no seconds column and loses its cursor after each load (the kit's `FilePicker::open` starts at the top).
+
+Built in U8b (`SampleEditScreen::save_wav`, `app/scenarios/sample_load.txt`): F7 writes the selected slot, whole and as it stands, as `Samples/slotN_NNN.wav` with the first free
+number, through the kit's `save_wav`. The slot's memory is already 16-bit mono at 44.1 kHz, so the job reads it in place, with no copy and no new buffer; until the job ends `busy()` refuses
+every edit that would write it (SAVING on the strip). Progress and result are the kit's strip. Leaving the screen gives the save up, since SAMPLE REC and SAMPLE LOAD write the same memory:
+the kit removes its temporary file, so a half file never stays. The cuts are not in the WAV.
 
 Built in U6c (`sample_logic.h` publish_slices, `stepseq.h`, `tests/slice_lane_test.cpp`, `app/scenarios/slice_lane.txt`): a step's slice fires a cut of the
 SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and CHOKE do not apply). Stop releases it
@@ -544,7 +549,7 @@ screen it touches. The unit checks owed are named, not run here.
 | U7c2 | SAMPLE EDIT: `Load` (id 61), START, END, COPY | `sample_edit.txt` grows |
 | U7d | SAMPLE EDIT: CUT HITS with the scan job | `sample_edit.txt` (a take of tone bursts stands in for the drum WAV until U8; the snaps count the marks at 100, 40 and 80) |
 | U8a | SAMPLE LOAD: the WAV reader, the picker, the load into a slot, the staging region (built) | `sample_load.txt` (`--card` with a mono and a stereo WAV over the same slot, a 48 kHz and an 8-bit one refused, a broken one, a 20 s one clipped, a slot that records) |
-| U8b | SAVE WAV: the writer on SAMPLE EDIT's F7 | `sample_save.txt` |
+| U8b | SAVE WAV: the writer on SAMPLE EDIT's F7 (built) | `sample_load.txt` (it needs the same card) |
 | U9 | TALK and TUNE voiceprints, PARAMS, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `params.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
 | U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
 | M1 | MIDI in, first step (section 7c): notes to the SYNTH carrier and to NOTES-IN, right after U1; then pitch bend to `Bend`, after U2b; learn and FOLLOW checked on this app | `midi.txt` (notes and a bend in, a WAV of each); on the unit, USB notes and a bend at the 72.9 % load |

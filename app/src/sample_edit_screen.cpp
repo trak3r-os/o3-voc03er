@@ -41,7 +41,6 @@ static_assert(se::kTrimFade == Loop::kFadeSamples, "the trim's seam is the unit'
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"CUT EVEN", "BEATS", "HITS", "START", "END", "NORMALISE", "SAVE WAV", "CLR CUTS"};
-constexpr std::uint8_t kLaterMask = 0x40u;  // F7 SAVE WAV draws dim: it comes later (F2 is dim for a WAV, see beats_dim)
 
 // The screen's state, in the SDRAM (O3SDK_BIG: zero at start, main loop only), so the screen object is the vtable and two pointers.
 struct EditData {
@@ -53,6 +52,7 @@ struct EditData {
   std::uint8_t hits[sm::kReaders];     // per slot, F3's value (0 off, 1..100); valid while hits_len[slot] is the slot's length (the last one tried, also after NO HITS)
   std::uint32_t hits_len[sm::kReaders];
   se::HopScan scan;                    // the hop-energy scan for F3 (main loop: a slice a pass from update())
+  bool saving;                         // F7's job runs: the slot's memory must stay as it is
   std::uint8_t scan_slot, scan_sens;   // the slot being scanned and the sensitivity to cut with when it is done
   std::uint32_t hop_len[sm::kReaders]; // per slot, the length the energies below were scanned for; 0 stale (a take, NORMALISE, a trim or a copy make them so)
   alignas(4) std::uint16_t hop[sm::kReaders][se::kMaxHops];  // the hop energies, 4 x 2,756 x 2 B = 22 KB
@@ -141,6 +141,10 @@ void SampleEditScreen::enter(app::Context& ctx) noexcept {
 void SampleEditScreen::leave(app::Context& ctx) noexcept {
   g_se.pending = se::Pending::None;
   g_se.scan = se::HopScan{};  // reads only: stopping it costs nothing but the pass
+  if (g_se.saving) {  // the job reads the slot's memory and the other screens write it: the card keeps no half file
+    ctx.files().cancel();
+    g_se.saving = false;
+  }
   if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {  // never leave a slot half scaled: finish now (at most 173 slices)
     while (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
       norm_tick(ctx);
@@ -431,6 +435,18 @@ void SampleEditScreen::scan_tick(app::Context& ctx) noexcept {
   ctx.redraw();
 }
 
+// F7: the slot as it stands, all of it, as Samples/slotN_NNN.wav (the first free NNN). The memory is already 16-bit mono at the unit's rate, so the kit's job reads it
+// where it is; busy() keeps every edit off it until the job ends. Progress and the result are the kit's strip.
+void SampleEditScreen::save_wav(app::Context& ctx) noexcept {
+  if (busy(ctx) || refuse(ctx, true) || mem_ == nullptr) {
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  char stem[6] = {'s', 'l', 'o', 't', static_cast<char>('1' + slot), '\0'};
+  g_se.saving = ctx.files().save_wav("Samples", mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples, sample_->table(slot).length, 1u, 44100u, stem);
+  ctx.redraw();
+}
+
 // F6: asks; F1 confirms. SHIFT + DELETE below.
 void SampleEditScreen::ask_normalise(app::Context& ctx) noexcept {
   if (busy(ctx)) {
@@ -528,6 +544,10 @@ bool SampleEditScreen::busy(app::Context& ctx) noexcept {
   }
   if (g_se.job_kind != kJobNone) {
     say(ctx, g_se.job_kind == kJobTrim ? "TRIMMING" : "COPYING");
+    return true;
+  }
+  if (g_se.saving) {
+    say(ctx, "SAVING");
     return true;
   }
   if (g_se.scan.on) {
@@ -827,7 +847,7 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     } else if (k == 7u) {
       clear_cuts(ctx);
     } else {
-      say(ctx, "COMES LATER");  // SAVE WAV; the encoder stays where it was
+      save_wav(ctx);  // the encoder stays where it was
     }
     return;
   }
@@ -887,7 +907,7 @@ void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept
     out.label[i] = kKeyNames[i];
   }
   out.hot = static_cast<std::uint8_t>(g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : (g_se.focus == kFocusHits ? 4u : (g_se.focus == kFocusStart ? 8u : (g_se.focus == kFocusEnd ? 16u : 0u)))));
-  out.dim = static_cast<std::uint8_t>(kLaterMask | (beats_dim(ctx) ? 2u : 0u));
+  out.dim = beats_dim(ctx) ? 2u : 0u;  // F2 is dim for a WAV
 }
 
 void SampleEditScreen::update(app::Context& ctx) noexcept {
@@ -903,6 +923,9 @@ void SampleEditScreen::update(app::Context& ctx) noexcept {
   }
   if (g_se.scan.on) {
     scan_tick(ctx);
+  }
+  if (g_se.saving && ctx.files().status().phase != app::Files::Status::Running) {
+    g_se.saving = false;  // the kit's strip says how it ended
   }
   for (unsigned i = 0; i < sm::kReaders; ++i) {  // a fresh take (possibly of the same length) makes the slot's energies stale
     if (sample_->status(i).rec != Vocoder::LoopStatus::Rec::Idle) {
@@ -955,7 +978,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   }
   h.fkey[0] = "OFF, 8, 16 OR 24 EVEN CUTS";
   h.fkey[2] = "CUTS AT HITS, 0 TO 100";
-  h.fkey[6] = "COMES LATER";
+  h.fkey[6] = "THE SLOT TO THE CARD";
   h.fkey[1] = "4, 8 OR 16 CUTS A BAR";
   h.fkey[3] = "TRIM START, F1 TRIMS";
   h.fkey[4] = "TRIM END, F1 TRIMS";
@@ -984,7 +1007,7 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   ornoir::FKey keys[ornoir::kFKeys];
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     keys[i].name = kKeyNames[i];
-    keys[i].dim = ((kLaterMask >> i) & 1u) != 0u;
+    keys[i].dim = false;
   }
   keys[0].hot = g_se.focus == kFocusCut;
   cat(keys[0].value, sizeof keys[0].value, se::even_name(sample_->even_code(slot)));
