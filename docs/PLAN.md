@@ -308,6 +308,15 @@ Candidate 6a19f36 (BANDS with the slow AGC, TALK at fs/4), kit ef6b1a0, SRAM_U m
 - The tester's found state was restored: the image of the session that holds the unit, one `.ptf` in `Firmware/`. `live.o3a` and `pattern.o3a` were not copied in this round, only their sizes read; the image changes no format.
 - **Console findings:** `o3console --update` rejects a path over 30 characters; `state` reports `screen=` unreliably; a screenshot lags one redraw; `o3console --put` spins on a deleted tty.
 
+## 4k. TALK's autocorrelation on the unit, 2026-11-06
+
+Candidate 37fa85f, kit ef6b1a0, SRAM_U margin 10,408 B. The figures are in `docs/ENGINE-REALISM.md`.
+
+- **TALK at `Quality` 16 with 8 notes and 4 loops: 142.8k, down from 160k,** inside the budget of 156,734 by its mean, one block over it. `Quality` 24 150.3k, 492 blocks over. BANDS at the same load 165.4k, still over at every peak. Underruns 0, shed 0, worst peak 70.3 %.
+- **AGC: passed at the meter's resolution** on a steady vowel: within 2 dB over 24 dB of input. The spoken reading of 4j does not stand.
+- **`pat A 3 car synth`** sets the step and a wrong word prints the words.
+- **SAMPLE EDIT's picture was not read.** The tester stayed on the old PLAY screen, which keeps the Sample keys for itself until U9, and reported that the image had no such screen. It has: open PERFORM first. The chunked upload on the FT812 is still owed.
+
 ## 5. How the work runs
 
 Lanes of one or two subagents, Sonnet for code and review, Haiku for mechanical checks. A brief names the files; agents use LSP and targeted reads

@@ -4,7 +4,7 @@ What makes the two engines sound real, what was wrong with them, and what change
 
 ## How it was measured
 
-Everything here is a host measurement. None of it has been heard on a unit, and the CPU figures are estimates until the unit reads them.
+The sound figures are host measurements, and nothing here has been heard on a unit. The CPU figures under "Unit readings" were read on one.
 
 - **Input.** A synthetic voice (flite, 7.8 s of speech) as the modulator and a 110 Hz saw as the carrier. Vowels with known formants at f0 120 Hz for the shape error.
 - **Engines.** The real `bands.cpp` and `talk.cpp` run over the files, through a small bench. Prototypes are double precision and are labelled.
@@ -145,12 +145,22 @@ A change of MODE costs one block of 76 to 88 %: the crossfade runs both engines.
 
 The AGC reading was inconclusive: the OUT meter on a spoken signal gave figures that ran against the input, and they do not hold on the host, where the real engines are flat within 0.3 dB from -6 to -30 dBFS on speech and on a sine, and the whole unit holds its level over 24 dB of a voice (`talk_test.cpp`). It needs a steady signal and repeated reads.
 
-Since then, on the host only, `Talk::slice` runs four lags in a pass and `talk.cpp` is built without contraction: 16 multiply-adds take 8 loads, about 3.5 cycles each against about 8 [est, from the disassembly]. The ramp's step shares the lattice's pass and the breath filter keeps its state in locals. The bench's figures do not move. Expected about 8k less at `Quality` 16 [est]; only the unit can confirm it.
+Candidate 37fa85f: `Talk::slice` runs four lags in a pass and `talk.cpp` is built without contraction, so 16 multiply-adds take 8 loads, about 3.5 cycles each against about 8 [est, from the disassembly]. The ramp's step shares the lattice's pass and the breath filter keeps its state in locals. The bench's figures do not move. The estimate was 8k less at `Quality` 16; the unit read 17k less.
+
+| Row | No notes | 8 notes | 8 notes + 4 loops |
+|---|---|---|---|
+| BANDS | 106.0k | 142.0k | 165.4k |
+| TALK, `Quality` 8 | | | 138.4k |
+| TALK, `Quality` 16 | 82.2k | 116.1k | 142.8k |
+| TALK, `Quality` 24 | | | 150.3k |
+
+TALK is now inside the budget at every `Quality` by its mean. `Quality` 16 went over it in one block; `Quality` 24 peaks at 166,762 and counted 492 blocks over. Underruns 0 and shed 0 on every read. The worst peak of the round was 183,755 cycles, 70.3 %.
+
+The AGC on a steady vowel, OUT meter, five reads a level at -6, -18 and -30 dBFS: BANDS -12.8, -12.4, -11.6 dB; TALK -13.8, -13.0, -11.8 dB. The means hold within 1.2 and 2.0 dB over 24 dB of input, and the spread from read to read, 1 to 5 dB, does not follow the level. That passes at the meter's resolution; the host's 0.3 dB is not something this meter can show.
 
 ## Owed
 
-- CPU on the unit after the autocorrelation change. BANDS with 8 notes and 4 loops stays over the budget at 170k; multi-rate bands would be the way down.
-- The AGC on a steady signal, with repeated reads.
+- BANDS with 8 notes and 4 loops stays over the budget at 165.4k; multi-rate bands would be the way down. TALK's saving makes the third modulator section no cheaper there.
 - Levels by ear, since a slower AGC lets a phrase's dynamics through to the soft clip, and `kTalkGain` is a bench figure.
 - By ear: follower speed, breath level against a real microphone, hop-rate zipper noise on fast vowels.
 - A real talkbox recording, if one can be had for measuring. It would settle the driver, the tube and the top of the spectrum.
