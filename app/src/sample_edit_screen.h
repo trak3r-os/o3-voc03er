@@ -13,7 +13,7 @@
 //   brackets (destructive, no undo; a slice of samples a pass, then Load). COPY copies the slot, cuts included, to the next empty slot. F6, SHIFT + DELETE
 //   (empty the slot) and COPY ask; F1 confirms. A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
 //
-// The cut tables are SAMPLE's (SampleScreen::table, in the SDRAM) and live in RAM until U8 and U9 save them. Main loop only; the cursor of each
+// The cut tables are SAMPLE's (SampleScreen::table, in the SDRAM) and live in RAM until U9 saves them (SAMPLE LOAD, U8a, resets a slot's through slot_replaced). Main loop only; the cursor of each
 // slot, the arm and the line are in the SDRAM (g_se in the .cpp), so this object is two pointers and the vtable.
 
 #include "sample_screen.h"
@@ -29,6 +29,9 @@ class SampleEditScreen final : public o3sdk::app::Screen {
  public:
   // `sample` is SAMPLE (the slot, the tables, the pads); `mem` the loop bank (slot n starts at n * Loop::kMaxSamples), or nullptr; read, and written only by NORMALISE.
   void init(SampleScreen* sample, std::int16_t* mem) noexcept;
+
+  // A load (SAMPLE LOAD) put new samples into `slot`: its cached energies, beats, hits, brackets and cursor were the old samples'.
+  static void slot_replaced(unsigned slot) noexcept;
 
   const char* title() const noexcept override { return "SAMPLE EDIT"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }

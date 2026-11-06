@@ -159,6 +159,57 @@ TEST_CASE("app: HELP holds to the kit's limits, names every pad the keyboard use
   }
 }
 
+namespace {
+// The WAVs sample_load.txt loads (app/scenarios/sample_load_wavs.py writes the same six for a run by hand): the scenario test's card starts empty.
+void put_wav(const std::filesystem::path& file, std::uint32_t frames, unsigned ch, std::uint32_t rate, unsigned bits, std::size_t cut = 0) {
+  std::vector<std::uint8_t> v;
+  const auto le = [&v](std::uint32_t x, unsigned bytes) {
+    for (unsigned k = 0; k < bytes; ++k) {
+      v.push_back(static_cast<std::uint8_t>(x >> (8u * k)));
+    }
+  };
+  const auto tag = [&v](const char* t) { v.insert(v.end(), t, t + 4); };
+  const std::uint32_t data = frames * ch * (bits / 8u);
+  tag("RIFF");
+  le(36u + data, 4);
+  tag("WAVE");
+  tag("fmt ");
+  le(16, 4);
+  le(1, 2);
+  le(ch, 2);
+  le(rate, 4);
+  le(rate * ch * (bits / 8u), 4);
+  le(ch * (bits / 8u), 2);
+  le(bits, 2);
+  tag("data");
+  le(data, 4);
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    for (unsigned c = 0; c < ch; ++c) {
+      const float x = 0.5f * std::sin(6.2831853f * (220.0f + 110.0f * static_cast<float>(c)) * static_cast<float>(i) / static_cast<float>(rate));
+      if (bits == 16u) {
+        le(static_cast<std::uint32_t>(static_cast<std::uint16_t>(static_cast<std::int16_t>(x * 32767.0f))), 2);
+      } else {
+        v.push_back(static_cast<std::uint8_t>(static_cast<int>(x * 127.0f) + 128));
+      }
+    }
+  }
+  v.resize(v.size() - cut);
+  std::ofstream out(file, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char*>(v.data()), static_cast<std::streamsize>(v.size()));
+}
+
+void put_load_wavs(const std::filesystem::path& root) {
+  const std::filesystem::path d = root / "Apps" / "o3_voc03er";
+  std::filesystem::create_directories(d);
+  put_wav(d / "a_mono.wav", 66150, 1, 44100, 16);
+  put_wav(d / "b_stereo.wav", 66150, 2, 44100, 16);
+  put_wav(d / "c_48k.wav", 48000, 1, 48000, 16);
+  put_wav(d / "d_8bit.wav", 44100, 1, 44100, 8);
+  put_wav(d / "e_long20.wav", 20u * 44100u, 2, 44100, 16);
+  put_wav(d / "f_broken.wav", 44100, 1, 44100, 16, 30000);
+}
+}  // namespace
+
 TEST_CASE("app: the scenarios run as they are, write their pictures and the audio is not silent") {
   const std::filesystem::path dir = APP_SCENARIO_DIR;
   const std::filesystem::path out = std::filesystem::temp_directory_path() / "o3_voc03er_scenarios";
@@ -175,6 +226,9 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
     text << in.rdbuf();
     platform::host::ScratchDir card_dir("o3_voc03er-card");  // an empty card for each scenario
     REQUIRE(card_dir.ok());
+    if (entry.path().filename() == "sample_load.txt") {
+      put_load_wavs(card_dir.path());
+    }
     platform::host::DirCard card(card_dir.path());
     platform::host::FakeCapture cap;
     platform::host::FakeMidi midi;  // for the scenarios with a midi line (bend.txt)

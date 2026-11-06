@@ -173,6 +173,16 @@ const std::int16_t* SampleEditScreen::samples() const noexcept {
   return mem_ != nullptr && sample_ != nullptr ? mem_ + static_cast<std::size_t>(sample_->slot() & 3u) * Loop::kMaxSamples : nullptr;
 }
 
+void SampleEditScreen::slot_replaced(unsigned slot) noexcept {
+  slot &= 3u;
+  g_se.beats_len[slot] = 0;
+  g_se.hits_len[slot] = 0;
+  g_se.br_len[slot] = 0;
+  g_se.hop_len[slot] = 0;
+  g_se.cursor[slot] = 0;
+  g_se.beats[slot] = 0;
+}
+
 void SampleEditScreen::say(app::Context& ctx, const char* text) noexcept {
   g_se.note = text;
   g_se.note_until = ctx.uptime_ms() + kNoteMs;
@@ -414,7 +424,7 @@ void SampleEditScreen::scan_tick(app::Context& ctx) noexcept {
   }
   if (se::hop_scan_step(g_se.scan, mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples, g_se.hop[slot])) {
     g_se.hop_len[slot] = len;
-    if (slot == (sample_->slot() & 3u)) {
+    if (slot == (sample_->slot() & 3u) && g_se.scan_sens != 0u) {  // 0: the table changed under the scan, the energies stay and no cut does
       cut_hits(ctx, slot, g_se.scan_sens);
     }
   }
@@ -923,7 +933,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER (SLICE U9)", nullptr},
       {Button::File, "FILE (SLICE U9)", nullptr},
-      {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
+      {Button::SampleLoad, "SAMPLE LOAD: A WAV", nullptr},
       {Button::SamplePlay, "SAMPLE: THE FOUR SLOTS", nullptr},
       {Button::SampleEdit, "THIS SCREEN", nullptr},
       {Button::SampleRec, "SAMPLE REC: A TAKE", nullptr},

@@ -8,7 +8,7 @@
 //   pads          a chromatic keyboard (app/include/o3_voc03er/pad_map.h); LEFT / RIGHT move it an octave
 //   F1..F3        point the encoder at a value (tap: latched; hold + turn: for a moment); the encoder changes it (SHIFT: coarse)
 //   pads, DELETE  the pads also record into a 16-step pattern; DELETE clears it
-//   FILE          saves the pattern to the SD card, Apps/o3_voc03er/pattern.o3a;  SAMPLE LOAD  loads it back
+//   FILE          saves the pattern to the SD card, Apps/o3_voc03er/pattern.o3a;  SAMPLE LOAD  loads it back (on this screen; elsewhere it opens SAMPLE LOAD, the WAV loader)
 //
 // The card (Context::files(), o3-sdk kit/app/include/o3sdk/app/files.h: read its header comment, it is short). Every call is a job the
 // runtime advances in the main loop, so the sound and the screen never wait for it: a call only records the request and returns, and update()
@@ -33,6 +33,7 @@
 #include "skin/ornoir_assets.h"
 #include "sample_rec_screen.h"
 #include "sample_edit_screen.h"
+#include "sample_load_screen.h"
 #include "sample_screen.h"
 #include "stub_screen.h"
 #include <cmath>
@@ -78,10 +79,6 @@ constexpr o3_voc03er::StubInfo kStubs[] = {
     {"MASTER", nullptr, "BUILT IN SLICE U9", nullptr, "MASTER: THE LIVE SOURCE AND GAIN, MONITOR, DRY, OUTPUT LEVEL. NOT DRAWN YET: SLICE U9."},
     {"SONG", nullptr, "BUILT IN SLICE U9", nullptr, "SONG: A CHAIN OF PATTERNS. NOT DRAWN YET: SLICE U9."},
     {"FILE", nullptr, "BUILT IN SLICE U9", nullptr, "FILE: THE PROJECTS ON THE CARD. NOT DRAWN YET: SLICE U9."},
-    {"SAMPLE LOAD", nullptr, "BUILT IN SLICE U8", nullptr, "SAMPLE LOAD: THE WAV PICKER. NOT DRAWN YET: SLICE U8."},
-    {"SAMPLE", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE: THE SLOTS AND THEIR SLICES ON THE PADS. NOT DRAWN YET: SLICE U4."},
-    {"SAMPLE EDIT", nullptr, "BUILT IN SLICE U7", nullptr, "SAMPLE EDIT: THE CUTS OF THE SELECTED SLOT (BUILT IN SLICE U7A); THE REST COMES IN SLICES U7B TO U8."},
-    {"SAMPLE REC", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE REC: RECORD THE LIVE SOURCE INTO A SLOT. NOT DRAWN YET: SLICE U4."},
 };
 
 class MyApp;
@@ -154,6 +151,7 @@ class MyApp final : public app::App {
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);
+    sample_load_.init(&sample_, g_loop_mem);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
@@ -265,13 +263,20 @@ class MyApp final : public app::App {
         ctx.redraw();
         return true;
       }
+      if (in.press(app::Button::SampleLoad)) {  // the WAV picker; F8 returns to the screen it was opened from
+        if (ctx.screen() != &sample_load_) {
+          sample_load_.set_back(ctx.screen());
+          ctx.show(sample_load_);
+        }
+        ctx.redraw();
+        return true;
+      }
       struct Open {
         app::Button button;
         const o3_voc03er::StubInfo* info;
       };
       static constexpr Open kOpen[] = {
           {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
-          {app::Button::SampleLoad, &kStubs[3]},
       };
       struct Lane {
         app::Button button;
@@ -668,6 +673,7 @@ class MyApp final : public app::App {
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::SampleScreen sample_;
   o3_voc03er::SampleEditScreen sample_edit_;
+  o3_voc03er::SampleLoadScreen sample_load_;
   o3_voc03er::PatternScreen pattern_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::StepSeq carriers_;  // the step sequencer hook (stepseq.h)

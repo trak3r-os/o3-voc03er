@@ -161,10 +161,13 @@ of the top rows auditions that slice through the vocoder with the chord of the b
 
 ### SAMPLE LOAD
 
-The kit's `FilePicker` (`app/file_picker.h`) over the app's folder, `.wav` only, with the file's size and seconds in the value column; F1 OPEN loads
-it into the selected slot (named at the top, UP / DOWN change it), F8 BACK. 16-bit PCM at 44.1 kHz, mono or stereo (mixed to mono), at most 16 s
-(a longer file gives its first 16 s and says so). The listing is `Apps/o3_voc03er/`, because the kit loads from the app's folder only (section 9);
-the card as a USB disk (Config, CARD AS DISK) is how files get there from a computer.
+The kit's `FilePicker` (`app/file_picker.h`) over the app's folder, `.wav` only, with the file's size in the value column (the picker has no seconds
+column, so the seconds of a file go on the strip when it is loaded and the slot's on the line at the right); F1 OPEN loads it into the selected slot (named
+at the top, UP / DOWN change it), F8 BACK. 16-bit PCM at 44.1 kHz, mono or stereo (mixed to mono), at most 16 s (a longer file gives its first 16 s and the
+strip says "FIRST 16.000 S LOADED, FILE HAS 20.000 S"). The listing is `Apps/o3_voc03er/`, because the kit loads from the app's folder only (section 9);
+the card as a USB disk (Config, CARD AS DISK) is how files get there from a computer. A slot that records or sounds refuses ("STOP THE SLOT FIRST"); a slot
+that holds a sample asks "REPLACES SLOT n: F1 CONFIRMS" and any other key cancels ("NOT REPLACED"). Another rate, another bit depth, a float file or a broken
+one is refused on the strip, with the slot as it was.
 
 ### PATTERN
 
@@ -200,7 +203,7 @@ the nearest zero crossing within 64 samples when there is one), and a cut less t
 DELETE needs the cursor exactly on the cut it removes (LEFT and RIGHT put it there); the cut before takes its samples, and the first cut stays. F1 is CUT EVEN
 (OFF, 8, 16, 24); when the cuts are the hand's (INSERT or DELETE since the take or the last CUT EVEN) the first try on F1 or F8 only says REPLACES n CUTS and a
 second one takes it; any other key closes the warning. The pads audition the cuts as on SAMPLE, and a new take of another length starts again from eight even
-cuts. The cuts live in RAM until U8 and U9 save them, and the screen draws no waveform until U7b. F1 tap points the encoder at CUT EVEN; UP, DOWN, LEFT, RIGHT,
+cuts. The cuts live in RAM until U9 saves them, and the screen draws no waveform until U7b. F1 tap points the encoder at CUT EVEN; UP, DOWN, LEFT, RIGHT,
 INSERT and DELETE return it to the cursor. F7 says COMES LATER (F3 was built in U7d). Rec does nothing special here, as on SAMPLE. No new unit parameter.
 
 Built in U7b (`overview.{h,cpp}`, pure logic in `overview_logic.h`, `tests/overview_test.cpp`, `app/scenarios/overview.txt`): the overview waveform of each slot. Per slot
@@ -218,6 +221,16 @@ about -40 dB (silence stays a flat line); a column lights the rows from its mini
 length changes (a take starts it, length 0 clears the picture at once), one slot at a time in slot order, 4,096 samples a main-loop pass (about 170 passes for a
 16 s slot); the old picture stays until the new one is up. The upload runs from `draw()` (the only place with the display), one a pass; a refused one is tried
 again 3 times, then dropped until the next length change. Nothing runs in the render. RAM cost: about 7 KB of SDRAM, a few bytes of SRAM_U. A sprite costs 7 display-list words. No new unit parameter.
+
+Built in U8a (`sample_load_screen.{h,cpp}`, pure logic in `sample_load_logic.h`, `tests/sample_load_test.cpp`, `app/scenarios/sample_load.txt` with `sample_load_wavs.py`): the load, no SAVE WAV (U8b).
+The card job (`Files::load`, in the kit's slices, so no frame waits) reads the file into a stage of 1,411,264 bytes in the SDRAM (the header and 16 s of stereo; a longer file fills it and the screen cancels
+the read, the data it holds is the first 16 s). The header is parsed from the stage (`sample_load::parse`: RIFF chunks walked to `fmt ` and `data`, bounded at 64 chunks, WAVE_FORMAT_EXTENSIBLE read as its
+sub-format), then the app writes the slot's memory 8,192 frames a pass from the main loop (a stereo pair is its mean), bakes the 64-sample fades at both ends with the last pass, sends Load and a 0, and waits
+for `loop_status(slot).length` (1 s, resent every 100 ms, then "LOAD FAILED"). The strip counts READING and WRITING in percent; F8 reads CANCEL while the card is read. Every refusal is decided before the slot is
+touched. A slot that holds a sample is cleared first (Play 0, Rec 2, Rec 0) and the screen waits for length 0, so SAMPLE's `service()` sees 0 and then the new length and re-cuts it evenly: `edited` is
+cleared and F2 is dim for a length that is not whole bars, as for any take. SAMPLE EDIT's tables and the overview follow because the clear goes through length 0; a replacement of the same length takes the same
+road (the clear), and `SampleEditScreen::slot_replaced` zeroes the slot's hop energies, beats and cursor and `overview::shared().mark_dirty` makes the picture stale, as NORMALISE does. A
+file of exactly 16 s is a whole number of bars at 120 BPM, so F2 stays on for it. Cost: SRAM_U `__bss_end` 0x2001F818 (the screen is 192 bytes, the limit 0x20022000), `.sdram_bss` 8,607,776 bytes in all. Not built: the picker has no seconds column and loses its cursor after each load (the kit's `FilePicker::open` starts at the top).
 
 Built in U6c (`sample_logic.h` publish_slices, `stepseq.h`, `tests/slice_lane_test.cpp`, `app/scenarios/slice_lane.txt`): a step's slice fires a cut of the
 SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and CHOKE do not apply). Stop releases it
@@ -334,7 +347,7 @@ frame at 15 Hz (every other frame skipped by the app's own counter; `redraw()` s
 SRAM_U has about 0.7 KiB above its floor, so no screen keeps more than its cursor there: every table (the slice tables, 4 x 24 x 8 B; the eight
 patterns with their chords, 8 x 16 x 6 B; the chain; the picker's 24 entries, 1.2 KB; the hop energies of the onset detector, 4 x 2,756 x 2 B =
 22 KB; the overview staging) lives in one namespace-scope `O3SDK_BIG` struct in the SDRAM (about 36 KB) that the screens hold a pointer to; a
-main-loop read there is 29 cycles. The screens themselves are 20 to 60 bytes each, under 400 bytes in all; `docs/PLAN.md` 4e still stands: the
+main-loop read there is 29 cycles. SAMPLE LOAD's stage (1,411,264 bytes, `g_stage`), its 64 picker entries and its state are in the SDRAM as well (U8a). The screens themselves are 20 to 60 bytes each, under 400 bytes in all; `docs/PLAN.md` 4e still stands: the
 first slice moves cold unit state out before any of this is linked.
 
 ## 6. The carrier synth
@@ -530,7 +543,8 @@ screen it touches. The unit checks owed are named, not run here.
 | U7c1 | SAMPLE EDIT: the picture across the rectangle, CUT BEATS, NORMALISE, SHIFT + DELETE | `sample_edit.txt` grows |
 | U7c2 | SAMPLE EDIT: `Load` (id 61), START, END, COPY | `sample_edit.txt` grows |
 | U7d | SAMPLE EDIT: CUT HITS with the scan job | `sample_edit.txt` (a take of tone bursts stands in for the drum WAV until U8; the snaps count the marks at 100, 40 and 80) |
-| U8 | SAMPLE LOAD and SAVE WAV: the WAV reader, the picker, the load into a slot, the staging region | `sample_load.txt` (`--card` with a mono and a stereo WAV, a 48 kHz one refused) |
+| U8a | SAMPLE LOAD: the WAV reader, the picker, the load into a slot, the staging region (built) | `sample_load.txt` (`--card` with a mono and a stereo WAV over the same slot, a 48 kHz and an 8-bit one refused, a broken one, a 20 s one clipped, a slot that records) |
+| U8b | SAVE WAV: the writer on SAMPLE EDIT's F7 | `sample_save.txt` |
 | U9 | TALK and TUNE voiceprints, PARAMS, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `params.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
 | U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
 | M1 | MIDI in, first step (section 7c): notes to the SYNTH carrier and to NOTES-IN, right after U1; then pitch bend to `Bend`, after U2b; learn and FOLLOW checked on this app | `midi.txt` (notes and a bend in, a WAV of each); on the unit, USB notes and a bend at the 72.9 % load |

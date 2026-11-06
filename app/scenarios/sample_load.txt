@@ -1,0 +1,102 @@
+# SAMPLE LOAD (U8a): SAMPLE LOAD opens the kit's file picker on Apps/o3_voc03er/ (.wav only); UP and DOWN name the slot; F1 loads the file under the cursor into it;
+# F8 returns to the screen it came from. A mono file, a stereo file over the same slot (REPLACES SLOT 1, F1 confirms: same length, so the slot is cleared first), a 48 kHz
+# and an 8-bit file refused, any other key cancelling the ask, a damaged file refused, a 20 s stereo file clipped to 16 s (the read stops when the stage is full), a slot
+# that records refused. The simulator shows the screen and the unit's length; it cannot say how it sounds. The card needs the WAVs of sample_load_wavs.py:
+#   mkdir -p <card> <dir> && python3 -I app/scenarios/sample_load_wavs.py <card>/Apps/o3_voc03er
+#   build-host/app/o3_voc03er_sim --scenario app/scenarios/sample_load.txt --card <card> --out <dir>
+# Files sorted: a_mono, b_stereo (same length as a_mono), c_48k, d_8bit, e_long20, f_broken.
+wait 300
+expect state card=ready
+tap sampleload
+wait 600
+snap 00_list
+expect state loop1=0
+
+# a_mono.wav (1.5 s) into the empty slot 1: no ask
+tap f1
+wait 150
+snap 01_reading
+wait 600
+snap 02_loaded
+expect state screen=SAMPLE_LOAD
+
+# b_stereo.wav into the same slot: it holds a sample, so it asks; F1 confirms; the slot keeps the length
+turn 1
+tap f1
+wait 100
+snap 03_ask
+tap f1
+wait 1200
+snap 04_replaced
+expect state screen=SAMPLE_LOAD
+
+# c_48k.wav: asks, F1 confirms, then the file is refused and the slot is untouched (the list starts at its top after every job)
+turn 2
+tap f1
+wait 100
+tap f1
+wait 800
+snap 05_refused_rate
+expect state screen=SAMPLE_LOAD
+
+# d_8bit.wav: asks; any other key cancels (F3 here)
+turn 3
+tap f1
+wait 100
+tap f3
+wait 300
+snap 06_not_replaced
+expect state screen=SAMPLE_LOAD
+
+# f_broken.wav: the data chunk is longer than the file
+turn 5
+tap f1
+wait 100
+tap f1
+wait 800
+snap 07_refused_broken
+expect state screen=SAMPLE_LOAD
+
+# e_long20.wav (20 s of stereo) into the empty slot 2: the first 16 s; the strip says so
+tap down
+wait 100
+snap 08_slot2
+turn 4
+tap f1
+wait 40
+snap 09_reading_long
+wait 1500
+snap 10_clipped
+wait 8000
+snap 10b_note_gone
+expect state loop2=705600
+
+# SAMPLE EDIT shows the new length (the cuts are even ones, F2 dim)
+tap sampleedit
+wait 600
+snap 11_edit
+
+# F8 returns to the screen SAMPLE LOAD came from
+tap sampleload
+wait 400
+tap f8
+wait 200
+snap 12_back
+
+# a slot that records (the transport runs, the take starts at the bar line, and slot 1 is the one SAMPLE REC took) is refused
+input tone 220 -8
+tap samplerec
+wait 200
+tap play
+wait 500
+tap rec
+wait 2500
+snap 13a_recording
+tap sampleload
+wait 300
+tap up
+tap up
+tap f1
+wait 200
+snap 13_busy
+expect state screen=SAMPLE_LOAD
