@@ -63,6 +63,31 @@ void fill(plot::Canvas& c, int x, int y, int w, int h, Color k, std::uint8_t a =
 
 void fill_rect(plot::Canvas& c, int x, int y, int w, int h, Color k) noexcept { fill(c, x, y, w, h, k); }
 
+// The voiceprint as a strip (PARAMS): the frame, the pane and, with `bars`, the sixteen levels from the bottom with the held peaks over them.
+void voiceprint_strip(plot::Canvas& c, int x, int y, int w, int h, const Voiceprint& vp) noexcept {
+  fill(c, x, y, w, h, Color::Empty);
+  fill(c, x + 2, y + 2, w - 4, h - 4, Color::Pane);
+  if (!vp.bars) {
+    for (int i = 1; i < 4; ++i) {  // the unlit grid
+      fill(c, x + 2, y + i * h / 4, w - 4, 1, Color::Empty);
+    }
+    return;
+  }
+  const int inner = w - 8, ih = h - 8;
+  const int stride = inner / static_cast<int>(kBandCount);
+  for (unsigned i = 0; i < kBandCount; ++i) {
+    const int bx = x + 4 + static_cast<int>(i) * stride;
+    const int bh = static_cast<int>(vp.level[i]) * ih / 255;
+    if (bh > 0) {
+      fill(c, bx, y + 4 + ih - bh, stride - 3, bh, Color::Play);
+    }
+    const int ph = static_cast<int>(vp.peak[i]) * ih / 255;
+    if (ph > bh + 2) {
+      fill(c, bx, y + 4 + ih - ph - 2, stride - 3, 2, Color::Text);
+    }
+  }
+}
+
 namespace {
 
 // The list over a column: a frame, the cursor's row lit (Accent), the row in force marked with a dot in the column's colour.

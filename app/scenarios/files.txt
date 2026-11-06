@@ -6,7 +6,9 @@
 # The files are <card>/Apps/o3_voc03er/pattern.o3a (and .bak) and config.o3a. The scenario stops at the first `expect` that is wrong. Start from an
 # empty card directory (tests/app_test.cpp gives each scenario a fresh one).
 wait 100
-tap params  # PERFORM is home; the card jobs and the pattern are the PLAY screen's
+press shift  # PERFORM is home; the card jobs and the pattern are the PLAY screen's (SHIFT + PARAMS)
+tap params
+release shift
 expect state card=ready
 expect nofile Apps/o3_voc03er/pattern.o3a
 expect state steps=0
@@ -53,7 +55,9 @@ expect state steps=4
 snap 04_after_reboot
 
 # No card: a save is refused at once and says NO CARD; the card back and it goes through. (FILE saves on the old PLAY screen only, until U9.)
+press shift
 tap params
+release shift
 card out
 wait 20
 tap file

@@ -50,6 +50,15 @@ void tap(sim::Harness& h, app::Button b) {
   h.run_ms(5);
 }
 
+// SHIFT + PARAMS: the old PLAY screen (PARAMS alone opens the PARAMS screen).
+void open_play(sim::Harness& h) {
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Params);
+  h.release(app::Button::Shift);
+  h.run_ms(5);
+}
+
 }  // namespace
 
 TEST_CASE("app: it starts, a pad sounds, and every frame fits the display list") {
@@ -79,7 +88,7 @@ TEST_CASE("app: it starts, a pad sounds, and every frame fits the display list")
 TEST_CASE("app: the console's state line carries the app's pairs") {
   auto h = std::make_unique<sim::Harness>(o3sdk_app());
   REQUIRE(h->start());
-  tap(*h, app::Button::Params);  // PERFORM is home; the old PLAY screen is on PARAMS
+  open_play(*h);  // PERFORM is home; the old PLAY screen is on SHIFT + PARAMS
   h->run_ms(100);
   char line[300];
   const std::size_t n = h->runtime().state_line(line, sizeof line);
@@ -96,7 +105,7 @@ TEST_CASE("app: a pattern and an octave saved on the card come back after a rest
   platform::host::DirCard card(card_dir.path());
   auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
   REQUIRE(h->start());
-  tap(*h, app::Button::Params);  // the old PLAY screen
+  open_play(*h);  // the old PLAY screen
   h->run_ms(100);
   CHECK(state(*h).find("steps=0") != std::string::npos);
   for (unsigned pad : {36u, 40u, 43u}) {
@@ -132,7 +141,7 @@ TEST_CASE("app: a pattern and an octave saved on the card come back after a rest
 TEST_CASE("app: HELP holds to the kit's limits, names every pad the keyboard uses, and follows the octave") {
   auto h = std::make_unique<sim::Harness>(o3sdk_app());
   REQUIRE(h->start());
-  tap(*h, app::Button::Params);  // the old PLAY screen; PERFORM's own HELP is tested in perform_screen_test
+  open_play(*h);  // the old PLAY screen; PERFORM's own HELP is tested in perform_screen_test
   h->run_ms(100);
   for (int step = 0; step < 3; ++step) {  // the octave moves the labels: look at the screen as it is, one octave down, and two
     if (step != 0) {

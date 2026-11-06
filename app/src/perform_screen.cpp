@@ -1075,6 +1075,20 @@ void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
   }
 }
 
+void PerformScreen::follow_bands(app::Context& ctx, std::uint8_t (&level)[16], std::uint8_t (&peak)[16]) noexcept {
+  static_assert(ornoir::kBandCount == 16, "PARAMS' arrays are one per band");
+  ++frame_;
+  const bool busy = ctx.cpu_percent() > 60u && (frame_ & 1u) != 0u;
+  if (!busy && voc_ != nullptr) {
+    const Vocoder::View v = voc_->view();
+    for (unsigned i = 0; i < ornoir::kBandCount; ++i) {
+      follow(v.band[i], g_pd.level[i], g_pd.peak[i], g_pd.age[i]);
+    }
+  }
+  std::memcpy(level, g_pd.level, sizeof level);
+  std::memcpy(peak, g_pd.peak, sizeof peak);
+}
+
 void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
   const dsp::Engine& e = ctx.engine();
   ++frame_;
@@ -1345,7 +1359,7 @@ void PerformScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 // on this screen has a row, and tests/perform_screen_test.cpp holds that. The legend carries the groups of the page in force only.
 void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
+      {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
       {Button::Performance, "AGAIN: FREES THE ENCODER", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER (SLICE U9)", nullptr},

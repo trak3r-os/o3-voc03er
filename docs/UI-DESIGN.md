@@ -242,10 +242,17 @@ SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's fr
 (Trig 0, once). A slice above the slot's cut count stays silent, and LEVEL does not touch a slice. The palette's two upper rows are slices 1 to 24, lit up to
 the count; with no slices a palette pad or the encoder says SPEAKS HAS NO SLICES and writes nothing. No new unit parameter.
 
+Built in U9a (`params_logic.h`, `params_screen.cpp`, `tests/params_test.cpp`, `app/scenarios/params.txt`): PARAMS opens on this screen (the old PLAY stays on
+SHIFT + PARAMS until U9 retires it). The F row holds the page's eight keys, the voiceprint is PERFORM's (the same follow rule, `follow_bands`), a tap on a live
+key points the encoder at it and a second tap steps it (a tap at an end goes to the other end), SHIFT + the encoder is coarse, and every value goes through the
+engine parameter PERFORM writes, in PERFORM's units. SHAPE is `Wave` and SPREAD `Detune` until U10 rebuilds them; SUB, TILT and VOICING are dim with no value and a tap says COMES LATER, since the unit has no
+parameter for them until then. QUALITY 24 draws no warning: section 4k of `docs/PLAN.md` measured it at 150.3k by its mean, inside the budget. No new unit parameter. Unit check owed: that the frame with the page's eight
+values and the voiceprint stays under the budget on the Tracker.
+
 ### PARAMS
 
 Three pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,
-SUB, TILT, NOISE, ATTACK, RELEASE, LEVEL). SHAPE: MODE, QUALITY (24 shows "OVER BUDGET AT 8 NOTES" in the Rec ink: `docs/PLAN.md` 4g), FREEZE,
+SUB, TILT, NOISE, ATTACK, RELEASE, LEVEL). SHAPE: MODE, QUALITY, FREEZE,
 DRY, VOICING, then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. PARAMS again or UP / DOWN page.
 
 ### MASTER
@@ -550,7 +557,8 @@ screen it touches. The unit checks owed are named, not run here.
 | U7d | SAMPLE EDIT: CUT HITS with the scan job | `sample_edit.txt` (a take of tone bursts stands in for the drum WAV until U8; the snaps count the marks at 100, 40 and 80) |
 | U8a | SAMPLE LOAD: the WAV reader, the picker, the load into a slot, the staging region (built) | `sample_load.txt` (`--card` with a mono and a stereo WAV over the same slot, a 48 kHz and an 8-bit one refused, a broken one, a 20 s one clipped, a slot that records) |
 | U8b | SAVE WAV: the writer on SAMPLE EDIT's F7 (built) | `sample_load.txt` (it needs the same card) |
-| U9 | TALK and TUNE voiceprints, PARAMS, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `params.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
+| U9a | PARAMS: three pages of eight values, the voiceprint small above them, COMES LATER for the keys of U10, QUALITY 24 over budget (built) | `params.txt` |
+| U9b | TALK and TUNE voiceprints, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
 | U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
 | M1 | MIDI in, first step (section 7c): notes to the SYNTH carrier and to NOTES-IN, right after U1; then pitch bend to `Bend`, after U2b; learn and FOLLOW checked on this app | `midi.txt` (notes and a bend in, a WAV of each); on the unit, USB notes and a bend at the 72.9 % load |
 | M2 | Slices by MIDI note, velocity as level, after U5 | `midi_slices.txt` (notes over a latched chord, a WAV); timing on the unit against the pads |

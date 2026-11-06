@@ -31,6 +31,7 @@
 #include "perform_screen.h"
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
+#include "params_screen.h"
 #include "sample_rec_screen.h"
 #include "sample_edit_screen.h"
 #include "sample_load_screen.h"
@@ -149,6 +150,7 @@ class MyApp final : public app::App {
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
+    params_.init(voice, &perform_);
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);
     sample_load_.init(&sample_, g_loop_mem);
@@ -221,8 +223,14 @@ class MyApp final : public app::App {
 
   // The keys the screen does not use: FILE saves the pattern, SAMPLE LOAD loads it. A key pressed while a job runs is ignored (busy()).
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
-    if (in.press(app::Button::Params)) {  // the old PLAY screen (pattern, carrier steps), kept reachable here
-      ctx.show(play_);
+    if (in.press(app::Button::Params)) {  // PARAMS, and on it the next page; SHIFT + PARAMS: the old PLAY screen (pattern, carrier steps), kept reachable
+      if (in.shift) {
+        ctx.show(play_);
+      } else if (ctx.screen() == &params_) {
+        params_.next_page(ctx);
+      } else {
+        ctx.show(params_);
+      }
       return true;
     }
     if (in.press(app::Button::Performance)) {  // PERFORM, the home screen
@@ -671,6 +679,7 @@ class MyApp final : public app::App {
   o3_voc03er::PlayScreen play_;
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
+  o3_voc03er::ParamsScreen params_;
   o3_voc03er::SampleScreen sample_;
   o3_voc03er::SampleEditScreen sample_edit_;
   o3_voc03er::SampleLoadScreen sample_load_;

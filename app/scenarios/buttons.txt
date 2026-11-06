@@ -1,5 +1,5 @@
 # Every physical button once, a snap each (docs/UI-DESIGN.md section 3, slice U2): the screen buttons open their screen (the ones not yet drawn
-# open the one stub, which says its name and the slice that builds it), PARAMS the old PLAY screen, PLAY the transport. The buttons a screen has
+# open the one stub, which says its name and the slice that builds it), PARAMS its own screen (SHIFT + PARAMS the old PLAY one), PLAY the transport. The buttons a screen has
 # no use for do nothing (the snap shows the same screen). CONFIG is the kit's system Config: pressed twice it opens and closes.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/buttons.txt --out <dir>   (the dir must exist)
 wait 100

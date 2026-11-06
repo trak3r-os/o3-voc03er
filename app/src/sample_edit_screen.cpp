@@ -951,7 +951,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
       {Button::Shift, "COARSE CURSOR, LATCH CHORD", nullptr},
       {Button::Rec, "SAMPLE REC: A TAKE", nullptr},
-      {Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
+      {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER (SLICE U9)", nullptr},

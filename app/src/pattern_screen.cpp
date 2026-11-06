@@ -380,7 +380,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Fx, "SLICE LANE: A SPEAKS CUT", nullptr},
       {Button::Shift, "WITH A STEP PAD: A REST", nullptr},
       {Button::Rec, "SAMPLE REC: A TAKE", nullptr},
-      {Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
+      {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER (SLICE U9)", nullptr},

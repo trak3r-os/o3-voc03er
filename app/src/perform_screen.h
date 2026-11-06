@@ -83,6 +83,10 @@ class PerformScreen final : public o3sdk::app::Screen {
   void step_chord(o3sdk::app::Context& ctx, int delta) noexcept { bottom_kind(ctx, delta); }
   void step_octave(o3sdk::app::Context& ctx, int delta) noexcept;
 
+  // PARAMS draws PERFORM's voiceprint small: the sixteen bands followed as draw() follows them (same smoothing, held peaks, the busy rule),
+  // copied out, 0..255 each. Call once a frame, from the main loop, on the screen that shows it.
+  void follow_bands(o3sdk::app::Context& ctx, std::uint8_t (&level)[16], std::uint8_t (&peak)[16]) noexcept;
+
   int octave() const noexcept { return octave_; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }

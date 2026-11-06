@@ -73,7 +73,7 @@ void StubScreen::help(const app::Context&, app::Help& h) const noexcept {
   // Every button app.cpp's input() answers on a stub: a button with no row draws as a hollow cap, which would say it does nothing.
   static constexpr app::HelpButton kButtons[] = {
       {app::Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
-      {app::Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
+      {app::Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
       {app::Button::Play, "START OR STOP THE BAR", nullptr},
       {app::Button::Master, "MASTER (SLICE U9)", nullptr},
       {app::Button::File, "FILE (SLICE U9)", nullptr},

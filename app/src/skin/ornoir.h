@@ -24,6 +24,7 @@ const o3sdk::ui::Theme& theme() noexcept;
 // A filled rectangle in a theme token, for screens that draw their own body (SAMPLE REC).
 void fill_rect(o3sdk::ui::plot::Canvas& c, int x, int y, int w, int h, o3sdk::ui::Color k) noexcept;
 
+
 // ---- header -------------------------------------------------------------------------------------------------------------------------
 
 struct HeaderState {
@@ -72,6 +73,9 @@ struct Voiceprint {
   std::uint8_t peak[kBandCount] = {};   // the held peaks, same scale
   bool bars = true;                     // false (TALK, TUNE): the frame and the unlit grid only
 };
+
+// The voiceprint as a plain strip of w x h at (x, y), shapes only (PARAMS shows it small above its keys).
+void voiceprint_strip(o3sdk::ui::plot::Canvas& c, int x, int y, int w, int h, const Voiceprint& vp) noexcept;
 
 struct Ladder {
   std::uint8_t level = 0;  // 0..255

@@ -13,14 +13,14 @@ tap f8
 wait 50
 snap 03_closed
 
-# HELP on every screen: the PERFORM screen above, then the old PLAY screen and each screen button's stub, each opened and closed.
+# HELP on every screen: the PERFORM screen above, then PARAMS and each screen button's stub, each opened and closed.
 tap params
 wait 50
 press shift
 tap config
 release shift
 wait 50
-snap 04_help_play
+snap 04_help_params
 tap config
 wait 50
 tap master

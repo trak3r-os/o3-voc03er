@@ -4,7 +4,9 @@
 # notes follow the steps; how each carrier sounds is the unit's to say.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/stepseq.txt --out <dir>   (the dir must exist)
 input tone 220 -12  # a modulator at the line jack, so the notes can be heard
-tap params  # PERFORM is home; the pattern is the PLAY screen's
+press shift  # PERFORM is home; the pattern is the PLAY screen's (SHIFT + PARAMS)
+tap params
+release shift
 record on
 wait 200
 pad 36
