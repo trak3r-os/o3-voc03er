@@ -181,9 +181,12 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const unsigned tempo = e.stats().tempo_mbpm;
 
   ornoir::Voiceprint vp;
-  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the frame and the unlit grid, as on PERFORM today
+  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the envelope and the ladder (follow_print)
   if (perform_ != nullptr) {
     perform_->follow_bands(ctx, vp.level, vp.peak);
+    if (!vp.bars) {
+      perform_->follow_print(ctx, vp);
+    }
   }
 
   ornoir::HeaderState h;

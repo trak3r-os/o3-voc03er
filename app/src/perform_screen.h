@@ -24,6 +24,7 @@
 // in perform_screen.cpp; the screen keeps a cursor and a few flags in the SRAM.
 
 #include "perform_logic.h"
+#include "skin/ornoir.h"
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pad_map.h>
@@ -86,6 +87,10 @@ class PerformScreen final : public o3sdk::app::Screen {
   // PARAMS draws PERFORM's voiceprint small: the sixteen bands followed as draw() follows them (same smoothing, held peaks, the busy rule),
   // copied out, 0..255 each. Call once a frame, from the main loop, on the screen that shows it.
   void follow_bands(o3sdk::app::Context& ctx, std::uint8_t (&level)[16], std::uint8_t (&peak)[16]) noexcept;
+
+  // TALK and TUNE: fills what `vp` needs for the mode in force (kind, the envelope, the ladder) from the unit's View; nothing in the other modes.
+  // The envelope is recomputed at most every 40 ms (80 above 60 % CPU). Call once a frame from the main loop, when `vp.bars` is false.
+  void follow_print(o3sdk::app::Context& ctx, ornoir::Voiceprint& vp) noexcept;
 
   int octave() const noexcept { return octave_; }
   unsigned focus() const noexcept { return focus_; }

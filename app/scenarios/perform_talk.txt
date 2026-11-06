@@ -1,0 +1,11 @@
+# PERFORM in TALK: the LPC envelope of the voice as a line over the bands' axis (docs/UI-DESIGN.md section 5.3), then FREEZE (the line turns the carrier ink).
+# A tone in for the voice, so the line is a synthetic envelope; the simulator cannot say what the frame costs on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/perform_talk.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 400
+tap f1
+tap f1
+wait 400
+snap 01_talk
+wait 200
+snap 02_talk_later

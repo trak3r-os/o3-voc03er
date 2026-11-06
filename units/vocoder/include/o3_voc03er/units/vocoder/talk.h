@@ -98,6 +98,7 @@ class Talk {
   float reflection_target(std::uint32_t m) const noexcept { return kt_[m]; }  // m 1..kMaxStages
   float reflection(std::uint32_t m) const noexcept { return k_[m]; }
   std::uint32_t order() const noexcept { return order_; }  // Quality
+  bool freeze() const noexcept { return freeze_; }
   std::uint32_t lattice_order() const noexcept { return run_; }
   float breath_open() const noexcept { return open_; }
 

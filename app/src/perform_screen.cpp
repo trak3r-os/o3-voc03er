@@ -3,6 +3,7 @@
 
 #include "perform_logic.h"
 #include "skin/ornoir.h"
+#include "voiceprint_logic.h"
 
 #include <o3_voc03er/chords.h>
 #include <o3_voc03er/presets.h>
@@ -42,6 +43,10 @@ struct PerformData {
   std::uint8_t in_level, in_peak, in_age;
   std::uint8_t out_level, out_peak, out_age;
   ornoir::PickerView pick;  // the open picker's rows (build_picker)
+  voiceprint::Axis axis;                     // TALK's 32 angles, computed at the first use (axis.ready)
+  std::uint8_t env[voiceprint::kPoints];     // TALK's envelope as last computed
+  std::uint64_t env_ms;                      // when (Context::uptime_ms)
+  std::uint8_t centre;                       // TUNE's ladder centre (0: not set), see voiceprint::ladder_follow
 };
 O3SDK_BIG PerformData g_pd = {};
 O3SDK_BIG app::HelpPadNames g_help_names = {};  // help(): valid while HELP is open
@@ -1095,6 +1100,42 @@ void PerformScreen::follow_bands(app::Context& ctx, std::uint8_t (&level)[16], s
   std::memcpy(peak, g_pd.peak, sizeof peak);
 }
 
+void PerformScreen::follow_print(app::Context& ctx, ornoir::Voiceprint& vp) noexcept {
+  const dsp::Engine& e = ctx.engine();
+  const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
+  if (voc_ == nullptr || (mode != 1u && mode != 2u)) {
+    return;
+  }
+  const Vocoder::View v = voc_->view();
+  if (mode == 1u) {
+    vp.kind = ornoir::Print::Talk;
+    vp.frozen = v.freeze;
+    const std::uint64_t now = ctx.uptime_ms();
+    if (now - g_pd.env_ms >= (ctx.cpu_percent() > 60u ? 80u : 40u)) {
+      g_pd.env_ms = now;
+      if (!g_pd.axis.ready) {
+        voiceprint::axis_init(g_pd.axis);
+      }
+      float k[voiceprint::kMaxOrder];
+      for (unsigned i = 0; i < voiceprint::kMaxOrder; ++i) {
+        k[i] = static_cast<float>(v.refl[i]) * (1.0f / 32768.0f);
+      }
+      voiceprint::envelope(g_pd.axis, k, v.order, g_pd.env);
+    }
+    std::memcpy(vp.env, g_pd.env, sizeof vp.env);
+  } else {
+    const unsigned key = round_param(e, voice_, Vocoder::Key);
+    vp.kind = ornoir::Print::Tune;
+    g_pd.centre = static_cast<std::uint8_t>(voiceprint::ladder_follow(g_pd.centre, v.target_note));
+    vp.centre = g_pd.centre;
+    vp.target = v.target_note;
+    vp.shift = v.shift_cents;
+    vp.voiced = v.voiced;
+    vp.key = static_cast<std::uint8_t>(key % 12u);
+    vp.scale_mask = pl::scale_cols(key, round_param(e, voice_, Vocoder::Scale));
+  }
+}
+
 void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
   const dsp::Engine& e = ctx.engine();
   ++frame_;
@@ -1216,6 +1257,9 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
 
   ornoir::Voiceprint vp;
   vp.bars = pl::mode_page(mode) == 0u;  // BANDS and ROBOT draw the bars
+  if (!vp.bars) {
+    follow_print(ctx, vp);  // TALK's envelope, TUNE's ladder
+  }
   std::memcpy(vp.level, g_pd.level, sizeof vp.level);
   std::memcpy(vp.peak, g_pd.peak, sizeof vp.peak);
 

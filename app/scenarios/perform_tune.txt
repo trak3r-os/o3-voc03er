@@ -1,0 +1,12 @@
+# PERFORM in TUNE: the pitch ladder of the scale's notes, the detected pitch as a disc and the target rung in the carrier ink (docs/UI-DESIGN.md
+# section 5.3). A tone in for the voice (220 Hz, snapped to the scale); the simulator cannot say what the frame costs on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/perform_tune.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 400
+tap f1
+tap f1
+tap f1
+wait 600
+snap 01_tune
+wait 200
+snap 02_tune_later
