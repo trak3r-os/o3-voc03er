@@ -69,7 +69,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | SAMPLE PLAY | Opens SAMPLE: the slots and their slices on the pads | everywhere |
 | SAMPLE EDIT | Opens SAMPLE EDIT: trim and cut the selected slot (by hand, evenly, by beats, by hits) | everywhere |
 | SAMPLE REC | Opens SAMPLE REC: record the live source into the selected slot at the bar | everywhere |
-| SONG | Opens SONG: the chain of patterns A to H (slice U9). Until U9 the screen says exactly "SONG: A CHAIN OF PATTERNS, NOT IN THIS VERSION" and nothing else | everywhere |
+| SONG | Opens SONG: the chain of patterns A to H (slice U9). Until U9 it opens the stub, like every screen not yet drawn | everywhere |
 | NOTE | The pattern's NOTE lane: opens PATTERN with that lane selected (the pads write notes or chords into the step) | everywhere |
 | INSTR | The pattern's CARRIER lane (what sounds on that step: FOLLOW, SYNTH, NOISE, SLOT 1 to 4) | everywhere |
 | VOL | The pattern's LEVEL lane (the step's velocity) | everywhere |

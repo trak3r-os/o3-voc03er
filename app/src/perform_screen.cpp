@@ -509,7 +509,7 @@ void PerformScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::SamplePlay, "SAMPLE (NOT DRAWN YET)", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT (NOT DRAWN YET)", nullptr},
       {Button::SampleRec, "SAMPLE REC (NOT DRAWN YET)", nullptr},
-      {Button::Song, "SONG (NOT IN THIS VERSION)", nullptr},
+      {Button::Song, "SONG (SLICE U9)", nullptr},
       {Button::Pattern, "PATTERN (NOT DRAWN YET)", nullptr},
       {Button::Shift, "WITH A PAD: LATCH ITS CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
