@@ -349,7 +349,8 @@ void PlayScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 void PlayScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Play, "START OR STOP THE BAR", nullptr},
-      {Button::Performance, "PERFORM", nullptr},
+      {Button::Params, "THIS SCREEN", nullptr},
+      {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Master, "MASTER (NOT DRAWN YET)", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},
       {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},

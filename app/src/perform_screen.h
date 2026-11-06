@@ -43,6 +43,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
   void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
   void leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept override;
+  void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;
   void help(const o3sdk::app::Context& ctx, o3sdk::app::Help& help) const noexcept override;
 
   int octave() const noexcept { return octave_; }

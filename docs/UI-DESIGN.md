@@ -88,7 +88,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 ## 4. The screens
 
 Ten screens, all with the skin's own chrome (`Chrome::None`, `Screen::theme()` the skin's theme, section 5). Each fills `help()` so SHIFT + CONFIG
-explains it. The kit's Config and HELP stay the kit's and come up with full chrome.
+explains it: a row for every button the screen answers (a button with no row draws hollow, which says it does nothing), and a legend with the groups of the page in force only. The kit's Config and HELP stay the kit's and come up with full chrome.
 
 ### PERFORM (PERFORMANCE): the home
 

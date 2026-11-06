@@ -70,10 +70,24 @@ void StubScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexc
 }
 
 void StubScreen::help(const app::Context&, app::Help& h) const noexcept {
+  // Every button app.cpp's input() answers on a stub: a button with no row draws as a hollow cap, which would say it does nothing.
   static constexpr app::HelpButton kButtons[] = {
-      {app::Button::Performance, "PERFORM", nullptr},
-      {app::Button::Params, "THE OLD PLAY SCREEN", nullptr},
+      {app::Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
+      {app::Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
       {app::Button::Play, "START OR STOP THE BAR", nullptr},
+      {app::Button::Master, "MASTER (SLICE U9)", nullptr},
+      {app::Button::File, "FILE (SLICE U9)", nullptr},
+      {app::Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
+      {app::Button::SamplePlay, "SAMPLE (SLICE U4)", nullptr},
+      {app::Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
+      {app::Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
+      {app::Button::Song, "SONG (SLICE U9)", nullptr},
+      {app::Button::Pattern, "PATTERN (SLICE U6)", nullptr},
+      {app::Button::Note, "PATTERN: NOTE LANE (U6)", nullptr},
+      {app::Button::Instr, "PATTERN: CARRIER LANE (U6)", nullptr},
+      {app::Button::Vol, "PATTERN: LEVEL LANE (U6)", nullptr},
+      {app::Button::Fx, "PATTERN: SLICE LANE (U6)", nullptr},
+      {app::Button::Shift, "NO SHIFT KEYS ON THIS SCREEN", nullptr},
   };
   h.summary = info_ != nullptr ? info_->summary : "THIS SCREEN IS NOT DRAWN YET.";
   h.buttons = kButtons;

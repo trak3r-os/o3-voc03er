@@ -314,6 +314,16 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
 
 // ---- draw ---------------------------------------------------------------------------------------------------------------------------
 
+namespace {
+
+// An F key's name: the skin's F row and HELP's caps. F8 is the mode's own value.
+const char* fkey_name(unsigned key, unsigned mode) noexcept {
+  static constexpr const char* kNames[] = {"MODE", "SPEAKS", "SOUNDS", "KEY", "SCALE", "CHORD", "PADS"};
+  return key < 7u ? kNames[key] : (mode == 0u ? "SPREAD" : (mode == 1u ? "QUALITY" : "SPEED"));
+}
+
+}  // namespace
+
 void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
   const unsigned key = round_param(e, voice_, Vocoder::Key);
   const unsigned scale = round_param(e, voice_, Vocoder::Scale);
@@ -377,9 +387,8 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   h.cpu_percent = ctx.cpu_percent();
 
   ornoir::FKey keys[ornoir::kFKeys];
-  const char* names[ornoir::kFKeys] = {"MODE", "SPEAKS", "SOUNDS", "KEY", "SCALE", "CHORD", "PADS", mode == 0u ? "SPREAD" : (mode == 1u ? "QUALITY" : "SPEED")};
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
-    keys[i].name = names[i];
+    keys[i].name = fkey_name(i, mode);
     keys[i].hot = i == focus_;
   }
   auto set = [&keys](unsigned i, const char* v) { append(keys[i].value, v); };
@@ -498,56 +507,76 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   }
 }
 
-void PerformScreen::help(const app::Context&, app::Help& h) const noexcept {
+// Chrome::None: the runtime draws no soft keys here. It still asks when HELP opens, and these are the names on HELP's F caps.
+void PerformScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
+  const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
+  for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
+    out.label[i] = fkey_name(i, mode);
+  }
+}
+
+// HELP (Shift + Config). A button with no entry draws as a hollow cap, which says it does nothing here: every button app.cpp's input() answers
+// on this screen has a row, and tests/perform_screen_test.cpp holds that. The legend carries the groups of the page in force only.
+void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Params, "THE OLD PLAY SCREEN", nullptr},
-      {Button::Performance, "PERFORM", nullptr},
+      {Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
+      {Button::Performance, "THIS SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
-      {Button::Master, "MASTER (NOT DRAWN YET)", nullptr},
-      {Button::File, "FILE (NOT DRAWN YET)", nullptr},
-      {Button::SampleLoad, "SAMPLE LOAD (NOT DRAWN YET)", nullptr},
-      {Button::SamplePlay, "SAMPLE (NOT DRAWN YET)", nullptr},
-      {Button::SampleEdit, "SAMPLE EDIT (NOT DRAWN YET)", nullptr},
-      {Button::SampleRec, "SAMPLE REC (NOT DRAWN YET)", nullptr},
+      {Button::Master, "MASTER (SLICE U9)", nullptr},
+      {Button::File, "FILE (SLICE U9)", nullptr},
+      {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
+      {Button::SamplePlay, "SAMPLE (SLICE U4)", nullptr},
+      {Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
+      {Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},
-      {Button::Pattern, "PATTERN (NOT DRAWN YET)", nullptr},
-      {Button::Shift, "WITH A PAD: LATCH ITS CHORD", nullptr},
+      {Button::Pattern, "PATTERN (SLICE U6)", nullptr},
+      {Button::Note, "PATTERN: NOTE LANE (U6)", nullptr},
+      {Button::Instr, "PATTERN: CARRIER LANE (U6)", nullptr},
+      {Button::Vol, "PATTERN: LEVEL LANE (U6)", nullptr},
+      {Button::Fx, "PATTERN: SLICE LANE (U6)", nullptr},
+      {Button::Shift, "HOLD A PAD, TAP: LATCH CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
       {Button::Up, "BOTTOM ROW: NEXT KIND", nullptr},
       {Button::Down, "BOTTOM ROW: PREVIOUS KIND", nullptr},
       {Button::Left, "OCTAVE DOWN (HOLD: REPEAT)", nullptr},
       {Button::Right, "OCTAVE UP (HOLD: REPEAT)", nullptr},
   };
-  static constexpr app::HelpPadGroup kGroups[] = {
-      {"POWER", "ROOT AND FIFTH", ui::Color::Sel},
-      {"OPEN", "OPEN TRIADS", ui::Color::Sel},
-      {"7TH", "SEVENTH CHORDS", ui::Color::Sel},
-      {"BOTTOM ROW", "THE KIND UP AND DOWN CHOOSE", ui::Color::Play},
-      {"WHITE KEYS", "THE CARRIER'S NOTES", ui::Color::Sel},
-      {"BLACK KEYS", "THE SEMITONES", ui::Color::Instr},
+  static constexpr app::HelpPadGroup kChordGroups[] = {
+      {"POWER", "ROOT, FIFTH, OCTAVE", ui::Color::Vol},
+      {"OPEN", "ROOT, FIFTH, NINTH: SUS2", ui::Color::Instr},
+      {"7TH", "THE SEVENTH CHORDS OF THE SCALE", ui::Color::Fx},
+      {"BOTTOM ROW", "F6, UP OR DOWN CHOOSE ITS KIND", ui::Color::Play},
+      {"PAD LEDS", "KEY COLUMN BRIGHTEST, SCALE DIM, OUTSIDE IT DARK", ui::Color::TextDim},
   };
-  h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER THE PADS PLAY. F1-F8 POINT THE ENCODER AT A VALUE.";
+  static constexpr app::HelpPadGroup kKeyGroups[] = {
+      {"WHITE KEYS", "THE CARRIER'S NOTES, LIT", ui::Color::Vol},
+      {"BLACK KEYS", "THE SEMITONES, DARK", ui::Color::Fx},
+  };
+  const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
+  h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
+              "F KEYS: A TAP POINTS THE ENCODER AT THAT VALUE, A SECOND TAP STEPS IT.";
   h.fkey[0] = "BANDS, TALK, TUNE";
   h.fkey[1] = "THE NEXT AUDIO SOURCE";
-  h.fkey[2] = "THE CARRIER";
-  h.fkey[3] = "KEY";
-  h.fkey[4] = "SCALE";
+  h.fkey[2] = "FOLLOW, SYNTH, NOISE, LOOPS";
+  h.fkey[3] = "THE SCALE'S ROOT";
+  h.fkey[4] = "SCALE OF THE CHORDS";
   h.fkey[5] = "BOTTOM ROW KIND";
   h.fkey[6] = "CHORDS OR KEYS";
-  h.fkey[7] = "SPREAD, QUALITY, SPEED";
+  h.fkey[7] = mode == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "CHANGE VALUE (SHIFT COARSE)";
-  h.groups = kGroups;
-  h.group_count = sizeof kGroups / sizeof kGroups[0];
-  h.pads = keys_ ? "A CHROMATIC KEYBOARD, THE BOTTOM ROW LOWEST." : "A CHORD A PAD: COLUMN ROOT, ROW KIND; - IS MINOR.";
+  h.groups = keys_ ? kKeyGroups : kChordGroups;
+  h.group_count = keys_ ? sizeof kKeyGroups / sizeof kKeyGroups[0] : sizeof kChordGroups / sizeof kChordGroups[0];
+  h.pads = keys_ ? "A CHROMATIC KEYBOARD, THE BOTTOM ROW LOWEST. LEFT / RIGHT MOVE IT AN OCTAVE. NO LATCH HERE."
+                 : "COLUMN: ROOT. ROW: KIND. THE QUALITY COMES FROM KEY AND SCALE; - IS MINOR.";
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     if (keys_) {
       const int note = key_note(pad, octave_);
       if (note < 0) {
         continue;
       }
-      h.pad_group[pad] = is_natural(note) ? 5 : 6;
+      h.pad_group[pad] = is_natural(note) ? 1 : 2;
       (void)app::help_pad_note(h, help_names_, pad, note);
     } else {
       const unsigned row = app::pad_row(pad);
