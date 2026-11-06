@@ -27,7 +27,9 @@
 // audio_in() (line and microphone input, the monitor), radio() (the FM radio) and recorder() (a take of the input or the master, saved to
 // the card as a WAV). The template uses none of them; each is a short call like files() and a line in the app's state.
 
+#include "perform_screen.h"
 #include "play_screen.h"
+#include "skin/ornoir_assets.h"
 #include <o3_voc03er/carrier_seq.h>
 
 #include <o3_voc03er/input.h>
@@ -120,13 +122,20 @@ class MyApp final : public app::App {
     meter_.reset(0, 0);
     console_notes_ = 0;
     play_.init(voice, &meter_, &voc_);
+    perform_.init(voice, &meter_, &voc_, &step_source_cb, this);
     carriers_.init(voice);
     (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
     op_ = Op::None;
     boot_ = Boot::Pattern;
     saved_octave_ = play_.octave();
-    ctx.show(play_);
+    ctx.show(perform_);
+  }
+
+  // OR NOIR's bitmaps, put in RAM_G by the runtime before setup().
+  std::size_t assets(const app::AppAsset*& rows) const noexcept override {
+    rows = o3_voc03er::ornoir::kAssets;
+    return o3_voc03er::ornoir::kAssetCount;
   }
 
   // The file jobs end and start here, once per pass of the main loop (a Screen has an update() too, for what only it needs).
@@ -171,6 +180,14 @@ class MyApp final : public app::App {
 
   // The keys the screen does not use: FILE saves the pattern, SAMPLE LOAD loads it. A key pressed while a job runs is ignored (busy()).
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
+    if (in.press(app::Button::Params)) {  // the old PLAY screen (pattern, carrier steps), kept reachable here
+      ctx.show(play_);
+      return true;
+    }
+    if (in.press(app::Button::Performance)) {  // PERFORM, the home screen
+      ctx.show(perform_);
+      return true;
+    }
     if (in.press(app::Button::Play)) {  // MODE: BANDS, TALK, TUNE, round; SHIFT + PLAY starts or stops the transport (the per-step carriers and the loops' bar lines run on it)
       dsp::Engine& e = ctx.engine();
       if (in.shift) {
@@ -372,6 +389,15 @@ class MyApp final : public app::App {
     return acked;
   }
 
+  // PERFORM's F2: the next audio source, at its own starting gain.
+  static void step_source_cb(void* user) noexcept {
+    MyApp& a = *static_cast<MyApp*>(user);
+    if (a.ctx_ != nullptr && a.ctx_->audio_in().available()) {
+      const hal::capture::Source next = o3_voc03er::next_source(a.ctx_->audio_in().source());
+      (void)a.select_source(next, o3_voc03er::default_gain(next));
+    }
+  }
+
   app::Context* ctx_ = nullptr;
   o3_voc03er::InputMeter meter_;
   dsp::UnitId voc_id_ = dsp::kNoUnit;
@@ -404,6 +430,7 @@ class MyApp final : public app::App {
 
   o3_voc03er::Vocoder voc_;
   o3_voc03er::PlayScreen play_;
+  o3_voc03er::PerformScreen perform_;
   o3_voc03er::CarrierSeq carriers_;
 
   Op op_ = Op::None;

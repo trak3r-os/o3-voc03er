@@ -3,6 +3,7 @@
 # showing the tags. The simulator's input is synthetic: this shows the screen and that the switch path runs; how each carrier sounds
 # and the click at a switch on a real source are the unit's to say.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/carrier_steps.txt --out <dir>   (the dir must exist)
+tap params  # PERFORM is home; the carrier steps are the PLAY screen's
 record on
 wait 200
 pad 36

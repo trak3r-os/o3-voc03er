@@ -2,6 +2,7 @@
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <cmath>
+#include <cstring>
 
 namespace o3_voc03er {
 
@@ -495,6 +496,41 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
   publish_loops();
 }
 
+namespace {
+// log2 of a positive float from its exponent and a linear mantissa (under 0.09 octave off: a meter, not a measurement), no libm.
+inline float fast_log2(float x) noexcept {
+  std::uint32_t b;
+  std::memcpy(&b, &x, sizeof b);
+  const int e = static_cast<int>((b >> 23) & 0xFFu) - 127;
+  const std::uint32_t m = (b & 0x7FFFFFu) | 0x3F800000u;
+  float f;
+  std::memcpy(&f, &m, sizeof f);
+  return static_cast<float>(e) + (f - 1.0f);
+}
+}  // namespace
+
+void Vocoder::publish_view() noexcept {
+  for (unsigned w = 0; w < 4; ++w) {
+    std::uint32_t word = 0;
+    for (unsigned k = 0; k < 4; ++k) {
+      const float env = bands_.envelope(w * 4u + k);
+      float db = env > 1.0e-6f ? fast_log2(env) * 6.0206f : -60.0f;
+      db = db < -60.0f ? -60.0f : (db > 0.0f ? 0.0f : db);
+      word |= static_cast<std::uint32_t>((db + 60.0f) * (255.0f / 60.0f) + 0.5f) << (8u * k);
+    }
+    view_[w].store(word, std::memory_order_relaxed);
+  }
+}
+
+Vocoder::View Vocoder::view() const noexcept {
+  View v;
+  for (unsigned w = 0; w < 4; ++w) {
+    const std::uint32_t word = view_[w].load(std::memory_order_relaxed);
+    for (unsigned k = 0; k < 4; ++k) v.band[w * 4u + k] = static_cast<std::uint8_t>(word >> (8u * k));
+  }
+  return v;
+}
+
 void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   const std::uint32_t n = args.frames < Bands::kMaxFrames ? args.frames : Bands::kMaxFrames;
   float mod[Bands::kMaxFrames];
@@ -535,6 +571,7 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   } else {
     for (std::uint32_t i = 0; i < n; ++i) tn[i] = 0.0f;
   }
+  publish_view();  // the BANDS followers for the PERFORM screen, once a block
   if (!level_.moving() && !dry_.moving() && !bands_mix_.moving() && !talk_mix_.moving() && !tune_mix_.moving()) {
     const float g = level_.value();
     const float d = dry_.value();

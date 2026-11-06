@@ -102,6 +102,14 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void prepare(float sample_rate) noexcept override;
   void process(const o3sdk::dsp::ProcessArgs& args) noexcept override;
 
+  // What the PERFORM screen shows of BANDS (docs/UI-DESIGN.md section 8): the sixteen followers as 8-bit logs (0 is -60 dBFS or less, 255 is 0 dBFS),
+  // band 0 (125 Hz) first. Packed four to a word, written by the render context once a block, one relaxed word-sized atomic each: a single writer like
+  // LoopStatus, a read is never torn (the four words may be a block apart, which a meter does not show).
+  struct View {
+    std::uint8_t band[Bands::kBands] = {};
+  };
+  View view() const noexcept;
+
   const Carrier& carrier() const noexcept { return carrier_; }
   const Bands& bands() const noexcept { return bands_; }
   const Talk& talk() const noexcept { return talk_; }
@@ -113,6 +121,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
   void run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept;
   void publish_loops() noexcept;
+  void publish_view() noexcept;
   void select_carrier(float v, std::uint32_t frame) noexcept;
   void retarget(std::uint32_t frame) noexcept;
   float noise_target() const noexcept { return sel_ == 2u ? 1.0f : (sel_ == 1u ? 0.0f : noise_user_); }
@@ -160,6 +169,8 @@ class Vocoder final : public o3sdk::dsp::Unit {
   Slot slot_[Loop::kCount];
   std::atomic<std::uint32_t> opts_[Loop::kCount] = {};    // packed speed | reverse << 2 | (level in half dB + 64) << 8, same protocol
   std::atomic<std::uint32_t> status_[Loop::kCount] = {};  // packed LoopStatus: single writer (the render context), word-sized reads
+  static_assert(Bands::kBands == 16, "the View packs the sixteen followers into four words");
+  std::atomic<std::uint32_t> view_[4] = {};  // View::band, four to a word: single writer (the render context), word-sized reads
 };
 
 }  // namespace o3_voc03er
