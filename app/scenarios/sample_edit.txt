@@ -1,6 +1,7 @@
 # SAMPLE EDIT (U7a): a 1 BAR take with the even cuts (8), then SAMPLE EDIT: the cursor by the encoder and by SHIFT + encoder, INSERT, LEFT and RIGHT,
 # DELETE (and a refused one), CUT EVEN to 8 and 16 with the REPLACES step, CLR CUTS, a pad auditioned, UP to another slot. The simulator shows the
-# screen and that the unit is asked for the cuts; it cannot say how it sounds or feels. The picture is in overview.txt (U7b).
+# screen and that the unit is asked for the cuts; it cannot say how it sounds or feels. The picture is in overview.txt (U7b). The last part (U7d, F3 CUT HITS)
+# records a tone that jumps between -60 and -12 dBFS every 250 ms (`input tone` mid-scenario), so the loud bursts are the hits; there is no WAV loader yet (U8).
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_edit.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -138,3 +139,113 @@ snap 24_clear_ask
 tap f1
 wait 300
 snap 25_cleared
+# U7d: F3 CUT HITS. A fresh take of bursts (a tone at -12 dBFS for 250 ms, -60 for the next 250), then F3: SCANNING, the cuts at the onsets, a lower sensitivity.
+tap samplerec
+wait 100
+tap f3
+tap f4
+tap f4
+tap f4
+input tone 220 -60
+tap rec
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -12
+wait 250
+input tone 220 -60
+wait 250
+input tone 220 -60
+wait 200
+tap sampleedit
+wait 300
+snap 40_hits_take
+tap f3
+turn 100
+snap 41_scanning
+wait 1500
+snap 42_hits_100
+turn -60
+wait 200
+snap 43_hits_40
+turn 40
+wait 200
+snap 44_hits_80
+tap insert
+wait 150
+tap f3
+turn -20
+wait 150
+snap 45_hits_replaces
+turn -1
+wait 200
+snap 46_hits_taken
+tap f1
+turn 1
+wait 150
+snap 47_cut_even

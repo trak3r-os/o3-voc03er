@@ -1132,3 +1132,244 @@ TEST_CASE("sample edit: COPY asks, F1 confirms, the next empty slot gets the sam
   CHECK(o3_voc03er::overview::shared().peak(0) == src);
   CHECK(h.runtime().frame_failures() == 0u);
 }
+
+// ---- F3 CUT HITS (U7d): the detector on synthetic signals, then the key on the engine -------------------------------------------------------
+
+namespace {
+
+// A noise burst of peak amplitude `amp` (of 32767) at sample `at`, decaying with time constant `tau` samples, added into `x`.
+void burst(std::vector<std::int16_t>& x, std::uint32_t at, float amp, float tau = 900.0f) {
+  static std::uint32_t seed = 12345u;
+  for (std::uint32_t i = 0; at + i < x.size() && i < static_cast<std::uint32_t>(tau * 8.0f); ++i) {
+    seed = seed * 1664525u + 1013904223u;
+    const float n = static_cast<float>(static_cast<std::int32_t>(seed >> 8) - (1 << 23)) / static_cast<float>(1 << 23);
+    const float v = static_cast<float>(x[at + i]) + n * amp * 32767.0f * std::exp(-static_cast<float>(i) / tau);
+    x[at + i] = static_cast<std::int16_t>(std::max(-32767.0f, std::min(32767.0f, v)));
+  }
+}
+
+// Scan the whole of `x` as the screen does, a slice at a time, then cut it at `sens`.
+se::HitCut hits_of(const std::vector<std::int16_t>& x, unsigned sens, sm::SliceTable& t) {
+  std::vector<std::uint16_t> e(se::kMaxHops, 0u);
+  se::HopScan sc;
+  se::hop_scan_begin(sc, static_cast<std::uint32_t>(x.size()));
+  unsigned slices = 0;
+  while (!se::hop_scan_step(sc, x.data(), e.data())) {
+    ++slices;
+    REQUIRE(slices < 400u);
+  }
+  return se::hit_cuts(t, e.data(), se::hop_count(static_cast<std::uint32_t>(x.size())), static_cast<std::uint32_t>(x.size()), sens);
+}
+
+bool near_cut(const sm::SliceTable& t, std::uint32_t pos) {
+  for (unsigned i = 0; i < t.count; ++i) {
+    const std::uint32_t d = t.cut[i].start > pos ? t.cut[i].start - pos : pos - t.cut[i].start;
+    if (d <= se::kHop) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE("sample edit: hit scan holds the mean of |sample| a hop, in slices, and the percent reaches 100") {
+  std::vector<std::int16_t> x(10000, 0);
+  for (std::uint32_t i = 0; i < 256u; ++i) {
+    x[i] = i % 2u ? 1000 : -1000;
+  }
+  x[9990] = -32768;  // the last hop holds 16 samples: its mean is over what is there
+  std::vector<std::uint16_t> e(se::kMaxHops, 7u);
+  se::HopScan sc;
+  se::hop_scan_begin(sc, 10000u);
+  unsigned slices = 0;
+  while (!se::hop_scan_step(sc, x.data(), e.data())) {
+    ++slices;
+    CHECK(se::hop_scan_percent(sc) <= 100u);
+  }
+  CHECK(slices == 2u);  // 10,000 samples in slices of 4,096: three passes, the third returns true
+  CHECK(e[0] == 1000u);
+  CHECK(e[1] == 0u);
+  CHECK(e[se::hop_count(10000u) - 1u] == 32768u / 16u);
+  CHECK(se::hop_count(10000u) == 40u);
+  CHECK(se::hop_count(705600u) == se::kMaxHops);
+  CHECK(se::hop_scan_step(sc, x.data(), e.data()));  // over: nothing more happens
+}
+
+TEST_CASE("sample edit: hit detector finds synthetic hits within a hop and the table tiles") {
+  std::vector<std::int16_t> x(44100u * 3u, 0);
+  const std::uint32_t at[] = {11025u, 33000u, 61111u, 95000u};
+  for (std::uint32_t a : at) {
+    burst(x, a, 0.6f);
+  }
+  sm::SliceTable t;
+  const se::HitCut r = hits_of(x, 50u, t);
+  CHECK(r.hits == 4u);
+  CHECK(r.count == 5u);
+  CHECK_FALSE(r.capped);
+  CHECK(t.length == x.size());
+  CHECK(tiles(t));
+  CHECK(t.cut[0].start == 0u);
+  for (std::uint32_t a : at) {
+    CHECK(near_cut(t, a));
+  }
+}
+
+TEST_CASE("sample edit: a low sensitivity keeps only the loud hit, a high one the soft too") {
+  std::vector<std::int16_t> x(44100u * 3u, 0);
+  burst(x, 22050u, 0.8f);  // loud
+  burst(x, 77000u, 0.15f);  // soft: a fifth of it
+  sm::SliceTable t;
+  CHECK(hits_of(x, 100u, t).hits == 2u);
+  CHECK(near_cut(t, 22050u));
+  CHECK(near_cut(t, 77000u));
+  for (unsigned sens : {1u, 20u, 50u}) {
+    sm::SliceTable u;
+    const se::HitCut r = hits_of(x, sens, u);
+    CHECK(r.hits == 1u);
+    CHECK(near_cut(u, 22050u));
+    CHECK(tiles(u));
+  }
+}
+
+TEST_CASE("sample edit: a held burst is one hit, at its start, at the highest sensitivity") {
+  std::vector<std::int16_t> x(88200, 0);
+  for (std::uint32_t at : {10000u, 40000u, 70000u}) {
+    for (std::uint32_t i = 0; i < 11025u; ++i) {  // 250 ms: past the running mean's 93 ms, so its sustain is what could cut again
+      x[at + i] = i % 2u ? 12000 : -12000;
+    }
+  }
+  sm::SliceTable t;
+  const se::HitCut r = hits_of(x, 100u, t);
+  CHECK(r.hits == 3u);
+  REQUIRE(t.count == 4u);
+  CHECK(t.cut[1].start == doctest::Approx(10000.0f).epsilon(0.03));
+  CHECK(t.cut[3].start == doctest::Approx(70000.0f).epsilon(0.01));
+}
+
+TEST_CASE("sample edit: two hits 20 ms apart give one cut") {
+  std::vector<std::int16_t> x(44100u * 2u, 0);
+  burst(x, 30000u, 0.7f);
+  burst(x, 30000u + 882u, 0.7f);
+  sm::SliceTable t;
+  const se::HitCut r = hits_of(x, 80u, t);
+  CHECK(r.hits == 1u);
+  CHECK(r.count == 2u);
+  CHECK(near_cut(t, 30000u));
+}
+
+TEST_CASE("sample edit: a slow sung-like swell gives no hits") {
+  std::vector<std::int16_t> x(44100u * 3u, 0);
+  for (std::uint32_t i = 0; i < x.size(); ++i) {
+    const float ph = static_cast<float>(i) / static_cast<float>(x.size());
+    const float env = 0.3f + 0.5f * (0.5f - 0.5f * std::cos(6.2831853f * ph));  // 0.3 up to 0.8 and back over 3 s
+    // a vibrato of 5 Hz on 220 Hz: the phase is 2 pi f t plus its own integral, so the pitch stays inside +-6 Hz
+    const float tt = static_cast<float>(i) / 44100.0f;
+    const float phase = 6.2831853f * (220.0f * tt + (6.0f / (6.2831853f * 5.0f)) * (1.0f - std::cos(6.2831853f * 5.0f * tt)));
+    x[i] = static_cast<std::int16_t>(env * 20000.0f * std::sin(phase));
+  }
+  sm::SliceTable t = even(static_cast<std::uint32_t>(x.size()));
+  const sm::SliceTable before = t;
+  const se::HitCut r = hits_of(x, 100u, t);
+  CHECK(r.hits == 0u);
+  CHECK(t.count == before.count);  // untouched
+  CHECK(t.cut[3].start == before.cut[3].start);
+}
+
+TEST_CASE("sample edit: over 24 cuts the strongest hits stay, in time order, and capped is set") {
+  std::vector<std::int16_t> x(44100u * 8u, 0);
+  std::vector<std::uint32_t> at;
+  for (unsigned k = 0; k < 30u; ++k) {  // every 0.25 s, rising from 0.2 to 0.9
+    at.push_back(4000u + k * 11025u);
+    burst(x, at.back(), 0.2f + 0.7f * static_cast<float>(k) / 29.0f, 600.0f);
+  }
+  sm::SliceTable t;
+  const se::HitCut r = hits_of(x, 100u, t);
+  CHECK(r.capped);
+  CHECK(r.hits == 23u);
+  CHECK(r.count == 24u);
+  CHECK(tiles(t));
+  CHECK(t.cut[0].start == 0u);
+  for (unsigned k = 7u; k < 30u; ++k) {  // the 23 strongest are the last 23
+    CHECK(near_cut(t, at[k]));
+  }
+  CHECK_FALSE(near_cut(t, at[0]));
+  for (unsigned i = 1; i < t.count; ++i) {
+    CHECK(t.cut[i].start > t.cut[i - 1u].start);
+  }
+}
+
+TEST_CASE("sample edit: silence gives no hits, nor a slot of less than a hop, nor sensitivity 0") {
+  std::vector<std::int16_t> x(44100u, 0);
+  sm::SliceTable t = even(static_cast<std::uint32_t>(x.size()));
+  CHECK(hits_of(x, 100u, t).hits == 0u);
+  CHECK(t.count == 8u);
+  std::vector<std::int16_t> tiny(100, 5000);
+  sm::SliceTable u = even(100u, 2u);
+  CHECK(hits_of(tiny, 100u, u).hits == 0u);
+  CHECK(u.count == 2u);
+  std::vector<std::int16_t> loud(44100u, 0);
+  burst(loud, 20000u, 0.8f);
+  CHECK(hits_of(loud, 0u, u).hits == 0u);
+  CHECK(hits_of(loud, 100u, u).hits == 1u);
+  sm::SliceTable none;
+  std::uint16_t e1[1] = {9000};
+  CHECK(se::hit_cuts(none, e1, 1u, 100u, 100u).hits == 0u);
+  CHECK(se::hit_cuts(none, e1, 0u, 0u, 100u).hits == 0u);
+}
+
+TEST_CASE("sample edit: F3 steps 0 to 100, a detent stops at the ends, a tap goes by 10 and wraps") {
+  CHECK(se::step_hits(0u, 1, false) == 1u);
+  CHECK(se::step_hits(0u, -3, false) == 0u);
+  CHECK(se::step_hits(99u, 5, false) == 100u);
+  CHECK(se::step_hits(100u, 1, false) == 100u);
+  CHECK(se::step_hits(0u, 1, true) == 10u);
+  CHECK(se::step_hits(37u, 1, true) == 40u);
+  CHECK(se::step_hits(95u, 1, true) == 100u);
+  CHECK(se::step_hits(100u, 1, true) == 0u);
+  CHECK(se::hit_ratio(1u) > se::hit_ratio(100u));
+  CHECK(se::hit_level(1u) > se::hit_level(100u));
+}
+
+TEST_CASE("sample edit: F3 CUT HITS scans the take, cuts at its onsets, warns before it replaces a hand's cut, and F1 reads it as OFF") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  // A take of 220 Hz at -60 dBFS with a -12 dBFS burst every 500 ms: the onsets are the hits.
+  tap(h, app::Button::SampleRec);
+  h.run_ms(60);
+  tap(h, app::Button::F3);
+  tap(h, app::Button::F4);
+  tap(h, app::Button::F4);
+  tap(h, app::Button::F4);
+  tap(h, app::Button::Rec);
+  for (unsigned i = 0; i < 36u; ++i) {
+    rig.cap.input_tone(220.0f, i % 2u ? -60.0f : -12.0f);
+    h.run_ms(250);
+  }
+  rig.cap.input_tone(220.0f, -60.0f);
+  rig.open();
+  float s = 0, l = 0;
+  tap(h, app::Button::F3);  // points the encoder at the key
+  h.turn(100);
+  h.run_ms(1500);  // the scan (a slice a frame), then the cuts
+  unsigned cuts = 0;
+  while (cuts < 24u && rig.audition(cuts, s, l)) {
+    ++cuts;
+  }
+  CHECK(cuts >= 2u);
+  REQUIRE(rig.audition(1, s, l));
+  CHECK(s > 0.0f);
+  // F1 re-cuts to 8 (the first try warns, the second takes it): F3 reads OFF then, so its next step asks for 1 and warns first, changing nothing.
+  tap(h, app::Button::F1);
+  h.turn(1);
+  h.run_ms(20);
+  h.turn(1);
+  h.run_ms(40);
+  tap(h, app::Button::F3);
+  h.turn(1);
+  h.run_ms(100);
+  CHECK(rig.audition(7, s, l));  // still the 8 even cuts: the warning changed nothing
+  CHECK_FALSE(rig.audition(8, s, l));
+  CHECK(h.runtime().frame_failures() == 0u);
+  CHECK(h.display().peak_frame_words() < 2048u);
+}

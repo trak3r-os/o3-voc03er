@@ -10,6 +10,8 @@
 #include <o3sdk/app/pad_leds.h>
 #include <o3sdk/core/placement.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstring>
 
 namespace o3_voc03er {
@@ -27,6 +29,7 @@ constexpr std::uint64_t kNoteMs = 2500;
 constexpr std::uint8_t kFocusCursor = 0;  // the encoder moves the cursor
 constexpr std::uint8_t kFocusCut = 1;     // the encoder steps F1 (CUT EVEN)
 constexpr std::uint8_t kFocusBeats = 2;   // the encoder steps F2 (CUT BEATS)
+constexpr std::uint8_t kFocusHits = 5;    // ... F3 (CUT HITS)
 constexpr std::uint8_t kFocusStart = 3;   // the encoder moves the trim's START bracket (F4)
 constexpr std::uint8_t kFocusEnd = 4;     // ... its END bracket (F5)
 constexpr std::uint8_t kJobNone = 0;      // g_se.job_kind
@@ -38,7 +41,7 @@ static_assert(se::kTrimFade == Loop::kFadeSamples, "the trim's seam is the unit'
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"CUT EVEN", "BEATS", "HITS", "START", "END", "NORMALISE", "SAVE WAV", "CLR CUTS"};
-constexpr std::uint8_t kLaterMask = 0x44u;  // F3 HITS and F7 SAVE WAV draw dim: they come later (F2 is dim for a WAV, see beats_dim)
+constexpr std::uint8_t kLaterMask = 0x40u;  // F7 SAVE WAV draws dim: it comes later (F2 is dim for a WAV, see beats_dim)
 
 // The screen's state, in the SDRAM (O3SDK_BIG: zero at start, main loop only), so the screen object is the vtable and two pointers.
 struct EditData {
@@ -47,6 +50,12 @@ struct EditData {
   std::uint8_t focus;                  // kFocusCursor, kFocusCut or kFocusBeats
   std::uint8_t beats[sm::kReaders];    // per slot, F2's value (se::beats_per_bar's code); valid while beats_len[slot] is the slot's length
   std::uint32_t beats_len[sm::kReaders];
+  std::uint8_t hits[sm::kReaders];     // per slot, F3's value (0 off, 1..100); valid while hits_len[slot] is the slot's length (the last one tried, also after NO HITS)
+  std::uint32_t hits_len[sm::kReaders];
+  se::HopScan scan;                    // the hop-energy scan for F3 (main loop: a slice a pass from update())
+  std::uint8_t scan_slot, scan_sens;   // the slot being scanned and the sensitivity to cut with when it is done
+  std::uint32_t hop_len[sm::kReaders]; // per slot, the length the energies below were scanned for; 0 stale (a take, NORMALISE, a trim or a copy make them so)
+  alignas(4) std::uint16_t hop[sm::kReaders][se::kMaxHops];  // the hop energies, 4 x 2,756 x 2 B = 22 KB
   se::Pending pending;                 // F6 or SHIFT + DELETE asked, F1 confirms (any other input cancels)
   se::Norm norm;                       // the NORMALISE run (main loop: a slice a pass from update())
   std::uint8_t norm_slot;
@@ -66,6 +75,7 @@ struct EditData {
   std::uint64_t note_until;
   char note_buf[32];
 };
+static_assert(offsetof(EditData, hop) % 4u == 0u, "the hop energies are word aligned");
 O3SDK_BIG EditData g_se = {};
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
@@ -118,6 +128,10 @@ const ui::Theme* SampleEditScreen::theme(const app::Context&) const noexcept { r
 
 void SampleEditScreen::enter(app::Context& ctx) noexcept {
   se::arm_cancel(g_se.arm);
+  g_se.scan = se::HopScan{};
+  for (unsigned i = 0; i < sm::kReaders; ++i) {
+    g_se.hop_len[i] = 0;  // a take may have changed any slot while this screen was away
+  }
   g_se.focus = kFocusCursor;
   g_se.pending = se::Pending::None;
   g_se.note = nullptr;
@@ -126,6 +140,7 @@ void SampleEditScreen::enter(app::Context& ctx) noexcept {
 
 void SampleEditScreen::leave(app::Context& ctx) noexcept {
   g_se.pending = se::Pending::None;
+  g_se.scan = se::HopScan{};  // reads only: stopping it costs nothing but the pass
   if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {  // never leave a slot half scaled: finish now (at most 173 slices)
     while (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
       norm_tick(ctx);
@@ -189,6 +204,8 @@ static void table_changed(SampleScreen& s, unsigned slot, bool edited, unsigned 
   s.set_even_code(slot, code);
   s.cuts_changed();
   g_se.beats[slot & 3u] = 0;  // F2's own call sets it again after this
+  g_se.scan_sens = 0;         // a scan still running keeps its energies, but its cuts must not replace this table
+  g_se.hits[slot & 3u] = 0;   // so does F3's
 }
 
 void SampleEditScreen::insert(app::Context& ctx) noexcept {
@@ -316,6 +333,94 @@ void SampleEditScreen::turn_beats(app::Context& ctx, int delta) noexcept {
   recut_beats(ctx, se::step_beats(shown_beats(*sample_, sample_->slot() & 3u), delta, g_se.key_tap));
 }
 
+// ---- CUT HITS (F3) ---------------------------------------------------------------------------------------------------------------------
+
+// The F3 value the slot shows: 0 unless it was set for this length (any re-cut by another key or by hand reads 0, see table_changed).
+static unsigned shown_hits(SampleScreen& s, unsigned slot) noexcept {
+  return g_se.hits_len[slot] == s.table(slot).length && s.table(slot).length != 0u ? g_se.hits[slot] : 0u;
+}
+
+// The table from the stored energies at `sens`. NO HITS leaves the table as it was; the value stays the one tried, so the encoder goes on from it.
+void SampleEditScreen::cut_hits(app::Context& ctx, unsigned slot, unsigned sens) noexcept {
+  sm::SliceTable& t = sample_->table(slot);
+  const se::HitCut r = se::hit_cuts(t, g_se.hop[slot], se::hop_count(t.length), t.length, sens);
+  if (r.hits == 0u) {
+    g_se.hits[slot] = static_cast<std::uint8_t>(sens);
+    g_se.hits_len[slot] = t.length;
+    say(ctx, "NO HITS");
+    return;
+  }
+  table_changed(*sample_, slot, true, 3u);
+  g_se.hits[slot] = static_cast<std::uint8_t>(sens);
+  g_se.hits_len[slot] = t.length;
+  g_se.note = nullptr;  // the warning has been answered
+  if (r.capped) {
+    say(ctx, "CAPPED AT 24 CUTS");
+  }
+  ctx.redraw();
+}
+
+// F3's value `code` (0..100): 0 only leaves the cuts as they are. Same rules as F1 and F2: a table the hand edited is replaced on the second try. The
+// energies are scanned once per slot length (a slice a pass, then the cuts follow); a turn that finds them stored re-cuts at once.
+void SampleEditScreen::recut_hits(app::Context& ctx, unsigned code) noexcept {
+  if (refuse(ctx, true) || busy(ctx)) {
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  if (code == shown_hits(*sample_, slot)) {
+    return;
+  }
+  if (code == 0u) {
+    g_se.hits[slot] = 0;
+    ctx.redraw();
+    return;
+  }
+  if (mem_ == nullptr) {
+    return;
+  }
+  const sm::SliceTable& t = sample_->table(slot);
+  if (se::arm_step(g_se.arm, 2u, sample_->edited(slot)) == se::Gate::Warn) {
+    g_se.note_buf[0] = '\0';
+    cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
+    cat_uint(g_se.note_buf, sizeof g_se.note_buf, t.count);
+    cat(g_se.note_buf, sizeof g_se.note_buf, " CUTS");
+    say(ctx, g_se.note_buf);
+    return;
+  }
+  if (g_se.hop_len[slot] != t.length) {
+    se::hop_scan_begin(g_se.scan, t.length);
+    g_se.scan_slot = static_cast<std::uint8_t>(slot);
+    g_se.scan_sens = static_cast<std::uint8_t>(code);
+    g_se.note = nullptr;
+    ctx.redraw();
+    return;
+  }
+  cut_hits(ctx, slot, code);
+}
+
+// F3's step: `delta` is the encoder's detents (or +1 for a second tap, which steps by 10 and wraps).
+void SampleEditScreen::turn_hits(app::Context& ctx, int delta) noexcept {
+  recut_hits(ctx, se::step_hits(shown_hits(*sample_, sample_->slot() & 3u), delta, g_se.key_tap));
+}
+
+// One slice of the scan; the cuts follow when it ends. It ends early when the slot changed under it (a take, a trim).
+void SampleEditScreen::scan_tick(app::Context& ctx) noexcept {
+  const unsigned slot = g_se.scan_slot & 3u;
+  const std::uint32_t len = sample_->table(slot).length;
+  if (mem_ == nullptr || sample_->status(slot).rec != Vocoder::LoopStatus::Rec::Idle || std::min(len, se::kMaxHops * se::kHop) != g_se.scan.end) {
+    g_se.scan = se::HopScan{};
+    say(ctx, "SCAN CANCELLED");
+    return;
+  }
+  if (se::hop_scan_step(g_se.scan, mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples, g_se.hop[slot])) {
+    g_se.hop_len[slot] = len;
+    if (slot == (sample_->slot() & 3u)) {
+      cut_hits(ctx, slot, g_se.scan_sens);
+    }
+  }
+  ctx.redraw();
+}
+
 // F6: asks; F1 confirms. SHIFT + DELETE below.
 void SampleEditScreen::ask_normalise(app::Context& ctx) noexcept {
   if (busy(ctx)) {
@@ -351,6 +456,7 @@ void SampleEditScreen::confirm(app::Context& ctx) noexcept {
       return;
     }
     se::norm_begin(g_se.norm, sample_->table(slot).length);
+    g_se.hop_len[slot] = 0;  // the samples are about to change
     g_se.norm_slot = static_cast<std::uint8_t>(slot);
     g_se.note = nullptr;
     ctx.redraw();
@@ -361,6 +467,7 @@ void SampleEditScreen::confirm(app::Context& ctx) noexcept {
     (void)ctx.engine().set_param(v, Vocoder::loop_param(slot, Vocoder::LoopField::Rec), 0.0f);
     g_se.cursor[slot] = 0;
     g_se.beats[slot] = 0;
+    g_se.hop_len[slot] = 0;
     say(ctx, "SLOT EMPTIED");
   }
 }
@@ -396,6 +503,7 @@ void SampleEditScreen::norm_finish(app::Context& ctx) noexcept {
   cat_uint(g_se.note_buf, sizeof g_se.note_buf, a % 10u);
   cat(g_se.note_buf, sizeof g_se.note_buf, " DB");
   g_se.norm = se::Norm{};
+  g_se.hop_len[g_se.norm_slot & 3u] = 0;
   overview::shared().mark_dirty(g_se.norm_slot);  // the samples changed in place: the picture is built again
   say(ctx, g_se.note_buf);
 }
@@ -410,6 +518,10 @@ bool SampleEditScreen::busy(app::Context& ctx) noexcept {
   }
   if (g_se.job_kind != kJobNone) {
     say(ctx, g_se.job_kind == kJobTrim ? "TRIMMING" : "COPYING");
+    return true;
+  }
+  if (g_se.scan.on) {
+    say(ctx, "SCANNING");
     return true;
   }
   return false;
@@ -579,6 +691,7 @@ void SampleEditScreen::job_tick(app::Context& ctx) noexcept {
   } else if (now >= g_se.job_deadline) {
     g_se.job_kind = kJobNone;
     overview::shared().mark_dirty(dst);  // a failed trim has moved the samples under the old length
+    g_se.hop_len[dst] = 0;
     say(ctx, trim ? "TRIM FAILED" : "COPY FAILED");
   } else if (now >= g_se.job_resend) {
     send_load(ctx);
@@ -594,6 +707,7 @@ void SampleEditScreen::job_finish(app::Context& ctx) noexcept {
   sample_->table(dst) = g_se.job_table;
   table_changed(*sample_, dst, trim ? true : g_se.job_edited != 0u, trim ? 3u : g_se.job_even);
   g_se.cursor[dst] = 0;
+  g_se.hop_len[dst] = 0;
   char tm[12];
   g_se.note_buf[0] = '\0';
   if (trim) {
@@ -648,8 +762,8 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     g_se.note = nullptr;
     ctx.redraw();
   }
-  const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 1u || k == 7u)) ||
-                         (in.turn() && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats));
+  const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 1u || k == 2u || k == 7u)) ||
+                         (in.turn() && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats || g_se.focus == kFocusHits));
   if (!keeps_arm) {
     se::arm_cancel(g_se.arm);
   }
@@ -685,6 +799,17 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       }
       g_se.focus = kFocusBeats;
       ctx.redraw();
+    } else if (k == 2u) {
+      if (refuse(ctx, true)) {
+        return;
+      }
+      if (g_se.focus == kFocusHits) {  // a second tap steps it
+        g_se.key_tap = true;
+        turn_hits(ctx, 1);
+        g_se.key_tap = false;
+      }
+      g_se.focus = kFocusHits;
+      ctx.redraw();
     } else if (k == 3u || k == 4u) {
       tap_bracket(ctx, k == 4u);
     } else if (k == 5u) {
@@ -692,7 +817,7 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     } else if (k == 7u) {
       clear_cuts(ctx);
     } else {
-      say(ctx, "COMES LATER");  // HITS, SAVE WAV; the encoder stays where it was
+      say(ctx, "COMES LATER");  // SAVE WAV; the encoder stays where it was
     }
     return;
   }
@@ -702,6 +827,8 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       turn(ctx, in.delta());
     } else if (g_se.focus == kFocusBeats) {
       turn_beats(ctx, in.delta());
+    } else if (g_se.focus == kFocusHits) {
+      turn_hits(ctx, in.delta());
     } else if (g_se.focus == kFocusStart || g_se.focus == kFocusEnd) {
       turn_bracket(ctx, in.delta(), in.shift);
     } else {
@@ -749,7 +876,7 @@ void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     out.label[i] = kKeyNames[i];
   }
-  out.hot = static_cast<std::uint8_t>(g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : (g_se.focus == kFocusStart ? 8u : (g_se.focus == kFocusEnd ? 16u : 0u))));
+  out.hot = static_cast<std::uint8_t>(g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : (g_se.focus == kFocusHits ? 4u : (g_se.focus == kFocusStart ? 8u : (g_se.focus == kFocusEnd ? 16u : 0u)))));
   out.dim = static_cast<std::uint8_t>(kLaterMask | (beats_dim(ctx) ? 2u : 0u));
 }
 
@@ -763,6 +890,14 @@ void SampleEditScreen::update(app::Context& ctx) noexcept {
   }
   if (g_se.job_kind != kJobNone) {
     job_tick(ctx);
+  }
+  if (g_se.scan.on) {
+    scan_tick(ctx);
+  }
+  for (unsigned i = 0; i < sm::kReaders; ++i) {  // a fresh take (possibly of the same length) makes the slot's energies stale
+    if (sample_->status(i).rec != Vocoder::LoopStatus::Rec::Idle) {
+      g_se.hop_len[i] = 0;
+    }
   }
   if (g_se.note != nullptr && ctx.uptime_ms() >= g_se.note_until) {
     g_se.note = nullptr;
@@ -809,7 +944,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
     h.fkey_shift[i] = nullptr;
   }
   h.fkey[0] = "OFF, 8, 16 OR 24 EVEN CUTS";
-  h.fkey[2] = "COMES LATER";
+  h.fkey[2] = "CUTS AT HITS, 0 TO 100";
   h.fkey[6] = "COMES LATER";
   h.fkey[1] = "4, 8 OR 16 CUTS A BAR";
   h.fkey[3] = "TRIM START, F1 TRIMS";
@@ -848,6 +983,16 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   keys[1].hot = g_se.focus == kFocusBeats;
   if (!bdim) {
     cat(keys[1].value, sizeof keys[1].value, se::beats_name(shown_beats(*sample_, slot)));
+  }
+
+  keys[2].hot = g_se.focus == kFocusHits;
+  if (len != 0u) {
+    const unsigned hv = shown_hits(*sample_, slot);
+    if (hv == 0u) {
+      cat(keys[2].value, sizeof keys[2].value, "OFF");
+    } else {
+      cat_uint(keys[2].value, sizeof keys[2].value, hv);
+    }
   }
 
   const bool has = len != 0u;
@@ -940,6 +1085,13 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     pb[0] = '\0';
     cat(pb, sizeof pb, g_se.job_kind == kJobTrim ? "TRIMMING " : "COPYING ");
     cat_uint(pb, sizeof pb, g_se.job_sent ? 100u : se::job_percent(g_se.job));
+    cat(pb, sizeof pb, "%");
+    r.text(kX, 398, pb, Color::Accent, Face::Label);
+  } else if (g_se.scan.on) {
+    char pb[24];
+    pb[0] = '\0';
+    cat(pb, sizeof pb, "SCANNING ");
+    cat_uint(pb, sizeof pb, se::hop_scan_percent(g_se.scan));
     cat(pb, sizeof pb, "%");
     r.text(kX, 398, pb, Color::Accent, Face::Label);
   } else if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {

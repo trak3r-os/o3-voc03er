@@ -297,6 +297,173 @@ inline BeatCut beat_cuts(sm::SliceTable& t, std::uint32_t length, float bar, uns
   return r;
 }
 
+// ---- CUT HITS (F3): an onset detector over 256-sample hop energies --------------------------------------------------------------------------
+
+inline constexpr std::uint32_t kHop = 256;                 // samples a hop energy covers (5.8 ms)
+inline constexpr unsigned kMaxHops = 2756;                 // the table's size a slot: 2,756 x 256 = 705,536 samples of the slot's 705,600 (the last 64 are not scanned)
+inline constexpr std::uint32_t kHopSlice = 4096;           // samples one hop_scan_step reads (16 hops: a frame's share of the main loop)
+inline constexpr unsigned kHitMeanHops = 16;               // the running mean: the 16 hops before a hop (93 ms)
+inline constexpr unsigned kHitGapHops = 9;                 // 50 ms apart at least: 9 x 256 samples = 52 ms at 44.1 kHz
+inline constexpr float kHitRise = 1.25f;                   // a hit is louder by this than two hops before it, the sustain of a burst is not
+inline constexpr unsigned kHitFloor = 32;                  // a hop under this mean of |sample| (-60 dBFS) is never a hit: silence and the noise floor give none
+inline constexpr unsigned kHitsMax = 100;                  // F3's value: 0 off, 1..100 the sensitivity
+inline constexpr unsigned kHitCandidates = kMaxHops / kHitGapHops + 2u;  // most hits a table can hold 50 ms apart
+inline constexpr unsigned kHitKeep = sm::kMaxSlices - 1u;  // cut 1 is always at sample 0, so at most 23 hits make the other cuts of the 24
+
+constexpr unsigned hop_count(std::uint32_t length) noexcept {
+  const std::uint32_t n = (length + kHop - 1u) / kHop;
+  return n > kMaxHops ? kMaxHops : static_cast<unsigned>(n);
+}
+
+// The scan: one pass over the slot, kHopSlice samples at a time, the mean of |sample| of each hop (the last hop of a slot is as long as what is left).
+struct HopScan {
+  bool on = false;
+  std::uint32_t pos = 0, end = 0;  // the next hop's first sample; the end of what is scanned
+};
+inline void hop_scan_begin(HopScan& s, std::uint32_t length) noexcept {
+  s.end = length < kMaxHops * kHop ? length : kMaxHops * kHop;
+  s.pos = 0;
+  s.on = s.end != 0u;
+}
+// One slice of data[0, end) into e[0, hop_count); true once the scan is over (also when it was not on). 0..65535 holds the mean (|sample| <= 32768).
+inline bool hop_scan_step(HopScan& s, const std::int16_t* data, std::uint16_t* e) noexcept {
+  if (!s.on) {
+    return true;
+  }
+  std::uint32_t stop = s.pos + kHopSlice;
+  if (stop > s.end) {
+    stop = s.end;
+  }
+  while (s.pos < stop) {
+    const std::uint32_t n = s.end - s.pos < kHop ? s.end - s.pos : kHop;
+    std::uint32_t sum = 0;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const std::int32_t v = data[s.pos + i];
+      sum += static_cast<std::uint32_t>(v < 0 ? -v : v);
+    }
+    const std::uint32_t m = sum / n;
+    e[s.pos / kHop] = static_cast<std::uint16_t>(m > 65535u ? 65535u : m);
+    s.pos += n;
+  }
+  if (s.pos >= s.end) {
+    s.on = false;
+  }
+  return !s.on;
+}
+constexpr unsigned hop_scan_percent(const HopScan& s) noexcept {
+  return s.end == 0u ? 0u : static_cast<unsigned>(static_cast<std::uint64_t>(s.pos) * 100u / s.end);
+}
+
+// The sensitivity (1..100) as the two tests a hop must pass. RATIO: the hop is above the running mean by this factor, 4.0 at 1 to 1.5 at 100 (linear
+// in the factor). LEVEL: the hop is at least this fraction of the loudest hop of the slot, 0.60 at 1 to 0.02 at 100 (linear): the ratio alone finds
+// a soft hit after silence as easily as a loud one, so the level is what makes 1 keep only the loudest and 100 the softest. Both loosen together.
+constexpr float hit_ratio(unsigned sens) noexcept {
+  const unsigned s = sens < 1u ? 1u : (sens > kHitsMax ? kHitsMax : sens);
+  return 4.0f - 2.5f * static_cast<float>(s - 1u) / 99.0f;
+}
+constexpr float hit_level(unsigned sens) noexcept {
+  const unsigned s = sens < 1u ? 1u : (sens > kHitsMax ? kHitsMax : sens);
+  return 0.60f - 0.58f * static_cast<float>(s - 1u) / 99.0f;
+}
+
+struct HitCut {
+  unsigned hits = 0;    // hops taken as hits (cuts made, less the first); 0: the table is untouched
+  unsigned count = 0;   // cuts made
+  bool capped = false;  // more hits than the 24 cuts hold: the weakest went
+};
+
+// The hits of e[0, hops) (hop_scan_step's energies; `length` the slot's) at `sens` as cuts of `t`: cut 1 at sample 0, then one at the first hop of each
+// hit, in time order. A hop is a hit when its energy passes the level and the ratio of hit_ratio / hit_level against the mean of the kHitMeanHops
+// before it, still rises (kHitRise), and it is at least kHitGapHops after the last hit (the first one to cross wins; the hit's strength is the loudest hop in the gap after
+// it). Hop 0 is never a hit (cut 1 is there); a hit closer than kMinCutSamples to the end is not one. Over 24 cuts the weakest hits go and `capped`
+// is set. Refuses (hits 0, the table untouched) a slot with no hits, sens 0, or fewer than two hops.
+inline HitCut hit_cuts(sm::SliceTable& t, const std::uint16_t* e, unsigned hops, std::uint32_t length, unsigned sens) noexcept {
+  HitCut r;
+  if (sens == 0u || hops < 2u || length == 0u) {
+    return r;
+  }
+  unsigned gmax = 0;
+  for (unsigned i = 0; i < hops; ++i) {
+    gmax = e[i] > gmax ? e[i] : gmax;
+  }
+  if (gmax < kHitFloor) {
+    return r;
+  }
+  const float ratio = hit_ratio(sens);
+  float level = hit_level(sens) * static_cast<float>(gmax);
+  if (level < static_cast<float>(kHitFloor)) {
+    level = static_cast<float>(kHitFloor);
+  }
+  struct Cand {
+    std::uint16_t hop, strength;
+  };
+  Cand cand[kHitCandidates];
+  unsigned n = 0;
+  std::uint32_t sum = e[0];  // the energies of the hops before hop i, at most kHitMeanHops of them
+  unsigned next_ok = 0;
+  for (unsigned i = 1; i < hops; ++i) {
+    if (static_cast<std::uint32_t>(i) * kHop + kMinCutSamples > length) {
+      break;
+    }
+    const unsigned back = i < kHitMeanHops ? i : kHitMeanHops;
+    const float mean = static_cast<float>(sum) / static_cast<float>(back);
+    const float v = static_cast<float>(e[i]);
+    const float before = static_cast<float>(e[i >= 2u ? i - 2u : 0u]);  // a held sound is above the mean for a while, but it no longer rises
+    if (i >= next_ok && n < kHitCandidates && v >= level && v > ratio * mean && v > kHitRise * before) {
+      unsigned peak = e[i];
+      for (unsigned j = i + 1u; j < hops && j < i + kHitGapHops; ++j) {
+        peak = e[j] > peak ? e[j] : peak;
+      }
+      cand[n++] = {static_cast<std::uint16_t>(i), static_cast<std::uint16_t>(peak)};
+      next_ok = i + kHitGapHops;
+    }
+    sum += e[i];
+    if (i >= kHitMeanHops) {
+      sum -= e[i - kHitMeanHops];
+    }
+  }
+  if (n == 0u) {
+    return r;
+  }
+  while (n > kHitKeep) {  // drop the weakest (the earliest of equals), keeping time order
+    unsigned w = 0;
+    for (unsigned k = 1; k < n; ++k) {
+      if (cand[k].strength < cand[w].strength) {
+        w = k;
+      }
+    }
+    for (unsigned k = w + 1u; k < n; ++k) {
+      cand[k - 1u] = cand[k];
+    }
+    --n;
+    r.capped = true;
+  }
+  t.length = length;
+  t.count = static_cast<std::uint8_t>(n + 1u);
+  t.cut[0] = {0u, 0u};
+  for (unsigned k = 0; k < n; ++k) {
+    t.cut[k + 1u].start = static_cast<std::uint32_t>(cand[k].hop) * kHop;
+  }
+  for (unsigned k = 0; k <= n; ++k) {
+    const std::uint32_t end = k < n ? t.cut[k + 1u].start : length;
+    t.cut[k].len = end - t.cut[k].start;
+  }
+  r.hits = n;
+  r.count = n + 1u;
+  return r;
+}
+
+// F3's value `code` (0 off, 1..100) `delta` steps on: a detent moves one and stops at the ends, a second tap steps by 10 (to the next multiple of 10, 100 at
+// most) and wraps from 100 to 0.
+constexpr unsigned step_hits(unsigned code, int delta, bool tap) noexcept {
+  const unsigned c = code > kHitsMax ? kHitsMax : code;
+  if (tap) {
+    return c >= kHitsMax ? 0u : (c / 10u + 1u) * 10u;
+  }
+  const int v = static_cast<int>(c) + delta;
+  return v < 0 ? 0u : (v > static_cast<int>(kHitsMax) ? kHitsMax : static_cast<unsigned>(v));
+}
+
 // ---- NORMALISE (F6): the peak to -1 dBFS, in slices ----------------------------------------------------------------------------------------
 
 inline constexpr std::int32_t kNormTarget = 29204;       // -1 dBFS of 32767: 32767 * 10^(-1/20)
