@@ -94,7 +94,7 @@ constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
-    {"pat", "pat [A-H [len n|note s n|chord s r k v|car s c|lvl s v|slc s n]]", &pat_command},
+    {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
 };
 
 constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
@@ -154,8 +154,10 @@ class MyApp final : public app::App {
     sample_.init(voice, &voc_, &perform_, &carriers_);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
+    // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
     (void)ctx.midi().route(voice, 0);
     carriers_.init(voice, &g_bank, sample_.slice_map());
+    voc_.bind_slices(sample_.slice_map());  // the same map the hook reads; its address never moves
     carriers_.set_picked(1);  // the boot CarSrc above
     (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
@@ -485,7 +487,7 @@ class MyApp final : public app::App {
     }
     ov::PatCommand c;
     if (!ov::parse_pat(args.argv + 1, args.argc - 1u, c)) {
-      out.text("usage: pat [A-H [len n|note s n|chord s root kind voic|car s c|lvl s v|slc s n]]").nl();
+      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car c|lvl v|slc n]]").nl();
       return;
     }
     ov::PatternData& pd = g_bank.pattern[c.pattern];
@@ -544,11 +546,11 @@ class MyApp final : public app::App {
     dsp::Engine& e = ctx_->engine();
     (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, static_cast<float>(c.mode));
     for (unsigned i = 0; i < console_notes_; ++i) {
-      (void)e.note_off(voc_id_, o3_voc03er::kVocChord[i]);
+      (void)e.send(voc_id_, o3_voc03er::Vocoder::note_off_local(o3_voc03er::kVocChord[i]));
     }
     console_notes_ = c.notes;
     for (unsigned i = 0; i < console_notes_; ++i) {
-      (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100);
+      (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100, o3_voc03er::Vocoder::kNoteLocal);
     }
     out.text("voc: ").text(kModeWord[c.mode]).text(" notes ").dec(console_notes_).nl();
     ctx_->redraw();

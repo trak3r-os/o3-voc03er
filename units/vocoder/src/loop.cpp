@@ -29,6 +29,8 @@ void Loop::clear() noexcept {
     gcur_[i] = 1.0f;
     st_s_[i] = 0;
     st_l_[i] = 0;
+    st_v_[i] = 100;
+    rv_[i] = 100;
     region_off(i);
   }
 }
@@ -353,10 +355,11 @@ void Loop::set_region_len(unsigned i, std::uint32_t len) noexcept {
   }
 }
 
-bool Loop::trig_region(unsigned i, std::uint32_t frame) noexcept {
+bool Loop::trig_region(unsigned i, std::uint32_t frame, std::uint8_t level) noexcept {
   if (mem_ == nullptr || i >= kCount || rec_[i] || st_l_[i] == 0u || st_s_[i] >= bank_samples()) {
     return false;
   }
+  st_v_[i] = level < 100u ? level : std::uint8_t{100};
   cmd_[i] = Cmd::Start;
   cf_[i] = static_cast<std::uint16_t>(frame);
   return true;
@@ -385,7 +388,8 @@ bool Loop::begin_region(unsigned i) noexcept {
   rs_[i] = a;
   rl_[i] = l;
   rh_[i] = rev_[i] ? 2u * (l - 1u) : 0u;
-  rg_[i] = gain_[i];
+  rv_[i] = st_v_[i];
+  rg_[i] = rv_[i] >= 100u ? gain_[i] : gain_[i] * (static_cast<float>(rv_[i]) * 0.01f);
   fn_[i] = 0;
   dir_[i] = 1;
   rst_[i] = false;
@@ -430,7 +434,8 @@ std::uint32_t Loop::region_chunk(unsigned i, float* dst, std::uint32_t n, bool a
   alignas(4) std::int16_t buf[kSpanMax + 2];
   float tmp[kChunk];
   fill_chunk(tmp, buf, s, len, h, rev, step, nn);
-  const float g1 = gain_[i];
+  // The region's level folds into the chunk's target: at full it is gain_ itself, bit for bit.
+  const float g1 = rv_[i] >= 100u ? gain_[i] : gain_[i] * (static_cast<float>(rv_[i]) * 0.01f);
   float g = rg_[i];
   const float dg = (g1 - g) / static_cast<float>(nn);
   if (dir == 0) {

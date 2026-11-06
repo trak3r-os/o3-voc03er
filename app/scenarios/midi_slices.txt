@@ -1,0 +1,72 @@
+# MIDI SLICES (M2): a 1 BAR take with the even cuts (8) and SAMPLE's slot on SPEAKS (as slice_lane.txt), a SYNTH chord latched on the pads, then MIDI
+# notes from 36 fire the slot's slices on their own (0x24 loud, 0x25 soft, 0x2C past the eight cuts is the carrier's). The WAV carries them; it is not the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/midi_slices.txt --out <dir>   (the dir must exist)
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/slice_lane.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleplay
+wait 200
+tap f2
+tap f2
+wait 100
+tap f2
+wait 100
+paddown 26
+wait 100
+tap shift
+padup 26
+wait 600
+snap 01_cuts
+tap performance
+wait 100
+# SOUNDS back to SYNTH (the take is on SOUNDS), then SPEAKS takes SLOT 1 (the list's eighth row)
+tap f3
+turn -9
+tap f3
+wait 100
+tap f2
+wait 100
+turn 7
+wait 100
+snap 01a_speaks_list
+tap f2
+wait 200
+snap 01b_speaks_slot
+tap play
+wait 100
+# the SYNTH chord latched under the slices (a pad held, SHIFT: LATCH)
+paddown 26
+wait 100
+tap shift
+padup 26
+wait 300
+# note 36, full velocity: slice 1; note 37 at velocity 50: slice 2 at about half the level; note 44 is past the eight cuts: the carrier plays it
+midi usb 90 24 7f
+wait 400
+midi usb 80 24 00
+snap 02_slice_1
+midi usb 90 25 32
+wait 400
+midi usb 80 25 00
+snap 03_slice_2_soft
+midi usb 90 2c 7f
+wait 400
+midi usb 80 2c 00
+wait 200
+midi usb 90 2b 7f
+wait 300
+midi usb 80 2b 00
+wait 400
+snap 04_done
+wav midi_slices

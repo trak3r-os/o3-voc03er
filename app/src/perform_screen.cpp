@@ -266,7 +266,7 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   }
   held_ |= std::uint64_t{1} << pad;
   for (unsigned i = 0; i < g_pd.count[pad]; ++i) {
-    (void)e.note_on(voice_, g_pd.notes[pad][i], kVelocity);
+    (void)e.note_on(voice_, g_pd.notes[pad][i], kVelocity, o3_voc03er::Vocoder::kNoteLocal);
   }
   ctx.redraw();
 }
@@ -300,7 +300,7 @@ void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
   }
   for (unsigned i = 0; i < g_pd.count[pad]; ++i) {
     if (!note_in_use(g_pd.notes[pad][i], app::kPadCount)) {  // a note another held pad or the latch still holds stays on
-      (void)ctx.engine().note_off(voice_, g_pd.notes[pad][i]);
+      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.notes[pad][i]));
     }
   }
   ctx.redraw();
@@ -329,7 +329,7 @@ void PerformScreen::latch(app::Context& ctx, bool on) noexcept {
   }
   for (unsigned i = 0; i < old_count && i < kChordMaxNotes; ++i) {  // the old latch's notes the new state does not hold
     if (!note_in_use(old[i], app::kPadCount)) {
-      (void)e.note_off(voice_, old[i]);
+      (void)e.send(voice_, o3_voc03er::Vocoder::note_off_local(old[i]));
     }
   }
   ctx.redraw();
@@ -340,13 +340,13 @@ void PerformScreen::release_all(app::Context& ctx) noexcept {
   for (unsigned p = 0; p < app::kPadCount; ++p) {
     if (((held_ >> p) & 1u) != 0u) {
       for (unsigned i = 0; i < g_pd.count[p]; ++i) {
-        (void)e.note_off(voice_, g_pd.notes[p][i]);
+        (void)e.send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.notes[p][i]));
       }
     }
   }
   if (latched_ >= 0) {
     for (unsigned i = 0; i < g_pd.lat_count && i < kChordMaxNotes; ++i) {
-      (void)e.note_off(voice_, g_pd.lat_notes[i]);
+      (void)e.send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.lat_notes[i]));
     }
   }
   held_ = 0;

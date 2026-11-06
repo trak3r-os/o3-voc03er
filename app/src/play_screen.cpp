@@ -169,11 +169,11 @@ void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       held_[in.pad()] = note;
       record_note(*pd_, cursor_, note);  // the pattern is what the pads played; FILE saves it
       ctx.redraw();
-      (void)ctx.engine().note_on(voice_, static_cast<std::uint8_t>(note), 110);
+      (void)ctx.engine().note_on(voice_, static_cast<std::uint8_t>(note), 110, o3_voc03er::Vocoder::kNoteLocal);
     }
   } else if (in.pad_release()) {
     if (held_[in.pad()] >= 0) {
-      (void)ctx.engine().note_off(voice_, static_cast<std::uint8_t>(held_[in.pad()]));
+      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_local(static_cast<std::uint8_t>(held_[in.pad()])));
       held_[in.pad()] = -1;
     }
   }

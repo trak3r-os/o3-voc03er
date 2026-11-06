@@ -496,7 +496,7 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     }
   }
   h.summary = "THE FOUR SLOTS: UP AND DOWN PICK ONE; ITS SIDE, SPEED, DIRECTION AND LEVEL ARE THE F KEYS.\n"
-              "THE UPPER PAD ROWS PLAY THE SLOT'S SLICES; THE LOWER ROWS PLAY CHORDS.";
+              "UPPER PADS: SLICES; LOWER: CHORDS. MIDI NOTES FROM 36 FIRE THE SPEAKS SLOT'S SLICES.";
   if (h.groups != nullptr && h.group_count < app::kHelpMaxGroups) {  // PERFORM's groups, then the slices (the screen's own storage in the SDRAM)
     for (unsigned i = 0; i < h.group_count; ++i) {
       g_sd.groups[i] = h.groups[i];

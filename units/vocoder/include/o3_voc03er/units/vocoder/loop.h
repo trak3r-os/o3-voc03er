@@ -79,7 +79,9 @@ class Loop {
   // nothing to play). release_region: fade out from `frame`; nothing when no region sounds.
   void set_region_start(unsigned i, std::uint32_t start) noexcept;
   void set_region_len(unsigned i, std::uint32_t len) noexcept;
-  bool trig_region(unsigned i, std::uint32_t frame) noexcept;
+  // `level` 0..100 (100 full) is the region's level, staged here and taken when the region begins (a region still sounding keeps its own);
+  // the default is full, so a caller that never passes it plays at full level.
+  bool trig_region(unsigned i, std::uint32_t frame, std::uint8_t level = 100) noexcept;
   void release_region(unsigned i, std::uint32_t frame) noexcept;
   bool region(unsigned i) const noexcept { return i < kCount && (act_[i] || cmd_[i] != Cmd::None); }  // sounding or about to
   bool region_sounding(unsigned i) const noexcept { return i < kCount && act_[i]; }
@@ -112,6 +114,8 @@ class Loop {
   // (fn_ of kFadeSamples, dir_ +1 in, 0 steady, -1 out), a retrigger waiting for the fade-out (rst_), the command and its frame.
   std::uint32_t st_s_[kCount] = {};
   std::uint32_t st_l_[kCount] = {};
+  std::uint8_t st_v_[kCount] = {100, 100, 100, 100};  // the staged level (trig_region), taken by begin_region
+  std::uint8_t rv_[kCount] = {100, 100, 100, 100};    // the sounding region's level, 0..100; folded into the chunk's gain
   std::uint32_t rs_[kCount] = {};
   std::uint32_t rl_[kCount] = {};
   std::uint32_t rh_[kCount] = {};

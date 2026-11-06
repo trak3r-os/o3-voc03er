@@ -41,13 +41,8 @@ inline constexpr std::uint8_t kLevelDefault = 100;
 // The v2 pattern file: the app's PATN with the old STEP and CARR chunks (pattern A, so an older reader still gets it) and BANK (all eight).
 inline constexpr std::size_t kBankFileMax = 768;  // about 600 bytes with room to spare
 
-// The slices of the SPEAKS slot as the hook needs them (U6c): `start` already counts from the start of the bank (what the unit's Start takes),
-// `len` in samples. Lives in the SDRAM (O3SDK_BIG), written by the main loop through StepSeq::slices_open / slices_close.
-inline constexpr unsigned kSliceMax = 24;
-struct SliceMap {
-  std::uint32_t start[kSliceMax];
-  std::uint32_t len[kSliceMax];
-};
+// SliceMap (the SPEAKS slot's slices: the hook's SLICE lane and the unit's MIDI slices read the same map) and kSliceMax live in vocoder.h; the
+// main loop writes it through StepSeq::slices_open / slices_close.
 
 struct Step {
   std::uint8_t note = 0;
@@ -358,24 +353,34 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     unit_ = vocoder;
     bank_ = bank;
     map_ = map;
-    count_.store(0, std::memory_order_relaxed);
-    reader_.store(kNoReader, std::memory_order_relaxed);
+    if (map_ != nullptr) {
+      __atomic_store_n(&map_->source, 0u, __ATOMIC_RELAXED);
+    }
   }
-  // Main loop (single writer): the SPEAKS slot's slices. slices_open() hides the map (count 0, release) and returns it to rewrite; slices_close()
-  // shows it again (reader, then count with release). The hook loads count with acquire, so it never reads a half-written map. A null map
-  // (none given at init) returns null and publishes nothing. `count` is clamped to kSliceMax; a reader above 3 or a count of 0 means none.
+  // Main loop (single writer): the SPEAKS slot's slices. slices_open() hides the map (source 0, release) and returns it to rewrite; slices_close()
+  // shows it again (reader | count << 8 in one word, release). The hook and the unit load the word with acquire, so they never read a half-written
+  // map and never see a reader with another's count. A null map (none given at init) returns null and publishes nothing. `count` is clamped to
+  // kSliceMax; a reader above 3 or a count of 0 means none.
   SliceMap* slices_open() noexcept {
-    count_.store(0, std::memory_order_release);
+    if (map_ != nullptr) {
+      __atomic_store_n(&map_->source, 0u, __ATOMIC_RELEASE);
+    }
     return map_;
   }
   void slices_close(unsigned reader, unsigned count) noexcept {
-    const bool ok = map_ != nullptr && reader < 4u && count != 0u;
-    reader_.store(ok ? static_cast<std::uint8_t>(reader) : kNoReader, std::memory_order_relaxed);
-    count_.store(ok ? static_cast<std::uint8_t>(count < kSliceMax ? count : kSliceMax) : std::uint8_t{0}, std::memory_order_release);
+    if (map_ == nullptr) {
+      return;
+    }
+    const bool ok = reader < 4u && count != 0u;
+    const std::uint32_t n = count < kSliceMax ? count : kSliceMax;
+    __atomic_store_n(&map_->source, ok ? (reader | n << 8) : 0u, __ATOMIC_RELEASE);
   }
   // The published source (UI: the PATTERN palette). 0 slices: none.
-  unsigned slice_count() const noexcept { return count_.load(std::memory_order_acquire); }
-  unsigned slice_reader() const noexcept { return reader_.load(std::memory_order_relaxed); }
+  unsigned slice_count() const noexcept { return source() >> 8; }
+  unsigned slice_reader() const noexcept {
+    const std::uint32_t src = source();
+    return src == 0u ? static_cast<unsigned>(kNoReader) : (src & 0xFFu);
+  }
   // The slice the last step that fired one played; 0 after a Stop (relaxed, may be a block old).
   unsigned playing_slice() const noexcept { return playing_slice_.load(std::memory_order_relaxed); }
   // Main loop: the pattern that plays after the current one's last step (or from the next Play). 0..7.
@@ -433,8 +438,9 @@ class StepSeq final : public o3sdk::dsp::Clocked {
         (void)ctx.emit(unit_, dsp::param_change(Vocoder::CarSrc, static_cast<float>(s.carrier), static_cast<std::uint16_t>(frame)));
       }
       if (s.slice != 0u) {  // the SLICE lane, independent of the NOTE lane
-        const unsigned n = count_.load(std::memory_order_acquire);
-        const unsigned rd = reader_.load(std::memory_order_relaxed);
+        const std::uint32_t src = source();
+        const unsigned n = src >> 8;
+        const unsigned rd = src & 0xFFu;
         if (n != 0u && s.slice <= n && rd < 4u && map_ != nullptr) {
           const std::uint16_t f = static_cast<std::uint16_t>(frame);
           (void)ctx.emit(unit_, dsp::param_change(Vocoder::region_param(rd, Vocoder::RegionField::Start), static_cast<float>(map_->start[s.slice - 1u]), f));
@@ -457,7 +463,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       const unsigned count = step_notes(s, key_.load(std::memory_order_relaxed), scale_.load(std::memory_order_relaxed), notes, pp);
       const std::uint8_t vel = step_velocity(s);
       for (unsigned n = 0; n < count; ++n) {
-        (void)ctx.emit(unit_, dsp::note_on(notes[n], vel, 0, static_cast<std::uint16_t>(frame)));
+        (void)ctx.emit(unit_, dsp::note_on(notes[n], vel, Vocoder::kNoteLocal, static_cast<std::uint16_t>(frame)));
         last_[n] = notes[n];
       }
       if (count != 0u) {
@@ -477,6 +483,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
  private:
   static constexpr std::uint32_t kGateTicks = 180;  // 75 % of a sixteenth (offset + swing < period)
 
+  std::uint32_t source() const noexcept { return map_ != nullptr ? __atomic_load_n(&map_->source, __ATOMIC_ACQUIRE) : 0u; }
   void take_next() noexcept {
     const std::uint8_t n = next_.exchange(kNoPattern, std::memory_order_relaxed);
     if (n < kBankPatterns) {
@@ -488,7 +495,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       return;
     }
     for (unsigned n = 0; n < last_count_; ++n) {
-      (void)ctx.emit(unit_, o3sdk::dsp::note_off(last_[n], frame));
+      (void)ctx.emit(unit_, Vocoder::note_off_local(last_[n], frame));
     }
     sounding_ = false;
   }
@@ -510,11 +517,9 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   std::atomic<std::uint8_t> picked_{1};
   std::atomic<std::uint8_t> key_{0};
   std::atomic<std::uint8_t> scale_{0};
-  // The SPEAKS slot's slices: map_ is set at init and written by the main loop only while count_ is 0 (see slices_open); reader_ and count_ are
-  // written by the main loop, read by the render context. playing_slice_ is written by the render context.
+  // The SPEAKS slot's slices: map_ is set at init and written by the main loop only while its source is 0 (see slices_open); source is written
+  // by the main loop, read by the render context. playing_slice_ is written by the render context.
   SliceMap* map_ = nullptr;
-  std::atomic<std::uint8_t> reader_{kNoReader};
-  std::atomic<std::uint8_t> count_{0};
   std::atomic<std::uint8_t> playing_slice_{0};
 };
 

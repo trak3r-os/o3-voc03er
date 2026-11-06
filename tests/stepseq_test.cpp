@@ -39,6 +39,7 @@ struct Seen {
   std::uint8_t vel;
   float value;  // Param events only
   std::uint16_t param;
+  std::uint8_t flags;  // notes: Vocoder::kNoteLocal when the app sent them
 };
 
 // An instrument that writes down every note and CarSrc event it is given, with the sample it lands on.
@@ -54,7 +55,7 @@ class Spy final : public dsp::Unit {
       if (e.kind == dsp::EventKind::Param && (!mine || block_ == 0)) {
         continue;  // block 0 carries the engine's stored values, not the hook's events
       }
-      seen.push_back({block_ * kBlock + e.frame, e.kind, e.note, e.velocity, e.value, e.param});
+      seen.push_back({block_ * kBlock + e.frame, e.kind, e.note, e.velocity, e.value, e.param, e.flags});
     }
     ++block_;
     for (std::uint32_t i = 0; i < a.frames; ++i) {
@@ -416,6 +417,12 @@ TEST_CASE("step hook: NOTE, CARRIER and LEVEL lanes land on the step's frame, th
   REQUIRE(on.size() == 4);  // step 0's note, then step 2's three
   CHECK(on[0].note == 60);
   CHECK(on[0].vel == 90);  // LEVEL is the velocity
+  for (const Seen& s : on) {
+    CHECK(s.flags == Vocoder::kNoteLocal);  // the unit tells the hook's notes from a MIDI key by this mark
+  }
+  for (const Seen& s : off) {
+    CHECK(s.flags == Vocoder::kNoteLocal);
+  }
   CHECK(on[0].at == kBlock);
   std::uint8_t want[kChordMaxNotes] = {};
   REQUIRE(step_notes(chord_step(60, ChordKind::Triad, Voicing::Close), 0, 0, want, nullptr) == 3);

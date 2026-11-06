@@ -94,6 +94,17 @@
 
 namespace o3_voc03er {
 
+// The slices of the SPEAKS slot (U6c, M2): `start` already counts from the start of the bank (what the Start parameter takes), `len` in samples.
+// `source` = reader | count << 8, 0 for none: one word, so a reader never meets another's count. The main loop is the single writer (StepSeq::
+// slices_open stores source 0 with release, rewrites the words, slices_close stores source with release); the step sequencer's hook and the unit
+// load it with acquire. Plain words (no std::atomic) so that `SampleData{}` keeps working. Lives in the SDRAM (O3SDK_BIG).
+inline constexpr unsigned kSliceMax = 24;
+struct SliceMap {
+  std::uint32_t start[kSliceMax];
+  std::uint32_t len[kSliceMax];
+  std::uint32_t source;
+};
+
 class Vocoder final : public o3sdk::dsp::Unit {
  public:
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
@@ -114,6 +125,20 @@ class Vocoder final : public o3sdk::dsp::Unit {
   static constexpr std::uint16_t region_param(unsigned reader, RegionField f) noexcept {
     return static_cast<std::uint16_t>(R1Start + 3u * reader + static_cast<unsigned>(f));
   }
+
+  // MIDI slices (M2). A unit has one route, so the user's channel arrives as plain NoteOn / NoteOff and the unit tells them from the app's own
+  // senders (pads, the step sequencer, the chord latch) by flags: those carry kNoteLocal on both the NoteOn and the NoteOff (note_off_local).
+  // An unmarked NoteOn of the notes kSliceNoteLow .. kSliceNoteLow + count - 1 fires slice 1 .. count of the published source (bind_slices) on
+  // that source's reader at the note's frame, one shot (the NoteOff does not end it), its velocity the slice's level (100 and up full,
+  // below v * 0.01). Any other note, marked or not, is the carrier's. A fired note never touches held notes, the carrier or the velocity
+  // gain. A reader that is armed or recording refuses the note (it does nothing).
+  static constexpr std::uint8_t kNoteLocal = 1u << 7;  // the kit uses bits 0 and 1 of flags
+  static constexpr unsigned kSliceNoteLow = 36;
+  static constexpr o3sdk::dsp::Event note_off_local(std::uint8_t note, std::uint16_t frame = 0) noexcept {
+    return o3sdk::dsp::Event{frame, o3sdk::dsp::EventKind::NoteOff, note, 0u, kNoteLocal, 0u, 0.0f};
+  }
+  // Main loop, before the engine starts: the map the unit reads `source` of (its address never moves); null: no MIDI slices.
+  void bind_slices(const SliceMap* map) noexcept { slices_ = map; }
 
   // What a loop is doing, for the screen and the console: written by the render context once a block, read by the main loop (one atomic
   // word per loop, so a read is never torn).
@@ -155,6 +180,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
 
  private:
   void apply(const o3sdk::dsp::Event& e) noexcept;
+  bool midi_slice_on(const o3sdk::dsp::Event& e) noexcept;
   void set(std::uint16_t id, float v) noexcept;
   void loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
   void region_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
@@ -245,6 +271,8 @@ class Vocoder final : public o3sdk::dsp::Unit {
   Retarget pend_[8];
   unsigned npend_ = 0;
   Slot slot_[Loop::kCount];
+  const SliceMap* slices_ = nullptr;  // bound once; `source` is read with acquire (see SliceMap)
+  std::uint32_t midi_fired_ = 0;      // render context only: bit (note - kSliceNoteLow) of the MIDI notes that fired a slice (their NoteOff is theirs)
   std::atomic<std::uint32_t> opts_[Loop::kCount] = {};    // packed speed | reverse << 2 | (level in half dB + 64) << 8, same protocol
   std::atomic<std::uint32_t> status_[Loop::kCount] = {};  // packed LoopStatus: single writer (the render context), word-sized reads
   std::atomic<std::uint32_t> pos_[Loop::kCount] = {};     // LoopStatus::position: same protocol

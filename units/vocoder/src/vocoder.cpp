@@ -321,10 +321,36 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
   }
 }
 
+// An unmarked NoteOn in the slice range fires a slice of the published source at e.frame (see kNoteLocal). Returns true when the note was
+// taken, fired or refused, so it never reaches the carrier; false when it is the carrier's.
+bool Vocoder::midi_slice_on(const o3sdk::dsp::Event& e) noexcept {
+  if (slices_ == nullptr || (e.flags & kNoteLocal) != 0u || e.note < kSliceNoteLow) {
+    return false;
+  }
+  const std::uint32_t src = __atomic_load_n(&slices_->source, __ATOMIC_ACQUIRE);
+  const unsigned idx = e.note - kSliceNoteLow;
+  const unsigned count = (src >> 8) & 0xFFu;
+  const unsigned rd = src & 0xFFu;
+  if (idx >= count || idx >= kSliceMax || rd >= Loop::kCount || !loops_.bound()) {
+    return false;
+  }
+  midi_fired_ |= 1u << idx;  // its NoteOff is the slice's, even when the slot refuses (a stuck carrier note cannot follow)
+  if (slot_[rd].rec != Slot::Rec::Idle) {
+    return true;
+  }
+  loops_.set_region_start(rd, slices_->start[idx]);
+  loops_.set_region_len(rd, slices_->len[idx]);
+  (void)loops_.trig_region(rd, e.frame, e.velocity >= 100u ? std::uint8_t{100} : e.velocity);
+  return true;
+}
+
 void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
   using o3sdk::dsp::EventKind;
   switch (e.kind) {
     case EventKind::NoteOn: {
+      if (midi_slice_on(e)) {
+        break;
+      }
       // The last note sets the synth's level (one gain: a chord step shares its velocity). 100 and up is the full level, so pads and
       // old patterns are unchanged, and it costs nothing a sample: the gain is the synth_gain_ ramp that is there anyway.
       const float vg = e.velocity >= 100u ? 1.0f : static_cast<float>(e.velocity) * 0.01f;
@@ -342,6 +368,10 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       break;
     }
     case EventKind::NoteOff:
+      if ((e.flags & kNoteLocal) == 0u && e.note >= kSliceNoteLow && e.note - kSliceNoteLow < 32u && (midi_fired_ & (1u << (e.note - kSliceNoteLow))) != 0u) {
+        midi_fired_ &= ~(1u << (e.note - kSliceNoteLow));  // a fired slice is one shot: its key's release is not the carrier's
+        break;
+      }
       held_remove(e.note);
       if (arp_ == 0u) {
         carrier_.note_off(e.note);
@@ -363,6 +393,7 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       }
       break;
     case EventKind::AllNotesOff:
+      midi_fired_ = 0;
       carrier_.all_notes_off();
       nheld_ = 0;
       arp_note_ = 0xFFu;
