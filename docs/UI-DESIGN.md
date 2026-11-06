@@ -273,6 +273,23 @@ WAVS, F8 BACK. A project is one `project.o3a` (the eight patterns, the chain, th
 from, the engine's values) plus the slots' WAVs saved on request (4 x 1.4 MB at most; on a slow card about 17 s a slot, the strip shows it). A load
 reads the `.o3a`, then the WAVs it names from the project folder, one job after another, a slot greyed until its file has landed.
 
+Format (U9c1, `app/include/o3_voc03er/project.h`, `tests/project_test.cpp`): the kit's chunk container, type `VOCP`, big-endian, CRC-32 trailer. One chunk per
+kind of data, each starting with its u16 version (major in the high byte, all 1.0 today); a newer major is refused, a newer minor is read as far as it is known,
+an unknown chunk is skipped, a missing chunk leaves that part at its defaults. A damaged file (CRC, cut short, a bad length, a value out of range, a chunk twice)
+is refused whole and the app's state is untouched. The CRC does not cover the minor byte of its own chunk's version; changing it changes no data.
+
+| Chunk | Version | Holds |
+|-------|---------|-------|
+| `PTNS` | 1.0 | the eight patterns: length and 16 packed steps each, each record with its own length |
+| `CHAI` | 1.0 | the SONG chain: up to 16 (pattern, repeats 1..64) and LOOP CHAIN |
+| `ROUT` | 1.0 | speaks, sounds, live source (absent: the default route) |
+| `SLOT` | 1.0 | per slot: length, cuts, trim, speed, reverse, level (half-dB), the WAV's file name (31 characters at most) |
+| `VALU` | 1.0 | the engine's state as (id, value) pairs, by `Vocoder::Param` id |
+
+Left out of `VALU`, as actions or as state another chunk owns: Freeze (9), the loops' Rec, Play and Role (10..21), their Speed, Dir and Level (22..33; in `SLOT`),
+CarSrc and ModSrc (34, 47; in `ROUT`), the R n Start, Len and Trig (49..60), Load (61). The largest file is 2008 bytes (`kProjectFileMax` is 2560).
+Not in the file: the WAV data, the octave, tempo and swing, the current pattern and cursor, the chord kind and the pads' mode.
+
 ### SONG (U9)
 
 The chain: up to 16 entries of a pattern letter and a repeat count, a row each; F1 ADD, F2 REPEATS, F3 LOOP CHAIN, F8 BACK; PLAY plays the chain
