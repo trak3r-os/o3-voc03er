@@ -338,6 +338,16 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
 - **BND- and BND+ (KEYS, row 0).** While held, the local bend grows linearly to -BEND RANGE or +BEND RANGE in 400 ms (the main loop's `uptime_ms`, written only when it changes); on release it returns to 0 through the unit's ramp. The last pressed of these and the strip wins. It sums with the MIDI wheel (clamped +-12).
 - **MOD (KEYS, col 9) and `Vib` (id 43).** The unit adds a vibrato to the bend: about 5.5 Hz, +-0.5 semitone at depth 1. At Vib 0 the output is bit-identical to Bend 0 and the phase resets. Held, the MOD pad raises the depth linearly to 1 in 400 ms; released, it falls to 0 in 400 ms. MIDI CC1 writes Vib too (when it is not learned): the larger of the pad's and the wheel's depth wins.
 
+### Pad ideas, proposed and not decided
+
+Offered to the maintainer on 2026-11-06, none built. The maintainer wants few pad modes, so F7 PADS stays CHORDS or KEYS until one of these is chosen, and each may fit better as an option or a row than as a third value.
+
+- **SCALE.** Only the notes of KEY and SCALE on the pads. A change of pad map, nearly free.
+- **STACK.** A pad turns its note on or off and it stays, so a chord is built note by note with the hands free for the microphone.
+- **VOICE.** The carrier plays the sung note and a pad adds an interval over it, snapped to the scale. It needs TUNE's pitch detector running beside BANDS: about 4 to 5 points of CPU [est, TUNE 45.3 % against 40.9 % idle], which takes BANDS 8 from 57.3 % to about 62 %, past the 60 % budget. Its own slice, after measuring the cost and the detector's delay on the unit.
+
+Still empty on KEYS: row 4 with BEND ROW off (a chord row for the left hand is one idea), and the gap pads of row 1.
+
 ## 7c. MIDI in
 
 Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns played from MIDI in, pitch bend included, so that the machine can sequence what it recorded, from an outside sequencer or from its own PATTERN.

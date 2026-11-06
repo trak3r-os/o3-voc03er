@@ -292,7 +292,7 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
     }
   }
   std::uint16_t hot_cols = 0;
-  for (unsigned p = 0; p < 48; ++p) {
+  for (unsigned p = 0; pads.column_in_scale_known && p < 48; ++p) {  // a column is a root only on a chord page: on KEYS it means nothing
     if (((pads.held >> p) & 1u) != 0 || static_cast<int>(p) == pads.latched) {
       hot_cols = static_cast<std::uint16_t>(hot_cols | (1u << (p % 12u)));
     }

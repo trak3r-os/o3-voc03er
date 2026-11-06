@@ -118,7 +118,6 @@ class PerformScreen final : public o3sdk::app::Screen {
   std::uint64_t held_ = 0;   // the pads this screen holds notes for (bit pad)
   std::uint32_t label_sig_ = 0xFFFFFFFFu;  // what the labels were built for
   std::uint32_t frame_ = 0;
-  mutable o3sdk::app::HelpPadNames help_names_ = {};
   mutable o3sdk::app::HelpPadGroup help_groups_[5] = {};
 };
 

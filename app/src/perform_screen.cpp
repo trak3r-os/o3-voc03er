@@ -41,6 +41,7 @@ struct PerformData {
   std::uint8_t out_level, out_peak, out_age;
 };
 O3SDK_BIG PerformData g_pd = {};
+O3SDK_BIG app::HelpPadNames g_help_names = {};  // help(): valid while HELP is open
 
 // Attack at once, release by a quarter of the distance; a peak holds for kPeakHoldFrames, then falls two a frame.
 void follow(std::uint8_t raw, std::uint8_t& level, std::uint8_t& peak, std::uint8_t& age) noexcept {
@@ -895,27 +896,27 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       pl::strip_label(pl::strip_semitone(app::pad_col(pad)), lbl);
       std::size_t n = 0;
       while (lbl[n] != '\0' && n < app::kHelpPadLabel) {
-        help_names_[pad][n] = lbl[n];
+        g_help_names[pad][n] = lbl[n];
         ++n;
       }
-      help_names_[pad][n] = '\0';
-      h.pad_label[pad] = help_names_[pad];
+      g_help_names[pad][n] = '\0';
+      h.pad_label[pad] = g_help_names[pad];
       h.pad_group[pad] = 4;
     } else if (keys_) {
       const pl::PianoPad pp = pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_);
       const int note = pl::piano_note(pp, octave_);
       if (note >= 0) {
         h.pad_group[pad] = pp.fn == pl::PianoFn::White ? 1 : 2;
-        (void)app::help_pad_note(h, help_names_, pad, note);
+        (void)app::help_pad_note(h, g_help_names, pad, note);
       } else if (pp.fn != pl::PianoFn::None) {
         const char* nm = pl::kControlName[app::pad_col(pad)];
         std::size_t n = 0;
         while (nm[n] != '\0') {
-          help_names_[pad][n] = nm[n];
+          g_help_names[pad][n] = nm[n];
           ++n;
         }
-        help_names_[pad][n] = '\0';
-        h.pad_label[pad] = help_names_[pad];
+        g_help_names[pad][n] = '\0';
+        h.pad_label[pad] = g_help_names[pad];
         h.pad_group[pad] = 3;
       }
     } else {
@@ -933,11 +934,11 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
         } else if (ch >= 'a' && ch <= 'z') {
           ch = static_cast<char>(ch - 'a' + 'A');
         }
-        help_names_[pad][n] = ch;
+        g_help_names[pad][n] = ch;
         ++n;
       }
-      help_names_[pad][n] = '\0';
-      h.pad_label[pad] = help_names_[pad];
+      g_help_names[pad][n] = '\0';
+      h.pad_label[pad] = g_help_names[pad];
     }
   }
 }

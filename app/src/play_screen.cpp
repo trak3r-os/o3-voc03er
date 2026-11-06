@@ -7,6 +7,7 @@
 #include <o3sdk/app/audio_in.h>
 #include <o3sdk/app/context.h>
 #include <o3sdk/app/widgets.h>
+#include <o3sdk/core/placement.h>
 
 #include <cstddef>
 
@@ -19,6 +20,8 @@ using ui::Face;
 using ui::Rect;
 
 namespace {
+
+O3SDK_BIG app::HelpPadNames g_help_names = {};  // help(): valid while HELP is open
 
 // "C#4" for a MIDI note (60 is C4), into `out`; a rest is "-".
 void note_name(int note, char (&out)[5]) noexcept {
@@ -408,7 +411,7 @@ void PlayScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       continue;
     }
     h.pad_group[pad] = is_natural(note) ? 1 : 2;
-    (void)app::help_pad_note(h, help_names_, pad, note);  // "C3", "F#4": 60 is C4, as the screen's own names
+    (void)app::help_pad_note(h, g_help_names, pad, note);  // "C3", "F#4": 60 is C4, as the screen's own names
   }
 }
 

@@ -57,7 +57,6 @@ class PlayScreen final : public o3sdk::app::Screen {
   int octave_ = 0;
   Pattern pattern_;
   const char* note_ = nullptr;
-  mutable o3sdk::app::HelpPadNames help_names_ = {};  // help(): the pads' labels ("C3", "F#4"), which move with the octave; Screen::help() is const
   int held_[o3sdk::app::kPadCount] = {};  // the note each held pad started (-1: none), so the release names it even after an octave shift
 };
 
