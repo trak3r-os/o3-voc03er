@@ -59,6 +59,9 @@ class Bands {
   void set_thru(float level) noexcept;
   void set_noise_source(NoiseSource* src) noexcept { noise_src_ = src; }  // null: the bands' own
   float unvoiced() const noexcept { return uv_; }  // 0..1, the noise mix now
+  // The AGC's level, so a change of MODE hands it over: the engine coming in starts on what the one going out knows of the input.
+  float agc_level() const noexcept { return level_; }
+  void adopt_level(float level) noexcept;
   // Test seam: every follower holds `level` (coefficients 0), so the synthesis bands alone can be swept. Not for the unit.
   void hold_envelopes(float level) noexcept;
 

@@ -106,7 +106,7 @@ constexpr float kGateEdgeMs = 2.0f;   // the soft edges of GATE
 constexpr float kHalfBeats[4] = {0.5f, 0.25f, 0.125f, 0.0625f};  // half a step in beats for 1/4, 1/8, 1/16, 1/32
 constexpr float kModeFadeMs = 10.0f;  // crossfade between the modes
 constexpr float kTuneGain = 1.0f;     // Tune returns the voice itself: unity
-constexpr float kTalkGain = 1.0f;     // Talk's output is a carrier-level signal shaped by the modulator's rms; not tuned (needs the unit's ears)
+constexpr float kTalkGain = 28.0f;    // speech on a one-note saw has the rms in TALK that it has in BANDS, so a change of MODE keeps the level (bench, docs/ENGINE-REALISM.md); by ear on the unit
 constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC holds at a mean-abs of 0.1, and each band passes a slice of the carrier: a vowel on a three-note saw chord peaks at about 0.9 at LEVEL 0 dB (0.47 at the default -6)
 
 // Cubic soft clip: linear near 0, flat at +-1.5 where it reaches 0.999: the peak never goes above it.
@@ -256,9 +256,16 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
         if (t == r.target_value()) continue;
         if (t > 0.5f && r.value() <= 0.0f) {
           // The mode was not running: what it remembers is stale.
-          if (i == 0u) bands_.restart();
-          else if (i == 1u) talk_.reset();
-          else tune_.reset();
+          const float lvl = talk_mix_.value() > 0.0f ? talk_.agc_level() : bands_.agc_level();  // from the engine that has been hearing the input
+          if (i == 0u) {
+            bands_.restart();
+            bands_.adopt_level(lvl);
+          } else if (i == 1u) {
+            talk_.reset();
+            talk_.adopt_level(lvl);
+          } else {
+            tune_.reset();
+          }
         }
         r.target(t);
       }

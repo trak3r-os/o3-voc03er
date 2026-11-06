@@ -1,0 +1,138 @@
+# Engine realism: BANDS and TALK
+
+What makes the two engines sound real, what was wrong with them, and what changed. The sources are in `docs/ports/engine-realism-research.md`; this file is the analysis and the decisions.
+
+## How it was measured
+
+Everything here is a host measurement. None of it has been heard on a unit, and the CPU figures are estimates until the unit reads them.
+
+- **Input.** A synthetic voice (flite, 7.8 s of speech) as the modulator and a 110 Hz saw as the carrier. Vowels with known formants at f0 120 Hz for the shape error.
+- **Engines.** The real `bands.cpp` and `talk.cpp` run over the files, through a small bench. Prototypes are double precision and are labelled.
+- **Intelligibility.** `STOI~` is an approximation of STOI: envelope correlation in 15 third-octave bands from 150 Hz to 4.3 kHz. It is good for comparing engines against each other and says nothing about 5 kHz and up.
+- **Lag.** The shift that gives the best `STOI~`, scanned in 1.4 ms steps. It is the delay of the envelope, not only of the signal.
+- **Shape.** RMS error in dB of the output over the carrier at each harmonic, against the true formant filter, with the tilt fitted out.
+- **Spectrum.** Long-term spectrum in seven bands from 250 Hz to 11 kHz, each in dB below the loudest band, against the voice's own.
+
+The voice is synthetic and the metric is ours, so the numbers rank changes. They do not prove that a person hears a real vocoder.
+
+## What the machines do
+
+From the research, in the order it matters here:
+
+1. **A channel vocoder keeps the voice's dynamics.** Hardware passes the envelopes through; compression, where it exists, is a separate input stage with a stated range (20 dB on the EH-0300).
+2. **The edges are treated apart.** Hardware gives the top a separate path: a wide HF channel switched on sibilance (Bode 7702), noise-only top bands (VC-10, unverified), high-pass and low-pass edge filters (EMS, A-129).
+3. **Followers scale with the band.** The EMS smooths in proportion to centre frequency. BANDS already grades its followers that way.
+4. **Sixteen bands is for naturalness, not intelligibility.** Sentences survive on 4 to 8 bands; speech importance sits between 500 Hz and 4 kHz.
+5. **In a talkbox the mouth adds formants and lip radiation, not a voice's source.** The carrier's spectrum stays. Consonants that rely on breath cannot go down the tube: the microphone hears the player's own air. The tube is a mild comb, not a vowel filter. These are inferences from physics and from electrolarynx work: **no measured talkbox spectrum was found**.
+6. **LPC needs one pole pair per kHz of bandwidth.** Full rate at order 16 gives 8 pole pairs over 22 kHz. mda Talkbox analyses at fs/2 for this reason.
+
+## BANDS
+
+**The filters were never the problem.** A prototype without the polarity flip of `syn_gain_` suggested that an 8-pole carrier path was worth 0.09 of `STOI~`. A model of the real topology, with the flip, shows no such gain:
+
+| Model of the real topology | Sum ripple | STOI~ | Shape |
+|---|---|---|---|
+| Today: 2 sections Q 2.3 on both paths | 1.4 dB | 0.865 | 11.3 dB |
+| Carrier 4 sections Q 1.6 | 1.1 dB | 0.854 | 11.5 dB |
+| Carrier 4 sections Q 1.3 | 0.3 dB | 0.855 | 11.5 dB |
+| Carrier 3 sections Q 1.8 | 0.6 dB | 0.859 | 11.4 dB |
+
+The same model came out at 0.865 while the real engine measured 0.756, and the gap is two constants:
+
+| Real `bands.cpp` | STOI~ | Lag | HF vs voice |
+|---|---|---|---|
+| Today | 0.756 | 5.4 ms | +9.4 dB |
+| No noise path | 0.785 | 5.4 ms | -1.3 dB |
+| No noise path, no AGC | 0.866 | 13.6 ms | -7.4 dB |
+| Noise 0.12, AGC 50/500 ms | 0.860 | 10.9 ms | -4.4 dB |
+| Noise 0.18, AGC 50/500 ms, followers 1/15/25 ms | 0.866 | 6.8 ms | -2.7 dB |
+
+- **The AGC was a compressor.** With a 5 ms attack and a 100 ms release it followed syllables and flattened the very envelopes the bands carry. At 50/500 ms it levels a singer, not a word. Today's 5.4 ms lag is not a virtue: it comes from the AGC lifting onsets.
+- **The noise path was 20 dB too loud** in the long-term spectrum. At 0.18 it sits within about 4 dB of the voice from 250 Hz to 8 kHz.
+- **Faster followers** (1/15/25 ms against 2/25/40 ms) take the lag down by 4 ms. The price is more ripple at the voice's pitch: 3.8 dB against 2.2 dB at band 11 on a steady vowel. 1/10/20 ms reaches 5.9 dB and is rejected.
+
+Cost: none. Output rms stays where it was and peaks fall from 5.2 to 3.0 before the soft clip.
+
+The AGC's slower release has a price: from a reset, a voice 10 dB under the target takes about 0.6 s to reach full gain, and the gain stays up for about a second after a phrase ends.
+
+**Tried and rejected on BANDS:**
+
+| Idea | Result |
+|---|---|
+| Mel spacing | Worse than the log spacing in the prototype (0.768 against 0.794) |
+| 2-pole follower | No gain, more lag |
+| Output tilt of -3 or -6 dB | Worse |
+| 20 or 24 bands | +0.014, +0.022 of `STOI~` for 25 % or 50 % more band work, and the View and PERFORM assume 16 |
+| Sharper carrier sections | No gain (above) |
+
+**Kept for later:** a third section on the modulator path takes shape error from 11.3 to 9.3 dB and tilt from +8.0 to +5.2 dB/oct, at 25 % more filter work [est]. BANDS is already over the 60 % budget with 8 notes and 4 loops, so this would need paying for first, by running the lowest bands at fs/4 or fs/8 between more halfbands. That rewrite was estimated at about a third less band work, and has not been built.
+
+## TALK
+
+Three separate causes, each one measured.
+
+**Too little resolution.** Order 16 at 44.1 kHz spreads 8 pole pairs over 22 kHz. At fs/4 the same work sits where the formants are: pole error on known vowels falls from 162/305/164 Hz (F1/F2/F3, full rate, order 16) to 12/23/30 Hz (fs/4, order 12). Order 14 at this rate starts fitting harmonics.
+
+**Too much delay.** The window was 17.4 ms with a hop of 8.7 ms, and the analysis was spread over the next hop, so the coefficients started moving 8.7 ms after the window closed. A short hop and a window that leans towards its newest samples take lag from 27 ms to about 13 ms.
+
+**Too dull.** The all-pole filter keeps the voice's tilt, and the saw carries its own: 15 dB too little at 4 to 8 kHz. A first difference on the carrier brings the 2 to 5 kHz region level with the voice. It was 0.4 in the prototype and is 0.2 in the engine, because the AGC below lifts quiet consonants by itself.
+
+**No consonants.** Nothing above 5.5 kHz can come from a carrier at fs/4, and in a real talkbox it does not come from the tube anyway. The breath path adds the modulator's own air above 5 kHz, gated by the carrier, so it stops when the carrier stops. THRU now scales it in TALK as well (`0.5 + 0.5 x THRU`).
+
+| Prototype, real halfbands | STOI~ | Lag | Shape | HF vs voice |
+|---|---|---|---|---|
+| Real `talk.cpp` today, order 16 | 0.843 | 27.2 ms | 12.5 dB | -16.0 dB |
+| Real `talk.cpp` today, order 24 | 0.861 | 25.9 ms | 12.2 dB | -16.8 dB |
+| fs/4, order 12, hop 5.8 ms | 0.912 | 15.0 ms | 9.9 dB | -5.1 dB |
+| fs/4, order 12, hop 2.9 ms | 0.913 | 12.2 ms | 9.9 dB | -5.1 dB |
+| + carrier difference 0.4, breath 0.5 at 5 kHz (hop 5.8 ms) | 0.911 | 15.0 ms | 10.3 dB | +0.9 dB |
+
+Cost [est]: about 5,800 cycles a block by the count in `talk.h`, against 16,600, and 10 KiB back in SRAM_U (the margin went from 296 B to about 10,500 B). The lattice runs on 16 samples a block instead of 64; the halfbands and the breath filter cost less than that saves.
+
+**Level.** TALK had no AGC and `kTalkGain` was a placeholder, so a change of MODE fell 15 dB on a tone and about 27 dB on speech: at the default LEVEL, speech in TALK came out at about -40 dBFS. TALK now shares BANDS' slow AGC (`agc.h`), and `kTalkGain` is 28, set so speech on a one-note saw has the same rms in both modes. In `vocoder.txt` the same chord reads 0.27 in BANDS and 0.26 in TALK. A change of MODE hands the AGC's level to the engine coming in; without that, a hot input came in about 20 dB too loud until the follower caught up. From silence the filter now lands at once, so a phrase starts on its formants and not on a glide from flat.
+
+Quality keeps its id and range. The order is `Quality x 3 / 4`, so the default 16 gives 12 and 24 gives 18.
+
+**Tried and rejected on TALK:**
+
+| Idea | Result |
+|---|---|
+| Removing mda's allpass spread alone | Nothing either way (0.498 against 0.499 before lag was compensated): it was dropped as dead weight, not as a fix |
+| Fast gain follower, 1/12 ms | 0.862 against 0.912: it adds amplitude modulation at the voice's pitch |
+| Hiss by the modulator's HF envelope | 0.890, shape 13.4 dB, and fills 8 to 11 kHz where a voice has nothing |
+| Carrier HF by a follower | 0.909, shape 11.4 dB, and a much weaker result at 5.6 to 8 kHz than the breath path |
+| Warped LPC, true envelope, pitch-adaptive window | Over budget by the research's estimate; not tried |
+
+**Not built, for lack of evidence:** a driver's saturation (drive 2: no measured change), a 150 Hz cut (no measured change), the tube's comb at 10.5 ms (+2.6 dB around 500 Hz to 1 kHz, not checkable). They are cheap. With no talkbox spectrum to aim at they would be guesses, so they wait for the maintainer's ear or for a real recording to measure against.
+
+## Result on the real code
+
+Flite speech on a 110 Hz saw, the real code at `Quality` 16 for TALK.
+
+| Engine | STOI~ | Lag | Shape | HF vs voice |
+|---|---|---|---|---|
+| BANDS before | 0.756 | 5.4 ms | 11.5 dB | +9.4 dB |
+| **BANDS now** | **0.866** | **6.8 ms** | 11.5 dB | **-2.7 dB** |
+| TALK before | 0.843 | 27.2 ms | 12.5 dB | -16.0 dB |
+| **TALK now** | **0.903** | **13.6 ms** | **10.2 dB** | **+0.6 dB** |
+
+`Quality` 8 gives 0.870 and `Quality` 24 gives 0.921, both at about the same lag.
+
+Long-term spectrum, dB below the loudest band:
+
+| Band (Hz) | 250-500 | 500-1k | 1k-2k | 2k-4k | 4k-5.6k | 5.6k-8k | 8k-11k |
+|---|---|---|---|---|---|---|---|
+| Voice | 0 | -3.8 | -15.5 | -24.3 | -24.8 | -23.6 | -64.1 |
+| BANDS before | 0 | -5.7 | -19.1 | -13.5 | -7.5 | -7.3 | -15.9 |
+| BANDS now | 0 | -5.3 | -18.6 | -24.5 | -20.5 | -20.9 | -29.6 |
+| TALK before | 0 | -10.4 | -24.7 | -36.9 | -38.5 | -36.5 | -68.8 |
+| TALK now | 0 | -5.2 | -17.5 | -23.4 | -21.3 | -26.0 | -65.8 |
+
+BANDS keeps more above 8 kHz than a voice has, because its noise goes in whatever the voice's band edge is. That is a vocoder's character and was left alone.
+
+## Owed
+
+- CPU on the unit, in every row the budget depends on: BANDS is unchanged by design; TALK should fall.
+- Levels by ear, since a slower AGC lets a phrase's dynamics through to the soft clip, and `kTalkGain` is a bench figure.
+- By ear: follower speed, breath level against a real microphone, hop-rate zipper noise on fast vowels.
+- A real talkbox recording, if one can be had for measuring. It would settle the driver, the tube and the top of the spectrum.

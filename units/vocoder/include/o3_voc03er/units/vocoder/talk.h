@@ -10,7 +10,8 @@
 // decimators (halfband.h, as Bands uses them), the lattice's output through two halfband interpolators back to fs. A voice's formants lie
 // under 5 kHz, and at this rate a window of 256 samples is 23.2 ms and the lattice order that models them is 12 (Quality 16), not 16.
 //
-// Streaming: the lattice runs on every carrier sample, so the carrier is NOT delayed (mda filters a captured window and overlap-adds).
+// Streaming: the lattice runs on every low-rate carrier sample, so the carrier is delayed only by the halfbands, about 9 samples (mda filters
+// a captured window and overlap-adds).
 // The analysis only moves coefficients: every kHop = 32 low-rate samples (2.9 ms = 128 frames; counted in low-rate samples, so any frame
 // count works, and a process() call may produce none) it reads the last kWin = 256 pre-emphasised (0.9) modulator samples from a ring of
 // 512 floats (>= window + hop, so the window is stable while samples keep arriving). The window is asymmetric, sin^2 over the first 80 %
@@ -18,12 +19,16 @@
 // hop by a cursor (a share per low-rate sample), Levinson-Durbin runs at the end of the hop. The coefficients ramp linearly over the hop,
 // one step per low-rate sample, in the reflection domain (stable while |k| < 1), never in direct form.
 //
-// The carrier gets a first difference (c - 0.4 c[-1]) before the lattice, which lifts its highs so the vowel's upper formants are not
+// The carrier gets a first difference (c - 0.2 c[-1]) before the lattice, which lifts its highs so the vowel's upper formants are not
 // buried under the saw's own tilt.
 //
 // Breath: a real talkbox gets its sibilants from the mouth's own air. The modulator at full rate through a 2nd-order Butterworth
 // high-pass at 5 kHz is added to the output, scaled by kBreath x (0.5 + 0.5 x thru) x open. `open` follows the carrier (1 while its
 // peak over a call exceeds 1e-3, a linear ramp of 5 ms), so with no carrier sounding there is no breath.
+//
+// Level: the slow AGC Bands has (agc.h), measured on the decimated modulator, scales the lattice's gain at each publish and the breath, so a
+// quiet microphone and a hot line sound alike and a change of MODE keeps the level. level_ survives reset(), as in Bands::restart, and a
+// change of MODE hands it over (adopt_level): without that a hot input came in 20 dB too loud until the follower caught up.
 //
 // Numerics: r0 x 1.0001, Gaussian lag window (60 Hz at the low rate), |k| <= 0.995, silence gate on r0. FREEZE stops k from updating
 // (the gain still follows). Quality 8..24 is the parameter's range; the lattice order is (q x 3 + 2) / 4 (16 gives 12, 8 gives 6,
@@ -61,6 +66,9 @@ class Talk {
   void reset() noexcept;                     // clears the state, keeps the settings (a mode switch into Talk)
   void set_order(std::uint32_t order) noexcept;  // Quality, clamped to 8..24; safe at any moment
   void set_freeze(bool on) noexcept { freeze_ = on; }
+  // The AGC's level, handed over by a change of MODE (see Bands::agc_level).
+  float agc_level() const noexcept { return level_; }
+  void adopt_level(float level) noexcept;
   void set_thru(float level) noexcept { thru_ = level > 1.0f ? 1.0f : (level > 0.0f ? level : 0.0f); }  // 0..1, the breath's strength
 
   // out[i] = the carrier shaped by the modulator's envelope. `n` at most kMaxFrames. out must not alias the inputs.
@@ -119,6 +127,11 @@ class Talk {
   float hp_s1_ = 0.0f, hp_s2_ = 0.0f;
   float open_ = 0.0f, open_step_ = 0.0f;
   float thru_ = 0.0f;
+  float breath_ = 0.0f, breath_step_ = 0.0f;  // the breath's level and its ramp over a hop
+  std::uint32_t breath_pos_ = 0;              // frames into that ramp
+  float agc_ = 1.0f;     // the AGC's gain at the last publish
+  float level_ = 0.1f;   // AGC: mean-abs follower of the decimated modulator
+  float lvl_att_ = 0.0f, lvl_rel_ = 0.0f;
 };
 
 }  // namespace o3_voc03er

@@ -533,6 +533,43 @@ struct Noise {
 
 }  // namespace
 
+TEST_CASE("talk: the AGC keeps the level of a voice 12 dB down, and leaves a noise floor alone") {
+  const auto level = [](float gain) {
+    static Talk t;
+    t.prepare(kFs);
+    Voice v(110.0f);
+    v.set_vowel(kA, 2);
+    Saw saw(100.0f);
+    const auto out = run_talk(t, [&] { return gain * v.next(); }, [&] { return saw.next(); }, 3000, [](std::size_t) {});
+    float s = 0.0f;
+    for (std::size_t i = 2500 * 64; i < out.size(); ++i) s += out[i] * out[i];
+    return std::sqrt(s / static_cast<float>(out.size() - 2500 * 64));
+  };
+  const float loud = level(0.1f);  // a hotter voice meets the AGC's lowest gain
+  const float quiet = level(0.025f);
+  CHECK(loud > 0.0f);
+  CHECK(quiet / loud > 0.8f);  // 12 dB less at the input, within 2 dB at the output
+  CHECK(quiet / loud < 1.25f);
+  const float floor = level(0.00003f);  // under the gate: unity gain, so it stays about 40 dB under the others
+  CHECK(floor < 0.1f * loud);
+}
+
+TEST_CASE("vocoder: a change of MODE keeps the level within 6 dB on a voice and a chord") {
+  static Vocoder vo;
+  vo.prepare(kFs);
+  const std::size_t sw = 2000;
+  const auto out = run_unit(vo, 4000, sw, 1000000);
+  const auto rms = [&](std::size_t from, std::size_t to) {
+    float s = 0.0f;
+    for (std::size_t i = from; i < to; ++i) s += out[i] * out[i];
+    return std::sqrt(s / static_cast<float>(to - from));
+  };
+  const float bands = rms(1500 * 64, sw * 64);
+  const float talk = rms(3500 * 64, 4000 * 64);
+  CHECK(talk / bands > 0.5f);
+  CHECK(talk / bands < 2.0f);
+}
+
 TEST_CASE("talk: the lattice's envelope peaks land within 60 Hz of a known vowel's F1 and F2 at Quality 16") {
   Talk& t = *make_talk();
   t.set_order(16);

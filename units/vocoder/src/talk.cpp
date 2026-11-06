@@ -3,6 +3,7 @@
 // the MIT option; see THIRD_PARTY.md. The code here is original.
 #include <o3_voc03er/units/vocoder/talk.h>
 
+#include <o3_voc03er/units/vocoder/agc.h>
 #include <o3_voc03er/units/vocoder/bands.h>
 
 #include <cmath>
@@ -11,14 +12,14 @@ namespace o3_voc03er {
 
 static_assert(Talk::kWin + Talk::kHop <= Talk::kRing, "the window must stay stable through a hop");
 static_assert((Talk::kRing & (Talk::kRing - 1u)) == 0u, "the ring wraps with a mask");
-static_assert(Talk::kHop * 4u == 128u, "a hop is 128 frames (2.9 ms)");
+static_assert(Talk::kHop * 4u == 128u, "a hop is 128 frames (2.9 ms), a power of 2: the breath's counter wraps with a mask");
 static_assert(Talk::stages_for(Talk::kMaxOrder) == Talk::kMaxStages, "the arrays hold the highest Quality's lattice");
 static_assert(Talk::stages_for(Talk::kMinOrder) >= 1u, "at least one stage");
 static_assert(alignof(Talk) >= 8u, "the buffers are alignas(8)");
 
 namespace {
 constexpr float kPreEmph = 0.9f;
-constexpr float kCarEmph = 0.4f;        // first difference of the carrier: c - 0.4 c[-1]
+constexpr float kCarEmph = 0.2f;        // first difference of the carrier: c - 0.2 c[-1]
 constexpr float kR0Boost = 1.0001f;
 constexpr float kLagHz = 60.0f;
 // Mean power of the pre-emphasised, decimated modulator below which the analysis calls it silence. The old gate was 1e-9 (-90 dB) at full
@@ -28,8 +29,8 @@ constexpr float kTiny = 1.0e-15f;
 constexpr float kErrFloor = 1.0e-7f;  // of r0: about float's resolution, below it Levinson's error is rounding
 constexpr float kPi2 = 6.2831853f;
 constexpr float kWinRise = 0.8f;        // the window rises over this part (sin^2) and falls over the rest (cos^2)
-constexpr float kGainK = 2.307f;          // level constant on the gain: sets TALK's overall level (calibrated on the bench, see the report)
-constexpr float kBreath = 0.36f;         // the breath's level against the modulator's high band
+constexpr float kGainK = 2.307f;          // the lattice's level against the breath: fixes their balance (docs/ENGINE-REALISM.md)
+constexpr float kBreath = 0.3f;         // the breath's level against the modulator's high band
 constexpr float kBreathHz = 5000.0f;
 constexpr float kOpenPeak = 1.0e-3f;    // the carrier's peak over a call above which the breath is open
 constexpr float kOpenMs = 5.0f;
@@ -68,6 +69,9 @@ void Talk::prepare(float sample_rate) noexcept {
   hp_a1_ = -2.0f * cw / a0;
   hp_a2_ = (1.0f - al) / a0;
   open_step_ = 1.0f / (kOpenMs * 0.001f * sample_rate);
+  lvl_att_ = 1.0f - std::exp(-1000.0f / (kAgcAttackMs * fl));
+  lvl_rel_ = 1.0f - std::exp(-1000.0f / (kAgcReleaseMs * fl));
+  level_ = kAgcTarget;  // starts at the target: unity gain, no blast at the first loud sample
   reset();
 }
 
@@ -91,8 +95,15 @@ void Talk::reset() noexcept {
   stage_ = cpos_ = lag_ = total_ = done_ = ramp_left_ = 0;
   acc_ = emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
   hp_s1_ = hp_s2_ = 0.0f;
-  open_ = 0.0f;
+  open_ = breath_ = breath_step_ = 0.0f;
+  breath_pos_ = 0;
+  agc_ = agc_gain(level_);  // level_ stays: its estimate of the input beats unity gain after a pause, as in Bands::restart
   macs_last_ = 0;
+}
+
+void Talk::adopt_level(float level) noexcept {
+  level_ = level;
+  agc_ = agc_gain(level);
 }
 
 void Talk::set_order(std::uint32_t order) noexcept {
@@ -178,8 +189,9 @@ void Talk::publish() noexcept {
     const std::uint32_t q = p < ord ? p : ord;
     for (std::uint32_t m = 1; m <= q; ++m) err *= 1.0f - kt_[m] * kt_[m];
   }
+  agc_ = agc_gain(level_);
   if (!silent) {
-    gain_t_ = kGainK * std::sqrt((err > 0.0f ? err : 0.0f) / sumw2_);
+    gain_t_ = kGainK * agc_ * std::sqrt((err > 0.0f ? err : 0.0f) / sumw2_);
   } else {
     gain_t_ = 0.0f;
   }
@@ -192,6 +204,9 @@ void Talk::publish() noexcept {
   }
   tgt_order_ = use;
   run_ = prev_run > use ? prev_run : use;
+  if (gain_ == 0.0f) {  // from silence nothing sounds yet, so the filter lands at once: a phrase starts on its formants, with no glide from flat
+    for (std::uint32_t m = 1; m <= kMaxStages; ++m) k_[m] = kt_[m];
+  }
   ramp_left_ = kHop;
   const float inv = 1.0f / static_cast<float>(kHop);
   for (std::uint32_t m = 1; m <= kMaxStages; ++m) dk_[m] = (kt_[m] - k_[m]) * inv;
@@ -217,6 +232,8 @@ void Talk::tick(float m, float c, float& y) noexcept {
   ring_[wpos_ & (kRing - 1u)] = m - kPreEmph * emph_prev_;
   emph_prev_ = m;
   ++wpos_;
+  const float am = m < 0.0f ? -m : m;
+  level_ += (am - level_) * (am > level_ ? lvl_att_ : lvl_rel_);
   if (filled_ < kRing) ++filled_;
   if (analysing_) {
     // an even share of the work a sample: the cumulative target is total x (pos + 1) / kHop
@@ -286,7 +303,10 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
 
   // Breath: the modulator above 5 kHz, as loud as the carrier is open.
   const float target = peak > kOpenPeak ? 1.0f : 0.0f;
-  const float level = kBreath * (0.5f + 0.5f * thru_);
+  // Its level moves once a hop, at frames counted from reset: a publish always lands before the frame that reads it (4 frames, a call is at
+  // most 64 of the hop's 128), so the output does not depend on how the frames are split into calls.
+  float breath = breath_, breath_step = breath_step_;
+  std::uint32_t breath_pos = breath_pos_;
   float s1 = hp_s1_, s2 = hp_s2_, open = open_;
   for (std::uint32_t i = 0; i < n; ++i) {
     const float x = m0[i];
@@ -295,8 +315,16 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
     s2 = hp_b2_ * x - hp_a2_ * h;
     open = open < target ? (open + open_step_ < target ? open + open_step_ : target)
                          : (open - open_step_ > target ? open - open_step_ : target);
-    out[i] += level * open * h;
+    if (breath_pos == 0u) {
+      breath_step = (kBreath * (0.5f + 0.5f * thru_) * agc_ - breath) * (1.0f / static_cast<float>(kHop * 4u));
+    }
+    breath_pos = (breath_pos + 1u) & (kHop * 4u - 1u);
+    breath += breath_step;
+    out[i] += breath * open * h;
   }
+  breath_ = breath;
+  breath_step_ = breath_step;
+  breath_pos_ = breath_pos;
   hp_s1_ = flush(s1);
   hp_s2_ = flush(s2);
   open_ = open;
@@ -310,6 +338,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   emph_prev_ = flush(emph_prev_);
   car_prev_ = flush(car_prev_);
   gain_ = flush(gain_);
+  level_ = flush(level_);
 }
 
 }  // namespace o3_voc03er

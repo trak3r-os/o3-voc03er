@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3_voc03er/units/vocoder/bands.h>
 
+#include <o3_voc03er/units/vocoder/agc.h>
+
 #include <cmath>
 
 #include <o3_voc03er/units/vocoder/nofma.h>
@@ -17,14 +19,6 @@ constexpr float kRectToPeak = 1.5707964f;  // pi / 2: the follower of a sine rea
 constexpr float kFlush = 1.0e-15f;
 
 constexpr float kHighpassHz = 80.0f;
-constexpr float kAgcTarget = 0.1f;     // mean-abs level the analysis path is brought to
-constexpr float kAgcGate = 0.002f;     // mean-abs level (about -54 dB) at and under which the gain is 1
-constexpr float kAgcKnee = 0.008f;     // the full gain from here up: between the two it fades to 1, so noise at the gate does not flutter
-constexpr float kAgcMaxGain = 20.0f;
-constexpr float kAgcMinGain = 0.05f;
-constexpr float kAgcAttackMs = 50.0f;
-constexpr float kAgcReleaseMs = 500.0f;
-
 constexpr unsigned kUvFirstBand = 11;    // noise goes into the carrier of bands 11..15
 constexpr unsigned kUvHiFirst = 13;      // the ratio looks at bands 13..15
 constexpr float kUvOpen = 0.35f;
@@ -119,6 +113,11 @@ void Bands::restart() noexcept {
   fol_odd_ = false;
   shifted_last_ = false;
   thru_s_ = 0.0f;
+}
+
+void Bands::adopt_level(float level) noexcept {
+  level_ = level;
+  gain_ = agc_gain(level);
 }
 
 void Bands::set_envelope(float attack_ms, float release_ms, float low_release_ms) noexcept {
@@ -305,14 +304,7 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
   hp_s2_ = flush(h2);
   level_ = flush(lvl);
   const bool agc_on = lvl > kAgcGate;
-  float gt = 1.0f;  // gated: under the gate the gain is 1, silence and noise floor pass as they are
-  if (agc_on) {
-    gt = kAgcTarget / lvl;
-    gt = gt > kAgcMaxGain ? kAgcMaxGain : (gt < kAgcMinGain ? kAgcMinGain : gt);
-    if (lvl < kAgcKnee) {
-      gt = 1.0f + (gt - 1.0f) * (lvl - kAgcGate) * (1.0f / (kAgcKnee - kAgcGate));
-    }
-  }
+  const float gt = agc_gain(lvl);  // gated: under the gate the gain is 1, silence and noise floor pass as they are
   float g = gain_;
   const float gstep = (gt - g) / static_cast<float>(n);
   float prev = pre_prev_;
