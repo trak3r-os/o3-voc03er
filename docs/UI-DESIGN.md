@@ -141,6 +141,10 @@ so what was sung is heard at once.
 - Pads: the chord grid or the keys, so the carrier is played while recording (the take is the input, not the output). While recording the whole
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
+Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
+A refused AFTER leaves the slot on no side and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
+again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
+
 ### SAMPLE EDIT
 
 The overview waveform across the screen, tall, the cuts as marks numbered 1 to 24, the trim as two brackets, the cursor a bright line with its

@@ -24,7 +24,7 @@ constexpr const char* kArpNames[] = {"OFF", "UP", "DOWN", "UP-DOWN", "RANDOM"};
 constexpr const char* kLiveChNames[] = {"L", "R"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
-constexpr const char* kRecNames[] = {"OFF", "ARM"};
+constexpr const char* kRecNames[] = {"OFF", "ARM", "CLEAR"};
 constexpr const char* kPlayNames[] = {"OFF", "ON"};
 constexpr const char* kRoleNames[] = {"MOD", "CAR"};
 
@@ -38,6 +38,9 @@ constexpr o3sdk::core::ParamDesc speed_row(const char* name) {
   return {name, "", kSpeedNames, nullptr, 0.0f, 2.0f, 1.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0};
 }
 constexpr o3sdk::core::ParamDesc dir_row(const char* name) { return loop_row(name, kDirNames); }
+constexpr o3sdk::core::ParamDesc rec_row(const char* name) {
+  return {name, "", kRecNames, nullptr, 0.0f, 2.0f, 0.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0};
+}
 constexpr o3sdk::core::ParamDesc level_row(const char* name) {
   return {name, "dB", nullptr, nullptr, -24.0f, 12.0f, 0.0f, 72, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0};
 }
@@ -55,10 +58,10 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"MODE", "", kModeNames, nullptr, 0.0f, 2.0f, 0.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"QUALITY", "", nullptr, nullptr, 8.0f, 24.0f, 16.0f, 16, 2, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"FREEZE", "", kFreezeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
-    loop_row("L1 REC", kRecNames), loop_row("L1 PLAY", kPlayNames), loop_row("L1 ROLE", kRoleNames),
-    loop_row("L2 REC", kRecNames), loop_row("L2 PLAY", kPlayNames), loop_row("L2 ROLE", kRoleNames),
-    loop_row("L3 REC", kRecNames), loop_row("L3 PLAY", kPlayNames), loop_row("L3 ROLE", kRoleNames),
-    loop_row("L4 REC", kRecNames), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
+    rec_row("L1 REC"), loop_row("L1 PLAY", kPlayNames), loop_row("L1 ROLE", kRoleNames),
+    rec_row("L2 REC"), loop_row("L2 PLAY", kPlayNames), loop_row("L2 ROLE", kRoleNames),
+    rec_row("L3 REC"), loop_row("L3 PLAY", kPlayNames), loop_row("L3 ROLE", kRoleNames),
+    rec_row("L4 REC"), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
     speed_row("L1 SPEED"), dir_row("L1 DIR"), level_row("L1 LEVEL"), speed_row("L2 SPEED"), dir_row("L2 DIR"), level_row("L2 LEVEL"),
     speed_row("L3 SPEED"), dir_row("L3 DIR"), level_row("L3 LEVEL"), speed_row("L4 SPEED"), dir_row("L4 DIR"), level_row("L4 LEVEL"),
     {"CARRIER", "", kCarNames, nullptr, 0.0f, 7.0f, 0.0f, 7, 1, 8, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
@@ -353,6 +356,13 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
   }
   switch (field) {
     case LoopField::Rec:
+      if (v >= 1.5f) {  // CLEAR: empty at once, whatever it was doing; a Rec or Play after this starts from nothing
+        s.want_rec = false;
+        s.want_play = false;
+        s.rec = Slot::Rec::Idle;
+        loops_.forget(n);
+        break;
+      }
       s.want_rec = on;
       if (on || s.rec != Slot::Rec::Idle) {  // a Rec off on an idle slot must not move a pending Play's frame past its bar line
         s.req = static_cast<std::uint16_t>(frame);

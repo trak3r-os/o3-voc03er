@@ -43,6 +43,7 @@ class Loop {
   bool bound() const noexcept { return mem_ != nullptr; }
   std::uint32_t capacity() const noexcept { return cap_; }
   void clear() noexcept;  // every loop empty, nothing recording or playing
+  void forget(unsigned i) noexcept;  // loop i alone: empty, not recording, not playing (its speed, direction and gain stay)
 
   // Recording. begin_record() empties loop i (and stops it playing) and starts taking samples; record() appends up to `n` samples of `in`
   // (clipped to +-1) and returns how many it took; when the loop is full it ends the recording itself (recording() is then false).

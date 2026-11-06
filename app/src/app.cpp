@@ -30,6 +30,7 @@
 #include "perform_screen.h"
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
+#include "sample_rec_screen.h"
 #include "stub_screen.h"
 #include <o3_voc03er/carrier_seq.h>
 
@@ -145,6 +146,7 @@ class MyApp final : public app::App {
     play_.init(voice, &meter_, &voc_);
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     stub_.init(voice);
+    sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     (void)ctx.midi().route(voice, 0);
     carriers_.init(voice);
@@ -225,6 +227,13 @@ class MyApp final : public app::App {
     // The other screen buttons open their screen (docs/UI-DESIGN.md section 3); the ones not yet drawn open the one StubScreen. The old PLAY
     // screen keeps the buttons its own controls and the card jobs use until U4, so on it these do what they did.
     if (ctx.screen() != &play_) {
+      if (in.press(app::Button::SampleRec)) {
+        if (ctx.screen() != &sample_rec_) {
+          ctx.show(sample_rec_);
+        }
+        ctx.redraw();
+        return true;
+      }
       struct Open {
         app::Button button;
         const o3_voc03er::StubInfo* info;
@@ -232,7 +241,7 @@ class MyApp final : public app::App {
       static constexpr Open kOpen[] = {
           {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
           {app::Button::SampleLoad, &kStubs[3]}, {app::Button::SamplePlay, &kStubs[4]}, {app::Button::SampleEdit, &kStubs[5]},
-          {app::Button::SampleRec, &kStubs[6]}, {app::Button::Pattern, &kStubs[7]},    {app::Button::Note, &kStubs[8]},
+          {app::Button::Pattern, &kStubs[7]},    {app::Button::Note, &kStubs[8]},
           {app::Button::Instr, &kStubs[9]},     {app::Button::Vol, &kStubs[10]},       {app::Button::Fx, &kStubs[11]},
       };
       for (const Open& o : kOpen) {
@@ -526,6 +535,7 @@ class MyApp final : public app::App {
   o3_voc03er::Vocoder voc_;
   o3_voc03er::PlayScreen play_;
   o3_voc03er::PerformScreen perform_;
+  o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::CarrierSeq carriers_;
 

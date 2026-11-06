@@ -30,6 +30,16 @@ void Loop::clear() noexcept {
   }
 }
 
+void Loop::forget(unsigned i) noexcept {
+  if (i >= kCount) {
+    return;
+  }
+  playing_[i] = false;
+  rec_[i] = false;
+  h_[i] = 0;
+  len_[i] = 0;
+}
+
 void Loop::begin_record(unsigned i) noexcept {
   if (mem_ == nullptr || i >= kCount) {
     return;

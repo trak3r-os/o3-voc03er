@@ -19,7 +19,7 @@
 //   8 Quality  LPC order 8..24 (default 16), Talk only
 //   9 Freeze   0 off, 1 on: Talk stops updating its reflection coefficients (a held vowel)
 //  10..21    Loops, three for each of the four loops n = 0..3 (ids 10 + 3n + field; Vocoder::loop_param):
-//            +0 Rec   0 OFF, 1 ARM: records `in_l` into the loop. ARM starts at the next bar line of the transport (sample-exact, 4/4: four
+//            +0 Rec   0 OFF, 1 ARM, 2 CLEAR (empties the loop at once): records `in_l` into the loop. ARM starts at the next bar line of the transport (sample-exact, 4/4: four
 //                     quarters, Transport::at); 0 stops at the next bar line. With the transport stopped both happen at once. A full loop
 //                     (16 s) stops by itself. Recording empties the loop. The engine's stored value stays 1 after such a stop: send 0 then 1
 //                     to record again (every Param event is delivered).

@@ -8,6 +8,8 @@
 #include <o3_voc03er/pad_map.h>
 #include <o3_voc03er/units/vocoder/scale.h>
 
+#include <o3sdk/core/audio_clock.h>
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +24,20 @@ inline constexpr const char* kModeNames[3] = {"BANDS", "TALK", "TUNE"};
 inline constexpr const char* kRowNames[4] = {"POWER", "OPEN", "7TH", ""};  // the bottom row's name is the kind's
 
 inline constexpr unsigned kLabelChars = 11;  // a pad's label: a chord's name fits kChordNameMax (12) with its terminator
+
+// Samples in one 4/4 bar at `mbpm` milli-BPM (a stopped or odd tempo reads as 20 BPM at the slowest). Shared by the two capture screens.
+inline float bar_samples(unsigned mbpm) noexcept {
+  if (mbpm < 20000u) {
+    mbpm = 20000u;
+  }
+  return o3sdk::core::kRefRateHz * 240000.0f / static_cast<float>(mbpm);  // the engine's rate (44.1 kHz), 240 s of beats a bar at 1 BPM
+}
+
+// The recorded length at which Rec 0 goes out for a take of `bars` bars: the transport running, the middle of the last bar (the unit then stops
+// at its end line); stopped, the unit stops at once, so the whole length.
+inline float capture_stop_at(unsigned bars, float bar, bool playing) noexcept {
+  return playing ? (static_cast<float>(bars) - 0.5f) * bar : static_cast<float>(bars) * bar;
+}
 
 // The mode index of the unit's Mode value (the app's mode_index).
 constexpr unsigned mode_index(float v) noexcept { return v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u); }

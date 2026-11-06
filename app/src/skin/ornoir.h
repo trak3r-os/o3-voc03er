@@ -21,6 +21,9 @@ namespace o3_voc03er::ornoir {
 // The tokens, as the theme gives them (theme()): tests/skin_theme_test.cpp holds them to the kit's kContrastPairs.
 const o3sdk::ui::Theme& theme() noexcept;
 
+// A filled rectangle in a theme token, for screens that draw their own body (SAMPLE REC).
+void fill_rect(o3sdk::ui::plot::Canvas& c, int x, int y, int w, int h, o3sdk::ui::Color k) noexcept;
+
 // ---- header -------------------------------------------------------------------------------------------------------------------------
 
 struct HeaderState {

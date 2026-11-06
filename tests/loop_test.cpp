@@ -254,6 +254,21 @@ TEST_CASE("vocoder loops: a full loop stops itself and arming again records afre
   CHECK(rig.v.loops().length(0) == 64);  // emptied and recording again
 }
 
+TEST_CASE("vocoder loops: CLEAR empties a loop at once, playing or recording, and the next take starts from nothing") {
+  Rig rig(1000);
+  std::vector<float> x(64, 0.3f);
+  const std::uint16_t id = Vocoder::loop_param(0, Vocoder::LoopField::Rec);
+  rig.block(x.data(), 64, {rec(0, true)});
+  rig.block(x.data(), 64);
+  CHECK(rig.v.loops().length(0) == 128);
+  rig.block(x.data(), 64, {dsp::param_change(id, 2.0f), dsp::param_change(id, 0.0f)});  // in the middle of a take
+  CHECK(rig.v.loops().length(0) == 0);
+  CHECK(rig.v.loop_status(0).rec == Vocoder::LoopStatus::Rec::Idle);
+  CHECK_FALSE(rig.v.loops().playing(0));
+  rig.block(x.data(), 64, {rec(0, true)});
+  CHECK(rig.v.loops().length(0) == 64);
+}
+
 TEST_CASE("vocoder loops: a loop plays from the next bar line") {
   Rig rig(Loop::kMaxSamples);
   std::vector<float> x(640, 0.5f);

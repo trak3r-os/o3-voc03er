@@ -59,6 +59,12 @@ constexpr unsigned kAtlasAdvance = 32;
 
 void fill(plot::Canvas& c, int x, int y, int w, int h, Color k, std::uint8_t a = 255) noexcept { c.rect(Rect{x, y, w, h}, col(k), a); }
 
+}  // namespace
+
+void fill_rect(plot::Canvas& c, int x, int y, int w, int h, Color k) noexcept { fill(c, x, y, w, h, k); }
+
+namespace {
+
 // The list over a column: a frame, the cursor's row lit (Accent), the row in force marked with a dot in the column's colour.
 constexpr int kPickY = 96, kPickRowH = 14;
 

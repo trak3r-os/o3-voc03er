@@ -126,14 +126,6 @@ unsigned live_index(const app::AudioIn& a) noexcept {
   return 0;
 }
 
-// Samples in one 4/4 bar at `mbpm` milli-BPM (a stopped or odd tempo reads as 20 BPM at the slowest).
-float bar_samples(unsigned mbpm) noexcept {
-  if (mbpm < 20000u) {
-    mbpm = 20000u;
-  }
-  return 1.152e10f / static_cast<float>(mbpm);
-}
-
 Chord chord_from(const std::uint8_t* notes, unsigned count) noexcept {
   Chord c;
   c.count = static_cast<std::uint8_t>(count > kChordMaxNotes ? kChordMaxNotes : count);
@@ -667,6 +659,16 @@ void PerformScreen::set_route(app::Context& ctx, route::Side side, route::Route 
   }
 }
 
+void PerformScreen::pad_event(app::Context& ctx, const app::Input& in) noexcept {
+  if (in.pad_press()) {
+    press_pad(ctx, in.pad());
+  } else if (in.pad_release()) {
+    release_pad(ctx, in.pad());
+  }
+}
+
+route::Route PerformScreen::route_now(const app::Context& ctx) const noexcept { return route_of(ctx.engine(), voice_); }
+
 // The cursor's row is taken. A dimmed LIVE source arms a capture (REC does it, the source follows); another dimmed row says why it cannot.
 void PerformScreen::take_choice(app::Context& ctx) noexcept {
   const route::Side side = pick_ == 1u ? route::Side::Speaks : route::Side::Sounds;
@@ -782,8 +784,8 @@ void PerformScreen::capture_tick(app::Context& ctx) noexcept {
     }
     if (ls.rec == R::Recording && !cap_stop_) {
       const dsp::Engine& e = ctx.engine();
-      const float bar = bar_samples(e.stats().tempo_mbpm);
-      const float need = e.playing() ? (static_cast<float>(kCapBars) - 0.5f) * bar : static_cast<float>(kCapBars) * bar;
+      const float bar = pl::bar_samples(e.stats().tempo_mbpm);
+      const float need = pl::capture_stop_at(kCapBars, bar, e.playing());
       if (static_cast<float>(ls.length) >= need) {
         loop_rec(ctx, cap_slot_, false);
         cap_stop_ = true;

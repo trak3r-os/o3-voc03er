@@ -1,0 +1,31 @@
+# SAMPLE REC: a take of a tone, 1 BAR long, with a chord held under it. EMPTY, ARMED (waiting for the bar line), REC counting, the finished take
+# playing on SPEAKS, then DELETE. The simulator shows the screen and that the unit records and plays; it cannot say how it sounds or what the frame costs.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_rec.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+snap 01_empty
+tap f3
+wait 100
+tap play
+wait 500
+record on
+tap rec
+wait 100
+snap 02_armed
+paddown 26
+wait 1800
+snap 03_rec
+wait 2500
+padup 26
+snap 04_take
+wait 1500
+wav sample_rec
+tap delete
+wait 300
+snap 05_deleted
+tap shift
+tap config
+wait 300
+snap 06_help

@@ -72,6 +72,12 @@ class PerformScreen final : public o3sdk::app::Screen {
   unsigned bend_range() const noexcept { return range_; }
   float bend_local() const noexcept { return local_; }
 
+  // SAMPLE REC plays the pads and moves a slot with this screen's code: a pad press or release of `in`, the route the engine holds, and a route
+  // change that stops or starts the slots it frees or takes (set_route).
+  void pad_event(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;
+  route::Route route_now(const o3sdk::app::Context& ctx) const noexcept;
+  void apply_route(o3sdk::app::Context& ctx, route::Side side, route::Route from, route::Route to) noexcept { set_route(ctx, side, from, to); }
+
   int octave() const noexcept { return octave_; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }
