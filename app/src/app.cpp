@@ -32,6 +32,7 @@
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
 #include "sample_rec_screen.h"
+#include "sample_edit_screen.h"
 #include "sample_screen.h"
 #include "stub_screen.h"
 #include <cmath>
@@ -79,7 +80,7 @@ constexpr o3_voc03er::StubInfo kStubs[] = {
     {"FILE", nullptr, "BUILT IN SLICE U9", nullptr, "FILE: THE PROJECTS ON THE CARD. NOT DRAWN YET: SLICE U9."},
     {"SAMPLE LOAD", nullptr, "BUILT IN SLICE U8", nullptr, "SAMPLE LOAD: THE WAV PICKER. NOT DRAWN YET: SLICE U8."},
     {"SAMPLE", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE: THE SLOTS AND THEIR SLICES ON THE PADS. NOT DRAWN YET: SLICE U4."},
-    {"SAMPLE EDIT", nullptr, "BUILT IN SLICE U7", nullptr, "SAMPLE EDIT: TRIM AND CUT THE SELECTED SLOT. NOT DRAWN YET: SLICE U7."},
+    {"SAMPLE EDIT", nullptr, "BUILT IN SLICE U7", nullptr, "SAMPLE EDIT: THE CUTS OF THE SELECTED SLOT (BUILT IN SLICE U7A); THE REST COMES IN SLICES U7B TO U8."},
     {"SAMPLE REC", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE REC: RECORD THE LIVE SOURCE INTO A SLOT. NOT DRAWN YET: SLICE U4."},
 };
 
@@ -152,6 +153,7 @@ class MyApp final : public app::App {
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_, &carriers_);
+    sample_edit_.init(&sample_, g_loop_mem);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
@@ -256,13 +258,20 @@ class MyApp final : public app::App {
         ctx.redraw();
         return true;
       }
+      if (in.press(app::Button::SampleEdit)) {
+        if (ctx.screen() != &sample_edit_) {
+          ctx.show(sample_edit_);
+        }
+        ctx.redraw();
+        return true;
+      }
       struct Open {
         app::Button button;
         const o3_voc03er::StubInfo* info;
       };
       static constexpr Open kOpen[] = {
           {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
-          {app::Button::SampleLoad, &kStubs[3]}, {app::Button::SampleEdit, &kStubs[5]},
+          {app::Button::SampleLoad, &kStubs[3]},
       };
       struct Lane {
         app::Button button;
@@ -658,6 +667,7 @@ class MyApp final : public app::App {
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::SampleScreen sample_;
+  o3_voc03er::SampleEditScreen sample_edit_;
   o3_voc03er::PatternScreen pattern_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::StepSeq carriers_;  // the step sequencer hook (stepseq.h)

@@ -194,6 +194,15 @@ the cursor, SHIFT + step pad rests the lane in force, a pattern pad shows that p
 F1..F5 point the encoder at a key (a second tap steps it, wrapping), F6 clears the lane at once, F7 is FOLLOW, F8 saves through the app's FILE job.
 The F6 label is `CLR LANE` (it does not fit the key in full); HELP spells it out. SLICE is read-only (U6c). No new unit parameter.
 
+Built in U7a (`sample_edit_screen.cpp`, pure logic in `sample_edit_logic.h`, `tests/sample_edit_test.cpp`, `app/scenarios/sample_edit.txt`): the cursor and the
+cut table of the selected slot. The encoder moves the cursor a sample at a time, SHIFT + encoder a 64th of the slot; INSERT cuts at the cursor (it snaps to
+the nearest zero crossing within 64 samples when there is one), and a cut less than 64 samples from another cut, or from the slot's end, is refused (TOO CLOSE).
+DELETE needs the cursor exactly on the cut it removes (LEFT and RIGHT put it there); the cut before takes its samples, and the first cut stays. F1 is CUT EVEN
+(OFF, 8, 16, 24); when the cuts are the hand's (INSERT or DELETE since the take or the last CUT EVEN) the first try on F1 or F8 only says REPLACES n CUTS and a
+second one takes it; any other key closes the warning. The pads audition the cuts as on SAMPLE, and a new take of another length starts again from eight even
+cuts. The cuts live in RAM until U8 and U9 save them, and the screen draws no waveform until U7b. F1 tap points the encoder at CUT EVEN; UP, DOWN, LEFT, RIGHT,
+INSERT and DELETE return it to the cursor. F2 to F7 say COMES LATER. Rec does nothing special here, as on SAMPLE. No new unit parameter.
+
 Built in U6c (`sample_logic.h` publish_slices, `stepseq.h`, `tests/slice_lane_test.cpp`, `app/scenarios/slice_lane.txt`): a step's slice fires a cut of the
 SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and CHOKE do not apply). Stop releases it
 (Trig 0, once). A slice above the slot's cut count stays silent, and LEVEL does not touch a slice. The palette's two upper rows are slices 1 to 24, lit up to
@@ -500,7 +509,10 @@ screen it touches. The unit checks owed are named, not run here.
 | U4 | SAMPLE REC and SAMPLE on the four slots as they are (whole play, side, speed, direction, level) | `sample_rec.txt`, `sample.txt` (a take through the chord, then the same as the carrier) |
 | U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, CHOKE and TRIG (the SLICE lane moved to U6) | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
 | U6 | PATTERN with lanes, chords in the NOTE lane, pads, patterns A to H in the SDRAM; LEVEL as velocity | `pattern.txt` |
-| U7 | SAMPLE EDIT: the overview bitmap, cursor, INSERT and DELETE, CUT EVEN and BEATS, trim, NORMALISE, COPY; CUT HITS with the scan job | `sample_edit.txt` (a drum WAV in, hits at 40 and 80, the snaps count the marks) |
+| U7a | SAMPLE EDIT: the cursor and the cut table (INSERT, DELETE, LEFT, RIGHT, CUT EVEN, CLR CUTS) | `sample_edit.txt` |
+| U7b | SAMPLE EDIT: the waveform bitmap of the slot | `sample_edit.txt` grows (the snaps show the waveform) |
+| U7c | SAMPLE EDIT: START, END, NORMALISE, COPY, BEATS, SHIFT + DELETE | `sample_edit.txt` grows |
+| U7d | SAMPLE EDIT: CUT HITS with the scan job | `sample_edit.txt` (a drum WAV in, hits at 40 and 80, the snaps count the marks) |
 | U8 | SAMPLE LOAD and SAVE WAV: the WAV reader, the picker, the load into a slot, the staging region | `sample_load.txt` (`--card` with a mono and a stereo WAV, a 48 kHz one refused) |
 | U9 | TALK and TUNE voiceprints, PARAMS, MASTER with the radio's keys; FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `params.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
 | U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |

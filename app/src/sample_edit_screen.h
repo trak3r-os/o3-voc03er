@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+// SAMPLE EDIT (docs/UI-DESIGN.md, "SAMPLE EDIT"), first cut (slice U7a), in the OR NOIR skin: the selected slot as a bar the full width of its length,
+// the cuts as numbered marks, the cursor as a bright line with its time under it. No waveform yet (U7b draws it in the rectangle left for it).
+//
+//   Encoder: the cursor, one sample a detent (the kit's acceleration applies); SHIFT: a 64th of the slot. LEFT / RIGHT: the previous / next cut's
+//   start. UP / DOWN: the slot (the one SAMPLE shows). INSERT: a cut at the cursor, snapped to a zero crossing within 64 samples. DELETE: the cut
+//   that starts at the cursor (LEFT / RIGHT put the cursor on one). F1 CUT EVEN: OFF, 8, 16, 24: a tap points the encoder at it, a second tap
+//   steps it, turning re-cuts the slot. F8 CLR CUTS: one cut over the slot. F2..F7 are drawn dim and say COMES LATER (BEATS, HITS, START, END,
+//   NORMALISE, SAVE WAV). A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
+//
+// The cut tables are SAMPLE's (SampleScreen::table, in the SDRAM) and live in RAM until U8 and U9 save them. Main loop only; the cursor of each
+// slot, the arm and the line are in the SDRAM (g_se in the .cpp), so this object is two pointers and the vtable.
+
+#include "sample_screen.h"
+
+#include <o3sdk/app/help.h>
+#include <o3sdk/app/screen.h>
+
+#include <cstdint>
+
+namespace o3_voc03er {
+
+class SampleEditScreen final : public o3sdk::app::Screen {
+ public:
+  // `sample` is SAMPLE (the slot, the tables, the pads); `mem` the loop bank (slot n starts at n * Loop::kMaxSamples), read only, or nullptr.
+  void init(SampleScreen* sample, const std::int16_t* mem) noexcept;
+
+  const char* title() const noexcept override { return "SAMPLE EDIT"; }
+  o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
+  const o3sdk::ui::Theme* theme(const o3sdk::app::Context&) const noexcept override;
+  void enter(o3sdk::app::Context& ctx) noexcept override;
+  void leave(o3sdk::app::Context& ctx) noexcept override;
+  std::uint64_t repeat_buttons(const o3sdk::app::Context&) const noexcept override;
+  void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
+  void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
+  void leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept override;
+  void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;
+  void help(const o3sdk::app::Context& ctx, o3sdk::app::Help& help) const noexcept override;
+  void update(o3sdk::app::Context& ctx) noexcept override;
+
+  // The cursor of the selected slot, in samples (the tests).
+  std::uint32_t cursor() const noexcept;
+
+ private:
+  void turn(o3sdk::app::Context& ctx, int delta) noexcept;
+  void recut(o3sdk::app::Context& ctx, unsigned code) noexcept;
+  void clear_cuts(o3sdk::app::Context& ctx) noexcept;
+  void insert(o3sdk::app::Context& ctx) noexcept;
+  void remove(o3sdk::app::Context& ctx) noexcept;
+  bool refuse(o3sdk::app::Context& ctx, bool needs_cuts) noexcept;
+  void say(o3sdk::app::Context& ctx, const char* text) noexcept;
+  void set_cursor(o3sdk::app::Context& ctx, std::uint32_t pos) noexcept;
+  const std::int16_t* samples() const noexcept;
+
+  SampleScreen* sample_ = nullptr;
+  const std::int16_t* mem_ = nullptr;
+};
+
+}  // namespace o3_voc03er

@@ -91,6 +91,8 @@ struct SliceVoice {
 struct SampleData {
   sm::SliceTable table[sm::kReaders];
   SliceVoice voice[sm::kReaders];
+  std::uint8_t edited[sm::kReaders];     // the cuts are the hand's or a re-cut's (SAMPLE EDIT): service() leaves them alone until the length changes
+  std::uint8_t even_code[sm::kReaders];  // SAMPLE EDIT's CUT EVEN value (sample_edit_logic.h even_cuts_of); 0 = 8, the cuts a take starts from
   std::uint8_t one_shot[sm::kReaders];   // TRIG per slot: 1 ONE SHOT
   std::uint8_t choke_off[sm::kReaders];  // CHOKE per slot: 1 OFF
   std::uint32_t seq;
@@ -127,6 +129,15 @@ void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* pe
 
 SliceMap* SampleScreen::slice_map() noexcept { return &g_sd.map; }
 
+void SampleScreen::set_slot(unsigned slot) noexcept { slot_ = static_cast<std::uint8_t>(slot < sm::kReaders ? slot : sm::kReaders - 1u); }
+sm::SliceTable& SampleScreen::table(unsigned slot) noexcept { return g_sd.table[slot & 3u]; }
+bool SampleScreen::edited(unsigned slot) const noexcept { return g_sd.edited[slot & 3u] != 0u; }
+void SampleScreen::set_edited(unsigned slot, bool v) noexcept { g_sd.edited[slot & 3u] = v ? 1u : 0u; }
+unsigned SampleScreen::even_code(unsigned slot) const noexcept { return g_sd.even_code[slot & 3u]; }
+void SampleScreen::set_even_code(unsigned slot, unsigned code) noexcept { g_sd.even_code[slot & 3u] = static_cast<std::uint8_t>(code); }
+// publish_slices compares only the slot and the length: a table edited in place needs the next service() pass to publish it again.
+void SampleScreen::cuts_changed() noexcept { g_sd.published = sm::SlicePublished{}; }
+
 const ui::Theme* SampleScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
 
 void SampleScreen::enter(app::Context& ctx) noexcept {
@@ -134,7 +145,9 @@ void SampleScreen::enter(app::Context& ctx) noexcept {
   ctx.redraw();
 }
 
-void SampleScreen::leave(app::Context& ctx) noexcept {
+void SampleScreen::leave(app::Context& ctx) noexcept { pad_leave(ctx); }
+
+void SampleScreen::pad_leave(app::Context& ctx) noexcept {
   release_all(ctx);
   if (perform_ != nullptr) {
     perform_->leave(ctx);  // releases the held pads
@@ -293,8 +306,10 @@ void SampleScreen::service(app::Context& ctx) noexcept {
   for (unsigned j = 0; j < sm::kReaders; ++j) {  // the cuts follow the slot's length (SAMPLE EDIT, U7, will edit them)
     const Vocoder::LoopStatus st = voc_->loop_status(j);
     const std::uint32_t len = st.rec == Vocoder::LoopStatus::Rec::Idle ? st.length : 0u;
-    if (g_sd.table[j].length != len) {
+    if (g_sd.table[j].length != len) {  // a new take (its length is 0 while it records) starts from 8 even cuts; hand cuts at the same length stay
       sm::even_cuts(g_sd.table[j], len);
+      g_sd.edited[j] = 0;
+      g_sd.even_code[j] = 0;
     }
   }
   if (seq_ != nullptr && perform_ != nullptr) {  // the SPEAKS slot's slices go to the step sequencer when the slot or its length changed
@@ -414,19 +429,35 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     perform_->step_octave(ctx, in.press(Button::Left) ? -1 : 1);
   } else if ((in.press(Button::Shift) || in.press(Button::Delete)) && perform_ != nullptr) {  // PERFORM's latch and release
     perform_->input(ctx, in);
+  } else {
+    (void)pad_input(ctx, in);
+  }
+}
+
+// The pads, here and on SAMPLE EDIT: the top rows play the selected slot's slices, the bottom rows are PERFORM's chords.
+bool SampleScreen::pad_input(app::Context& ctx, const app::Input& in) noexcept {
+  if (in.press(Button::Shift) && perform_ != nullptr) {  // PERFORM's latch of the held chord pad
+    perform_->input(ctx, in);
   } else if (in.pad_press() && !sm::chord_pad(in.pad())) {
     trigger(ctx, in.pad());
   } else if (in.pad_release() && !sm::chord_pad(in.pad())) {
     release_pad(ctx, in.pad());
   } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr && sm::chord_pad(in.pad())) {
     perform_->pad_event(ctx, in);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void SampleScreen::pad_update(app::Context& ctx) noexcept {
+  if (perform_ != nullptr) {
+    perform_->update(ctx);  // the pads' bend and vibrato, as on PERFORM
   }
 }
 
 void SampleScreen::update(app::Context& ctx) noexcept {
-  if (perform_ != nullptr) {
-    perform_->update(ctx);  // the pads' bend and vibrato, as on PERFORM
-  }
+  pad_update(ctx);
   if (note_ != nullptr && ctx.uptime_ms() >= note_until_) {
     note_ = nullptr;
   }
@@ -434,7 +465,9 @@ void SampleScreen::update(app::Context& ctx) noexcept {
 }
 
 // The chord grid of PERFORM's two lower rows; the top two rows are the slot's slices: a cut dim, a sounding one on, an empty slot dark.
-void SampleScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
+void SampleScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept { pad_leds(ctx, leds); }
+
+void SampleScreen::pad_leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   if (perform_ == nullptr) {
     return;
   }
@@ -479,7 +512,7 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::File, "FILE (SLICE U9)", nullptr},
       {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
       {Button::SamplePlay, "THIS SCREEN", nullptr},
-      {Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
+      {Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},
       {Button::SampleRec, "SAMPLE REC: A TAKE", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
@@ -563,12 +596,25 @@ void SampleScreen::draw_line(app::Context&, ui::Renderer& r, unsigned slot, std:
   c.close();
 }
 
-void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
+// The header's chips as SAMPLE shows them (SAMPLE EDIT draws the same).
+void SampleScreen::fill_header(app::Context& ctx, ornoir::HeaderState& h) const noexcept {
   const dsp::Engine& e = ctx.engine();
   const app::AudioIn& ain = ctx.audio_in();
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
   const unsigned car = round_param(e, voice_, Vocoder::CarSrc);
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
+  const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
+  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (src != nullptr ? src->label : "NONE");
+  h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
+                                                                              : pl::kCarrierNames[car < 8u ? car : 0u];
+  h.mode = pl::kModeNames[mode];
+  h.playing = e.playing();
+  h.tempo_x10 = e.stats().tempo_mbpm / 100u;
+  h.cpu_percent = ctx.cpu_percent();
+}
+
+void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
+  const dsp::Engine& e = ctx.engine();
   const unsigned tempo = e.stats().tempo_mbpm;
   const float bar = pl::bar_samples(tempo);
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
@@ -583,13 +629,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const sm::Side side = sm::side_of(rt, slot_);
 
   ornoir::HeaderState h;
-  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (src != nullptr ? src->label : "NONE");
-  h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
-                                                                              : pl::kCarrierNames[car < 8u ? car : 0u];
-  h.mode = pl::kModeNames[mode];
-  h.playing = e.playing();
-  h.tempo_x10 = tempo / 100u;
-  h.cpu_percent = ctx.cpu_percent();
+  fill_header(ctx, h);
 
   ornoir::FKey keys[ornoir::kFKeys];
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {

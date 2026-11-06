@@ -15,6 +15,8 @@
 // Main loop only; the cursor is a few bytes, the tables are in the SDRAM (g_sd in the .cpp).
 
 #include "perform_screen.h"
+#include "sample_logic.h"
+#include "skin/ornoir.h"
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/stepseq.h>
@@ -50,6 +52,21 @@ class SampleScreen final : public o3sdk::app::Screen {
   void update(o3sdk::app::Context& ctx) noexcept override;
 
   unsigned slot() const noexcept { return slot_; }
+
+  // What SAMPLE EDIT (sample_edit_screen.h) shares with this screen: the selected slot, the cut tables (g_sd), the pads and the header.
+  void set_slot(unsigned slot) noexcept;
+  sample::SliceTable& table(unsigned slot) noexcept;
+  bool edited(unsigned slot) const noexcept;  // the slot's cuts are the hand's or a re-cut's; a new length (a new take) clears it
+  void set_edited(unsigned slot, bool v) noexcept;
+  unsigned even_code(unsigned slot) const noexcept;  // F1 CUT EVEN's value (sample_edit_logic.h)
+  void set_even_code(unsigned slot, unsigned code) noexcept;
+  void cuts_changed() noexcept;  // after any edit of a table: the next service() pass publishes the SPEAKS slot's cuts again
+  Vocoder::LoopStatus status(unsigned slot) const noexcept { return view(slot); }
+  bool pad_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;  // a pad press or release; false when `in` is no pad
+  void pad_leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept;
+  void pad_leave(o3sdk::app::Context& ctx) noexcept;  // the slice voices and the held chord pads let go
+  void pad_update(o3sdk::app::Context& ctx) noexcept;
+  void fill_header(o3sdk::app::Context& ctx, ornoir::HeaderState& h) const noexcept;
 
   // Once a pass of the main loop, whichever screen is up (App::update): ends the slice voices that finished (a borrowed reader gets its own slot's
   // Speed, Dir, Level and Role back), rebuilds a slot's cuts when its length changed and republishes the SPEAKS slot's slices to the step
