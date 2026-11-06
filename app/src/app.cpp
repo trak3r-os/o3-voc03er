@@ -89,7 +89,7 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
-    {"voc", "voc <mode> [n] | formant|thru|glide|gate|arp <v> | bendrange <2|5|12>", &voc_command},
+    {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
@@ -390,6 +390,10 @@ class MyApp final : public app::App {
       }
       if (shape.thru) {
         (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Thru, static_cast<float>(shape.value) * 0.01f);
+      } else if (shape.speaks || shape.sounds) {
+        (void)e.set_param(voc_id_, shape.speaks ? o3_voc03er::Vocoder::ModSrc : o3_voc03er::Vocoder::CarSrc, static_cast<float>(shape.value));
+        out.text(shape.speaks ? "voc: speaks " : "voc: sounds ").dec(static_cast<unsigned>(shape.value)).nl();
+        return;
       } else if (shape.glide || shape.gate || shape.arp) {
         const std::uint16_t id = shape.glide ? o3_voc03er::Vocoder::Glide : (shape.gate ? o3_voc03er::Vocoder::Gate : o3_voc03er::Vocoder::Arp);
         (void)e.set_param(voc_id_, id, static_cast<float>(shape.value));
@@ -403,7 +407,7 @@ class MyApp final : public app::App {
     o3_voc03er::VocCommand c;
     if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
         !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
-      out.text("usage: voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100> | glide <0..500> | gate <0..4> | arp <0..4> | bendrange <2|5|12>").nl();
+      out.text("usage: voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100> | glide <0..500> | gate <0..4> | arp <0..4> | speaks <0..6> | sounds <0..7> | bendrange <2|5|12>").nl();
       return;
     }
     dsp::Engine& e = ctx_->engine();

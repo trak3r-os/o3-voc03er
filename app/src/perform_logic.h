@@ -16,7 +16,7 @@ namespace o3_voc03er::perform {
 
 inline constexpr const char* kKeyNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 inline constexpr const char* kScaleNames[kScaleTableCount] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
-inline constexpr const char* kCarrierNames[7] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4"};  // Vocoder::CarSrc 0..6
+inline constexpr const char* kCarrierNames[8] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE"};  // Vocoder::CarSrc 0..7
 inline constexpr const char* kKindNames[4] = {"TRIAD", "7TH", "OPEN", "POWER"};                                    // ChordKind
 inline constexpr const char* kModeNames[3] = {"BANDS", "TALK", "TUNE"};
 inline constexpr const char* kRowNames[4] = {"POWER", "OPEN", "7TH", ""};  // the bottom row's name is the kind's

@@ -125,6 +125,16 @@ TEST_CASE("voc formant and voc thru: the console's two BANDS values") {
   CHECK_FALSE(parse_voc_shape("formant", "13", s));
   CHECK_FALSE(parse_voc_shape("formant", "-13", s));
   CHECK_FALSE(parse_voc_shape("formant", "-", s));
+  CHECK(parse_voc_shape("speaks", "6", s));
+  CHECK(s.speaks);
+  CHECK(s.value == 6);
+  CHECK(parse_voc_shape("speaks", "0", s));
+  CHECK_FALSE(parse_voc_shape("speaks", "7", s));
+  CHECK_FALSE(parse_voc_shape("speaks", "-1", s));
+  CHECK(parse_voc_shape("sounds", "7", s));
+  CHECK(s.sounds);
+  CHECK_FALSE(s.speaks);
+  CHECK_FALSE(parse_voc_shape("sounds", "8", s));
   CHECK_FALSE(parse_voc_shape("thru", "-1", s));
   CHECK_FALSE(parse_voc_shape("thru", "101", s));
   CHECK_FALSE(parse_voc_shape("thru", "1x", s));

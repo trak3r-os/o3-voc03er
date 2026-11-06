@@ -339,7 +339,7 @@ std::vector<float> run_unit(Vocoder& vo, std::size_t blocks, const std::vector<s
 TEST_CASE("vocoder: TUNE is mode 2 after TALK, the new parameters are appended, and TUNE tunes") {
   static Vocoder vo;
   vo.prepare(static_cast<float>(kFs));
-  CHECK(Vocoder::kParamCount == 47);
+  CHECK(Vocoder::kParamCount == 48);
   CHECK(Vocoder::Mode == 7);
   CHECK(Vocoder::CarSrc == 34);
   CHECK(Vocoder::Key == 35);

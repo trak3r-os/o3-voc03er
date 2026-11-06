@@ -114,6 +114,8 @@ struct VocShape {
   bool glide = false;
   bool gate = false;
   bool arp = false;
+  bool speaks = false;  // `speaks <0..6>`: Vocoder::ModSrc (0 LIVE, 1 NONE, 3..6 SLOT 1..4; 2 acts as NONE)
+  bool sounds = false;  // `sounds <0..7>`: Vocoder::CarSrc (0 FOLLOW, 1 SYNTH, 2 NOISE, 3..6 SLOT 1..4, 7 LIVE)
   bool range = false;  // `bendrange`: value is 2, 5 or 12
   int value = 0;
 };
@@ -145,6 +147,12 @@ inline bool parse_voc_shape(const char* what, const char* value, VocShape& out) 
   } else if (std::strcmp(what, "arp") == 0) {
     v.arp = true;
     max = 4;
+  } else if (std::strcmp(what, "speaks") == 0) {
+    v.speaks = true;
+    max = 6;
+  } else if (std::strcmp(what, "sounds") == 0) {
+    v.sounds = true;
+    max = 7;
   } else if (std::strcmp(what, "formant") == 0) {
     signed_ok = true;
   } else {

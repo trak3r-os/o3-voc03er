@@ -728,7 +728,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
 
   ornoir::HeaderState h;
   h.speaks = src != nullptr ? src->label : "NONE";
-  h.sounds = pl::kCarrierNames[car < 7u ? car : 0u];
+  h.sounds = pl::kCarrierNames[car < 8u ? car : 0u];
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = st.tempo_mbpm / 100u;

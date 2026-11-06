@@ -19,6 +19,7 @@ constexpr const char* kKeyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", 
 constexpr const char* kScaleNames[] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
 constexpr const char* kNotesInNames[] = {"OFF", "ON"};
 constexpr const char* kGateNames[] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
+constexpr const char* kModNames[] = {"LIVE", "NONE", "-", "SLOT1", "SLOT2", "SLOT3", "SLOT4"};
 constexpr const char* kArpNames[] = {"OFF", "UP", "DOWN", "UP-DOWN", "RANDOM"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
@@ -40,7 +41,7 @@ constexpr o3sdk::core::ParamDesc level_row(const char* name) {
   return {name, "dB", nullptr, nullptr, -24.0f, 12.0f, 0.0f, 72, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0};
 }
 
-constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4"};
+constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE"};
 
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"WAVE", "", kWaveNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
@@ -59,7 +60,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     loop_row("L4 REC", kRecNames), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
     speed_row("L1 SPEED"), dir_row("L1 DIR"), level_row("L1 LEVEL"), speed_row("L2 SPEED"), dir_row("L2 DIR"), level_row("L2 LEVEL"),
     speed_row("L3 SPEED"), dir_row("L3 DIR"), level_row("L3 LEVEL"), speed_row("L4 SPEED"), dir_row("L4 DIR"), level_row("L4 LEVEL"),
-    {"CARRIER", "", kCarNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"CARRIER", "", kCarNames, nullptr, 0.0f, 7.0f, 0.0f, 7, 1, 8, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"KEY", "", kKeyNames, nullptr, 0.0f, 11.0f, 0.0f, 11, 1, 12, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"SCALE", "", kScaleNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"SPEED", "ms", nullptr, nullptr, 0.0f, 500.0f, 25.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
@@ -72,6 +73,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"GLIDE", "ms", nullptr, nullptr, 0.0f, 500.0f, 0.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"GATE", "", kGateNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"ARP", "", kArpNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"MOD SRC", "", kModNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -166,6 +168,9 @@ void Vocoder::prepare(float sample_rate) noexcept {
     s = Slot{};
   }
   sel_ = 0;
+  msel_ = 0;
+  live_car_.set_length(ramp);
+  live_car_.jump(0.0f);
   npend_ = 0;
   synth_gain_.set_length(ramp);
   noise_amt_.set_length(ramp);
@@ -191,6 +196,9 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     return;  // the loops' parameters carry a frame: loop_param_event
   }
   switch (id) {
+    case ModSrc:
+      msel_ = static_cast<unsigned>(v + 0.5f);
+      break;
     case Wave:
       carrier_.set_wave(v >= 0.5f ? Carrier::Wave::Pulse : Carrier::Wave::Saw);
       break;
@@ -382,6 +390,7 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
 void Vocoder::select_carrier(float v, std::uint32_t frame) noexcept {
   sel_ = static_cast<unsigned>(v + 0.5f);
   synth_gain_.target(sel_ >= 3u ? 0.0f : 1.0f);
+  live_car_.target(sel_ == 7u ? 1.0f : 0.0f);
   noise_amt_.target(noise_target());
   retarget(frame);
 }
@@ -703,7 +712,13 @@ Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
 // recording takes the live modulator first (a loop is recorded as heard at the input, whatever plays), then each playing loop replaces the
 // modulator (a MOD loop; the second one adds) or adds to the carrier (a CAR loop). A loop that does not record or play costs a few compares.
 void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept {
+  const auto drop_live = [&] {  // a speaking slot or NONE: the live input leaves the modulator sum
+    if (msel_ != 0u) {
+      for (std::uint32_t k = 0; k < n; ++k) mod[k] = 0.0f;
+    }
+  };
   if (!loops_.bound()) {
+    drop_live();
     npend_ = 0;
     return;
   }
@@ -747,6 +762,7 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
       }
     }
   }
+  drop_live();  // after the recordings: a take is the live input as heard
   bool modulated = false;
   for (unsigned i = 0; i < Loop::kCount; ++i) {
     Slot& s = slot_[i];
@@ -758,7 +774,7 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
       }
     }
     // sel_ is the block's last word: a loop leaving the carrier stays on that side until its fade has run from the event's frame.
-    const bool on_car = s.carrier || sel_ == 3u + i || loop_car_[i].value() > 0.0f;
+    const bool on_car = sel_ == 3u + i || (msel_ != 3u + i && (s.carrier || loop_car_[i].value() > 0.0f));
     if (loops_.playing(i)) {
       const std::uint32_t pf = play_from[i];
       if (on_car) {
@@ -875,6 +891,9 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
         }
       },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
+  if (live_car_.value() > 0.0f || live_car_.target_value() > 0.0f) {  // CarSrc LIVE: the live input, before run_loops takes it out of mod
+    for (std::uint32_t i = 0; i < n; ++i) car[i] += live_car_.next() * mod[i] * (gated ? gain[i] : 1.0f);  // GATE cuts it like any carrier
+  }
   if (gated) {  // GATE cuts the loops that play as the carrier by the same envelope as the synth
     float lcar[Bands::kMaxFrames];
     for (std::uint32_t i = 0; i < n; ++i) lcar[i] = 0.0f;
