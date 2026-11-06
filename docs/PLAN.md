@@ -62,7 +62,7 @@ Made by the orchestrator on 2026-11-05 under the maintainer's "no questions" rul
 | V2d | The last per-sample work: ramps out of the sample loop when settled, the unvoiced mix once a block, the follower every second sample, TALK's ramp every 8 | Host tests unchanged, no doubles; the cycles read on the unit | Done (section 4d); listening owed |
 | V5a | Loops: record, play, roles, bar lines from the transport | Host tests, scenario, unit | Built 2026-11-05, host tests green (loop_test: bar-exact start and stop, seam, roles, full loop, transport stopped), no doubles, SDRAM 5.7 MB of 16. Owed on the unit: the CPU of a playing loop, recording through a real source, listening to the roles. CPU on the unit: section 4f; sound not heard. |
 | V5b | Loops: speed and reverse, the span copy | Host tests, unit | Built 2026-11-06, host tests green (every speed and direction against an integer oracle, both wraps, loops of 1 to 100 samples, no drift over 16 s, changes while playing), mk66 image builds, no doubles. Per loop speed 0.5x/1x/2x, direction, level (ids 22..33). Owed on the unit: the CPU at each speed (BANDS, 8 notes), listening (melody kept, seam, level balance). CPU on the unit: section 4f; sound not heard. |
-| V5c | Per-step carrier switch | Host tests, scenario, unit | Built (host tests, scenario carrier_steps, cross build); the unit check is owed: CPU, click on real sources, a MOD-role loop picked as carrier |
+| V5c | Per-step carrier switch | Host tests, scenario, unit | Built (host tests, scenario carrier_steps, cross build); the unit check is owed: CPU, click on real sources, a MOD-role loop picked as carrier CPU on the unit: section 4g; sound not heard. |
 | V6a | TUNE: detector and gate | Host tests against synthetic voices and three sung phrases; aubio as a host oracle only, never shipped |Built 2026-11-06: `Tune` (YIN, 4:1 and bass 8:1 decimation, native refine, 60 ms voiced gate), 13000 bytes, 10 host tests on synthetic voices (saw and glottal through formants, 80 to 800 Hz, worst 0.12 cent; clean sweep 0 octave errors; breathy 70 to 200 Hz 0.65%; vibrato no flips), voiced after 11 to 48 ms, ends 79 ms. Owed: CPU on the unit, the three sung phrases, breathy voice below 80 Hz. CPU on the unit: section 4f; sound not heard. |
 | V6b | TUNE: shifter, snap, retune | Host tests, unit |Built 2026-11-06: `Autotune` (period-jump shifter on Tune's own native ring, 16-sample control step, snap to KEY and SCALE or to NOTES-IN, SPEED 0 = stepped), Mode 2 = TUNE, params 35..39, `voc tune`, F keys and PLAY screen, scenario `tune.txt`; 10 host tests (snap error ~0 cent, no click, block independent, NaN clean, unvoiced bit-exact delay, vibrato no flip). 13 KiB; SRAM_U 138,088 B (about 1.2 KiB above the 32 KiB free floor). Formants move with the shift (centroid ratio equals the pitch ratio); Range Normal only. Owed: CPU of TUNE on the unit [est about 7,100 cycles a block], a sung voice, listening. CPU on the unit: section 4f; sound not heard. |
 | V7 | The 2040 layer, slice by slice | | |
@@ -214,6 +214,28 @@ What it says:
 
 Decision: optimising stops here, as in section 4d, and the word reads stay. Capping notes cannot reach 60 %: a note is about 1.3 points (section 4d) and the excess is 12. What
 is left is fewer loops on the carrier side or fewer bands, and both are sound choices that wait for the maintainer's ears. The UI and MIDI were not measured at this load.
+
+## 4g. The rest of the unit reads, 2026-11-06
+
+Image b1283df on o3-sdk ef6b1a0, same method as section 4f. Mean is of three `render last` reads, peak is the window's `max`. All 18 reads: 0 underruns, mutes, late blocks,
+slips or hardware faults, 0 blocks shed, no crash.
+
+| Case | Signal | Mean | Peak | Over budget |
+| --- | --- | --- | --- | --- |
+| BANDS 8 notes, 4 loops 2x | noise | 176,893 | 72.9 % | every block |
+| TALK 8 notes, 4 loops 2x | noise | 158,685 | 64.6 % | about a third of blocks |
+| TALK 8 notes, QUALITY 16, no loops | noise | 137,238 | 59.3 % | none |
+| TALK 8 notes, QUALITY 24, no loops | noise | 159,304 | 66.0 % | about a third of blocks |
+| TALK 8 notes, QUALITY 24, 4 loops 2x | noise | 189,488 | 74.4 % | every block |
+| BANDS 4 notes, 3 carrier steps, transport running | tone | 120,868 | 50.4 % | none |
+
+- The kit's move from f14f247 to ef6b1a0 changed nothing beyond the reads' spread. It took 512 B of SRAM_U, which leaves about 0.7 KiB above the floor.
+- QUALITY 16 stays the default: it is the only TALK order inside the budget at 8 notes. QUALITY 24 costs about 8 points.
+- The per-step carrier (V5c) reached `carriers=3` from the console and ran with the transport. Clicks at a switch are for the ears.
+- The main loop gets what the audio leaves. `shot` took 4.6 s with the render near 46 % and 9.2 s near 73 %, the same 2:1 as the free time. `state` round trips went from 1.9 ms to 2.8 ms
+  mean and 3.9 ms to 6.0 ms max. Key and pad commands were acknowledged in 1 to 4 ms and none was lost. So at the worst case the UI runs at about half speed; whether that shows needs eyes.
+- `midi` reports the kit's service in the image with no traffic. The app has no MIDI code of its own, and whether notes reach the vocoder is untested.
+- `usb` counted 1 output underrun over 7 stream starts during the session. When it happened is unknown, and nothing in `cpu` or `log` matches it. It stays open.
 
 ## 5. How the work runs
 
