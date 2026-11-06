@@ -3,7 +3,7 @@
 
 #include <cmath>
 
-#include "nofma.h"
+#include <o3_voc03er/units/vocoder/nofma.h>
 
 namespace o3_voc03er {
 

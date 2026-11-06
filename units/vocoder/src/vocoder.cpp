@@ -284,6 +284,7 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       break;
     case Thru:
       bands_.set_thru(v);
+      talk_.set_thru(v);
       break;
     case Bend:
       bend_.target(v);

@@ -3,7 +3,7 @@
 
 #include <cmath>
 
-#include "nofma.h"
+#include <o3_voc03er/units/vocoder/nofma.h>
 
 namespace o3_voc03er {
 
@@ -22,8 +22,8 @@ constexpr float kAgcGate = 0.002f;     // mean-abs level (about -54 dB) at and u
 constexpr float kAgcKnee = 0.008f;     // the full gain from here up: between the two it fades to 1, so noise at the gate does not flutter
 constexpr float kAgcMaxGain = 20.0f;
 constexpr float kAgcMinGain = 0.05f;
-constexpr float kAgcAttackMs = 5.0f;
-constexpr float kAgcReleaseMs = 100.0f;
+constexpr float kAgcAttackMs = 50.0f;
+constexpr float kAgcReleaseMs = 500.0f;
 
 constexpr unsigned kUvFirstBand = 11;    // noise goes into the carrier of bands 11..15
 constexpr unsigned kUvHiFirst = 13;      // the ratio looks at bands 13..15
@@ -31,24 +31,13 @@ constexpr float kUvOpen = 0.35f;
 constexpr float kUvClose = 0.28f;        // hysteresis
 constexpr float kUvMinSum = 0.003f;      // followers' sum under which there is nothing to decide on
 constexpr float kUvFadeMs = 5.0f;
-constexpr float kUvNoiseGain = 0.5f;
+constexpr float kUvNoiseGain = 0.18f;
 
 constexpr unsigned kThruFirst = 13;      // THRU follows the followers of bands 13..15
 constexpr float kThruGain = 0.08f;       // [est] the output scales the wet sum by 128 (kWetGain), the followers of a loud sibilant sum to about 0.1: about unity at THRU 100 %
 constexpr float kBandsPerSemitone = 1.0f / 4.8f;  // 0.4 octave a band
 
 constexpr unsigned kHalfBands = 13;      // bands 0..12 run at half rate
-constexpr float kHbC0 = 0.12701027f;     // halfband allpass coefficients: branch of the current sample, branch of the previous one
-constexpr float kHbC1 = 0.5664591f;
-
-// First-order allpass in z^-2 on the half-rate grid, one multiply: y = a (x - y[-1]) + x[-1].
-inline float allpass(float a, float& x1, float& y1, float x) noexcept {
-  const float y = mulb(a, x - y1) + x1;
-  x1 = x;
-  y1 = y;
-  return y;
-}
-
 inline float flush(float s) noexcept { return (s > kFlush || s < -kFlush) ? s : 0.0f; }
 inline float one_pole(float ms, float fs) noexcept { return 1.0f - std::exp(-1000.0f / (ms * fs)); }
 
@@ -87,7 +76,7 @@ void Bands::prepare(float sample_rate) noexcept {
   lvl_att_ = one_pole(kAgcAttackMs, fs_);
   lvl_rel_ = one_pole(kAgcReleaseMs, fs_);
   uv_step_ = 1.0f / (kUvFadeMs * 0.001f * fs_);
-  set_envelope(2.0f, 25.0f, 40.0f);
+  set_envelope(1.0f, 15.0f, 25.0f);
   reset();
 }
 
@@ -137,7 +126,7 @@ void Bands::set_envelope(float attack_ms, float release_ms, float low_release_ms
   release_ms = release_ms < 0.05f ? 0.05f : release_ms;
   low_release_ms = low_release_ms < 0.05f ? 0.05f : low_release_ms;
   // A gradient across the bands, geometric: band 0 has the low release, the middle of the range (band 7.5) the release, band 15 the release
-  // squared over the low release (default 40, 25, 15.6 ms). The attack follows the same factor, so the bottom is slower and the top faster.
+  // squared over the low release (default 25, 15, 9 ms). The attack follows the same factor, so the bottom is slower and the top faster.
   const float oct = std::log2(low_release_ms / release_ms);
   for (unsigned b = 0; b < kBands; ++b) {
     const float k = std::exp2(oct * (7.5f - static_cast<float>(b)) * (1.0f / 7.5f));
@@ -165,49 +154,6 @@ void Bands::set_formant(float semitones) noexcept {
 }
 
 void Bands::set_thru(float level) noexcept { thru_ = level > 1.0f ? 1.0f : (level > 0.0f ? level : 0.0f); }
-
-std::uint32_t Bands::decimate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept {
-  std::uint32_t i = 0, k = 0;
-  float pend = h.pend;
-  if (odd && n > 0) {  // in[0] is the earlier sample of a pair: it goes through the z^-1 branch
-    pend = allpass(kHbC1, h.x1, h.y1, in[0]);
-    i = 1;
-  }
-  for (; i + 1 < n; i += 2) {
-    out[k++] = 0.5f * (allpass(kHbC0, h.x0, h.y0, in[i]) + pend);
-    pend = allpass(kHbC1, h.x1, h.y1, in[i + 1]);
-  }
-  if (i < n) {  // a last even sample: its pair completes in the next call
-    out[k++] = 0.5f * (allpass(kHbC0, h.x0, h.y0, in[i]) + pend);
-  }
-  h.pend = pend;
-  return k;
-}
-
-void Bands::interpolate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept {
-  std::uint32_t i = 0;
-  if (odd && n > 0) {  // the second output of the last call's last pair
-    out[0] += h.pend;
-    i = 1;
-  }
-  for (std::uint32_t m = 0; i < n; ++m, i += 2) {
-    out[i] += allpass(kHbC0, h.x0, h.y0, in[m]);
-    const float o1 = allpass(kHbC1, h.x1, h.y1, in[m]);
-    if (i + 1 < n) {
-      out[i + 1] += o1;
-    } else {
-      h.pend = o1;
-    }
-  }
-}
-
-void Bands::settle(Halfband& h) noexcept {
-  h.x0 = flush(h.x0);
-  h.y0 = flush(h.y0);
-  h.x1 = flush(h.x1);
-  h.y1 = flush(h.y1);
-  h.pend = flush(h.pend);
-}
 
 // FORMANT other than 0. Pass 1 runs the modulator sections and the followers of all 16 bands; then each synthesis band takes the follower
 // at fractional position b - offset (linear between neighbours, the nearest band past either end) as a target gain, ramped from the gain the

@@ -787,9 +787,9 @@ TEST_CASE("bands: a carrier tone above 11 kHz that would alias onto a low band d
 namespace {
 
 const float kVoiceEnvFullRate[Bands::kBands] = {
-    0.0130749f, 0.00580474f, 0.0111257f, 0.00800566f, 0.00937417f, 0.0127554f, 0.0191459f, 0.0159279f,
-    0.00740966f, 0.00572744f, 0.00220999f, 0.00102686f, 0.000622491f, 0.00032418f, 0.000177753f, 0.000100688f};
-// vowel A, mean of the last 300 blocks. V2f: re-derived at the graded follower rates (bands.cpp set_envelope) in a one-off run with
+    0.0173853f, 0.0077841f, 0.0148367f, 0.0107291f, 0.0125046f, 0.0172781f, 0.025903f, 0.0215385f,
+    0.0101047f, 0.00775739f, 0.00299845f, 0.00142848f, 0.000851399f, 0.000451527f, 0.00024683f, 0.000138929f};
+// vowel A, mean of the last 300 blocks. Re-derived at the follower rates of the realism round (1 ms attack, 15 ms release mid-range; bands.cpp set_envelope) in a one-off run with
 // kHalfBands = 0, so every band runs at the full rate; the tolerance (1 dB) is unchanged.
 
 void voice_levels(float* env) {
@@ -841,7 +841,7 @@ TEST_CASE("bands: any frame count from 1 to 64 gives the output and followers of
     Bands b;
     b.prepare(kFs);
     float lead[64] = {}, lead_out[64];
-    for (int blk = 0; blk < 300; ++blk) {  // the AGC level starts at its target; 300 silent blocks bring it under the gate
+    for (int blk = 0; blk < 2000; ++blk) {  // the AGC level starts at its target; 2000 silent blocks (500 ms release) bring it under the gate
       b.process(lead, lead, lead_out, 64);
     }
     out.assign(total, 0.0f);
@@ -923,7 +923,7 @@ float peak_hz(const std::vector<float>& v, std::size_t from) {
 TEST_CASE("bands: the follower times are a smooth gradient, slower at the bottom and faster at the top") {
   Bands b;
   b.prepare(kFs);
-  // default 25 ms release, 40 ms low release: neighbours differ by 2^(log2(40/25)/7.5) = 1.065; the bound is 1.10
+  // default 15 ms release, 25 ms low release: neighbours differ by 2^(log2(25/15)/7.5) = 1.070; the bound is 1.10
   for (unsigned i = 0; i + 1 < Bands::kBands; ++i) {
     INFO("band " << i);
     CHECK(b.release_ms(i) > b.release_ms(i + 1));
@@ -931,13 +931,13 @@ TEST_CASE("bands: the follower times are a smooth gradient, slower at the bottom
     CHECK(b.release_ms(i) / b.release_ms(i + 1) < 1.10f);
     CHECK(b.attack_ms(i) / b.attack_ms(i + 1) < 1.10f);
   }
-  CHECK(b.release_ms(0) == doctest::Approx(40.0f).epsilon(0.02));
-  CHECK(b.release_ms(15) == doctest::Approx(15.6f).epsilon(0.03));
-  // the middle of the range keeps today's 25 ms and 2 ms: the two middle bands straddle them
-  CHECK(b.release_ms(7) > 25.0f);
-  CHECK(b.release_ms(8) < 25.0f);
-  CHECK(std::sqrt(b.release_ms(7) * b.release_ms(8)) == doctest::Approx(25.0f).epsilon(0.02));
-  CHECK(std::sqrt(b.attack_ms(7) * b.attack_ms(8)) == doctest::Approx(2.0f).epsilon(0.02));
+  CHECK(b.release_ms(0) == doctest::Approx(25.0f).epsilon(0.02));
+  CHECK(b.release_ms(15) == doctest::Approx(9.0f).epsilon(0.03));
+  // the middle of the range is 15 ms and 1 ms: the two middle bands straddle them
+  CHECK(b.release_ms(7) > 15.0f);
+  CHECK(b.release_ms(8) < 15.0f);
+  CHECK(std::sqrt(b.release_ms(7) * b.release_ms(8)) == doctest::Approx(15.0f).epsilon(0.02));
+  CHECK(std::sqrt(b.attack_ms(7) * b.attack_ms(8)) == doctest::Approx(1.0f).epsilon(0.02));
 }
 
 TEST_CASE("bands: FORMANT 0 stays on the merged path; two passes only away from 0 and for one block after it") {
@@ -1038,14 +1038,14 @@ TEST_CASE("bands: FORMANT away from 0 gives blocks of any size the output of blo
     mod[i] = 0.001f * std::sin(0.3f * static_cast<float>(i)) + 0.0005f * std::sin(0.9f * static_cast<float>(i));
   }
   const std::vector<float> car = noise_vec(total, 0.2f);
-  const std::vector<float> ref = bands_run(mod, car, 6.0f, 0.0f, 64, 300);
+  const std::vector<float> ref = bands_run(mod, car, 6.0f, 0.0f, 64, 2000);
   float sig = 0.0f;
   for (std::size_t i = 64 * 250; i < total; ++i) {
     sig += ref[i] * ref[i];
   }
   CHECK(sig > 0.0f);
   for (const std::uint32_t blk : {1u, 7u, 13u, 33u}) {
-    const std::vector<float> o = bands_run(mod, car, 6.0f, 0.0f, blk, 300);
+    const std::vector<float> o = bands_run(mod, car, 6.0f, 0.0f, blk, 2000);
     float err = 0.0f;
     for (std::size_t i = 64 * 250; i < total; ++i) {
       err += (o[i] - ref[i]) * (o[i] - ref[i]);

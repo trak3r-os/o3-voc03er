@@ -2,7 +2,7 @@
 #include <o3_voc03er/units/vocoder/autotune.h>
 #include <o3_voc03er/units/vocoder/scale.h>
 
-#include "nofma.h"
+#include <o3_voc03er/units/vocoder/nofma.h>
 
 #include <cmath>
 #include <cstring>

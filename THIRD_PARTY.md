@@ -3,8 +3,9 @@
 ## mda Talkbox (Paul Kellett): the DSP steps of the vocoder's Talk mode
 
 - Used in: `units/vocoder/src/talk.cpp`, `units/vocoder/include/o3_voc03er/units/vocoder/talk.h`.
-- What is taken: the DSP steps only (pre-emphasis, Hann window, autocorrelation, Levinson-Durbin with reflection coefficients clamped
-  to +-0.995, lattice filter, gain = sqrt(error), the two-path allpass spreading of the carrier). No mda source is in this tree: the
+- What is taken: the DSP steps only (pre-emphasis, window, autocorrelation, Levinson-Durbin with reflection coefficients clamped
+  to +-0.995, lattice filter, gain = sqrt(error), a first difference of the carrier); the analysis and lattice run at fs/4 behind
+  a halfband pair of this project's own. No mda source is in this tree: the
   code is written here from the algorithm's description, as a streaming design (the structure differs from mda's batch one).
 - Licence of the original: dual MIT / GPL-2.0-or-later at the licensee's choice (`readme.license` of the mda-vst repository,
   https://sourceforge.net/p/mda-vst/code/HEAD/tree/). This project takes the **MIT option**.

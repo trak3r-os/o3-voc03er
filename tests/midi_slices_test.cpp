@@ -172,7 +172,7 @@ TEST_CASE("midi slices: velocity is the level, and a Param trigger afterwards is
     Rig& p = i == 0 ? soft : ref;
     (void)p.rms(2);
     (void)p.e.inject(p.id, midi_on(kLow, i == 0 ? 40u : 100u));
-    (void)p.rms(600);  // past its end and the followers' tails
+    (void)p.rms(2500);  // past its end and the followers' and the AGC's tails (500 ms release)
     REQUIRE_FALSE(p.v.loop_status(kReader).region);
     (void)p.e.set_param(p.id, Vocoder::region_param(kReader, Vocoder::RegionField::Start), static_cast<float>(kPer));
     (void)p.e.set_param(p.id, Vocoder::region_param(kReader, Vocoder::RegionField::Len), 1000.0f);

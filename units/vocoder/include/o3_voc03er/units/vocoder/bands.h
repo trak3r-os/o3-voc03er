@@ -2,12 +2,12 @@
 #pragma once
 
 // Bands: a 16-band channel vocoder. Band centres are 125 x 2^(0.4 i) Hz, i = 0..15 (125 Hz to 8 kHz, 2.5 bands an octave). Per band: two
-// cascaded RBJ bandpass biquads (Q 2.3 each) on the modulator, a rectifier and a one-pole follower (attack 2 ms, release 25 ms in the middle of the
+// cascaded RBJ bandpass biquads (Q 2.3 each) on the modulator, a rectifier and a one-pole follower (attack 1 ms, release 15 ms in the middle of the
 // range, graded across the bands: slower at the bottom, faster at the top, see set_envelope), and two cascaded bandpass biquads on the carrier whose output is scaled by the follower and summed. Two
 // cascaded biquads at Q 2.3 are about 0.28 octave wide at -3 dB, narrower than the 0.4-octave spacing, and neighbouring bands cancel at the crossover unless the synthesis polarity of alternate bands is flipped (syn_gain_): with the flip the swept sum is flat within +-1 dB from 200 Hz to 6 kHz, without it 16 dB of ripple (tests/vocoder_test.cpp).
 //
 // Front end on the analysis path only (the dry modulator is the caller's): an 80 Hz high-pass, a slow AGC (the level is a mean-abs
-// follower, attack 5 ms, release 100 ms; the gain is target / level, per block, ramped over the block, clamped to 0.05..20, fading to 1 as the level falls from 0.008 to 0.002) that is gated:
+// follower, attack 50 ms, release 500 ms; the gain is target / level, per block, ramped over the block, clamped to 0.05..20, fading to 1 as the level falls from 0.008 to 0.002) that is gated:
 // below -54 dB the gain goes to 1, so a noise floor is never lifted, then a first-order pre-emphasis so consonants survive.
 //
 // Unvoiced path: when (followers of bands 13..15) / (sum of all followers) passes 0.35 (closes under 0.28) and the AGC level is above its
@@ -34,6 +34,7 @@
 // Cost: V2's loop measured 97 cycles a band-sample, 38 % of a block (docs/PLAN.md, section 4b). After V2c, about 47 by its instructions [est].
 
 #include <o3_voc03er/units/vocoder/carrier.h>
+#include <o3_voc03er/units/vocoder/halfband.h>
 
 #include <cstdint>
 
@@ -85,16 +86,6 @@ class Bands {
   // Two biquads, n1 and n2 each, as -s/b0 of the transposed form (b0 folded out, see process): up to 1/b0^2 = 7e4 times the plain state.
   alignas(16) float mod_state_[kBands][4] = {};
   alignas(16) float car_state_[kBands][4] = {};
-  // A halfband's state: x[n-1] and y[n-1] of the section of each branch, and `pend`, the value the next call needs (the odd-sample branch's
-  // output in a decimator, the second output of the pair in the interpolator).
-  struct Halfband {
-    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f, pend = 0.0f;
-  };
-  // Returns the number of outputs (one for each even-indexed input, `odd` says whether in[0] is odd-indexed).
-  static std::uint32_t decimate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept;
-  // Adds the interpolated `m` samples (the first output at an even-indexed sample) into out[0..n).
-  static void interpolate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept;
-  static void settle(Halfband& h) noexcept;  // flush tiny state to 0 (no denormals)
   Halfband dec_mod_, dec_car_, dec_uv_, interp_;
   static constexpr unsigned kFullDelay = 3;  // samples the full-rate bands' sum is delayed by
   float fr_dly_[kFullDelay] = {};

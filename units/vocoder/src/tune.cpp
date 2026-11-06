@@ -2,7 +2,7 @@
 // Tune: the YIN pitch detector and the voicing gate. See tune.h for the design, the schedule and the cost.
 #include <o3_voc03er/units/vocoder/tune.h>
 
-#include "nofma.h"
+#include <o3_voc03er/units/vocoder/nofma.h>
 
 #include <cmath>
 

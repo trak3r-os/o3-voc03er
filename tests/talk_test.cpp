@@ -167,7 +167,7 @@ TEST_CASE("talk: no block carries a spike, at every order") {
     Saw saw(100.0f);
     std::vector<std::uint32_t> macs;
     float m[64], c[64], o[64];
-    for (int b = 0; b < 12 * 6; ++b) {
+    for (int b = 0; b < 36 * 2; ++b) {
       for (int i = 0; i < 64; ++i) {
         m[i] = v.next();
         c[i] = saw.next();
@@ -175,15 +175,10 @@ TEST_CASE("talk: no block carries a spike, at every order") {
       t.process(m, c, o, 64);
       macs.push_back(t.macs_last_block());
     }
-    // Hops after the ring has filled (12 blocks), each aligned: blocks 6k .. 6k+5.
-    for (std::size_t h = 3; h < 12; ++h) {
-      std::uint32_t mx = 0;
-      double sum = 0.0;
-      for (std::size_t j = 0; j < 6; ++j) {
-        mx = std::max(mx, macs[h * 6 + j]);
-        sum += macs[h * 6 + j];
-      }
-      CHECK(static_cast<double>(mx) <= 1.5 * (sum / 6.0));
+    // Hops after the window has filled (the first 256 low-rate samples, 16 blocks), each aligned: a hop is 2 blocks of 64 frames.
+    for (std::size_t h = 12; h < 36; ++h) {
+      const std::uint32_t mx = std::max(macs[h * 2], macs[h * 2 + 1]);
+      CHECK(static_cast<double>(mx) <= 1.5 * 0.5 * (macs[h * 2] + macs[h * 2 + 1]));
     }
   }
 }
@@ -223,7 +218,7 @@ TEST_CASE("talk: a 90 Hz vowel at order 24 for 5 s stays bounded, |k| <= 0.995, 
   Saw saw(90.0f);
   float kmax = 0.0f;
   auto out = run_talk(t, [&] { return v.next(); }, [&] { return saw.next(); }, 5 * 44100 / 64, [&](std::size_t) {
-    for (std::uint32_t m = 1; m <= 24; ++m) {
+    for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) {
       kmax = std::max(kmax, std::fabs(t.reflection(m)));
       kmax = std::max(kmax, std::fabs(t.reflection_target(m)));
     }
@@ -263,13 +258,13 @@ TEST_CASE("talk: FREEZE holds k while the modulator changes") {
   v.set_vowel(kA, 2);
   Saw saw(100.0f);
   run_talk(t, [&] { return v.next(); }, [&] { return saw.next(); }, 200, [](std::size_t) {});
-  float held[25];
-  for (std::uint32_t m = 1; m <= 16; ++m) held[m] = t.reflection_target(m);
+  float held[Talk::kMaxStages + 1];
+  for (std::uint32_t m = 1; m <= 12; ++m) held[m] = t.reflection_target(m);
   CHECK(std::fabs(held[1]) > 0.1f);
   t.set_freeze(true);
   v.set_vowel(kB, 2);
   auto out = run_talk(t, [&] { return v.next(); }, [&] { return saw.next(); }, 200, [](std::size_t) {});
-  for (std::uint32_t m = 1; m <= 16; ++m) {
+  for (std::uint32_t m = 1; m <= 12; ++m) {
     CHECK(t.reflection_target(m) == held[m]);
     CHECK(t.reflection(m) == held[m]);
   }
@@ -277,7 +272,7 @@ TEST_CASE("talk: FREEZE holds k while the modulator changes") {
   t.set_freeze(false);
   run_talk(t, [&] { return v.next(); }, [&] { return saw.next(); }, 200, [](std::size_t) {});
   float moved = 0.0f;
-  for (std::uint32_t m = 1; m <= 16; ++m) moved = std::max(moved, std::fabs(t.reflection_target(m) - held[m]));
+  for (std::uint32_t m = 1; m <= 12; ++m) moved = std::max(moved, std::fabs(t.reflection_target(m) - held[m]));
   CHECK(moved > 0.05f);
 }
 
@@ -412,7 +407,7 @@ TEST_CASE("talk: a pure tone at full scale, the near-singular case, stays finite
     for (float v : out) {
       all_finite = all_finite && std::isfinite(v);
     }
-    for (std::uint32_t m = 1; m <= Talk::kMaxOrder; ++m) {
+    for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) {
       all_finite = all_finite && std::fabs(t->reflection(m)) <= Talk::kMaxK;  // false for a NaN too
     }
   }
@@ -461,4 +456,243 @@ TEST_CASE("vocoder: back from TALK, the bands hold nothing of the voice before i
     left += v.bands().envelope(b);
   }
   CHECK(left < 0.01f * held);
+}
+
+// ---- fs/4 design: formants, any frame count, breath, bad input, quality ----
+
+namespace {
+
+// A pulse train at f0 through two known resonators in cascade: an all-pole vowel with formants at f1 and f2.
+class Buzz {
+ public:
+  Buzz(float f0, float f1, float bw1, float f2, float bw2) : period_(kFs / f0) {
+    const float r1 = std::exp(-3.1415927f * bw1 / kFs), r2 = std::exp(-3.1415927f * bw2 / kFs);
+    c1_[0] = 2.0f * r1 * std::cos(kPi2 * f1 / kFs);
+    c1_[1] = -r1 * r1;
+    c2_[0] = 2.0f * r2 * std::cos(kPi2 * f2 / kFs);
+    c2_[1] = -r2 * r2;
+    g_ = (1.0f - r1) * (1.0f - r2) * 8.0f;
+  }
+  float next() {
+    float x = 0.0f;
+    if (t_ >= period_) {
+      t_ -= period_;
+      x = g_;
+    }
+    t_ += 1.0f;
+    const float a = x + c1_[0] * a1_ + c1_[1] * a2_;
+    a2_ = a1_;
+    a1_ = a;
+    const float b = a + c2_[0] * b1_ + c2_[1] * b2_;
+    b2_ = b1_;
+    b1_ = b;
+    return b;
+  }
+
+ private:
+  float period_, t_ = 0.0f, g_;
+  float c1_[2], c2_[2];
+  float a1_ = 0.0f, a2_ = 0.0f, b1_ = 0.0f, b2_ = 0.0f;
+};
+
+// The lattice's all-pole envelope 1/|A| at `hz` (the lattice runs at fs/4), from the reflection targets of stages 1..p.
+float lattice_env(const Talk& t, std::uint32_t p, float hz) {
+  float a[Talk::kMaxStages + 1] = {1.0f}, tmp[Talk::kMaxStages + 1];
+  for (std::uint32_t m = 1; m <= p; ++m) {
+    const float k = t.reflection_target(m);
+    for (std::uint32_t j = 1; j < m; ++j) tmp[j] = a[j] + k * a[m - j];
+    for (std::uint32_t j = 1; j < m; ++j) a[j] = tmp[j];
+    a[m] = k;
+  }
+  const float w = kPi2 * hz / (kFs * 0.25f);
+  float re = 1.0f, im = 0.0f;
+  for (std::uint32_t j = 1; j <= p; ++j) {
+    re += a[j] * std::cos(w * static_cast<float>(j));
+    im -= a[j] * std::sin(w * static_cast<float>(j));
+  }
+  return 1.0f / std::sqrt(re * re + im * im);
+}
+
+// Power of x[from, to) above `lo` Hz: the sum of Goertzel powers on a grid of `lo` + 250 Hz steps up to 10 kHz.
+float power_above(const std::vector<float>& x, std::size_t from, std::size_t to, float lo) {
+  float p = 0.0f;
+  for (float hz = lo; hz <= 10000.0f; hz += 250.0f) p += power_at(x, from, to, hz);
+  return p;
+}
+
+// Noise generator (xorshift), -0.3..0.3
+struct Noise {
+  std::uint32_t s = 12345u;
+  float next() {
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return (static_cast<float>(s & 0xFFFFu) * (1.0f / 32768.0f) - 1.0f) * 0.3f;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("talk: the lattice's envelope peaks land within 60 Hz of a known vowel's F1 and F2 at Quality 16") {
+  Talk& t = *make_talk();
+  t.set_order(16);
+  Buzz v(110.0f, 650.0f, 90.0f, 1700.0f, 120.0f);
+  Saw saw(100.0f);
+  run_talk(t, [&] { return v.next(); }, [&] { return saw.next(); }, 300, [](std::size_t) {});
+  float best1 = 0.0f, best2 = 0.0f, e1 = 0.0f, e2 = 0.0f;
+  for (float hz = 200.0f; hz < 3500.0f; hz += 5.0f) {
+    const float e = lattice_env(t, 12, hz);
+    if (hz < 1150.0f && e > e1) {
+      e1 = e;
+      best1 = hz;
+    }
+    if (hz >= 1150.0f && e > e2) {
+      e2 = e;
+      best2 = hz;
+    }
+  }
+  MESSAGE("F1 " << best1 << " Hz, F2 " << best2 << " Hz");
+  CHECK(std::fabs(best1 - 650.0f) <= 60.0f);
+  CHECK(std::fabs(best2 - 1700.0f) <= 60.0f);
+}
+
+TEST_CASE("talk: any frame count gives the same output as calls of 64") {
+  const std::size_t total = 64 * 85;  // 85 x 64 = 64 x (1 + 7 + 13 + 64)
+  std::vector<float> m(total), c(total);
+  {
+    Voice v(110.0f);
+    v.set_vowel(kA, 2);
+    Saw saw(100.0f);
+    for (std::size_t i = 0; i < total; ++i) {
+      m[i] = 0.3f * v.next();
+      c[i] = 0.3f + 0.2f * saw.next();  // never under 0.1: the breath's gate sees the same carrier in every call
+    }
+  }
+  Talk& a = *make_talk();
+  a.set_order(16);
+  std::vector<float> ref(total);
+  for (std::size_t i = 0; i < total; i += 64) a.process(&m[i], &c[i], &ref[i], 64);
+  static Talk b;
+  b.prepare(kFs);
+  b.set_order(16);
+  std::vector<float> got(total);
+  const std::uint32_t pattern[] = {1, 7, 13, 64};
+  std::size_t pos = 0;
+  unsigned k = 0;
+  while (pos < total) {
+    std::size_t n = pattern[k++ % 4];
+    n = std::min(n, total - pos);
+    b.process(&m[pos], &c[pos], &got[pos], static_cast<std::uint32_t>(n));
+    pos += n;
+  }
+  float worst = 0.0f;
+  for (std::size_t i = 0; i < total; ++i) worst = std::max(worst, std::fabs(ref[i] - got[i]));
+  MESSAGE("worst difference " << worst << " on a peak of " << peak(ref));
+  CHECK(peak(ref) > 0.01f);
+  CHECK(worst <= 1.0e-5f);
+  // single frames too
+  static Talk d;
+  d.prepare(kFs);
+  d.set_order(16);
+  std::vector<float> one(total);
+  for (std::size_t i = 0; i < total; ++i) d.process(&m[i], &c[i], &one[i], 1);
+  worst = 0.0f;
+  for (std::size_t i = 0; i < total; ++i) worst = std::max(worst, std::fabs(ref[i] - one[i]));
+  CHECK(worst <= 1.0e-5f);
+}
+
+TEST_CASE("talk: the breath is the modulator above 5 kHz, only while the carrier sounds, and THRU doubles it") {
+  const std::size_t blocks = 400;
+  const auto run = [&](bool carrier_on, float thru) {
+    Talk& t = *make_talk();
+    t.set_thru(thru);
+    Noise n;
+    Saw saw(100.0f);
+    return run_talk(t, [&] { return n.next(); }, [&] { return carrier_on ? saw.next() : 0.0f; }, blocks, [](std::size_t) {});
+  };
+  const std::size_t from = 200 * 64, to = blocks * 64;
+  const auto on0 = run(true, 0.0f);
+  const auto on1 = run(true, 1.0f);
+  const auto off = run(false, 1.0f);
+  const float p0 = power_above(on0, from, to, 6000.0f);
+  const float p1 = power_above(on1, from, to, 6000.0f);
+  CHECK(p0 > 1.0e-9f);  // the carrier is below 5.5 kHz after the decimators: this is the breath
+  CHECK(peak(off) == 0.0f);
+  CHECK(power_above(off, from, to, 6000.0f) == 0.0f);
+  const float ratio = std::sqrt(p1 / p0);
+  MESSAGE("THRU 1 over THRU 0, amplitude " << ratio);
+  CHECK(ratio > 1.9f);
+  CHECK(ratio < 2.1f);
+}
+
+TEST_CASE("talk: a NaN and an Inf in the modulator and in the carrier leave the output finite") {
+  Talk& t = *make_talk();
+  Voice v(110.0f);
+  v.set_vowel(kA, 2);
+  Saw saw(100.0f);
+  const float nan = std::nanf(""), inf = INFINITY;
+  std::vector<float> out;
+  for (std::size_t b = 0; b < 300; ++b) {
+    float m[64], c[64], o[64];
+    for (int i = 0; i < 64; ++i) {
+      m[i] = 0.3f * v.next();
+      c[i] = saw.next();
+    }
+    if (b == 50) m[10] = nan;
+    if (b == 60) m[20] = inf;
+    if (b == 70) c[30] = nan;
+    if (b == 80) c[40] = -inf;
+    t.process(m, c, o, 64);
+    out.insert(out.end(), o, o + 64);
+  }
+  CHECK(finite(out));
+  CHECK(peak(out, 200 * 64) > 0.01f);
+  for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) CHECK(std::isfinite(t.reflection(m)));
+}
+
+TEST_CASE("talk: both inputs silent after a vowel give exact silence, no denormals; reset leaves no state") {
+  Talk& t = *make_talk();
+  Voice v(110.0f);
+  v.set_vowel(kA, 2);
+  Saw saw(100.0f);
+  std::size_t sample = 0;
+  auto out = run_talk(t, [&] { return (sample < 44100u) ? v.next() : 0.0f; },
+                      [&] { return (sample++ < 44100u) ? saw.next() : 0.0f; }, 3 * 44100 / 64, [](std::size_t) {});
+  CHECK(peak(out, 0) > 0.0f);
+  for (std::size_t i = 0; i < out.size(); ++i) CHECK(std::fpclassify(out[i]) != FP_SUBNORMAL);
+  for (std::size_t i = out.size() - 64 * 64; i < out.size(); ++i) CHECK(out[i] == 0.0f);
+  // after reset(), silence in gives silence out at once: no lattice, filter or decimator state left over
+  Voice w(110.0f);
+  w.set_vowel(kA, 2);
+  Saw s2(100.0f);
+  run_talk(t, [&] { return w.next(); }, [&] { return s2.next(); }, 200, [](std::size_t) {});
+  t.reset();
+  std::vector<float> z(64, 0.0f), o(64, 1.0f);
+  for (int b = 0; b < 4; ++b) {
+    t.process(z.data(), z.data(), o.data(), 64);
+    CHECK(peak(o) == 0.0f);
+  }
+}
+
+TEST_CASE("talk: Quality maps to the lattice order (q x 3 + 2) / 4 and stays in 8..24") {
+  CHECK(Talk::stages_for(8) == 6);
+  CHECK(Talk::stages_for(16) == 12);
+  CHECK(Talk::stages_for(24) == 18);
+  CHECK(Talk::kMaxStages == 18);
+  for (std::uint32_t q = 8; q <= 24; ++q) {
+    Talk& t = *make_talk();
+    t.set_order(q);
+    CHECK(t.order() == q);
+    Voice v(110.0f);
+    v.set_vowel(kA, 2);
+    Saw saw(100.0f);
+    run_talk(t, [&] { return v.next(); }, [&] { return saw.next(); }, 100, [](std::size_t) {});
+    CHECK(t.lattice_order() == (q * 3 + 2) / 4);
+    CHECK(t.reflection_target((q * 3 + 2) / 4) != 0.0f);
+  }
+  Talk& t = *make_talk();
+  t.set_order(3);
+  CHECK(t.order() == 8);
+  t.set_order(99);
+  CHECK(t.order() == 24);
 }
