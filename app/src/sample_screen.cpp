@@ -9,6 +9,7 @@
 #include <o3sdk/app/audio_in.h>
 #include <o3sdk/app/context.h>
 #include <o3sdk/app/pad_leds.h>
+#include <o3sdk/core/placement.h>
 
 #include <cstring>
 
@@ -29,7 +30,7 @@ constexpr std::uint64_t kNoteMs = 2500;
 constexpr int kLevelTap = 6;  // a second tap on F8 moves the level this many half-dB (a detent moves 1)
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"CHORD", "SIDE", "SPEED", "DIR", "LOOP", "", "", "LEVEL"};
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"CHORD", "SIDE", "SPEED", "DIR", "LOOP", "TRIG", "CHOKE", "LEVEL"};
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
   std::size_t n = std::strlen(dst);
@@ -70,12 +71,54 @@ unsigned round_param(const dsp::Engine& e, dsp::UnitId id, std::uint16_t p) noex
 
 Color side_ink(sm::Side s) noexcept { return s == sm::Side::Speaks ? Color::Play : (s == sm::Side::Sounds ? Color::Sel : Color::TextDim); }
 
+// A slice voice is a loop reader playing a region (the unit's Regions). Reader k's own Speed, Dir, Level and Role are overwritten for the slice
+// of another slot, so the first slice on a reader keeps what they were (`saved`) and the end of its region writes them back: until then
+// SampleScreen::view() shows slot k from `saved`. Main loop only.
+struct SliceVoice {
+  bool active;    // asked, not yet seen to end
+  bool seen;      // LoopStatus::region was true once since the ask
+  bool modified;  // the four values of the reader are the slice's: restore at the end
+  bool gate;      // a pad release ends it
+  std::uint8_t slot, pad;
+  std::uint8_t speed, dir, role;  // saved
+  float level_db;                 // saved
+  std::uint32_t seq;
+  std::uint64_t started_ms;
+};
+
+// SAMPLE's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just the cursor in the SRAM). Zero means TRIG GATE and
+// CHOKE ON, the defaults. The help tables are valid while HELP is open.
+struct SampleData {
+  sm::SliceTable table[sm::kReaders];
+  SliceVoice voice[sm::kReaders];
+  std::uint8_t one_shot[sm::kReaders];   // TRIG per slot: 1 ONE SHOT
+  std::uint8_t choke_off[sm::kReaders];  // CHOKE per slot: 1 OFF
+  std::uint32_t seq;
+  app::HelpPadGroup groups[app::kHelpMaxGroups];
+  char pad_name[sm::kTopPads][app::kHelpPadLabel + 1];
+};
+O3SDK_BIG SampleData g_sd = {};
+
+// The slices of `slot` that sound, as a bit mask (bit i: slice i + 1).
+std::uint32_t sounding_mask(unsigned slot) noexcept {
+  std::uint32_t m = 0;
+  for (const SliceVoice& v : g_sd.voice) {
+    if (v.active && v.slot == slot && v.pad < sm::kMaxSlices) {
+      m |= std::uint32_t{1} << v.pad;
+    }
+  }
+  return m;
+}
+
 }  // namespace
 
 void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform) noexcept {
   voice_ = voice;
   voc_ = voc;
   perform_ = perform;
+  slot_ = 0;
+  focus_ = 0;
+  g_sd = SampleData{};  // a restarted app starts from the defaults
 }
 
 const ui::Theme* SampleScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
@@ -86,6 +129,7 @@ void SampleScreen::enter(app::Context& ctx) noexcept {
 }
 
 void SampleScreen::leave(app::Context& ctx) noexcept {
+  release_all(ctx);
   if (perform_ != nullptr) {
     perform_->leave(ctx);  // releases the held pads
   }
@@ -101,8 +145,152 @@ void SampleScreen::say(app::Context& ctx, const char* text) noexcept {
   ctx.redraw();
 }
 
+// SPEED, DIR, LEVEL and LOOP of the selected slot. While a slice of another slot borrows its reader the new value waits in `saved` (the reader
+// plays that slice); while a slice of its own slot plays on it both are written, or the end of the region would undo the change.
 void SampleScreen::write(app::Context& ctx, Field f, float v) noexcept {
+  SliceVoice& sv = g_sd.voice[slot_ & 3u];
+  if (sv.modified) {
+    if (f == Field::Speed) {
+      sv.speed = static_cast<std::uint8_t>(v);
+    } else if (f == Field::Dir) {
+      sv.dir = v >= 0.5f ? 1u : 0u;
+    } else if (f == Field::Level) {
+      sv.level_db = v;
+    }
+    if (sv.slot != slot_ && f != Field::Play) {
+      return;
+    }
+  }
   (void)ctx.engine().set_param(voice_, Vocoder::loop_param(slot_, f), v);
+}
+
+// The slot's status as the screen shows it: a borrowed reader's own values come from `saved`, not from what the slice has put there.
+Vocoder::LoopStatus SampleScreen::view(unsigned loop) const noexcept {
+  Vocoder::LoopStatus st = voc_ != nullptr ? voc_->loop_status(loop) : Vocoder::LoopStatus{};
+  const SliceVoice& sv = g_sd.voice[loop & 3u];
+  if (sv.modified && sv.slot != loop) {
+    st.speed = sv.speed;
+    st.reverse = sv.dir != 0u;
+    st.level_db = sv.level_db;
+  }
+  return st;
+}
+
+// A slice of the selected slot on a reader (sm::pick_reader). The reader plays the slot's cut at the slot's Speed, Dir and Level, on the slot's
+// side (a slot on no side speaks): those four are written first, then Start, Len and Trig 1, in that order, so the unit takes the span with the
+// trigger. A press is at most 7 writes (3 when the reader is the slot's own and its values already are the slot's): the unit drains 64 a block
+// (kMaxParamsPerBlock) and the ring holds 512, and the 24 slice pads give at most 24 * 7 in a frame, which the frame cadence does not allow.
+void SampleScreen::trigger(app::Context& ctx, unsigned pad) noexcept {
+  if (voc_ == nullptr || perform_ == nullptr || pad >= g_sd.table[slot_ & 3u].count) {
+    return;
+  }
+  dsp::Engine& e = ctx.engine();
+  const sm::Cut cut = g_sd.table[slot_ & 3u].cut[pad];
+  sm::ReaderState rs[sm::kReaders];
+  const route::Route rt = perform_->route_now(ctx);
+  for (unsigned k = 0; k < sm::kReaders; ++k) {
+    const Vocoder::LoopStatus st = voc_->loop_status(k);
+    rs[k].sided = sm::side_of(rt, k) != sm::Side::None;
+    rs[k].recording = st.rec != Vocoder::LoopStatus::Rec::Idle;
+    rs[k].loop_on = st.playing || st.pending;
+    rs[k].region = g_sd.voice[k].active || st.region;
+    rs[k].seq = g_sd.voice[k].seq;
+  }
+  const int pick = sm::pick_reader(rs, slot_, g_sd.choke_off[slot_ & 3u] == 0u);
+  if (pick < 0) {
+    say(ctx, "NO FREE READER");
+    return;
+  }
+  const unsigned k = static_cast<unsigned>(pick);
+  const Vocoder::LoopStatus src = view(slot_);  // before reader k's values change (k may be borrowed)
+  const bool car = sm::slice_is_carrier(sm::side_of(rt, slot_));
+  SliceVoice& v = g_sd.voice[k];
+  if (!v.modified) {
+    v.speed = static_cast<std::uint8_t>(round_param(e, voice_, Vocoder::loop_param(k, Field::Speed)));
+    v.dir = static_cast<std::uint8_t>(round_param(e, voice_, Vocoder::loop_param(k, Field::Dir)));
+    v.role = static_cast<std::uint8_t>(round_param(e, voice_, Vocoder::loop_param(k, Field::Role)));
+    v.level_db = e.param(voice_, Vocoder::loop_param(k, Field::Level));
+    v.modified = true;
+  }
+  const auto put = [&](Field f, float val) {
+    const std::uint16_t id = Vocoder::loop_param(k, f);
+    if (e.param(voice_, id) != val) {
+      (void)e.set_param(voice_, id, val);
+    }
+  };
+  put(Field::Speed, static_cast<float>(src.speed));
+  put(Field::Dir, src.reverse ? 1.0f : 0.0f);
+  put(Field::Level, src.level_db);
+  put(Field::Role, car ? 1.0f : 0.0f);
+  (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Start), static_cast<float>(sm::region_start(slot_, Loop::kMaxSamples, cut)));
+  (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Len), static_cast<float>(cut.len));
+  (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Trig), 1.0f);
+  v.active = true;
+  v.seen = false;
+  v.gate = g_sd.one_shot[slot_ & 3u] == 0u;
+  v.slot = slot_;
+  v.pad = static_cast<std::uint8_t>(pad);
+  v.seq = ++g_sd.seq;
+  v.started_ms = ctx.uptime_ms();
+  ctx.redraw();
+}
+
+// TRIG GATE: the pad's release fades the voice out. A ONE SHOT voice ignores it.
+void SampleScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
+  for (unsigned k = 0; k < sm::kReaders; ++k) {
+    SliceVoice& v = g_sd.voice[k];
+    if (v.active && v.gate && v.pad == pad) {
+      v.gate = false;
+      (void)ctx.engine().set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Trig), 0.0f);
+    }
+  }
+}
+
+void SampleScreen::release_all(app::Context& ctx) noexcept {
+  for (unsigned pad = 0; pad < sm::kTopPads; ++pad) {
+    release_pad(ctx, pad);
+  }
+}
+
+void SampleScreen::service(app::Context& ctx) noexcept {
+  if (voc_ == nullptr) {
+    return;
+  }
+  dsp::Engine& e = ctx.engine();
+  const std::uint64_t now = ctx.uptime_ms();
+  for (unsigned k = 0; k < sm::kReaders; ++k) {
+    SliceVoice& v = g_sd.voice[k];
+    if (!v.active) {
+      continue;
+    }
+    const bool region = voc_->loop_status(k).region;
+    v.seen = v.seen || region;
+    if (!sm::region_ended(v.seen, region, now - v.started_ms)) {
+      continue;
+    }
+    v.active = false;
+    v.gate = false;
+    if (v.modified) {  // the reader's own slot's values and role come back, as the screens and PERFORM's roles had them
+      const auto back = [&](Field f, float val) {
+        const std::uint16_t id = Vocoder::loop_param(k, f);
+        if (e.param(voice_, id) != val) {
+          (void)e.set_param(voice_, id, val);
+        }
+      };
+      back(Field::Speed, static_cast<float>(v.speed));
+      back(Field::Dir, static_cast<float>(v.dir));
+      back(Field::Level, v.level_db);
+      back(Field::Role, static_cast<float>(v.role));
+      v.modified = false;
+    }
+  }
+  for (unsigned j = 0; j < sm::kReaders; ++j) {  // the cuts follow the slot's length (SAMPLE EDIT, U7, will edit them)
+    const Vocoder::LoopStatus st = voc_->loop_status(j);
+    const std::uint32_t len = st.rec == Vocoder::LoopStatus::Rec::Idle ? st.length : 0u;
+    if (g_sd.table[j].length != len) {
+      sm::even_cuts(g_sd.table[j], len);
+    }
+  }
 }
 
 // F2: the slot moves to the next side. The side it leaves is freed first, so each write keeps the route allowed and the unit stops or plays
@@ -147,7 +335,7 @@ void SampleScreen::set_side(app::Context& ctx, int delta) noexcept {
 // `delta` is the encoder's detents, or +-1 for a tap; a tap wraps where a detent stops at the end.
 void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
   const bool tap = delta == 1 && key_tap_;
-  const Vocoder::LoopStatus ls = voc_ != nullptr ? voc_->loop_status(slot_) : Vocoder::LoopStatus{};
+  const Vocoder::LoopStatus ls = view(slot_);
   switch (key) {
     case 0:  // CHORD
       if (perform_ != nullptr) {
@@ -170,6 +358,12 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       }
       write(ctx, Field::Play, ls.playing || ls.pending ? 0.0f : 1.0f);
       break;
+    case 5:  // TRIG: a flip
+      g_sd.one_shot[slot_ & 3u] ^= 1u;
+      break;
+    case 6:  // CHOKE
+      g_sd.choke_off[slot_ & 3u] ^= 1u;
+      break;
     case 7:  // LEVEL
       write(ctx, Field::Level, sm::step_level(ls.level_db, tap ? kLevelTap : delta));
       break;
@@ -182,10 +376,10 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
 void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
-    if (in.shift || k == 5u || k == 6u) {
+    if (in.shift) {
       return;
     }
-    if (k == focus_ || k == 3u || k == 4u) {  // a second tap steps the value on (DIR and LOOP have nothing else to do)
+    if (k == focus_ || (k >= 3u && k <= 6u)) {  // a second tap steps the value on (DIR, LOOP, TRIG and CHOKE have nothing else to do)
       key_tap_ = true;
       turn(ctx, k, 1);
       key_tap_ = false;
@@ -209,6 +403,10 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     perform_->step_octave(ctx, in.press(Button::Left) ? -1 : 1);
   } else if ((in.press(Button::Shift) || in.press(Button::Delete)) && perform_ != nullptr) {  // PERFORM's latch and release
     perform_->input(ctx, in);
+  } else if (in.pad_press() && !sm::chord_pad(in.pad())) {
+    trigger(ctx, in.pad());
+  } else if (in.pad_release() && !sm::chord_pad(in.pad())) {
+    release_pad(ctx, in.pad());
   } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr && sm::chord_pad(in.pad())) {
     perform_->pad_event(ctx, in);
   }
@@ -224,14 +422,16 @@ void SampleScreen::update(app::Context& ctx) noexcept {
   ctx.redraw();  // the play state moves with the bar
 }
 
-// The chord grid of PERFORM's two lower rows; the top two rows stay dark until the slices.
+// The chord grid of PERFORM's two lower rows; the top two rows are the slot's slices: a cut dim, a sounding one on, an empty slot dark.
 void SampleScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   if (perform_ == nullptr) {
     return;
   }
   perform_->leds(ctx, leds);
+  const unsigned count = g_sd.table[slot_ & 3u].count;
+  const std::uint32_t on = sounding_mask(slot_);
   for (unsigned pad = 0; pad < sm::kTopPads; ++pad) {
-    leds.set(pad, app::kLedOff);
+    leds.set(pad, pad < count ? (((on >> pad) & 1u) != 0u ? app::kLedOn : app::kLedDim) : app::kLedOff);
   }
 }
 
@@ -275,12 +475,32 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     }
   }
   h.summary = "THE FOUR SLOTS: UP AND DOWN PICK ONE; ITS SIDE, SPEED, DIRECTION AND LEVEL ARE THE F KEYS.\n"
-              "THE LOWER PAD ROWS PLAY CHORDS; THE UPPER ROWS ARE DARK UNTIL THE SLICES.";
+              "THE UPPER PAD ROWS PLAY THE SLOT'S SLICES; THE LOWER ROWS PLAY CHORDS.";
+  if (h.groups != nullptr && h.group_count < app::kHelpMaxGroups) {  // PERFORM's groups, then the slices (the screen's own storage in the SDRAM)
+    for (unsigned i = 0; i < h.group_count; ++i) {
+      g_sd.groups[i] = h.groups[i];
+    }
+    g_sd.groups[h.group_count] = {"SLICES", "THE SLOT'S CUTS; GATE HOLDS, ONE SHOT RUNS ON", ui::Color::Accent};
+    h.groups = g_sd.groups;
+    ++h.group_count;
+    for (unsigned pad = 0; pad < sm::kTopPads; ++pad) {
+      const unsigned n = pad + 1u;
+      char* l = g_sd.pad_name[pad];
+      l[0] = n >= 10u ? static_cast<char>('0' + n / 10u) : static_cast<char>('0' + n);
+      l[1] = n >= 10u ? static_cast<char>('0' + n % 10u) : '\0';
+      l[2] = '\0';
+      h.pad_label[pad] = l;
+      h.pad_group[pad] = h.group_count;
+    }
+    h.pads = "UPPER ROWS: SLICES 1 TO 24 OF THE SLOT. LOWER ROWS: CHORDS (LATCH WITH SHIFT).";
+  }
   h.fkey[0] = "THE CHORD ROW'S KIND";
   h.fkey[1] = "SPEAKS, SOUNDS, NONE";
   h.fkey[2] = "0.5X, 1X, 2X";
   h.fkey[3] = "FORWARD, REVERSE";
   h.fkey[4] = "THE WHOLE SLOT PLAYS ROUND";
+  h.fkey[5] = "GATE OR ONE SHOT";
+  h.fkey[6] = "ON: SLICES CUT EACH OTHER";
   h.fkey[7] = "-24 TO +12 DB";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
@@ -299,6 +519,29 @@ constexpr int kMidW = 270;
 constexpr int kRightX = 592;
 }  // namespace
 
+// The play line of the selected slot: a bar, a tick at each cut (lit while its slice sounds), a head for every reader whose position is in the slot
+// (the slot's own loop or a slice on another reader). Rects only, so the display list grows by 2 + the cuts + the heads.
+void SampleScreen::draw_line(app::Context&, ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept {
+  const sm::SliceTable& t = g_sd.table[slot & 3u];
+  const std::uint32_t on = sounding_mask(slot);
+  const std::uint32_t base = slot * Loop::kMaxSamples;
+  ui::plot::Canvas c(r);
+  c.open();
+  ornoir::fill_rect(c, x, y, w, 10, Color::Empty);
+  for (unsigned i = 0; i < t.count; ++i) {
+    const int tx = x + static_cast<int>(sm::bar_x(t.cut[i].start, length, static_cast<std::uint32_t>(w - 2)));
+    ornoir::fill_rect(c, tx, y - 6, 2, 22, ((on >> i) & 1u) != 0u ? Color::Play : Color::TextDim);
+  }
+  for (unsigned k = 0; k < sm::kReaders && voc_ != nullptr; ++k) {
+    const Vocoder::LoopStatus s = voc_->loop_status(k);
+    if ((s.playing || s.region) && s.position >= base && s.position - base < length) {
+      const int hx = x + static_cast<int>(sm::bar_x(s.position - base, length, static_cast<std::uint32_t>(w - 4)));
+      ornoir::fill_rect(c, hx, y - 3, 4, 16, Color::Accent);
+    }
+  }
+  c.close();
+}
+
 void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
   const dsp::Engine& e = ctx.engine();
   const app::AudioIn& ain = ctx.audio_in();
@@ -312,7 +555,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
 
   Vocoder::LoopStatus st[4];
   for (unsigned i = 0; i < 4 && voc_ != nullptr; ++i) {
-    st[i] = voc_->loop_status(i);
+    st[i] = view(i);
   }
   const Vocoder::LoopStatus& ls = st[slot_ & 3u];
   const bool empty = ls.length == 0u;
@@ -330,7 +573,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   ornoir::FKey keys[ornoir::kFKeys];
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     keys[i].name = kKeyNames[i];
-    keys[i].hot = i == focus_ && i != 5u && i != 6u;
+    keys[i].hot = i == focus_;
   }
   cat(keys[0].value, sizeof keys[0].value, pl::kKindNames[kind & 3u]);
   cat(keys[1].value, sizeof keys[1].value, sm::kSideNames[static_cast<unsigned>(side)]);
@@ -338,6 +581,8 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   cat(keys[2].value, sizeof keys[2].value, sm::kSpeedNames[ls.speed < sm::kSpeedCount ? ls.speed : 1u]);
   cat(keys[3].value, sizeof keys[3].value, sm::kDirNames[ls.reverse ? 1 : 0]);
   cat(keys[4].value, sizeof keys[4].value, ls.playing || ls.pending ? "ON" : "OFF");
+  cat(keys[5].value, sizeof keys[5].value, g_sd.one_shot[slot_ & 3u] != 0u ? "ONE SHOT" : "GATE");
+  cat(keys[6].value, sizeof keys[6].value, g_sd.choke_off[slot_ & 3u] != 0u ? "OFF" : "ON");
   {
     char num[8];
     sm::level_text(ls.level_db, num);
@@ -389,7 +634,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     }
   }
 
-  // The middle: the slot's name, its play state and where it plays (no overview yet: LoopStatus has no play position, slice U7 draws the wave).
+  // The middle: the slot's name, its play state and where it plays (no wave: SAMPLE EDIT, U7, draws it); below, the play line.
   const int mid = kMidX + kMidW / 2;
   r.text(centred(r, kSlotNames[slot_ & 3u], Face::Display, mid), kRowY + 14, kSlotNames[slot_ & 3u], Color::Text, Face::Display);
   if (empty) {
@@ -406,6 +651,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     r.text(centred(r, word, Face::Label, mid), kRowY + 134, word, ls.playing ? Color::Play : Color::TextDim, Face::Label);
     const char* on = side == sm::Side::Speaks ? "ON SPEAKS" : (side == sm::Side::Sounds ? "ON SOUNDS" : "ON NO SIDE");
     r.text(centred(r, on, Face::Label, mid), kRowY + 168, on, side_ink(side), Face::Label);
+    draw_line(ctx, r, slot_, ls.length, kMidX + 14, kRowY + 214, kMidW - 28);
   }
 
   // The right: SOUNDS as PERFORM shows it, and the chord.
@@ -417,7 +663,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   if (note_ != nullptr) {
     r.text(kColX, kRowY + 4 * kRowH + 2, note_, Color::Accent, Face::Label);
   } else {
-    r.text(kColX, kRowY + 4 * kRowH + 6, "PADS: THE CHORDS OF PERFORM, LOWER TWO ROWS", Color::TextDim, Face::Micro);
+    r.text(kColX, kRowY + 4 * kRowH + 6, "PADS: SLICES ON THE UPPER TWO ROWS, CHORDS BELOW", Color::TextDim, Face::Micro);
   }
 }
 

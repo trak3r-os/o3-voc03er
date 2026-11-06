@@ -142,7 +142,7 @@ so what was sung is heard at once.
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
 Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
-Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SIDE moves the slot (it leaves the other side first); it refuses only an empty slot or a route `allowed` rejects, and says why. F1 shares PERFORM's chord kind; LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. Only pads of the lower two rows reach the chord; F6 and F7 stay blank until U5.
+Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SIDE moves the slot (it leaves the other side first); it refuses only an empty slot or a route `allowed` rejects, and says why. F1 shares PERFORM's chord kind; LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. Only pads of the lower two rows reach the chord; F6 and F7 came in U5b.
 A refused AFTER leaves the slot on no side and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
 again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
 
@@ -405,6 +405,7 @@ unvoiced mix, the talk coefficients as 16 x 8-bit in four words at each publish,
 bytes of atomics in the unit, no SDRAM; the packing under 300 cycles a block [est].
 
 Built in U5a, ids 49 to 60 (R1Start on). One command a block and reader, the last wins; a release in the block of its start cancels it. A whole loop asked for while a region sounds waits at position 0 and starts when the region ends, off the bar line. Regions under 128 samples can end on a step of up to 2/64, and under 256 samples the loop under them is not ducked: both far below the shortest cut SAMPLE EDIT makes. A region stays in its memory: CLEAR on a slot does not stop another reader that is reading it.
+Built in U5b. Pads 0 to 23 are slices 1 to 24 of the selected slot (even cuts, 8, rebuilt when the slot's length changes; a slot shorter than the count gets one sample a cut). A press picks a reader (`pick_reader`: CHOKE ON the slot's own, OFF a free one, else the oldest slice voice; never a recording reader or another slot's whole loop) and writes Speed, Dir, Level and Role from the source slot, then Start, Len, Trig 1: at most 7 writes, 56 for eight pads against 64 a block. Role is CAR only for a slot on SOUNDS. The first slice on a reader keeps its Speed, Dir, Level and Role and the end of the region writes them back; SAMPLE shows slot k from the kept values while k is borrowed, and its edits wait there. Known edge, unit check: a borrowed reader whose own slot is on a side follows that side (CarSrc/ModSrc beat Role in `run_loops`). F6 TRIG (GATE, ONE SHOT) and F7 CHOKE (ON, OFF) are per slot, not saved. The play line is a bar, a tick per cut and a head per reader inside the slot.
 
 **Polyphony and cost.** A slice voice is a loop reader: 3,000 to 8,000 cycles a block from the unit reads (1x to 2x, `docs/PLAN.md` 4f), so four at
 once are 1.1 to 3 % each, the 4.6 to 12 % the four loops already cost; past four the oldest is stolen. BANDS with eight notes and four readers at
@@ -476,7 +477,7 @@ screen it touches. The unit checks owed are named, not run here.
 | P3 | GATE, ARP, GLIDE on the SHIFT row; the eight presets | `presets.txt` |
 | U3 | The routing: the two pickers, `ModSrc`, CarSrc LIVE, the roles derived, the one-rule rows, the capture gesture on REC and from a dimmed row | `route.txt` (every pair, the dimmed rows snapped, a capture to a slot with its WAV) |
 | U4 | SAMPLE REC and SAMPLE on the four slots as they are (whole play, side, speed, direction, level) | `sample_rec.txt`, `sample.txt` (a take through the chord, then the same as the carrier) |
-| U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, CHOKE and TRIG, the SLICE lane | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
+| U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, CHOKE and TRIG (the SLICE lane moved to U6) | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
 | U6 | PATTERN with lanes, chords in the NOTE lane, pads, patterns A to H in the SDRAM; LEVEL as velocity | `pattern.txt` |
 | U7 | SAMPLE EDIT: the overview bitmap, cursor, INSERT and DELETE, CUT EVEN and BEATS, trim, NORMALISE, COPY; CUT HITS with the scan job | `sample_edit.txt` (a drum WAV in, hits at 40 and 80, the snaps count the marks) |
 | U8 | SAMPLE LOAD and SAVE WAV: the WAV reader, the picker, the load into a slot, the staging region | `sample_load.txt` (`--card` with a mono and a stereo WAV, a 48 kHz one refused) |

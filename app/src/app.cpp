@@ -169,6 +169,7 @@ class MyApp final : public app::App {
   // The file jobs end and start here, once per pass of the main loop (a Screen has an update() too, for what only it needs).
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
+    sample_.service(ctx);  // slice voices end and tables follow lengths whichever screen is up
     carriers_.set_all(play_.pattern().carrier);  // the render side's copy of the steps' carriers (relaxed atomics, carrier_seq.h)
     app::Files& files = ctx.files();
     if (op_ != Op::None) {

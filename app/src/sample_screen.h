@@ -2,15 +2,17 @@
 #pragma once
 
 // SAMPLE (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"), in the OR NOIR skin: the four slots as a column (the selected one framed: name,
-// length, speed, direction, its side in that side's ink), the slot's state in the middle, SOUNDS and the chord on the right. No slices yet (U5).
+// length, speed, direction, its side in that side's ink), the slot's slices and play line in the middle, SOUNDS and the chord on the right.
 //
-//   F1 CHORD  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 -  F7 -  F8 LEVEL
+//   F1 CHORD  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on (DIR and LOOP flip at once). UP / DOWN: the slot.
-//   LEFT / RIGHT: the octave. The bottom two pad rows play PERFORM's chords (its code); the top two rows are dark and silent until the slices.
+//   LEFT / RIGHT: the octave. The bottom two pad rows play PERFORM's chords (its code); the top two rows are the slot's slices 1..24 (even cuts,
+//   8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), TRIG GATE stops it at the release, ONE SHOT lets it end.
+//   TRIG and CHOKE are per slot; CHOKE ON (default) gives a slot one voice, OFF lets its slices overlap on the free readers (or steal the oldest).
 //   SIDE moves the slot between SPEAKS, SOUNDS and NONE; an empty slot is refused and the screen says why. LOOP is the unit's Play: the whole
 //   slot plays round from the bar. SPEED, DIR and LEVEL are the slot's own parameters (Vocoder::loop_param).
 //
-// Main loop only; the state is a few bytes, nothing is big.
+// Main loop only; the cursor is a few bytes, the tables are in the SDRAM (g_sd in the .cpp).
 
 #include "perform_screen.h"
 
@@ -45,11 +47,20 @@ class SampleScreen final : public o3sdk::app::Screen {
 
   unsigned slot() const noexcept { return slot_; }
 
+  // Once a pass of the main loop, whichever screen is up (App::update): ends the slice voices that finished (a borrowed reader gets its own slot's
+  // Speed, Dir, Level and Role back) and rebuilds a slot's cuts when its length changed.
+  void service(o3sdk::app::Context& ctx) noexcept;
+
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void write(o3sdk::app::Context& ctx, Vocoder::LoopField f, float v) noexcept;
   void set_side(o3sdk::app::Context& ctx, int delta) noexcept;
+  void trigger(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void release_all(o3sdk::app::Context& ctx) noexcept;
+  void draw_line(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept;
+  Vocoder::LoopStatus view(unsigned loop) const noexcept;
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   const Vocoder* voc_ = nullptr;
