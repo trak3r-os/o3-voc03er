@@ -293,6 +293,8 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       held_insert(e.note);
       if (arp_ == 0u) {
         carrier_.note_on(e.note);
+      } else if (!playing_ && arp_note_ == 0xFFu && nheld_ != 0u) {
+        clock_start_now();  // transport stopped, nothing sounding: the first note restarts the step clock and sounds at once
       }
       tune_.note_on(e.note);
       break;
@@ -576,7 +578,16 @@ void Vocoder::arp_step() noexcept {
 }
 
 // GATE on frames [from, from + k) of the carrier and its held-notes gate: the gain slews to 0 in the second half of a step and back to 1, 2 ms edges.
-void Vocoder::apply_gate(float* car, float* gate, std::uint32_t from, std::uint32_t k) noexcept {
+// While GATE is on (or its gain is still returning to 1) the gain of each frame is also written to `gain` (the whole array is set to 1 the first
+// time in a block, `recorded` marks it), so process() can cut the loops that play as the carrier by the same envelope.
+void Vocoder::apply_gate(float* car, float* gate, std::uint32_t from, std::uint32_t k, float* gain, bool& recorded) noexcept {
+  const bool rec = recorded || gate_ != 0u || gate_g_ != 1.0f;
+  if (rec && !recorded) {
+    for (std::uint32_t i = 0; i < Bands::kMaxFrames; ++i) {
+      gain[i] = 1.0f;
+    }
+    recorded = true;
+  }
   const float tgt = (clock_on_ && gate_ != 0u && second_half_) ? 0.0f : 1.0f;
   float g = gate_g_;
   const float st = gate_step_;
@@ -590,6 +601,9 @@ void Vocoder::apply_gate(float* car, float* gate, std::uint32_t from, std::uint3
     }
     car[i] *= g;
     gate[i] *= g;
+    if (rec) {
+      gain[i] = g;
+    }
   }
   gate_g_ = g;
 }
@@ -804,6 +818,9 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   float car[Bands::kMaxFrames];
   float wet[Bands::kMaxFrames];
   float gate[Bands::kMaxFrames];
+  float gain[Bands::kMaxFrames];  // GATE's gain per frame, set only when a gate ran (gated)
+  bool gated = false;
+  playing_ = args.transport->playing;
   for (std::uint32_t i = 0; i < n; ++i) {
     mod[i] = args.in_l != nullptr ? Bands::clean(args.in_l[i]) : 0.0f;
   }
@@ -850,7 +867,7 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
           } else {
             render_carrier(car + from, gate + from, k);
           }
-          apply_gate(car, gate, from, k);
+          apply_gate(car, gate, from, k, gain, gated);
           if (clock_on_) {
             clock_cnt_ -= static_cast<float>(k);
           }
@@ -858,7 +875,14 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
         }
       },
       [&](const o3sdk::dsp::Event& e) { apply(e); });
-  run_loops(*args.transport, n, mod, car);
+  if (gated) {  // GATE cuts the loops that play as the carrier by the same envelope as the synth
+    float lcar[Bands::kMaxFrames];
+    for (std::uint32_t i = 0; i < n; ++i) lcar[i] = 0.0f;
+    run_loops(*args.transport, n, mod, lcar);
+    for (std::uint32_t i = 0; i < n; ++i) car[i] += lcar[i] * gain[i];
+  } else {
+    run_loops(*args.transport, n, mod, car);
+  }
   // Only the active mode runs; two or three run while a crossfade is under way.
   const auto runs = [](const Ramp& r) { return r.value() > 0.0f || r.target_value() > 0.0f; };
   float tw[Bands::kMaxFrames];

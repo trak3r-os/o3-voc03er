@@ -214,7 +214,7 @@ TEST_CASE("perform: the formant strip reads -12 to +12 with both middle pads at 
   }
 }
 
-TEST_CASE("perform: the SHIFT row's steps hold their ranges, and only FREEZE, FORMANT, THRU and BEND ROW are live") {
+TEST_CASE("perform: the SHIFT row's steps hold their ranges, and all eight keys are live") {
   CHECK(pl::formant_step(0, 1, false) == 1);
   CHECK(pl::formant_step(0, -1, true) == -4);
   CHECK(pl::formant_step(11, 1, true) == 12);
@@ -223,12 +223,22 @@ TEST_CASE("perform: the SHIFT row's steps hold their ranges, and only FREEZE, FO
   CHECK(pl::thru_step(98, 1, false) == 100);
   CHECK(pl::thru_step(3, -1, false) == 0);
   CHECK(pl::thru_step(50, 1, true) == 70);
-  unsigned live = 0;
+  CHECK(pl::glide_step(0, 1, false) == 10);
+  CHECK(pl::glide_step(0, 1, true) == 50);
+  CHECK(pl::glide_step(495, 1, false) == 500);
+  CHECK(pl::glide_step(20, -1, true) == 0);
+  CHECK(pl::preset_step(pl::kNoPreset, 1, 8) == 0u);
+  CHECK(pl::preset_step(pl::kNoPreset, -1, 8) == 7u);
+  CHECK(pl::preset_step(7, 1, 8) == 0u);
+  CHECK(pl::preset_step(0, -1, 8) == 7u);
+  CHECK(std::string(pl::kArpNames[3]) == "UP-DOWN");
   for (unsigned i = 0; i < 8; ++i) {
     CHECK(std::string(pl::kShiftKeys[i].name).size() <= 9u);
-    live += pl::kShiftKeys[i].fn != pl::ShiftFn::Dead ? 1u : 0u;
   }
-  CHECK(live == 4u);
+  for (const unsigned k : {1u, 2u, 3u, 7u}) {
+    CHECK(pl::kShiftKeys[k].fn == pl::ShiftFn::Value);
+    CHECK(std::string(pl::key_hint(5, 0, k)).size() <= pl::kKeyHintMax);
+  }
   CHECK(pl::kShiftKeys[0].fn == pl::ShiftFn::Freeze);
   CHECK(pl::kShiftKeys[4].fn == pl::ShiftFn::Value);
   CHECK(pl::kShiftKeys[5].fn == pl::ShiftFn::Value);

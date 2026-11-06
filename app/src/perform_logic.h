@@ -268,15 +268,14 @@ inline void strip_label(int st, char (&out)[kLabelChars + 1]) noexcept {
 }
 
 // ---- the SHIFT row (docs/UI-DESIGN.md "The SHIFT row of PERFORM") -------------------------------------------------------------------
-// What SHIFT + F1..F8 are. Dead: its parameter waits for slice P3 (shown dimmed with "-", a press does nothing and takes no focus). Toggle: an
-// action, no focus (FREEZE). Value: takes the encoder (sfocus). BendRow: an action. P3 fills the Dead rows by changing their fn, not the table.
-enum class ShiftFn : std::uint8_t { Dead, Freeze, Value, BendRow };
+// What SHIFT + F1..F8 are. Toggle: an action, no focus (FREEZE). Value: takes the encoder (sfocus), a second tap steps it. BendRow: an action.
+enum class ShiftFn : std::uint8_t { Freeze, Value, BendRow };
 struct ShiftKey {
   const char* name;  // on the F row (the Label face fits 8) and, upper case, HELP's Shift label (9 at most)
   ShiftFn fn;
 };
-inline constexpr ShiftKey kShiftKeys[8] = {{"FREEZE", ShiftFn::Freeze}, {"GATE", ShiftFn::Dead},     {"ARP", ShiftFn::Dead},        {"GLIDE", ShiftFn::Dead},
-                                           {"FORMANT", ShiftFn::Value}, {"THRU", ShiftFn::Value},    {"BEND ROW", ShiftFn::BendRow}, {"PRESET", ShiftFn::Dead}};
+inline constexpr ShiftKey kShiftKeys[8] = {{"FREEZE", ShiftFn::Freeze}, {"GATE", ShiftFn::Value},      {"ARP", ShiftFn::Value},        {"GLIDE", ShiftFn::Value},
+                                           {"FORMANT", ShiftFn::Value}, {"THRU", ShiftFn::Value},    {"BEND ROW", ShiftFn::BendRow}, {"PRESET", ShiftFn::Value}};
 inline constexpr unsigned kNoShiftFocus = 8;  // PerformScreen's sfocus_ when no SHIFT-row value has the encoder
 
 inline constexpr int kFormantMin = -12;
@@ -285,6 +284,21 @@ inline constexpr int kFormantMax = 12;
 constexpr int formant_step(int st, int delta, bool coarse) noexcept { return step_clamped(st, delta * (coarse ? 4 : 1), kFormantMin, kFormantMax); }
 // Thru (percent) after one detent: 5, SHIFT coarse 20, held to 0..100. The unit's Thru is 0..1 (percent / 100, as `voc thru` writes it).
 constexpr int thru_step(int percent, int delta, bool coarse) noexcept { return step_clamped(percent, delta * (coarse ? 20 : 5), 0, 100); }
+// GATE and ARP are the unit's enums (Vocoder::Gate 0..4, Vocoder::Arp 0..4); a detent or a second tap steps round.
+inline constexpr unsigned kGateCount = 5;
+inline constexpr unsigned kArpCount = 5;
+inline constexpr const char* kGateNames[kGateCount] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
+inline constexpr const char* kArpNames[kArpCount] = {"OFF", "UP", "DOWN", "UP-DOWN", "RANDOM"};
+// Glide (ms) after one detent: 10, SHIFT coarse 50, held to 0..500.
+constexpr int glide_step(int ms, int delta, bool coarse) noexcept { return step_clamped(ms, delta * (coarse ? 50 : 10), 0, 500); }
+// The preset after one detent, round; from none (kNoPreset) a turn up picks the first and a turn down the last. `count` is kPresetCount.
+inline constexpr unsigned kNoPreset = 255;
+constexpr unsigned preset_step(unsigned cur, int delta, unsigned count) noexcept {
+  if (cur >= count) {
+    return delta >= 0 ? 0u : count - 1u;
+  }
+  return step_wrapped(cur, delta, count);
+}
 // The pad of the formant strip in force: `col` holds `formant` (both middle pads at 0).
 constexpr bool formant_lit(int formant, unsigned col) noexcept { return col < 12u && kFormantStrip[col] == formant; }
 
@@ -296,6 +310,18 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
   }
   if (sfocus == 5u) {
     return "SHIFT F6 THRU: SIBILANTS COME THROUGH";
+  }
+  if (sfocus == 1u) {
+    return "SHIFT F2 GATE: CUTS THE CARRIER IN TIME";
+  }
+  if (sfocus == 2u) {
+    return "SHIFT F3 ARP: HELD NOTES ONE AT A TIME";
+  }
+  if (sfocus == 3u) {
+    return "SHIFT F4 GLIDE: SLIDE BETWEEN NOTES";
+  }
+  if (sfocus == 7u) {
+    return "SHIFT F8 PRESET: A FACTORY SOUND";
   }
   if (focus >= kBendFocus) {
     return "ENCODER FREE: IT BENDS THE PITCH";

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 using namespace o3_voc03er;
@@ -702,4 +703,46 @@ TEST_CASE("vocoder loops: the level parameter defaults to 0 dB, ids 0..21 did no
   CHECK(rig.v.loop_status(2).level_db == -6.0f);
   CHECK(rig.v.info().params[Vocoder::loop_param(2, LF::Level)].def == 0.0f);
   CHECK(rig.v.info().params[Vocoder::Loop4Role].def == 0.0f);
+}
+
+TEST_CASE("vocoder loops: GATE cuts a loop playing as the carrier, and GATE 0 leaves the sound bit-identical") {
+  const std::vector<float> tone = rich(64 * 200, 500.0f);
+  const std::vector<float> live = rich(64 * 100, 3000.0f / 7.0f);
+  const auto run_case = [&](float gate, bool write_gate) {
+    Rig rig(Loop::kMaxSamples);
+    record_loop(rig, 0, tone);
+    std::vector<dsp::Event> ev = {dsp::param_change(Vocoder::Dry, 0.0f), role(0, true), play(0, true)};
+    if (write_gate) {
+      ev.push_back(dsp::param_change(Vocoder::Gate, gate));
+    }
+    rig.tr = playing_at(3840u * 3u - 960u);  // a quarter before a bar line: the loop starts there, 22,050 frames on
+    rig.block(nullptr, 64, ev);
+    std::vector<float> out;
+    for (int b = 0; b < 1500; ++b) {
+      const std::vector<float> o = rig.block(live.data() + (static_cast<std::size_t>(b) % 100u) * 64u, 64);
+      out.insert(out.end(), o.begin(), o.end());
+    }
+    return out;
+  };
+  // the loop and the live modulator are ordinary signals: with the gate off the sound is steady
+  const std::vector<float> open = run_case(0.0f, false);
+  const std::vector<float> zero = run_case(0.0f, true);
+  CHECK(open == zero);  // GATE written 0 is bit-exact with never written
+  // windows of 1024 frames (about 4 half-steps of 1/8 at 120 BPM are 2756 frames each): the level of the quietest and the loudest
+  const auto span = [](const std::vector<float>& x) {
+    float lo = 1.0e9f, hi = 0.0f;
+    for (std::size_t from = 64 * 600; from + 512 <= x.size(); from += 128) {
+      const float r = rms(x, from, from + 512);
+      lo = std::fmin(lo, r);
+      hi = std::fmax(hi, r);
+    }
+    return std::pair<float, float>(lo, hi);
+  };
+  const auto so = span(open);
+  CHECK(so.second > 0.01f);
+  CHECK(so.first > 0.3f * so.second);
+  const std::vector<float> gated = run_case(2.0f, true);  // 1/8
+  const auto sg = span(gated);
+  CHECK(sg.second > 0.01f);
+  CHECK(sg.first < 0.05f * sg.second);  // the closed half is silent: the loop does not escape the gate
 }

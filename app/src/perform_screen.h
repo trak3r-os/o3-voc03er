@@ -95,7 +95,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   const Vocoder* voc_ = nullptr;
   SourceStep step_source_ = nullptr;
   void* source_user_ = nullptr;
-  unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (4 FORMANT, 5 THRU), or kNoShiftFocus; the row stays shown while set
+  unsigned preset_ = perform::kNoPreset;  // the last factory sound chosen (SHIFT + F8), or kNoPreset: the window shows ---
+  unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (1 GATE, 2 ARP, 3 GLIDE, 4 FORMANT, 5 THRU, 7 PRESET), or kNoShiftFocus; the row stays shown while set
   unsigned focus_ = 5;       // the F key the encoder drives (default F6, CHORD); perform::kBendFocus (8): none, the encoder bends
   int octave_ = 0;
   unsigned bottom_ = 0;      // ChordKind of the bottom row

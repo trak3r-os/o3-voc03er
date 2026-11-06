@@ -378,18 +378,18 @@ int arp_note(const std::vector<float>& out, unsigned s) {
 }  // namespace
 
 TEST_CASE("rhythm: ARP sounds the held notes one at a time in the order of each pattern") {
-  const std::size_t blocks = 800;  // steps 1 to 8 of 1/16 at 120 BPM (5,512 frames each)
+  const std::size_t blocks = 800;  // steps 0 to 7 of 1/16 at 120 BPM (5,512 frames each)
   const char* names[5] = {"", "arp_up.wav", "arp_down.wav", "arp_updown.wav", "arp_random.wav"};
   const std::vector<int> want[4] = {
       {0, 1, 2, 0, 1, 2, 0, 1},  // UP
-      {2, 1, 0, 2, 1, 0, 2, 1},  // DOWN
+      {0, 2, 1, 0, 2, 1, 0, 2},  // DOWN: the first key alone starts the clock, so the cycle begins at it
       {0, 1, 2, 1, 0, 1, 2, 1},  // UP-DOWN, the ends once
       {},
   };
   for (unsigned m = 1; m <= 4; ++m) {
     const auto out = render(chord({dsp::param_change(Vocoder::Arp, static_cast<float>(m), 0)}, blocks), blocks);
     std::vector<int> got;
-    for (unsigned s = 1; s <= 8; ++s) {  // step 0 is silent: the notes arrive after the arp's first step began, they sound from the next edge
+    for (unsigned s = 0; s < 8; ++s) {  // the transport is stopped: the first key restarts the clock and step 0 sounds at once
       got.push_back(arp_note(out, s));
     }
     if (m < 4) {
@@ -465,5 +465,50 @@ TEST_CASE("rhythm: ARP off with notes held sounds them all again and leaves no h
   const auto e2 = envelope(render(ev2, blocks));
   for (std::size_t b = 300; b < blocks; ++b) {
     CHECK(e2[b] < 1e-3f);
+  }
+}
+
+namespace {
+// The first frame at which the output exceeds a threshold well above the bands' noise floor (or the size when it never does).
+std::size_t onset(const std::vector<float>& x, std::size_t from) {
+  for (std::size_t i = from; i < x.size(); ++i) {
+    if (std::fabs(x[i]) > 2.0e-3f) {
+      return i;
+    }
+  }
+  return x.size();
+}
+}  // namespace
+
+TEST_CASE("rhythm: ARP's first note sounds at once with the transport stopped and stays on the grid when it runs") {
+  const std::size_t blocks = 700;
+  const std::size_t press = 100;  // block where the key goes down: frame 6,400, between the grid edges 5,512 and 11,025
+  const auto played = [&](bool running) {
+    Events ev(blocks);
+    add(ev, 0, dsp::param_change(Vocoder::Arp, 1.0f, 0));
+    add(ev, 0, dsp::param_change(Vocoder::Release, 30.0f, 0));
+    add(ev, press, dsp::note_on(45, 100, 0, 0));
+    add(ev, 400, dsp::note_off(45, 0));
+    Run run;
+    if (running) {
+      run.started = {0};
+    }
+    return render(ev, blocks, run);
+  };
+  const std::size_t at = press * kBlock;
+  const auto stopped = played(false);
+  const std::size_t s_on = onset(stopped, 0);
+  CHECK(s_on >= at);
+  CHECK(s_on < at + 2 * kBlock + 600);  // at once: the attack of the voice, not a wait for the next step
+  const auto running = played(true);
+  const std::size_t r_on = onset(running, 0);
+  CHECK(r_on >= 11025);  // on the grid: the next edge after the key
+  CHECK(r_on < 11025 + 2 * kBlock + 600);
+  // no hung note: both are silent a while after the key goes up
+  for (const auto* o : {&stopped, &running}) {
+    const auto env = envelope(*o);
+    for (std::size_t b = 600; b < blocks; ++b) {
+      CHECK(env[b] < 1.0e-3f);
+    }
   }
 }

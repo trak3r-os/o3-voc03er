@@ -5,6 +5,7 @@
 #include "skin/ornoir.h"
 
 #include <o3_voc03er/chords.h>
+#include <o3_voc03er/presets.h>
 
 #include <o3sdk/app/audio_in.h>
 #include <o3sdk/app/context.h>
@@ -498,6 +499,26 @@ void PerformScreen::bottom_kind(app::Context& ctx, int delta) noexcept {
 void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   dsp::Engine& e = ctx.engine();
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
+  if (sfocus_ == 1u || sfocus_ == 2u) {  // SHIFT + F2 GATE, F3 ARP: the unit's enums, stepped round
+    const std::uint16_t id = sfocus_ == 1u ? Vocoder::Gate : Vocoder::Arp;
+    const unsigned count = sfocus_ == 1u ? pl::kGateCount : pl::kArpCount;
+    (void)e.set_param(voice_, id, static_cast<float>(pl::step_wrapped(round_param(e, voice_, id), delta, count)));
+    ctx.redraw();
+    return;
+  }
+  if (sfocus_ == 3u) {  // SHIFT + F4 GLIDE: 10 ms a detent, SHIFT coarse 50
+    (void)e.set_param(voice_, Vocoder::Glide, static_cast<float>(pl::glide_step(static_cast<int>(round_param(e, voice_, Vocoder::Glide)), delta, coarse)));
+    ctx.redraw();
+    return;
+  }
+  if (sfocus_ == 7u) {  // SHIFT + F8 PRESET: the sound changes at once, as the encoder turns
+    preset_ = pl::preset_step(preset_, delta, kPresetCount);
+    for (const PresetValue& pv : kPresets[preset_].v) {
+      (void)e.set_param(voice_, pv.id, pv.value);
+    }
+    ctx.redraw();
+    return;
+  }
   if (sfocus_ == 4u) {  // SHIFT + F5 FORMANT: one semitone a detent, SHIFT coarse 4
     (void)e.set_param(voice_, Vocoder::Formant,
                       static_cast<float>(pl::formant_step(static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f)), delta, coarse)));
@@ -563,7 +584,7 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   ctx.redraw();
 }
 
-// SHIFT + an F key: the SHIFT row (pl::kShiftKeys). A waiting key does nothing; FREEZE and BEND ROW are actions; the others take the encoder
+// SHIFT + an F key: the SHIFT row (pl::kShiftKeys). FREEZE and BEND ROW are actions; the others take the encoder
 // (a second tap steps the value on, as the plain row does).
 void PerformScreen::shift_key(app::Context& ctx, unsigned key) noexcept {
   if (key >= 8u) {
@@ -584,8 +605,6 @@ void PerformScreen::shift_key(app::Context& ctx, unsigned key) noexcept {
         sfocus_ = key;
         ctx.redraw();
       }
-      break;
-    case pl::ShiftFn::Dead:
       break;
   }
 }
@@ -766,7 +785,19 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
           append(keys[i].value, strip_ ? "ON" : "OFF");
           break;
         case pl::ShiftFn::Value:
-          if (i == 4u) {
+          if (i == 1u || i == 2u) {
+            const unsigned v = round_param(e, voice_, i == 1u ? Vocoder::Gate : Vocoder::Arp);
+            const unsigned count = i == 1u ? pl::kGateCount : pl::kArpCount;
+            append(keys[i].value, (i == 1u ? pl::kGateNames : pl::kArpNames)[v < count ? v : 0u]);
+          } else if (i == 3u) {
+            const unsigned ms = round_param(e, voice_, Vocoder::Glide);
+            (void)pl::format_uint(ms, num);
+            append(keys[i].value, num);
+            append(keys[i].value, "MS");
+            keys[i].pct = pl::bar_percent(static_cast<float>(ms), 0.0f, 500.0f);
+          } else if (i == 7u) {
+            append(keys[i].value, preset_ < kPresetCount ? kPresets[preset_].name : "---");
+          } else if (i == 4u) {
             const int f = static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f));
             char lbl[pl::kLabelChars + 1] = {};
             pl::strip_label(f, lbl);
@@ -778,10 +809,6 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
             append(keys[i].value, num);
             keys[i].pct = static_cast<int>(pct > 100u ? 100u : pct);
           }
-          break;
-        case pl::ShiftFn::Dead:
-          append(keys[i].value, "-");
-          keys[i].dim = true;
           break;
       }
     }
@@ -959,7 +986,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   }
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
-              "F KEYS: A TAP POINTS THE ENCODER AT A VALUE, A SECOND TAP STEPS IT. HOLD SHIFT: THE SECOND ROW.";
+              "F KEYS: A TAP POINTS THE ENCODER, A SECOND TAP STEPS. HOLD SHIFT FOR GATE, ARP, GLIDE, PRESET...";
   h.fkey[0] = "BANDS, TALK, TUNE";
   h.fkey[1] = "THE NEXT AUDIO SOURCE";
   h.fkey[2] = "FOLLOW, SYNTH, NOISE, LOOPS";
@@ -967,7 +994,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[4] = "SCALE OF THE CHORDS";
   h.fkey[5] = "BOTTOM ROW KIND";
   h.fkey[6] = "CHORDS OR KEYS";
-  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row: GATE, ARP, GLIDE and PRESET wait for slice P3
+  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row
     h.fkey_shift[i] = pl::kShiftKeys[i].name;
   }
   h.fkey[7] = mode == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");

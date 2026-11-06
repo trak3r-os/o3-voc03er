@@ -155,7 +155,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void arp_step() noexcept;
   void clock_start_now() noexcept;
   void clock_edge() noexcept;
-  void apply_gate(float* car, float* gate, std::uint32_t from, std::uint32_t k) noexcept;
+  void apply_gate(float* car, float* gate, std::uint32_t from, std::uint32_t k, float* gain, bool& recorded) noexcept;
   void render_carrier(float* out, float* gate, std::uint32_t n) noexcept;
   void mix_car(unsigned loop, std::uint32_t from, std::uint32_t n, float* car, float* tmp) noexcept;
 
@@ -213,6 +213,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   bool arp_down_ = false;
   bool second_half_ = true;
   bool clock_on_ = false;
+  bool playing_ = false;  // the transport's state at this block's start, for the arp's first note
   std::uint8_t held_[Carrier::kVoices] = {};
   o3sdk::dsp::Ramp loop_car_[Loop::kCount];
   struct Retarget {

@@ -181,10 +181,10 @@ void shift_tap(sim::Harness& h, app::Button b) {
   h.release(app::Button::Shift);
   h.run_ms(20);
 }
-constexpr std::uint16_t kFreeze = 9, kFormant = 40, kThru = 41;
+constexpr std::uint16_t kFreeze = 9, kDetune = 6, kFormant = 40, kThru = 41, kGlide = 44, kGate = 45, kArp = 46;
 }  // namespace
 
-TEST_CASE("perform: the SHIFT row focuses FORMANT and THRU, FREEZE toggles, a waiting key does nothing") {
+TEST_CASE("perform: the SHIFT row focuses FORMANT, THRU, GATE, ARP, GLIDE and PRESET, and FREEZE toggles") {
   auto h = std::make_unique<sim::Harness>(::o3sdk_app());
   REQUIRE(h->start());
   h->run_ms(100);
@@ -214,15 +214,67 @@ TEST_CASE("perform: the SHIFT row focuses FORMANT and THRU, FREEZE toggles, a wa
   h->run_ms(20);
   CHECK(unit_param(*h, kThru) == doctest::Approx(0.10f));
 
-  shift_tap(*h, app::Button::F2);  // GATE waits for P3: nothing moves, the focus stays on THRU
+  shift_tap(*h, app::Button::F2);  // GATE: the encoder steps the enum, a second SHIFT + tap steps it on
+  h->turn(2);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kThru) == doctest::Approx(0.10f));
+  CHECK(unit_param(*h, kGate) == doctest::Approx(2.0f));
+  shift_tap(*h, app::Button::F2);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kGate) == doctest::Approx(3.0f));
+  h->turn(-3);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kGate) == doctest::Approx(0.0f));
+  shift_tap(*h, app::Button::F3);  // ARP: OFF, UP, DOWN, UP-DOWN, RANDOM, round
+  h->turn(-1);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kArp) == doctest::Approx(4.0f));
+  shift_tap(*h, app::Button::F3);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kArp) == doctest::Approx(0.0f));
+  shift_tap(*h, app::Button::F4);  // GLIDE: 10 ms a detent, SHIFT coarse 50
+  h->turn(3);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kGlide) == doctest::Approx(30.0f));
+  h->press(app::Button::Shift);
+  h->run_ms(2);
+  h->turn(2);
+  h->release(app::Button::Shift);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kGlide) == doctest::Approx(130.0f));
+  shift_tap(*h, app::Button::F4);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kGlide) == doctest::Approx(140.0f));
+
+  shift_tap(*h, app::Button::F6);  // back to THRU
   h->turn(1);
   h->run_ms(20);
   CHECK(unit_param(*h, kThru) == doctest::Approx(0.15f));
 
-  tap(*h, app::Button::F3);  // a plain tap goes back: the encoder no longer moves THRU
+  // PRESET: a turn applies the sound at once and leaves KEY alone; the second SHIFT + tap goes to the next
+  const float key_before = unit_param(*h, 35);
+  shift_tap(*h, app::Button::F8);
+  h->turn(1);  // from none the first turn picks ROBOT
+  h->run_ms(20);
+  CHECK(unit_param(*h, kGlide) == doctest::Approx(0.0f));
+  CHECK(unit_param(*h, kThru) == doctest::Approx(0.0f));
+  CHECK(unit_param(*h, kDetune) == doctest::Approx(0.0f));
+  h->turn(3);  // GIANT: formant -9, glide 250
+  h->run_ms(20);
+  CHECK(unit_param(*h, kFormant) == doctest::Approx(-9.0f));
+  CHECK(unit_param(*h, kGlide) == doctest::Approx(250.0f));
+  shift_tap(*h, app::Button::F8);  // ELF: nothing of GIANT stays
+  h->run_ms(20);
+  CHECK(unit_param(*h, kFormant) == doctest::Approx(9.0f));
+  CHECK(unit_param(*h, kGlide) == doctest::Approx(0.0f));
+  CHECK(unit_param(*h, 35) == doctest::Approx(key_before));
+
+  const float thru_elf = unit_param(*h, kThru);
+  tap(*h, app::Button::F3);  // a plain tap goes back: the encoder no longer moves THRU (nor the preset)
   h->turn(1);
   h->run_ms(20);
-  CHECK(unit_param(*h, kThru) == doctest::Approx(0.15f));
+  CHECK(unit_param(*h, kThru) == doctest::Approx(thru_elf));
+  CHECK(unit_param(*h, kFormant) == doctest::Approx(9.0f));
   CHECK(h->runtime().frame_failures() == 0u);
   CHECK(h->display().peak_frame_words() < 2048u);
 }
