@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3_voc03er/units/vocoder/loop.h>
 
+#include <cstdint>
+#include <cstring>
+
 namespace o3_voc03er {
 
 namespace {
@@ -113,13 +116,90 @@ namespace {
 constexpr std::uint32_t kChunk = 64;                       // output samples a span copy serves
 constexpr std::uint32_t kSpanMax = kChunk * 2u + 2u;       // 2x: two samples each, plus the interpolator's guard
 
+// Loop memory is SDRAM on the system bus (uncached): read aligned 32-bit words, two samples a bus access.
+// The address decides, never the index: at most one halfword head, whole words, at most one halfword tail,
+// so nothing outside the segment is read. Target and host are little-endian: the low half of a word is the
+// sample at the lower address.
+inline bool word_aligned(const std::int16_t* p) noexcept {
+  return (reinterpret_cast<std::uintptr_t>(p) & 2u) == 0u;
+}
+inline std::uint32_t load_word(const std::int16_t* p) noexcept {  // p word-aligned
+  std::uint32_t w;
+  std::memcpy(&w, p, sizeof w);
+  return w;
+}
+inline std::int16_t lo_half(std::uint32_t w) noexcept {
+  return static_cast<std::int16_t>(static_cast<std::uint16_t>(w & 0xFFFFu));
+}
+inline std::int16_t hi_half(std::uint32_t w) noexcept {
+  return static_cast<std::int16_t>(static_cast<std::uint16_t>(w >> 16));
+}
+
+// out[k] = src[k] for k < seg.
+void read_forward(std::int16_t* out, const std::int16_t* src, std::uint32_t seg) noexcept {
+  if (seg != 0u && !word_aligned(src)) {
+    *out++ = *src++;
+    --seg;
+  }
+  for (std::uint32_t k = seg >> 1; k != 0u; --k) {
+    const std::uint32_t w = load_word(src);
+    out[0] = lo_half(w);
+    out[1] = hi_half(w);
+    out += 2;
+    src += 2;
+  }
+  if ((seg & 1u) != 0u) {
+    *out = *src;
+  }
+}
+
+// out[k] = src[-k] for k < seg (src is the highest sample read).
+void read_backward(std::int16_t* out, const std::int16_t* src, std::uint32_t seg) noexcept {
+  if (seg != 0u && word_aligned(src)) {  // src is the low half of its word: the high half is outside
+    *out++ = *src--;
+    --seg;
+  }
+  for (std::uint32_t k = seg >> 1; k != 0u; --k) {  // src is a high half, src - 1 the word's base
+    const std::uint32_t w = load_word(src - 1);
+    out[0] = hi_half(w);
+    out[1] = lo_half(w);
+    out += 2;
+    src -= 2;
+  }
+  if ((seg & 1u) != 0u) {
+    *out = *src;
+  }
+}
+
+// dst[k] (+)= src[k] * scale for k < seg.
+template <bool Add>
+void scale_forward(float* dst, const std::int16_t* src, std::uint32_t seg, float scale) noexcept {
+  if (seg != 0u && !word_aligned(src)) {
+    const float v = static_cast<float>(*src++) * scale;
+    dst[0] = Add ? dst[0] + v : v;
+    ++dst;
+    --seg;
+  }
+  for (std::uint32_t k = seg >> 1; k != 0u; --k) {
+    const std::uint32_t w = load_word(src);
+    const float a = static_cast<float>(lo_half(w)) * scale;
+    const float b = static_cast<float>(hi_half(w)) * scale;
+    dst[0] = Add ? dst[0] + a : a;
+    dst[1] = Add ? dst[1] + b : b;
+    dst += 2;
+    src += 2;
+  }
+  if ((seg & 1u) != 0u) {
+    const float v = static_cast<float>(*src) * scale;
+    dst[0] = Add ? dst[0] + v : v;
+  }
+}
+
 // buf[j] = s[(start + j) mod len], one sequential pass (start < len, len >= 1).
 void copy_forward(std::int16_t* buf, const std::int16_t* s, std::uint32_t len, std::uint32_t start, std::uint32_t count) noexcept {
   while (count != 0u) {
     const std::uint32_t seg = len - start < count ? len - start : count;
-    for (std::uint32_t k = 0; k < seg; ++k) {
-      buf[k] = s[start + k];
-    }
+    read_forward(buf, s + start, seg);
     buf += seg;
     count -= seg;
     start = 0;
@@ -130,9 +210,7 @@ void copy_forward(std::int16_t* buf, const std::int16_t* s, std::uint32_t len, s
 void copy_backward(std::int16_t* buf, const std::int16_t* s, std::uint32_t len, std::uint32_t start, std::uint32_t count) noexcept {
   while (count != 0u) {
     const std::uint32_t seg = start + 1u < count ? start + 1u : count;
-    for (std::uint32_t k = 0; k < seg; ++k) {
-      buf[k] = s[start - k];
-    }
+    read_backward(buf, s + start, seg);
     buf += seg;
     count -= seg;
     start = len - 1u;
@@ -162,13 +240,9 @@ void Loop::mix(unsigned i, float* dst, std::uint32_t n, bool add) noexcept {
       const std::uint32_t seg = len - p < n ? len - p : n;
       const std::int16_t* src = s + p;
       if (add) {
-        for (std::uint32_t k = 0; k < seg; ++k) {
-          dst[k] += static_cast<float>(src[k]) * scale;
-        }
+        scale_forward<true>(dst, src, seg, scale);
       } else {
-        for (std::uint32_t k = 0; k < seg; ++k) {
-          dst[k] = static_cast<float>(src[k]) * scale;
-        }
+        scale_forward<false>(dst, src, seg, scale);
       }
       dst += seg;
       n -= seg;

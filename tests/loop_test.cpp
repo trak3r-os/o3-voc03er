@@ -535,6 +535,119 @@ TEST_CASE("loop: speed, direction and level changed while playing do not jump") 
   CHECK(l.playing(0));
 }
 
+namespace {
+
+// The per-sample reference for Loop::mix: the same arithmetic with one plain int16 read per sample (what the word-read version replaced).
+struct RefPlay {
+  const std::int16_t* s = nullptr;
+  std::uint32_t len = 0, h = 0;
+  unsigned sp = 1;
+  bool rev = false;
+  float g1 = 1.0f, g = 1.0f;
+  void mix(float* dst, std::uint32_t n, bool add) {
+    const std::uint32_t len2 = 2u * len;
+    if (sp == 1u && !rev) {
+      h &= ~1u;
+    }
+    if (sp == 1u && !rev && g == g1) {
+      const float scale = kToFloat16 * g1;
+      for (std::uint32_t k = 0; k < n; ++k) {
+        const float v = static_cast<float>(s[(h >> 1) % len]) * scale;
+        dst[k] = add ? dst[k] + v : v;
+        h = (h + 2u) % len2;
+      }
+      return;
+    }
+    const std::uint32_t step = sp == 0u ? 1u : (sp == 1u ? 2u : 4u);
+    while (n != 0u) {
+      const std::uint32_t nn = n < 64u ? n : 64u;
+      float tmp[64];
+      std::uint32_t hh = h;
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        const std::uint32_t a = hh >> 1;
+        const std::uint32_t a1 = (a + 1u) % len;
+        tmp[k] = (hh & 1u) != 0u ? static_cast<float>(s[a] + s[a1]) * 0.5f : static_cast<float>(s[a]);
+        hh = rev ? (hh + len2 - step) % len2 : (hh + step) % len2;  // the position h/2 either way, only its direction differs
+      }
+      h = hh;
+      const float dg = (g1 - g) / static_cast<float>(nn);
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        g += dg;
+        tmp[k] *= kToFloat16 * g;
+      }
+      g = g1;
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        dst[k] = add ? dst[k] + tmp[k] : tmp[k];
+      }
+      dst += nn;
+      n -= nn;
+    }
+  }
+};
+
+}  // namespace
+
+TEST_CASE("loop: word reads are bit-identical to per-sample reads at any alignment, length, speed, direction, level and add") {
+  const std::uint32_t frames[] = {64, 1, 7, 33, 64, 127, 200, 3, 65};
+  for (const std::uint32_t per : {1001u, 1000u}) {
+    const std::uint32_t lens[Loop::kCount] = {per, per - 1u, 63u, 2u};
+    std::vector<std::int16_t> mem(static_cast<std::size_t>(Loop::kCount) * per, 0);
+    Loop l;
+    l.bind(mem.data(), per);
+    std::uint32_t seed = 12345u;
+    for (unsigned i = 0; i < Loop::kCount; ++i) {
+      std::vector<float> in(lens[i]);
+      for (auto& x : in) {
+        seed = seed * 1664525u + 1013904223u;
+        x = static_cast<float>(static_cast<std::int32_t>(seed >> 16) - 32768) / 32768.0f;
+      }
+      l.begin_record(i);
+      REQUIRE(l.record(i, in.data(), lens[i]) == lens[i]);
+      if (l.recording(i)) {
+        l.end_record(i);
+      }
+    }
+    for (unsigned i = 0; i < Loop::kCount; ++i) {
+      for (unsigned speed = 0; speed < 3; ++speed) {
+        for (const bool rev : {false, true}) {
+          for (const bool ramp : {false, true}) {
+            for (const bool add : {false, true}) {
+              INFO("per " << per << " loop " << i << " speed " << speed << " rev " << rev << " ramp " << ramp << " add " << add);
+              l.stop(i);
+              l.set_speed(i, speed);
+              l.set_reverse(i, rev);
+              l.set_gain(i, 0.8f);
+              REQUIRE(l.start(i));
+              RefPlay r;
+              r.s = mem.data() + static_cast<std::size_t>(i) * per;
+              r.len = lens[i];
+              r.sp = speed;
+              r.rev = rev;
+              r.g1 = r.g = 0.8f;
+              r.h = l.position(i) << 1;
+              std::uint32_t total = 0;
+              const std::uint32_t want = 3u * lens[i] * (speed == 0 ? 2u : 1u) + 50u;
+              for (std::size_t b = 0; total < want; ++b) {
+                if (ramp && b % 4 == 1) {  // a new level: the next chunk ramps
+                  const float ng = 0.3f + 0.15f * static_cast<float>(b % 5);
+                  l.set_gain(i, ng);
+                  r.g1 = ng;
+                }
+                const std::uint32_t m = frames[b % (sizeof frames / sizeof frames[0])];
+                std::vector<float> a(m, 0.25f), e(m, 0.25f);
+                l.mix(i, a.data(), m, add);
+                r.mix(e.data(), m, add);
+                REQUIRE(std::memcmp(a.data(), e.data(), m * sizeof(float)) == 0);
+                total += m;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("loop: the level scales the output, the default is exactly the stored sample") {
   std::vector<std::int16_t> mem;
   Loop l;
