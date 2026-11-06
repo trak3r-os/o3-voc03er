@@ -17,8 +17,8 @@ picks its source:
 | SPEAKS | LIVE (the one live source: LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO or USB), SLOT 1 to 4 (a sample, whole or by slices) |
 | SOUNDS | SYNTH (section 6), NOISE, LIVE, SLOT 1 to 4 |
 
-The maintainer's two modes are the two common pairs: **REALTIME** is LIVE ▸ SYNTH (sing, play chords), **SAMPLE** is SLOT ▸ anything (a recording or
-a WAV speaks through a carrier chosen apart). They are not a switch: the header always shows the pair in force ("MIC ▸ SYNTH", "SLOT 2 ▸ LINE"),
+The maintainer's two modes are the two common pairs: **REALTIME** is LIVE > SYNTH (sing, play chords), **SAMPLE** is SLOT > anything (a recording or
+a WAV speaks through a carrier chosen apart). They are not a switch: the header always shows the pair in force ("MIC > SYNTH", "SLOT 2 > LINE"),
 PERFORM changes it with two keys, and the two homes (PERFORM for playing, SAMPLE for the slots and slices) are reached by PERFORMANCE and SAMPLE
 PLAY without touching the routing. BANDS, TALK and TUNE stay as they are: the three ways the voiceprint is taken and applied, on F1 of either
 home. TUNE corrects what SPEAKS and runs no carrier.
@@ -39,7 +39,7 @@ live source on the other side is listed dimmed with the words CAPTURE FIRST. The
   row reads "USB L" on one side and "USB R" on the other.
 - **Capture, one gesture.** REC on PERFORM records the live source into the next empty slot (at the bar, LENGTH bars, 2 by default) and, when the
   take ends, the side that held LIVE takes that slot: LIVE is free. The chip under the keys says what will happen before it does ("REC: CAPTURE
-  MIC ▸ SLOT 2"). Picking a dimmed live source on the other side pre-arms the same thing: after the capture the picker switches the ADC to the
+  MIC > SLOT 2"). Picking a dimmed live source on the other side pre-arms the same thing: after the capture the picker switches the ADC to the
   new source and gives it to that side. Two presses from "mic speaks through the synth" to "the captured voice speaks through the radio".
 
 The same rule explains why a live carrier cannot change per step (the ADC settles 200 ms): the PATTERN's CARRIER lane offers SYNTH, NOISE and
@@ -92,7 +92,7 @@ explains it. The kit's Config and HELP stay the kit's and come up with full chro
 
 ### PERFORM (PERFORMANCE): the home
 
-Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN meter with a CLIP lamp, the capture chip ("REC: CAPTURE MIC ▸ SLOT 2").
+Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN meter with a CLIP lamp, the capture chip ("REC: CAPTURE MIC > SLOT 2").
 Middle: the voiceprint with the MODE word over it. Right, SOUNDS: the carrier chip, the chord being played in big type ("Dm7", "C5") with its
 notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the chord grid or the keys, with the octave.
 
@@ -193,6 +193,8 @@ from the cursor while this screen is up. Before U9 the one-line screen of sectio
 
 ## 5. The skin
 
+**OR NOIR, the only skin, chosen by the maintainer on 2026-11-06 ("me gusta el OR NOIR", "solo ese, por defecto").** Its idea, frames, tokens and costs are the OR NOIR section of `docs/ui-skins.html`, which replaces 5.1, the token table of 5.2 and the look of 5.3 below: gold speaks, chrome sounds, on a black wall of round LEDs, the voiceprint as sixteen upright columns of dots. There is no skin byte and no seam: the screens draw OR NOIR directly. What still stands below: the rule of the two inks, what each mode's voiceprint shows and where its values come from, the grid and type of 5.4, the budget of 5.5, the memory of 5.6. Text uses `>`, since the faces hold U+0020 to U+007E only. F6 on PERFORM is CHORD (section 4), whatever the pictures show.
+
 ### 5.1 Point of view
 
 A **voiceprint reader**: a dark slate instrument whose only bright things are the signals. One rule gives it its character and its legibility:
@@ -251,7 +253,7 @@ The kit's four faces, nothing else: Display 16 x 32 (the mode word, the chord na
 8 x 16 (captions), Micro 6 x 12 (ticks, the pads line). Upper case throughout (HELP demands it; the screens match it), except the chord names,
 whose small letters are the convention ("Dm7").
 
-The grid: an 8 px module. Header y 0 to 40: the wordmark `VOC03ER` in Display (live text, no bitmap), the routing chip "MIC ▸ SYNTH", the MODE word,
+The grid: an 8 px module. Header y 0 to 40: the wordmark `VOC03ER` in Display (live text, no bitmap), the routing chip "MIC > SYNTH", the MODE word,
 TEMPO, the transport, the CPU figure (`Context::cpu_percent`). Content y 40 to 404, three columns 240 / 320 / 240 on PERFORM and SAMPLE, 16 px
 gutters. The F row y 404 to 480, eight slots of 100 px: the key number as a 6 x 12 tab, the name in Label, the value in Data at y 424, a 4 px bar
 at y 446; the latched slot's bar and tab in Accent. A key's name is at most 9 characters (the slot's width in the Label face). Nothing that matters below y 452: the kit's system strip is drawn there (`strip_area()`).
@@ -337,13 +339,13 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
 
 ## 8. What the unit and the app need
 
-**The unit (`units/vocoder/`, parameters appended, never inserted; ids 40 on):**
+**The unit (`units/vocoder/`, parameters appended, never inserted; ids 40 and 41 are FORMANT and THRU, slice V2f of `docs/PLAN.md`; these from 42 on):**
 
 | Id | Name | What |
 |---|---|---|
-| 40 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
-| 41 .. 52 | Slot n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples (both exact in a float up to 16.7 M; a slot is 705,600) at the slot's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT); a whole-loop play of that slot pauses under a slice and resumes at its position |
-| 53 .. 56 | Slot n Loaded | the length of a sample the app wrote into the slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it |
+| 42 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
+| 43 .. 54 | Slot n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples (both exact in a float up to 16.7 M; a slot is 705,600) at the slot's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT); a whole-loop play of that slot pauses under a slice and resumes at its position |
+| 55 .. 58 | Slot n Loaded | the length of a sample the app wrote into the slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it |
 | CarSrc | value 7 LIVE | `in_l` on the carrier bus: the line, the radio or USB R sounds. A routing inside the unit, instant and click-free with the same 5 ms ramp; the ADC source itself is the app's one `AudioIn::select` |
 
 The slots' roles (`Loop n Role`) stay the unit's mechanism; the app sets them from the two pickers. `Loop` grows `start_region(i, a, b)` and a
@@ -378,14 +380,14 @@ the skin's theme and its contrast test; every screen's `help()` checked with `he
 
 ## 10. The first five minutes
 
-No manual, the unit just switched on. PERFORM comes up: LIVE ▸ SYNTH, BANDS, PADS = CHORDS, KEY C, SCALE MAJOR, the stored source (LINE on the first
+No manual, the unit just switched on. PERFORM comes up: LIVE > SYNTH, BANDS, PADS = CHORDS, KEY C, SCALE MAJOR, the stored source (LINE on the first
 boot, section 11).
 
 **To a vocoded chord.** Play something into the line jack, or pick MIC on MASTER and speak: the IN meter moves and the voiceprint flickers in the voice ink; nothing sounds yet, the carrier has no note. Press
 one pad of the bottom row: a C major chord speaks your words; the screen says "C" and lights its three notes; the next pad to the right is D minor.
 Zero button presses. SHIFT + that pad latches it; both hands are free for the microphone. The top row is the robot fifth.
 
-**To a recorded loop as the carrier.** REC (1): the chip reads "CAPTURE MIC ▸ SLOT 1, 2 BARS"; sing; the take ends at the bar by itself, the slot
+**To a recorded loop as the carrier.** REC (1): the chip reads "CAPTURE MIC > SLOT 1, 2 BARS"; sing; the take ends at the bar by itself, the slot
 plays looped and takes SPEAKS (the side that held LIVE), so you hear it through the chord you hold. F3 SOUNDS (2), DOWN to SLOT 1 (3), F3 again
 (4): the recording now sounds and the microphone, free again, speaks through it. Four presses. (SAMPLE REC does the same with every setting
 visible, for a take of a chosen length into a chosen slot.)
@@ -401,7 +403,7 @@ to LINE, and the external synth on the jack sounds under your recorded voice. Th
 ## 11. Choices, as the maintainer made them on 2026-11-06
 
 1. **The first boot's live source:** LINE at gain 0. After that the kit stores the last one.
-2. **The voice ink:** the chartreuse of 5.2, in this skin. The skin itself is still to choose (`docs/ui-skins.html`).
+2. **The skin:** OR NOIR, the only one and the default. Its voice ink is gold, which replaces the chartreuse chosen earlier for the first skin.
 3. **The split in SAMPLE:** 24 slices over two chord rows.
 4. **After a take or a capture the slot plays by itself:** yes, AUTOPLAY ON.
 5. **The chord rows' order:** as designed, power at the top, triad at the bottom.
