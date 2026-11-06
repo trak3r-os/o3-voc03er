@@ -24,7 +24,7 @@ constexpr float kFs = 44100.0f;
 constexpr float kPi2 = 6.2831853f;
 using LF = Vocoder::LoopField;
 
-static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::CarSrc == 34 && Vocoder::NotesIn == 39 && Vocoder::Bend == 42 && Vocoder::Vib == 43 && Vocoder::Glide == 44 && Vocoder::Gate == 45 && Vocoder::Arp == 46 && Vocoder::ModSrc == 47 && Vocoder::kParamCount == 61, "ids are append-only: the first ten never move");
+static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::CarSrc == 34 && Vocoder::NotesIn == 39 && Vocoder::Bend == 42 && Vocoder::Vib == 43 && Vocoder::Glide == 44 && Vocoder::Gate == 45 && Vocoder::Arp == 46 && Vocoder::ModSrc == 47 && Vocoder::kParamCount == 62, "ids are append-only: the first ten never move");
 static_assert(Vocoder::loop_param(3, LF::Level) == 33 && Vocoder::loop_param(1, LF::Dir) == 26 && Vocoder::loop_param(3, LF::Role) == 21, "four loops of three parameters from id 10");
 
 // A transport at 120 BPM, playing, `tick` ticks into the run (so the bar lines are at multiples of 3840).
@@ -760,4 +760,100 @@ TEST_CASE("vocoder loops: GATE cuts a loop playing as the carrier, and GATE 0 le
   const auto sg = span(gated);
   CHECK(sg.second > 0.01f);
   CHECK(sg.first < 0.05f * sg.second);  // the closed half is silent: the loop does not escape the gate
+}
+
+// U7c2a: Load (id 61) and Loop::adopt.
+namespace {
+dsp::Event load(std::uint32_t slot, std::uint32_t len) {
+  return dsp::param_change(Vocoder::Load, static_cast<float>(slot * Loop::kMaxSamples + len));
+}
+}  // namespace
+
+TEST_CASE("loop: a length cut short by adopt ends at zero, so the wrap does not click") {
+  std::vector<std::int16_t> mem(Loop::kCount * 1000u, 0);
+  Loop l;
+  l.bind(mem.data(), 1000);
+  for (std::size_t k = 0; k < 1000; ++k) {
+    mem[k] = 20000;
+  }
+  REQUIRE(l.adopt(0, 1000));  // longer than it was: the writer's fades, nothing touched
+  CHECK(mem[999] == 20000);
+  REQUIRE(l.adopt(0, 900));
+  CHECK(mem[899] == 0);
+  CHECK(std::abs(mem[899 - 32]) == 10000);  // the ramp's middle
+  CHECK(mem[899 - 64] == 20000);            // before the fade
+  CHECK(mem[900] == 20000);                 // past the end, left alone
+}
+
+TEST_CASE("loop: adopt takes a length written into the memory, and refuses when it must") {
+  static_assert(Vocoder::Load == 61 && Vocoder::kParamCount == 62, "append only");
+  std::vector<std::int16_t> mem(Loop::kCount * 100u);
+  Loop l;
+  CHECK_FALSE(l.adopt(0, 10));  // unbound
+  l.bind(mem.data(), 100);
+  for (std::size_t k = 0; k < 100; ++k) {
+    mem[100u + k] = static_cast<std::int16_t>(1000 + static_cast<int>(k));
+  }
+  CHECK_FALSE(l.adopt(4, 10));   // out of range
+  CHECK_FALSE(l.adopt(1, 101));  // over what the slot holds
+  CHECK(l.length(1) == 0);
+  CHECK(l.adopt(1, 60));
+  CHECK(l.length(1) == 60);
+  CHECK(l.position(1) == 0);
+  CHECK_FALSE(l.playing(1));
+  CHECK(l.start(1));  // plays what was written, from its first sample, wrapping at the adopted length
+  std::vector<float> out(70, 0.0f);
+  l.mix(1, out.data(), 70, false);
+  CHECK(out[0] == doctest::Approx(1000.0f / 32768.0f));
+  CHECK(out[59] == doctest::Approx(1059.0f / 32768.0f));
+  CHECK(out[60] == doctest::Approx(1000.0f / 32768.0f));
+  CHECK_FALSE(l.adopt(1, 50));  // playing: no change
+  CHECK(l.length(1) == 60);
+  l.stop(1);
+  l.set_region_start(1, 100);
+  l.set_region_len(1, 30);
+  REQUIRE(l.trig_region(1, 0));
+  CHECK_FALSE(l.adopt(1, 50));  // a region is about to sound
+  l.release_region(1, 0);
+  l.forget(1);
+  std::vector<float> in(10, 0.5f);
+  l.begin_record(2);
+  CHECK_FALSE(l.adopt(2, 50));  // recording
+  CHECK(l.length(2) == 0);
+  l.end_record(2);
+  CHECK(l.adopt(3, 100));
+  CHECK(l.adopt(3, 0));  // 0 is forget
+  CHECK(l.length(3) == 0);
+  CHECK_FALSE(l.start(3));
+}
+
+TEST_CASE("vocoder loops: Load adopts the length the app wrote, exactly, in any slot, and a stopped or busy slot is respected") {
+  Rig rig(Loop::kMaxSamples);
+  CHECK(Vocoder::Load == 61);
+  CHECK(static_cast<std::uint32_t>(static_cast<float>(3u * Loop::kMaxSamples + Loop::kMaxSamples)) == 2'822'400u);  // exact in a float
+  for (unsigned s = 0; s < 4; ++s) {
+    rig.mem[static_cast<std::size_t>(s) * Loop::kMaxSamples] = 4000;
+  }
+  rig.block(nullptr, 64, {load(3, Loop::kMaxSamples)});  // slot 3, a full 16 s: the corner of the encoding
+  CHECK(rig.v.loops().length(3) == Loop::kMaxSamples);
+  CHECK(rig.v.loop_status(3).length == Loop::kMaxSamples);
+  rig.block(nullptr, 64, {load(1, 176'400)});
+  CHECK(rig.v.loops().length(1) == 176'400);
+  CHECK(rig.v.loops().length(0) == 0);
+  CHECK(rig.v.loop_status(1).length == 176'400);
+  rig.block(nullptr, 64, {dsp::param_change(Vocoder::Load, 0.0f)});  // 0 does nothing
+  CHECK(rig.v.loops().length(1) == 176'400);
+  rig.block(nullptr, 64, {dsp::param_change(Vocoder::Load, 100.9f)});  // floored: slot 0, length 100
+  CHECK(rig.v.loops().length(0) == 100);
+  // it plays what the app wrote
+  rig.block(nullptr, 64, {play(0, true)});
+  CHECK(rig.v.loop_status(0).playing);
+  // refused while playing, and while recording
+  rig.block(nullptr, 64, {load(0, 50)});
+  CHECK(rig.v.loops().length(0) == 100);
+  rig.block(nullptr, 64, {rec(2, true)});
+  rig.block(nullptr, 64, {load(2, 50)});
+  CHECK(rig.v.loops().length(2) != 50);
+  rig.block(nullptr, 64, {rec(2, false)});
+  CHECK(rig.v.loops().length(2) == 128);
 }

@@ -25,6 +25,7 @@ namespace {
 
 constexpr std::uint64_t kStartMs = 250;  // the unit shows the Rec within this, or the take failed (as PERFORM's capture)
 constexpr std::uint64_t kNoteMs = 2500;
+constexpr std::uint32_t kTrimMaxOver = 4410;  // a stopped take is trimmed to its mark only when it ran at most this far (100 ms) past it
 constexpr unsigned kGainTap = 5;  // a second tap on F2 moves the gain this much (a detent moves 1)
 constexpr int kPicX = 548, kPicY = 210;  // the overview picture (240 x 48), right of the slot cards, under the BAR chip
 
@@ -189,6 +190,8 @@ void SampleRecScreen::finish(app::Context& ctx) noexcept {
   phase_ = Phase::Idle;
   stop_ = false;
   const unsigned slot = rec_slot_ & 3u;
+  const std::uint32_t trim = trim_;
+  trim_ = 0;
   const auto v = static_cast<std::uint8_t>(route::kFirstSlot + slot);
   route::Route cur = perform_->route_now(ctx);
   if (drop_) {
@@ -210,6 +213,15 @@ void SampleRecScreen::finish(app::Context& ctx) noexcept {
     (void)ctx.engine().set_param(voice_, rec, 0.0f);
     say(ctx, "DELETED");
     return;
+  }
+  // The exact length of a take that stopped with the transport stopped: only down, only by what a frame can overshoot, only while the transport
+  // is still stopped. Load, then back to 0: a saved project must not hold it (as for CLEAR above); the unit adopts it while the slot is idle.
+  if (trim != 0u && !ctx.engine().playing()) {
+    const std::uint32_t got = voc_->loop_status(slot).length;
+    if (got > trim && got - trim <= kTrimMaxOver) {
+      (void)ctx.engine().set_param(voice_, Vocoder::Load, static_cast<float>(slot * Loop::kMaxSamples + trim));
+      (void)ctx.engine().set_param(voice_, Vocoder::Load, 0.0f);
+    }
   }
   if (!autoplay_) {
     say(ctx, "TAKEN, NOT PLAYING");
@@ -259,6 +271,8 @@ void SampleRecScreen::tick(app::Context& ctx) noexcept {
       if (static_cast<float>(ls.length) >= pl::capture_stop_at(bars, bar, e.playing())) {
         write_rec(ctx, false);
         stop_ = true;
+        // Stopped, the unit ends the take at the next block: up to a frame's worth past the mark, and loops do not resync at the bar.
+        trim_ = e.playing() ? 0u : static_cast<std::uint32_t>(pl::capture_stop_at(bars, bar, false) + 0.5f);
       }
     }
   }

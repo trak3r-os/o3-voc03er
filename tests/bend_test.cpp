@@ -80,7 +80,7 @@ std::vector<std::vector<dsp::Event>> held(std::vector<dsp::Event> first) {
 TEST_CASE("bend: BEND is parameter 42 and VIB 43, both default 0") {
   CHECK(Vocoder::Bend == 42);
   CHECK(Vocoder::Vib == 43);
-  CHECK(Vocoder::kParamCount == 61);
+  CHECK(Vocoder::kParamCount == 62);
   Vocoder v;
   CHECK(v.info().params[Vocoder::Bend].def == 0.0f);
   CHECK(v.info().params[Vocoder::Vib].def == 0.0f);

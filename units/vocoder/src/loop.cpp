@@ -46,6 +46,23 @@ void Loop::forget(unsigned i) noexcept {
   region_off(i);
 }
 
+bool Loop::adopt(unsigned i, std::uint32_t length) noexcept {
+  if (mem_ == nullptr || i >= kCount || rec_[i] || playing_[i] || region(i) || length > cap_) {
+    return false;
+  }
+  if (length != 0u && length < len_[i]) {  // the seam end_record() baked is cut off: ramp the new end to zero, or the wrap clicks
+    std::int16_t* s = mem_ + static_cast<std::size_t>(i) * cap_;
+    const std::uint32_t f = length / 2u < kFadeSamples ? length / 2u : kFadeSamples;
+    const float step = f != 0u ? 1.0f / static_cast<float>(f) : 0.0f;
+    for (std::uint32_t k = 0; k < f; ++k) {
+      s[length - 1u - k] = static_cast<std::int16_t>(static_cast<float>(s[length - 1u - k]) * (static_cast<float>(k) * step));
+    }
+  }
+  h_[i] = 0;
+  len_[i] = length;
+  return true;
+}
+
 void Loop::begin_record(unsigned i) noexcept {
   if (mem_ == nullptr || i >= kCount) {
     return;

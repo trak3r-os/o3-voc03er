@@ -112,7 +112,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
                             CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, ModSrc, LiveCh,
-                            R1Start, R1Len, R1Trig, R2Start, R2Len, R2Trig, R3Start, R3Len, R3Trig, R4Start, R4Len, R4Trig, kParamCount };
+                            R1Start, R1Len, R1Trig, R2Start, R2Len, R2Trig, R3Start, R3Len, R3Trig, R4Start, R4Len, R4Trig, Load, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
@@ -185,6 +185,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void set(std::uint16_t id, float v) noexcept;
   void loop_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
   void region_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept;
+  void load_event(float v) noexcept;  // Load: the app wrote a sample into a stopped slot; adopt its length
   void run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* mod, float* car) noexcept;
   void publish_loops() noexcept;
   void publish_view() noexcept;

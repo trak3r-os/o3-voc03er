@@ -190,3 +190,26 @@ TEST_CASE("sample_rec: HELP gives a row to every button the screen answers") {
     CHECK(help.fkey[k] != nullptr);
   }
 }
+
+TEST_CASE("sample_rec: a 2 BAR take with the transport stopped is exactly 2 bars long, not a block past it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  REQUIRE_FALSE(h.engine().playing());
+  REQUIRE(h.engine().stats().tempo_mbpm == 120000u);
+  tap(h, app::Button::Right);  // LENGTH: 1 BAR
+  h.run_ms(60);
+  tap(h, app::Button::Right);  // 2 BARS
+  h.run_ms(60);
+  tap(h, app::Button::Rec);
+  h.run_ms(6500);  // 4 s of audio plus the stop and the trim
+  const auto loop1 = [&h] {
+    char line[1200];
+    const std::string text(line, h.runtime().state_line(line, sizeof line));
+    const std::size_t at = text.find("loop1=");
+    return at == std::string::npos ? std::string() : text.substr(at, text.find(' ', at) - at);
+  };
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Play)) == doctest::Approx(1.0f));
+  CHECK(unit_param(h, Vocoder::Load) == doctest::Approx(0.0f));  // back to 0: a saved project does not hold it
+  CHECK(loop1() == "loop1=176400");
+  CHECK(h.runtime().frame_failures() == 0u);
+}

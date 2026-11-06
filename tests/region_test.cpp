@@ -24,7 +24,7 @@ constexpr std::uint32_t kPer = 4000;  // samples a slot
 using RF = Vocoder::RegionField;
 using LF = Vocoder::LoopField;
 
-static_assert(Vocoder::LiveCh == 48 && Vocoder::R1Start == 49 && Vocoder::R4Trig == 60 && Vocoder::kParamCount == 61, "append only");
+static_assert(Vocoder::LiveCh == 48 && Vocoder::R1Start == 49 && Vocoder::R4Trig == 60 && Vocoder::kParamCount == 62, "append only");
 static_assert(Vocoder::kParamCount <= 64, "the kit's limit per unit");
 static_assert(Vocoder::region_param(0, RF::Start) == 49 && Vocoder::region_param(2, RF::Len) == 56 && Vocoder::region_param(3, RF::Trig) == 60, "three a reader");
 

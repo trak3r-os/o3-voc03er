@@ -55,6 +55,12 @@ class Loop {
   void clear() noexcept;  // every loop empty, nothing recording or playing
   void forget(unsigned i) noexcept;  // loop i alone: empty, not recording, not playing (its speed, direction and gain stay)
 
+  // adopt(): loop i takes `length` samples the owner wrote into its memory (main loop, while the loop was stopped) as a finished take: what
+  // end_record() leaves (length, position 0, not playing). The writer bakes its own fades, but a length shorter than the loop had gets a fade at
+  // its new end, since the old one is cut off. false and no change when i is out of range, the loop is unbound, recording, playing or has a
+  // region sounding or pending, or `length` is over capacity(). 0 is forget().
+  bool adopt(unsigned i, std::uint32_t length) noexcept;
+
   // Recording. begin_record() empties loop i (and stops it playing) and starts taking samples; record() appends up to `n` samples of `in`
   // (clipped to +-1) and returns how many it took; when the loop is full it ends the recording itself (recording() is then false).
   // end_record() makes what was taken the loop (the seam fade is baked in).

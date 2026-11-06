@@ -94,6 +94,9 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     region_start_row("R2 START"), region_len_row("R2 LEN"), region_trig_row("R2 TRIG"),
     region_start_row("R3 START"), region_len_row("R3 LEN"), region_trig_row("R3 TRIG"),
     region_start_row("R4 START"), region_len_row("R4 LEN"), region_trig_row("R4 TRIG"),
+    // Load: slot x Loop::kMaxSamples + length, length 1..kMaxSamples (see load_event). 0 does nothing: the default that prepare() and
+    // Engine::start() replay is harmless.
+    {"LOAD", "", nullptr, nullptr, 0.0f, kBankMax, 0.0f, 2048, 16, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -214,6 +217,10 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
   }
   if (id >= Loop1Rec && id < CarSrc) {
     return;  // the loops' parameters carry a frame: loop_param_event
+  }
+  if (id == Load) {
+    load_event(v);
+    return;
   }
   if (id >= R1Start) {
     region_param_event(id, v, 0);
@@ -394,7 +401,7 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
         select_carrier(o3sdk::core::param_clamp(kParams[CarSrc], e.value), e.frame);
       } else if (e.param >= Loop1Rec && e.param < CarSrc) {
         loop_param_event(e.param, e.value, e.frame);
-      } else if (e.param >= R1Start && e.param < kParamCount) {
+      } else if (e.param >= R1Start && e.param < Load) {
         region_param_event(e.param, e.value, e.frame);
       } else {
         set(e.param, e.value);
@@ -470,6 +477,23 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
 
 // A region parameter (ids 49..60). Start and Len are staged in the Loop; Trig 1 starts the reader's region at `frame` unless its slot is
 // armed or recording (the recording has priority), Trig 0 releases it.
+// Load = slot x kMaxSamples + length, length 1..kMaxSamples, so slot 3 with a full 16 s is 2,822,400 and every value has one reading
+// (v > 0: slot = (v - 1) / kMaxSamples). The app wrote that sample into the slot's memory from the main loop while the slot was stopped.
+// Like the other action-like parameters (a Rec off, a Trig 0) its default, 0, is a no-op, which is all prepare() and Engine::start() ever
+// replay (the engine keeps no restart); a stored value is only ever the one the app just sent.
+void Vocoder::load_event(float v) noexcept {
+  if (!(v >= 1.0f) || !loops_.bound()) {
+    return;
+  }
+  const auto w = static_cast<std::uint32_t>(v);  // exact: v is a whole number below 2^24, and clamped
+  const std::uint32_t n = (w - 1u) / Loop::kMaxSamples;
+  const std::uint32_t len = w - n * Loop::kMaxSamples;
+  if (n >= Loop::kCount || slot_[n].rec != Slot::Rec::Idle || slot_[n].want_play) {
+    return;
+  }
+  (void)loops_.adopt(n, len);
+}
+
 void Vocoder::region_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept {
   v = o3sdk::core::param_clamp(kParams[id], v);
   const unsigned k = id - R1Start;
