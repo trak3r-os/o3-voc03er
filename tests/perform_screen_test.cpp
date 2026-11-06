@@ -341,6 +341,7 @@ struct Rig {
     tap(*h, app::Button::F3);
     tap(*h, app::Button::Down);
     tap(*h, app::Button::Down);
+    tap(*h, app::Button::Down);  // SYNTH, NOISE, VOICE, LIVE
     tap(*h, app::Button::F1);
     h->run_ms(20);
   }

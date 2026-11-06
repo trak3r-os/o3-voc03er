@@ -511,7 +511,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
 
   ornoir::HeaderState h;
   h.speaks = src != nullptr ? src->label : "NONE";
-  h.sounds = pl::kCarrierNames[car < 8u ? car : 0u];
+  h.sounds = pl::kCarrierNames[car < 9u ? car : 0u];
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = tempo / 100u;

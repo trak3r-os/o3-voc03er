@@ -90,7 +90,7 @@ TEST_CASE("ModSrc: the ids and the table") {
   Vocoder u;
   const auto& info = u.info();
   CHECK(info.params[Vocoder::ModSrc].max == 6.0f);
-  CHECK(info.params[Vocoder::CarSrc].max == 7.0f);
+  CHECK(info.params[Vocoder::CarSrc].max == 8.0f);
 }
 
 TEST_CASE("ModSrc: LIVE is bit-identical to a unit that never heard of it") {

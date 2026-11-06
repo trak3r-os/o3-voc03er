@@ -6,7 +6,7 @@
 // header and the console all read this; tests/route_test.cpp covers it.
 //
 // Values are the unit's: SPEAKS is Vocoder::ModSrc (0 LIVE, 3..6 SLOT 1..4; NONE (1) is not a picker choice), SOUNDS is Vocoder::CarSrc
-// (1 SYNTH, 2 NOISE, 3..6 SLOT 1..4, 7 LIVE; FOLLOW (0) is the pattern's "leave it").
+// (1 SYNTH, 2 NOISE, 3..6 SLOT 1..4, 7 LIVE, 8 VOICE: the synth plays the pitch that is sung; FOLLOW (0) is the pattern's "leave it").
 
 #include <cstdint>
 
@@ -17,6 +17,7 @@ inline constexpr std::uint8_t kSoundsSynth = 1;
 inline constexpr std::uint8_t kSoundsNoise = 2;
 inline constexpr std::uint8_t kFirstSlot = 3;  // slot n (0..3) is kFirstSlot + n on both sides
 inline constexpr std::uint8_t kSoundsLive = 7;
+inline constexpr std::uint8_t kSoundsVoice = 8;
 inline constexpr unsigned kSlots = 4;
 
 enum class Side : std::uint8_t { Speaks, Sounds };
@@ -33,7 +34,7 @@ struct Route {
 constexpr bool is_slot(std::uint8_t v) noexcept { return v >= kFirstSlot && v < kFirstSlot + kSlots; }
 
 constexpr bool speaks_valid(std::uint8_t v) noexcept { return v == kSpeaksLive || is_slot(v); }
-constexpr bool sounds_valid(std::uint8_t v) noexcept { return v == kSoundsSynth || v == kSoundsNoise || is_slot(v) || v == kSoundsLive; }
+constexpr bool sounds_valid(std::uint8_t v) noexcept { return v == kSoundsSynth || v == kSoundsNoise || is_slot(v) || v == kSoundsLive || v == kSoundsVoice; }
 
 // A pair is allowed when both values are picker choices and no slot is on both sides (a slot is one reader: it cannot be the modulator and
 // the carrier at once). Every other pair is allowed, LIVE on both sides included: it is the same source on the modulator and the carrier bus.
@@ -57,7 +58,7 @@ constexpr Roles roles(Route r) noexcept {
   o.live_speaks = r.speaks == kSpeaksLive;
   o.live_sounds = r.sounds == kSoundsLive;
   o.adc = o.live_speaks || o.live_sounds;
-  o.synth = r.sounds == kSoundsSynth || r.sounds == kSoundsNoise;
+  o.synth = r.sounds == kSoundsSynth || r.sounds == kSoundsNoise || r.sounds == kSoundsVoice;
   o.noise_only = r.sounds == kSoundsNoise;
   for (unsigned i = 0; i < kSlots; ++i) {
     const auto v = static_cast<std::uint8_t>(kFirstSlot + i);
@@ -72,7 +73,7 @@ constexpr unsigned usb_channel(Side s) noexcept { return s == Side::Speaks ? 0u 
 constexpr const char* live_name(const char* label, bool usb, Side s) noexcept { return !usb ? label : (usb_channel(s) == 0u ? "USB L" : "USB R"); }
 
 // A picker row: what it offers. Live is the LIVE row with the name of the source in force; Source is any other live source.
-enum class Kind : std::uint8_t { Synth, Noise, Live, Source, Slot };
+enum class Kind : std::uint8_t { Synth, Noise, Voice, Live, Source, Slot };
 struct Row {
   Kind kind = Kind::Synth;
   std::uint8_t arg = 0;  // Source: a LiveSrc; Slot: 0..3
@@ -93,7 +94,7 @@ constexpr const char* reason_text(Reason r) noexcept {
 
 // The state of `row` in the picker of `side` while `r` is in force and `cur` is the live source of the ADC. The one rule: the other side
 // holds LIVE, so any source but the one in force cannot be taken without freeing it by a capture (CAPTURE FIRST). The LIVE row of the source
-// in force is never dimmed (both sides may hold it). A slot the other side holds is dimmed (IN USE). SYNTH and NOISE are never dimmed.
+// in force is never dimmed (both sides may hold it). A slot the other side holds is dimmed (IN USE). SYNTH, NOISE and VOICE are never dimmed.
 constexpr RowState row_state(Side side, Route r, Row row) noexcept {
   RowState s;
   const Roles o = roles(r);
@@ -114,9 +115,9 @@ constexpr RowState row_state(Side side, Route r, Row row) noexcept {
   return s;
 }
 
-// The rows of a picker, in the order the screen lists them: SOUNDS gets SYNTH, NOISE first; both get the LIVE row, the other live sources
+// The rows of a picker, in the order the screen lists them: SOUNDS gets SYNTH, NOISE, VOICE first; both get the LIVE row, the other live sources
 // (all but `cur`, 6 rows), then the 4 slots. Writes at most `cap` rows and returns how many the picker has (up to kMaxRows).
-inline constexpr unsigned kMaxRows = 2 + 1 + (kLiveSrcCount - 1) + kSlots;
+inline constexpr unsigned kMaxRows = 3 + 1 + (kLiveSrcCount - 1) + kSlots;
 
 constexpr unsigned rows(Side side, LiveSrc cur, Row* out, unsigned cap) noexcept {
   unsigned n = 0;
@@ -129,6 +130,7 @@ constexpr unsigned rows(Side side, LiveSrc cur, Row* out, unsigned cap) noexcept
   if (side == Side::Sounds) {
     put(Kind::Synth, 0);
     put(Kind::Noise, 0);
+    put(Kind::Voice, 0);
   }
   put(Kind::Live, 0);
   for (unsigned s = 0; s < kLiveSrcCount; ++s) {
@@ -152,6 +154,7 @@ constexpr bool pick(Side side, Route& r, Row row) noexcept {
   switch (row.kind) {
     case Kind::Synth: v = kSoundsSynth; break;
     case Kind::Noise: v = kSoundsNoise; break;
+    case Kind::Voice: v = kSoundsVoice; break;
     case Kind::Live:
     case Kind::Source: v = side == Side::Speaks ? kSpeaksLive : kSoundsLive; break;
     case Kind::Slot: v = static_cast<std::uint8_t>(kFirstSlot + row.arg); break;

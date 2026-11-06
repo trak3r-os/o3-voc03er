@@ -623,7 +623,7 @@ void SampleScreen::fill_header(app::Context& ctx, ornoir::HeaderState& h) const 
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (src != nullptr ? src->label : "NONE");
   h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
-                                                                              : pl::kCarrierNames[car < 8u ? car : 0u];
+                                                                              : pl::kCarrierNames[car < 9u ? car : 0u];
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = e.stats().tempo_mbpm / 100u;

@@ -56,7 +56,7 @@ constexpr o3sdk::core::ParamDesc region_len_row(const char* name) {
 constexpr const char* kTrigNames[] = {"OFF", "TRIG"};
 constexpr o3sdk::core::ParamDesc region_trig_row(const char* name) { return loop_row(name, kTrigNames); }
 
-constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE"};
+constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE", "VOICE"};
 
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"WAVE", "", kWaveNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
@@ -75,7 +75,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     rec_row("L4 REC"), loop_row("L4 PLAY", kPlayNames), loop_row("L4 ROLE", kRoleNames),
     speed_row("L1 SPEED"), dir_row("L1 DIR"), level_row("L1 LEVEL"), speed_row("L2 SPEED"), dir_row("L2 DIR"), level_row("L2 LEVEL"),
     speed_row("L3 SPEED"), dir_row("L3 DIR"), level_row("L3 LEVEL"), speed_row("L4 SPEED"), dir_row("L4 DIR"), level_row("L4 LEVEL"),
-    {"CARRIER", "", kCarNames, nullptr, 0.0f, 7.0f, 0.0f, 7, 1, 8, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"CARRIER", "", kCarNames, nullptr, 0.0f, 8.0f, 0.0f, 8, 1, 9, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"KEY", "", kKeyNames, nullptr, 0.0f, 11.0f, 0.0f, 11, 1, 12, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"SCALE", "", kScaleNames, nullptr, 0.0f, 6.0f, 0.0f, 6, 1, 7, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"SPEED", "ms", nullptr, nullptr, 0.0f, 500.0f, 25.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
@@ -194,6 +194,8 @@ void Vocoder::prepare(float sample_rate) noexcept {
     s = Slot{};
   }
   sel_ = 0;
+  tune_.set_voice(false);
+  vn_ = 0;
   msel_ = 0;
   live_car_.set_length(ramp);
   live_car_.jump(0.0f);
@@ -377,11 +379,11 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       const float vg = e.velocity >= 100u ? 1.0f : static_cast<float>(e.velocity) * 0.01f;
       if (vg != vel_gain_) {
         vel_gain_ = vg;
-        synth_gain_.target(sel_ >= 3u ? 0.0f : vel_gain_);
+        synth_gain_.target(synth_target());
       }
       held_insert(e.note);
       if (arp_ == 0u) {
-        carrier_.note_on(e.note);
+        car_on(e.note);
       } else if (!playing_ && arp_note_ == 0xFFu && nheld_ != 0u) {
         clock_start_now();  // transport stopped, nothing sounding: the first note restarts the step clock and sounds at once
       }
@@ -395,9 +397,9 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       }
       held_remove(e.note);
       if (arp_ == 0u) {
-        carrier_.note_off(e.note);
+        car_off(e.note);
       } else if (nheld_ == 0u && arp_note_ != 0xFFu) {  // the last note let go: the arp's voice releases
-        carrier_.note_off(arp_note_);
+        car_off(arp_note_);
         arp_note_ = 0xFFu;
       }
       tune_.note_off(e.note);
@@ -527,11 +529,73 @@ void Vocoder::region_param_event(std::uint16_t id, float v, std::uint32_t frame)
 // The carrier source changes at `frame`: the synth's gain and the noise amount start their ramps now (the run before this event has been
 // rendered), the loops' at the same frame through pend_.
 void Vocoder::select_carrier(float v, std::uint32_t frame) noexcept {
+  const bool was_voice = sel_ == kCarVoice;
   sel_ = static_cast<unsigned>(v + 0.5f);
-  synth_gain_.target(sel_ >= 3u ? 0.0f : vel_gain_);
+  if ((sel_ == kCarVoice) != was_voice) voice_switch(sel_ == kCarVoice);
+  synth_gain_.target(synth_target());
   live_car_.target(sel_ == 7u ? 1.0f : 0.0f);
   noise_amt_.target(noise_target());
   retarget(frame);
+}
+
+// Entering VOICE the pads' notes in the carrier let go (they were played as such); leaving it the sung notes let go and the pads sound again.
+void Vocoder::voice_switch(bool on) noexcept {
+  tune_.set_voice(on);
+  if (on) {
+    carrier_.all_notes_off();
+    vn_ = 0;
+    return;
+  }
+  for (unsigned i = 0; i < vn_; ++i) carrier_.note_off(vsnd_[i]);
+  vn_ = 0;
+  if (arp_ == 0u) {
+    for (unsigned i = 0; i < nheld_; ++i) carrier_.note_on(held_[i]);
+  } else if (arp_note_ != 0xFFu) {
+    carrier_.note_on(arp_note_);
+  }
+}
+
+// VOICE, called before each render of the carrier: the notes it should sound are the sung note alone with no pad held; else each sounding pad
+// (the held ones, or the arp's one) moved by sung - lowest held; none when nothing is sung. Only the difference with what it was given goes
+// to the carrier, so a steady note costs a compare and a change is a note_off and a note_on (GLIDE and the envelopes do the rest). Once a
+// render call, no libm, no division.
+void Vocoder::voice_sync() noexcept {
+  std::uint8_t want[Carrier::kVoices];
+  unsigned nw = 0;
+  const int base = tune_.voice_note();
+  if (base >= 0 && base <= 127) {
+    if (nheld_ == 0u) {
+      want[nw++] = static_cast<std::uint8_t>(base);
+    } else {
+      const int lo = held_[0];
+      const auto add = [&](std::uint8_t pad) {
+        const int m = base + static_cast<int>(pad) - lo;
+        if (m >= 0 && m <= 127 && nw < Carrier::kVoices) want[nw++] = static_cast<std::uint8_t>(m);
+      };
+      if (arp_ == 0u) {
+        for (unsigned i = 0; i < nheld_; ++i) add(held_[i]);
+      } else if (arp_note_ != 0xFFu) {
+        add(arp_note_);
+      }
+    }
+  }
+  if (nw == vn_) {
+    unsigned i = 0;
+    while (i < nw && want[i] == vsnd_[i]) ++i;
+    if (i == nw) return;
+  }
+  for (unsigned i = 0; i < vn_; ++i) {
+    bool keep = false;
+    for (unsigned j = 0; j < nw; ++j) keep = keep || want[j] == vsnd_[i];
+    if (!keep) carrier_.note_off(vsnd_[i]);
+  }
+  for (unsigned j = 0; j < nw; ++j) {
+    bool had = false;
+    for (unsigned i = 0; i < vn_; ++i) had = had || vsnd_[i] == want[j];
+    if (!had) carrier_.note_on(want[j]);
+  }
+  for (unsigned j = 0; j < nw; ++j) vsnd_[j] = want[j];
+  vn_ = static_cast<std::uint8_t>(nw);
 }
 
 void Vocoder::retarget(std::uint32_t frame) noexcept {
@@ -644,11 +708,11 @@ void Vocoder::set_arp(unsigned mode) noexcept {
   if (mode == 0u) {  // off: what the arp had on goes, every held note sounds again
     arp_ = 0;
     if (arp_note_ != 0xFFu) {
-      carrier_.note_off(arp_note_);
+      car_off(arp_note_);
       arp_note_ = 0xFFu;
     }
     for (unsigned i = 0; i < nheld_; ++i) {
-      carrier_.note_on(held_[i]);
+      car_on(held_[i]);
     }
     arp_pos_ = 0xFFu;
     arp_down_ = false;
@@ -658,7 +722,7 @@ void Vocoder::set_arp(unsigned mode) noexcept {
   arp_ = static_cast<std::uint8_t>(mode);
   if (was == 0u) {  // on: the held notes were sounding all together; the arp takes them one at a time from the bottom
     for (unsigned i = 0; i < nheld_; ++i) {
-      carrier_.note_off(held_[i]);
+      car_off(held_[i]);
     }
     arp_pos_ = 0xFFu;
     arp_down_ = false;
@@ -675,7 +739,7 @@ void Vocoder::set_arp(unsigned mode) noexcept {
 // One step of the arp: release the note it had on, sound the next of the pattern; with nothing held it only releases.
 void Vocoder::arp_step() noexcept {
   if (arp_note_ != 0xFFu) {
-    carrier_.note_off(arp_note_);
+    car_off(arp_note_);
     arp_note_ = 0xFFu;
   }
   const unsigned n = nheld_;
@@ -722,7 +786,7 @@ void Vocoder::arp_step() noexcept {
   }
   arp_pos_ = static_cast<std::uint8_t>(next);
   arp_note_ = held_[next];
-  carrier_.note_on(arp_note_);
+  car_on(arp_note_);
 }
 
 // GATE on frames [from, from + k) of the carrier and its held-notes gate: the gain slews to 0 in the second half of a step and back to 1, 2 ms edges.
@@ -757,6 +821,9 @@ void Vocoder::apply_gate(float* car, float* gate, std::uint32_t from, std::uint3
 }
 
 void Vocoder::render_carrier(float* out, float* gate, std::uint32_t n) noexcept {
+  if (sel_ == kCarVoice) {
+    voice_sync();
+  }
   if (!synth_gain_.moving() && !noise_amt_.moving()) {
     carrier_.set_noise(noise_amt_.value());
     carrier_.render(out, n, gate);
@@ -1065,9 +1132,12 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
     for (std::uint32_t i = 0; i < n; ++i) tw[i] = 0.0f;
   }
   if (runs(tune_mix_)) {
-    tune_.process(mod, tn, n);
+    tune_.process(mod, tn, n);  // with VOICE on it decides the sung note too: one detector for both
   } else {
     for (std::uint32_t i = 0; i < n; ++i) tn[i] = 0.0f;
+    if (sel_ == kCarVoice) {
+      tune_.detect(mod, n);  // VOICE outside TUNE: the detector alone
+    }
   }
   publish_view();  // the BANDS followers for the PERFORM screen, once a block
   float rw[Bands::kMaxFrames];  // ROBOT: the wet sum after the compressor (a copy: the BANDS term reads the wet sum itself while they crossfade)

@@ -171,6 +171,20 @@ Estimated cost: well under 1 % of a core for ROBOT, the driver a few cycles per 
 
 Owed: by ear (the driver, ROBOT's threshold, make-up and release, SPEED 0 on a real voice) and the CPU on the unit. ROBOT has to be measured on the BANDS 8 notes + 4 loops row, whose peak was 65.5 % against a limit now 69 %, because it runs the BANDS engine and the compressor on top.
 
+## E2: the VOICE carrier
+
+CarSrc 8, VOICE (no new parameter id; parameter 34 now runs 0 to 8): the synth carrier plays the pitch the singer sings, snapped by KEY and SCALE, in any MODE. Built and host-tested, nothing heard.
+
+- **Detector.** `Autotune::detect` runs the `Tune` detector alone (no shifter) while VOICE is on, outside TUNE too; in TUNE the same detector feeds both, so there is one copy. With VOICE off it costs nothing, and every other output is bit-identical (the BANDS digest in `talk_test.cpp` is unchanged).
+- **Note.** `Autotune::voice_step`, per 16-sample segment (so it does not depend on the block length), takes the detector's frequency, converts it to a note number and snaps it with the same `pick()` and `kSnapBias` as TUNE; SPEED 0 decides at once, and a slower SPEED smooths the pitch first. The note is kept apart from TUNE's, so TUNE with NOTES IN does not steer it. When the voice stops, the note is held `kVoiceHoldMs` (60 ms, 165 segments) so a consonant or a breath does not cut it, then released.
+- **Carrier.** `Vocoder::voice_sync` runs before each carrier render and turns the wanted note list into note offs and ons, so a change goes through GLIDE and the carrier's legato, with no click. No pad held: the sung note alone. Pads held: each sounds at sung + (held - lowest held), within `Carrier::kVoices` (8). No sung note, pads held: silence. ARP maps the arp's current note the same way, and GATE is a gain on the carrier output, so both work unchanged. The decision lands one block (about 1.45 ms) after the audio, small against the detector's 11 to 48 ms.
+- **Left out.** The per-step carrier of a pattern (`pat ... car`) does not offer VOICE: it is a pad index, not a CarSrc. With TUNE alone (no carrier render) VOICE has nothing to sound.
+- **Cost (estimates).** Control rate only: one `log2f` per new detector estimate (a hop, 512 samples) and a few compares per segment; no libm, division or allocation per sample. The unit object grows by about 33 bytes of state (Autotune 24, Vocoder 9) plus the code.
+
+Test: `tests/voice_carrier_test.cpp` (a sung sine outside the scale gives the snapped note, silence releases after the hold, a held triad follows the voice, VOICE off changes nothing), and `app/scenarios/voice_carrier.txt` (the picker row, the header, the WAV).
+
+Owed: by ear, CPU on the unit, onset lag and octave errors on a real microphone.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.
