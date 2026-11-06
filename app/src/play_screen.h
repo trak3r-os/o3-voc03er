@@ -8,6 +8,7 @@
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pattern.h>
+#include <o3_voc03er/stepseq.h>
 
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
@@ -23,7 +24,8 @@ class PlayScreen final : public o3sdk::app::Screen {
   // Called by the app's setup(): the unit this screen plays and edits.
   // `meter` is the app's input peak meter (it outlives the screen).
   // `loops`: the vocoder, for the state of its four loops (main loop only).
-  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, const Vocoder* loops = nullptr) noexcept;
+  // `pattern`: pattern A of the app's bank (stepseq.h), the one this screen records into and draws; it outlives the screen.
+  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, const Vocoder* loops, PatternData* pattern) noexcept;
 
   const char* title() const noexcept override { return "PLAY"; }
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
@@ -37,8 +39,12 @@ class PlayScreen final : public o3sdk::app::Screen {
   // For the console's `state` (the app's describe_state) and the app's file jobs.
   int octave() const noexcept { return octave_; }
   void set_octave(int octave) noexcept { octave_ = clamp_octave(octave); }
-  const Pattern& pattern() const noexcept { return pattern_; }
-  void set_pattern(const Pattern& p) noexcept { pattern_ = p; }
+  // Pattern A in the V1 shape (notes, carriers, this screen's cursor) for `state`.
+  Pattern pattern() const noexcept {
+    Pattern p = to_legacy(*pd_);
+    p.cursor = cursor_;
+    return p;
+  }
   // A line of the app's own about the last file job, shown in place of the files service's text ("BAD FILE": the load worked and the file
   // was not a pattern). nullptr: none.
   void set_note(const char* note) noexcept { note_ = note; }
@@ -55,7 +61,8 @@ class PlayScreen final : public o3sdk::app::Screen {
   void sync_page(const o3sdk::dsp::Engine& e) const noexcept;
   o3sdk::app::ParamKeys keys_;
   int octave_ = 0;
-  Pattern pattern_;
+  PatternData* pd_ = nullptr;  // pattern A of the bank
+  unsigned cursor_ = 0;        // the step the next recorded note goes to (not kept in the file)
   const char* note_ = nullptr;
   int held_[o3sdk::app::kPadCount] = {};  // the note each held pad started (-1: none), so the release names it even after an octave shift
 };

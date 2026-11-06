@@ -250,4 +250,107 @@ inline bool parse_loop(const char* num, const char* act, LoopCommand& out, const
   return false;
 }
 
+// `pat [A-H] [len <n>] | [A-H <step 1-16> note <1-127|rest> | chord <root> <tri|sev|open|pow> [close|open|wide|smooth] | car <follow|synth|noise|s1..s4> |
+// lvl <0-127>]`: the words after `pat`. Kind and voicing are the numbers of ChordKind and Voicing (chords.h); the root is a MIDI note 1..127.
+enum class PatAct : std::uint8_t { Show, Length, Note, Chord, Carrier, Level };
+struct PatCommand {
+  unsigned pattern = 0;  // 0..7
+  PatAct act = PatAct::Show;
+  unsigned step = 0;     // 0..15 (every act but Show and Length)
+  unsigned value = 0;    // Length 1..16; Note 0..127 (0 a rest); Chord the root; Carrier 0..6; Level 0..127
+  unsigned kind = 0;     // Chord: ChordKind
+  unsigned voicing = 0;  // Chord: Voicing
+};
+// false (out untouched) for a pattern that is not A..H (or 1..8), a step that is not 1..16, a word that is not an action, a value out of range
+// or a missing or extra word.
+inline bool parse_pat(const char* const* w, unsigned n, PatCommand& out) noexcept {
+  auto number = [](const char* t, unsigned max, unsigned& v) noexcept {
+    if (t == nullptr || t[0] == '\0') {
+      return false;
+    }
+    unsigned acc = 0;
+    for (; *t != '\0'; ++t) {
+      if (*t < '0' || *t > '9' || acc > max) {
+        return false;
+      }
+      acc = acc * 10u + static_cast<unsigned>(*t - '0');
+    }
+    if (acc > max) {
+      return false;
+    }
+    v = acc;
+    return true;
+  };
+  auto word = [](const char* t, const char* const* names, unsigned count, unsigned& v) noexcept {
+    for (unsigned i = 0; i < count; ++i) {
+      if (t != nullptr && std::strcmp(t, names[i]) == 0) {
+        v = i;
+        return true;
+      }
+    }
+    return false;
+  };
+  if (w == nullptr || n < 1u || n > 6u || w[0] == nullptr || w[0][1] != '\0') {
+    return false;
+  }
+  PatCommand c;
+  const char l = w[0][0];
+  if (l >= 'A' && l <= 'H') {
+    c.pattern = static_cast<unsigned>(l - 'A');
+  } else if (l >= 'a' && l <= 'h') {
+    c.pattern = static_cast<unsigned>(l - 'a');
+  } else if (l >= '1' && l <= '8') {
+    c.pattern = static_cast<unsigned>(l - '1');
+  } else {
+    return false;
+  }
+  if (n == 1u) {
+    out = c;
+    return true;
+  }
+  if (std::strcmp(w[1], "len") == 0) {
+    c.act = PatAct::Length;
+    if (n != 3u || !number(w[2], 16u, c.value) || c.value < 1u) {
+      return false;
+    }
+    out = c;
+    return true;
+  }
+  unsigned step = 0;
+  if (n < 4u || !number(w[1], 16u, step) || step < 1u) {
+    return false;
+  }
+  c.step = step - 1u;
+  static const char* const kCar[] = {"follow", "synth", "noise", "s1", "s2", "s3", "s4"};
+  static const char* const kKind[] = {"tri", "sev", "open", "pow"};
+  static const char* const kVoice[] = {"close", "open", "wide", "smooth"};
+  if (std::strcmp(w[2], "note") == 0 && n == 4u) {
+    c.act = PatAct::Note;
+    if (std::strcmp(w[3], "rest") == 0) {
+      c.value = 0;
+    } else if (!number(w[3], 127u, c.value) || c.value < 1u) {
+      return false;
+    }
+  } else if (std::strcmp(w[2], "chord") == 0 && (n == 5u || n == 6u)) {
+    c.act = PatAct::Chord;
+    if (!number(w[3], 127u, c.value) || c.value < 1u || !word(w[4], kKind, 4u, c.kind) || (n == 6u && !word(w[5], kVoice, 4u, c.voicing))) {
+      return false;
+    }
+  } else if (std::strcmp(w[2], "car") == 0 && n == 4u) {
+    c.act = PatAct::Carrier;
+    if (!word(w[3], kCar, 7u, c.value)) {
+      return false;
+    }
+  } else if (std::strcmp(w[2], "lvl") == 0 && n == 4u) {
+    c.act = PatAct::Level;
+    if (!number(w[3], 127u, c.value)) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  out = c;
+  return true;
+}
+
 }  // namespace o3_voc03er

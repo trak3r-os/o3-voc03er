@@ -4,7 +4,7 @@
 // Vocoder's CARRIER parameter (sample-exact, a ramp and not a step, a loop that is selected). Synthetic signals only.
 #include <doctest/doctest.h>
 
-#include <o3_voc03er/carrier_seq.h>
+#include <o3_voc03er/stepseq.h>
 #include <o3_voc03er/pattern.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
@@ -189,7 +189,7 @@ class Spy final : public dsp::Unit {
 struct HookRig {
   HookRig() {
     id = e.attach(spy);
-    seq.init(id);
+    seq.init(id, &bank);
     ok = e.set_source(0, id) && e.add_hook(seq);
   }
   void run(unsigned blocks) {
@@ -200,7 +200,14 @@ struct HookRig {
   }
   dsp::Engine e;
   Spy spy;
-  CarrierSeq seq;
+  Bank bank = {};
+  StepSeq seq;
+  // The carrier lane of pattern A, as the old table was set.
+  void set_all(const std::uint8_t* car) {
+    for (unsigned i = 0; i < kPatternSteps; ++i) {
+      (void)set_carrier(bank.pattern[0], i, car[i]);
+    }
+  }
   dsp::UnitId id = dsp::kNoUnit;
   bool ok = false;
 };
@@ -213,8 +220,8 @@ TEST_CASE("carrier hook: the switch lands on the step's own frame, an empty step
   std::uint8_t car[kPatternSteps] = {};
   car[1] = 3;  // loop 1
   car[5] = 2;  // noise
-  car[9] = 9;  // not a carrier: a value out of range never reaches the unit
-  rig.seq.set_all(car);
+  CHECK_FALSE(set_carrier(rig.bank.pattern[0], 9, 9));  // not a carrier: the edit refuses it, it never reaches the unit
+  rig.set_all(car);
   rig.e.start();
   rig.spy.hits.clear();
   REQUIRE(rig.e.play());
@@ -230,12 +237,13 @@ TEST_CASE("carrier hook: the switch lands on the step's own frame, an empty step
   }
 }
 
-TEST_CASE("carrier hook: a stop sends FOLLOW once, a restart begins from the top and switches again at the same frames") {
+TEST_CASE("carrier hook: a stop restores what the user picked, once, and only if a step changed the carrier") {
   HookRig rig;
   REQUIRE(rig.ok);
+  rig.seq.set_picked(4);  // SOUNDS = SLOT 2, chosen with F3
   std::uint8_t car[kPatternSteps] = {};
   car[2] = 1;  // synth
-  rig.seq.set_all(car);
+  rig.set_all(car);
   rig.e.start();
   rig.spy.hits.clear();
   REQUIRE(rig.e.play());
@@ -246,8 +254,8 @@ TEST_CASE("carrier hook: a stop sends FOLLOW once, a restart begins from the top
   rig.spy.hits.clear();
   REQUIRE(rig.e.stop());
   rig.run(1);
-  REQUIRE(rig.spy.hits.size() == 1);  // FOLLOW, at the first frame of the stopped block
-  CHECK(rig.spy.hits[0].value == 0.0f);
+  REQUIRE(rig.spy.hits.size() == 1);  // the picked carrier, at the first frame of the stopped block (it was 0 = FOLLOW before U6a)
+  CHECK(rig.spy.hits[0].value == 4.0f);
   rig.run(20);
   CHECK(rig.spy.hits.size() == 1);  // and nothing while it stays stopped
   REQUIRE(rig.e.play());
@@ -255,6 +263,21 @@ TEST_CASE("carrier hook: a stop sends FOLLOW once, a restart begins from the top
   REQUIRE(rig.spy.hits.size() == 2);
   CHECK(rig.spy.hits[1].value == 1.0f);
   CHECK(rig.spy.hits[1].tick == 2u * 240u);  // the run restarts at position 0
+}
+
+TEST_CASE("carrier hook: PLAY then STOP with no carrier step leaves SOUNDS alone (LIVE, a slot)") {
+  for (std::uint8_t picked : {std::uint8_t{7}, std::uint8_t{3}, std::uint8_t{0}}) {
+    HookRig rig;
+    REQUIRE(rig.ok);
+    rig.seq.set_picked(picked);
+    rig.e.start();
+    rig.spy.hits.clear();
+    REQUIRE(rig.e.play());
+    rig.run(300);
+    REQUIRE(rig.e.stop());
+    rig.run(20);
+    CHECK(rig.spy.hits.empty());  // no CarSrc at all: the unit keeps what the user chose
+  }
 }
 
 // ---- The unit ------------------------------------------------------------------------------------------------------------------

@@ -33,7 +33,9 @@
 #include "sample_rec_screen.h"
 #include "sample_screen.h"
 #include "stub_screen.h"
-#include <o3_voc03er/carrier_seq.h>
+#include <cmath>
+
+#include <o3_voc03er/stepseq.h>
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pattern.h>
@@ -61,6 +63,8 @@ alignas(8) O3SDK_BIG std::int16_t g_loop_mem[o3_voc03er::Loop::kBankSamples] = {
 static_assert(sizeof g_loop_mem == o3_voc03er::Loop::kBankSamples * sizeof(std::int16_t) && sizeof g_loop_mem % 8 == 0, "the bank is whole words");
 // The buffers of the file jobs (main loop only: the card is polled by the core, so SDRAM is legal, mem_map.h): word aligned, and a save's stays
 // unchanged until its job ends, so each file has its own; one load at a time shares one (the files service runs one job at a time).
+// The eight patterns A-H (stepseq.h): SDRAM, zero at boot (every step a rest, every length 16). The step sequencer hook reads it.
+alignas(4) O3SDK_BIG o3_voc03er::Bank g_bank;
 alignas(4) O3SDK_BIG std::uint8_t g_save_buf[o3_voc03er::kPatternFileMax] = {};
 alignas(4) O3SDK_BIG std::uint8_t g_cfg_buf[o3_voc03er::kConfigFileMax] = {};
 alignas(4) O3SDK_BIG std::uint8_t g_load_buf[o3_voc03er::kPatternFileMax] = {};
@@ -88,11 +92,13 @@ MyApp& instance() noexcept;
 void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
+    {"pat", "pat [A-H [len n|note s n|chord s root kind voic|car s c|lvl s v]]", &pat_command},
 };
 
 constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
@@ -144,14 +150,16 @@ class MyApp final : public app::App {
     (void)e.set_param(voice, o3_voc03er::Vocoder::Scale, 1.0f);
     meter_.reset(0, 0);
     console_notes_ = 0;
-    play_.init(voice, &meter_, &voc_);
+    g_bank = o3_voc03er::Bank{};  // setup() can run again on this object (tests, `reboot`): the patterns start empty; no render runs yet
+    play_.init(voice, &meter_, &voc_, &g_bank.pattern[0]);
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     (void)ctx.midi().route(voice, 0);
-    carriers_.init(voice);
+    carriers_.init(voice, &g_bank);
+    carriers_.set_picked(1);  // the boot CarSrc above
     (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
     op_ = Op::None;
@@ -170,7 +178,12 @@ class MyApp final : public app::App {
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
     sample_.service(ctx);  // slice voices end and tables follow lengths whichever screen is up
-    carriers_.set_all(play_.pattern().carrier);  // the render side's copy of the steps' carriers (relaxed atomics, carrier_seq.h)
+    {  // what the hook needs of the main side: the carrier the user picked (restored on Stop), and the key and scale the chords are spelled in
+      const dsp::Engine& e = ctx.engine();
+      carriers_.set_picked(static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::CarSrc))));
+      carriers_.set_key_scale(static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::Key))),
+                              static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::Scale))));
+    }
     app::Files& files = ctx.files();
     if (op_ != Op::None) {
       const app::Files::Status st = files.status();
@@ -285,7 +298,7 @@ class MyApp final : public app::App {
       files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
       play_.set_note(nullptr);
       if (save) {
-        const std::size_t n = o3_voc03er::write_pattern(play_.pattern(), g_save_buf, sizeof g_save_buf);
+        const std::size_t n = o3_voc03er::write_bank(g_bank, g_save_buf, sizeof g_save_buf);
         op_ = n != 0u && files.save("", o3_voc03er::kPatternFile, g_save_buf, n) ? Op::SavePattern : Op::None;
       } else {
         op_ = files.load("", o3_voc03er::kPatternFile, g_load_buf, sizeof g_load_buf) ? Op::LoadPattern : Op::None;
@@ -397,6 +410,64 @@ class MyApp final : public app::App {
     }
     out.text("loop ").dec(i + 1u).text(" asked").nl();
     ctx_->redraw();
+  }
+
+  // `pat [A-H [len n | note s n | chord s root kind voicing | car s c | lvl s v]]` (main loop): prints a pattern (or all eight), or edits one step
+  // with the pure functions of stepseq.h (an edit while playing is read whole at the next step). Steps are 1..16.
+  void pat(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    namespace ov = o3_voc03er;
+    auto show = [&](unsigned p) noexcept {
+      const ov::PatternData& pd = g_bank.pattern[p];
+      out.chr(static_cast<char>('A' + p)).text(p == carriers_.playing_pattern() ? "*" : " ").text(" len ").dec(ov::length_of(pd)).text(":");
+      for (unsigned i = 0; i < ov::length_of(pd); ++i) {
+        const ov::Step s = ov::get_step(pd, i);
+        out.chr(' ');
+        if (s.note == 0u) {
+          out.chr('-');
+        } else {
+          out.dec(s.note);
+          if (s.kind != 0u || s.voicing != 0u) {
+            out.chr('c');
+          }
+        }
+        if (s.carrier != 0u) {
+          out.chr('/').dec(s.carrier);
+        }
+        if (s.level != 0u) {
+          out.chr('v').dec(s.level);
+        }
+      }
+      out.nl();
+    };
+    if (args.argc == 1u) {
+      for (unsigned p = 0; p < ov::kBankPatterns; ++p) {
+        show(p);
+      }
+      return;
+    }
+    ov::PatCommand c;
+    if (!ov::parse_pat(args.argv + 1, args.argc - 1u, c)) {
+      out.text("usage: pat [A-H [len n|note s n|chord s root kind voic|car s c|lvl s v]]").nl();
+      return;
+    }
+    ov::PatternData& pd = g_bank.pattern[c.pattern];
+    bool ok = true;
+    switch (c.act) {
+      case ov::PatAct::Show: break;
+      case ov::PatAct::Length: ok = ov::set_length(pd, c.value); break;
+      case ov::PatAct::Note: ok = ov::set_note(pd, c.step, c.value); break;
+      case ov::PatAct::Chord: ok = ov::set_chord(pd, c.step, c.value, static_cast<ov::ChordKind>(c.kind), static_cast<ov::Voicing>(c.voicing)); break;
+      case ov::PatAct::Carrier: ok = ov::set_carrier(pd, c.step, c.value); break;
+      case ov::PatAct::Level: ok = ov::set_level(pd, c.step, c.value); break;
+    }
+    if (!ok) {
+      out.text("refused").nl();
+      return;
+    }
+    show(c.pattern);
+    if (ctx_ != nullptr) {
+      ctx_->redraw();
+    }
   }
 
   // `voc <bands|talk|tune> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
@@ -527,10 +598,7 @@ class MyApp final : public app::App {
   void settle(app::Context& ctx, bool done) noexcept {
     const std::size_t got = ctx.files().loaded();
     if (done && op_ == Op::LoadPattern) {
-      o3_voc03er::Pattern p;
-      if (o3_voc03er::read_pattern(g_load_buf, got, p)) {
-        play_.set_pattern(p);
-      } else {
+      if (!o3_voc03er::read_bank(g_load_buf, got, g_bank)) {
         play_.set_note("BAD FILE");
       }
     } else if (done && op_ == Op::LoadConfig) {
@@ -550,7 +618,7 @@ class MyApp final : public app::App {
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::SampleScreen sample_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
-  o3_voc03er::CarrierSeq carriers_;
+  o3_voc03er::StepSeq carriers_;  // the step sequencer hook (stepseq.h)
 
   Op op_ = Op::None;
   Boot boot_ = Boot::Pattern;
@@ -573,6 +641,10 @@ void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
 
 void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().loop(args, out);
+}
+
+void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().pat(args, out);
 }
 
 }  // namespace

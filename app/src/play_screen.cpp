@@ -58,14 +58,15 @@ const char* card_text(const app::Files& files) noexcept {
 
 }  // namespace
 
-void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocoder* loops) noexcept {
+void PlayScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocoder* loops, PatternData* pattern) noexcept {
   // setup() can run again on the same app object (every test starts a fresh simulator on the one o3sdk_app() instance): start from scratch.
   voice_ = voice;
   meter_ = meter;
   loops_ = loops;
   loop_sel_ = 0;
   octave_ = 0;
-  pattern_ = Pattern{};
+  pd_ = pattern;
+  cursor_ = 0;
   note_ = nullptr;
   page_ = app::ParamPage{"VOCODER", voice,
                          {Vocoder::Mode, Vocoder::Quality, Vocoder::Freeze, Vocoder::Dry, Vocoder::Level, Vocoder::Wave, Vocoder::Detune,
@@ -149,14 +150,15 @@ void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     }
   }
   if (in.press(Button::Delete)) {
-    pattern_.clear();
+    clear_pattern(*pd_);
+    cursor_ = 0;
     note_ = nullptr;
     ctx.redraw();
-  } else if (in.press(Button::Pattern)) {  // the carrier of the step under the cursor: none, synth, noise, loop 1..4 (carrier_seq.h)
-    (void)pattern_.cycle_carrier(pattern_.cursor);
+  } else if (in.press(Button::Pattern)) {  // the carrier of the step under the cursor: none, synth, noise, loop 1..4 (stepseq.h)
+    (void)cycle_carrier(*pd_, cursor_);
     ctx.redraw();
   } else if (in.shift && (in.press(Button::Left) || in.press(Button::Right))) {  // the cursor, a step
-    pattern_.cursor = (pattern_.cursor + (in.press(Button::Left) ? kPatternSteps - 1u : 1u)) % kPatternSteps;
+    cursor_ = (cursor_ + (in.press(Button::Left) ? kPatternSteps - 1u : 1u)) % kPatternSteps;
     ctx.redraw();
   } else if (in.press(Button::Left) || in.press(Button::Right)) {
     octave_ = clamp_octave(octave_ + (in.press(Button::Left) ? -1 : 1));
@@ -165,7 +167,7 @@ void PlayScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     const int note = key_note(in.pad(), octave_);
     if (note >= 0) {
       held_[in.pad()] = note;
-      pattern_.record(note);  // the pattern is what the pads played; FILE saves it
+      record_note(*pd_, cursor_, note);  // the pattern is what the pads played; FILE saves it
       ctx.redraw();
       (void)ctx.engine().note_on(voice_, static_cast<std::uint8_t>(note), 110);
     }
@@ -259,20 +261,21 @@ void PlayScreen::draw(app::Context& ctx, ui::Renderer& r, const Rect& area) noex
   const int step_w = 40;
   for (unsigned i = 0; i < kPatternSteps; ++i) {
     const Rect c{16 + static_cast<int>(i) * step_w, hy + 38, step_w - 4, 26};
-    if (pattern_.note[i] != 0) {
+    const Step st = get_step(*pd_, i);
+    if (st.note != 0) {
       r.panel(c, Color::Empty);
     } else {
       r.frame(c, Color::Empty);
     }
-    if (i == pattern_.cursor) {
+    if (i == cursor_) {
       r.frame(c, Color::Accent);
     }
     char name[5];
-    note_name(pattern_.note[i], name);
+    note_name(st.note, name);
     r.text(c.x + 4, c.y + 3, name, Color::Text, Face::Micro);
-    if (pattern_.carrier[i] != 0) {  // the step's carrier, under the note
+    if (st.carrier != 0) {  // the step's carrier, under the note
       static constexpr const char* kTag[] = {"", "SY", "NZ", "L1", "L2", "L3", "L4"};
-      r.text(c.x + 4, c.y + 14, kTag[pattern_.carrier[i]], Color::Accent, Face::Micro);
+      r.text(c.x + 4, c.y + 14, kTag[st.carrier], Color::Accent, Face::Micro);
     }
   }
 

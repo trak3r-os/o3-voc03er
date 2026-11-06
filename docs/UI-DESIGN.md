@@ -179,6 +179,15 @@ the cursor there (SHIFT + step pad: a rest in the lane).
 - F1 PATTERN (A to H) · F2 LANE (also NOTE, INSTR, VOL, FX and UP / DOWN) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's
   value in the lane, the encoder edits it) · F6 CLEAR LANE (action) · F7 FOLLOW (the cursor rides the playhead) · F8 SAVE (FILE's save, here).
 
+Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cpp`): a step is one 32-bit word (note, kind, voicing, carrier, level,
+slice), the bank of eight patterns is `O3SDK_BIG`, and the hook reads one word per step with a relaxed atomic, so an edit is heard whole at the
+step's next visit. A chord step stores its root as the note, so the old PLAY screen keeps working on pattern A. Settled where the spec was open:
+the gate is 75 % of a sixteenth, notes also end at Stop; carrier 0 (FOLLOW) emits nothing, and a Stop restores the carrier the user picked only
+if a step changed it (LIVE is never a lane value); LEVEL 0 means 100 and is sent as the NoteOn velocity, which the vocoder ignores today (it
+changes nothing audible yet); a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the
+previous step's notes; `pattern.o3a` v2 adds a BANK chunk after the v1 chunks (an older reader gets pattern A), a v1 file loads into A only,
+and a file that fails any check loads nothing. The console has `pat` (print, `len`, `note`, `chord`, `car`, `lvl`). SLICE is stored and ignored (U6c).
+
 ### PARAMS
 
 Three pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,

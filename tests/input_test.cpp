@@ -5,6 +5,8 @@
 
 #include <o3_voc03er/input.h>
 
+#include <initializer_list>
+
 using namespace o3_voc03er;
 using Source = o3sdk::hal::capture::Source;
 
@@ -155,4 +157,83 @@ TEST_CASE("voc formant and voc thru: the console's two BANDS values") {
   CHECK_FALSE(parse_voc_shape("arp", "", s));
   CHECK_FALSE(parse_voc_shape("bands", "3", s));
   CHECK_FALSE(parse_voc_shape("thru", nullptr, s));
+}
+
+TEST_CASE("parse_pat reads a pattern letter, a step and one lane") {
+  PatCommand c;
+  auto parse = [&](std::initializer_list<const char*> words) {
+    const char* w[8] = {};
+    unsigned n = 0;
+    for (const char* t : words) {
+      w[n++] = t;
+    }
+    return parse_pat(w, n, c);
+  };
+  REQUIRE(parse({"C"}));
+  CHECK(c.pattern == 2u);
+  CHECK(c.act == PatAct::Show);
+  REQUIRE(parse({"h"}));
+  CHECK(c.pattern == 7u);
+  REQUIRE(parse({"1"}));
+  CHECK(c.pattern == 0u);
+  REQUIRE(parse({"B", "len", "12"}));
+  CHECK(c.act == PatAct::Length);
+  CHECK(c.value == 12u);
+  REQUIRE(parse({"A", "3", "note", "60"}));
+  CHECK(c.act == PatAct::Note);
+  CHECK(c.step == 2u);
+  CHECK(c.value == 60u);
+  REQUIRE(parse({"A", "16", "note", "rest"}));
+  CHECK(c.step == 15u);
+  CHECK(c.value == 0u);
+  REQUIRE(parse({"D", "1", "chord", "48", "sev"}));
+  CHECK(c.act == PatAct::Chord);
+  CHECK(c.value == 48u);
+  CHECK(c.kind == 1u);
+  CHECK(c.voicing == 0u);
+  REQUIRE(parse({"D", "2", "chord", "50", "pow", "smooth"}));
+  CHECK(c.kind == 3u);
+  CHECK(c.voicing == 3u);
+  REQUIRE(parse({"A", "4", "car", "s3"}));
+  CHECK(c.act == PatAct::Carrier);
+  CHECK(c.value == 5u);
+  REQUIRE(parse({"A", "4", "car", "follow"}));
+  CHECK(c.value == 0u);
+  REQUIRE(parse({"A", "5", "lvl", "0"}));
+  CHECK(c.act == PatAct::Level);
+  REQUIRE(parse({"A", "5", "lvl", "127"}));
+  CHECK(c.value == 127u);
+}
+
+TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and leaves the command alone") {
+  PatCommand c;
+  c.step = 9;
+  auto bad = [&](std::initializer_list<const char*> words) {
+    const char* w[8] = {};
+    unsigned n = 0;
+    for (const char* t : words) {
+      w[n++] = t;
+    }
+    return !parse_pat(w, n, c) && c.step == 9u;
+  };
+  CHECK(bad({}));
+  CHECK(bad({"I"}));
+  CHECK(bad({"9"}));
+  CHECK(bad({"AB"}));
+  CHECK(bad({"A", "0", "note", "60"}));
+  CHECK(bad({"A", "17", "note", "60"}));
+  CHECK(bad({"A", "1", "note", "128"}));
+  CHECK(bad({"A", "1", "note", "0"}));  // a rest is spelled out
+  CHECK(bad({"A", "1", "note"}));
+  CHECK(bad({"A", "1", "note", "60", "x"}));
+  CHECK(bad({"A", "1", "chord", "60"}));
+  CHECK(bad({"A", "1", "chord", "60", "maj"}));
+  CHECK(bad({"A", "1", "chord", "60", "tri", "huge"}));
+  CHECK(bad({"A", "1", "car", "live"}));  // LIVE is not a lane value
+  CHECK(bad({"A", "1", "lvl", "128"}));
+  CHECK(bad({"A", "1", "lvl", "-1"}));
+  CHECK(bad({"A", "len", "0"}));
+  CHECK(bad({"A", "len", "17"}));
+  CHECK(bad({"A", "len"}));
+  CHECK(bad({"A", "1", "jump", "3"}));
 }
