@@ -63,6 +63,8 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"SPEED", "ms", nullptr, nullptr, 0.0f, 500.0f, 25.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"AMOUNT", "%", nullptr, nullptr, 0.0f, 1.0f, 1.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"NOTES-IN", "", kNotesInNames, nullptr, 0.0f, 1.0f, 1.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"FORMANT", "st", nullptr, nullptr, -12.0f, 12.0f, 0.0f, 24, 4, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"THRU", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -213,6 +215,12 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       break;
     case NotesIn:
       tune_.set_notes_in(v >= 0.5f);
+      break;
+    case Formant:
+      bands_.set_formant(std::floor(v + 0.5f));  // integer semitones
+      break;
+    case Thru:
+      bands_.set_thru(v);
       break;
     case Quality:
       talk_.set_order(static_cast<std::uint32_t>(v + 0.5f));

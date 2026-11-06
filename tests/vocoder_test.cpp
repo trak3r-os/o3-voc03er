@@ -8,7 +8,11 @@
 
 #include <cfloat>
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 using namespace o3_voc03er;
@@ -158,7 +162,7 @@ TEST_CASE("vocoder: the parameter table is valid and ids are stable") {
   CHECK(Vocoder::Detune == 6);
   CHECK(Vocoder::Mode == 7);  // Talk: MODE, QUALITY and FREEZE appended
   CHECK(Vocoder::Freeze == 9);  // the first ten never move
-  CHECK(Vocoder::kParamCount == 40);  // V5a: the loops appended (ids 10..21), V5b: their speed, direction and level (22..33), V5c: CARRIER (34), V6b: KEY, SCALE, SPEED, AMOUNT, NOTES-IN (35..39)
+  CHECK(Vocoder::kParamCount == 42);  // V2f: FORMANT, THRU (40, 41); V5a: the loops appended (ids 10..21), V5b: their speed, direction and level (22..33), V5c: CARRIER (34), V6b: KEY, SCALE, SPEED, AMOUNT, NOTES-IN (35..39)
 }
 
 TEST_CASE("bands: a band responds more to a sine at its centre than at a neighbour's centre") {
@@ -783,8 +787,10 @@ TEST_CASE("bands: a carrier tone above 11 kHz that would alias onto a low band d
 namespace {
 
 const float kVoiceEnvFullRate[Bands::kBands] = {
-    0.0134829f, 0.00619435f, 0.011672f, 0.00800391f, 0.00934264f, 0.0127339f, 0.0191305f, 0.015925f,
-    0.0074127f, 0.00573096f, 0.0022171f, 0.00102916f, 0.000626447f, 0.000325573f, 0.000179028f, 0.000101804f};  // vowel A, e3f675c, mean of the last 300 blocks
+    0.0130749f, 0.00580474f, 0.0111257f, 0.00800566f, 0.00937417f, 0.0127554f, 0.0191459f, 0.0159279f,
+    0.00740966f, 0.00572744f, 0.00220999f, 0.00102686f, 0.000622491f, 0.00032418f, 0.000177753f, 0.000100688f};
+// vowel A, mean of the last 300 blocks. V2f: re-derived at the graded follower rates (bands.cpp set_envelope) in a one-off run with
+// kHalfBands = 0, so every band runs at the full rate; the tolerance (1 dB) is unchanged.
 
 void voice_levels(float* env) {
   Bands b;
@@ -864,5 +870,344 @@ TEST_CASE("bands: any frame count from 1 to 64 gives the output and followers of
     for (unsigned i = 0; i < Bands::kBands; ++i) {
       CHECK(env_odd[i] == env_ref[i]);
     }
+  }
+}
+
+// ---- V2f: graded follower rates, FORMANT, THRU ----
+
+namespace {
+
+// One resonance at 1 kHz (the other two formants silent): the follower row has one hump, so a shift moves one peak.
+const FormantVoice::Formant kVowelOne[] = {{1000.0f, 120.0f, 1.0f}, {1000.0f, 120.0f, 0.0f}, {1000.0f, 120.0f, 0.0f}};
+
+// Runs `mod` and the carrier through a Bands at `formant` semitones and THRU `thru`, in blocks of `blk` frames.
+std::vector<float> bands_run(const std::vector<float>& mod, const std::vector<float>& car, float formant, float thru = 0.0f, std::uint32_t blk = 64,
+                              unsigned lead_blocks = 0) {
+  Bands b;
+  b.prepare(kFs);
+  float lead[64] = {}, lead_out[64];
+  for (unsigned k = 0; k < lead_blocks; ++k) {  // silent blocks first: the AGC level settles under its gate
+    b.process(lead, lead, lead_out, 64);
+  }
+  b.set_formant(formant);
+  b.set_thru(thru);
+  std::vector<float> out(mod.size());
+  for (std::size_t at = 0; at < mod.size();) {
+    const std::uint32_t n = static_cast<std::uint32_t>(std::min<std::size_t>(blk, mod.size() - at));
+    b.process(mod.data() + at, car.data() + at, out.data() + at, n);
+    at += n;
+  }
+  return out;
+}
+
+// The frequency of the strongest of 48 log-spaced probes from 200 Hz to 7 kHz, each the mean of Goertzel energies over 32 segments of 1024 samples.
+float peak_hz(const std::vector<float>& v, std::size_t from) {
+  float best = 0.0f, best_hz = 0.0f;
+  for (int k = 0; k < 48; ++k) {
+    const float hz = 200.0f * std::pow(35.0f, static_cast<float>(k) / 47.0f);
+    float e = 0.0f;
+    for (int s = 0; s < 32; ++s) {
+      const std::size_t a = from + static_cast<std::size_t>(s) * 1024;
+      e += tone_energy(v, a, a + 1024, hz);
+    }
+    if (e > best) {
+      best = e;
+      best_hz = hz;
+    }
+  }
+  return best_hz;
+}
+
+}  // namespace
+
+TEST_CASE("bands: the follower times are a smooth gradient, slower at the bottom and faster at the top") {
+  Bands b;
+  b.prepare(kFs);
+  // default 25 ms release, 40 ms low release: neighbours differ by 2^(log2(40/25)/7.5) = 1.065; the bound is 1.10
+  for (unsigned i = 0; i + 1 < Bands::kBands; ++i) {
+    INFO("band " << i);
+    CHECK(b.release_ms(i) > b.release_ms(i + 1));
+    CHECK(b.attack_ms(i) > b.attack_ms(i + 1));
+    CHECK(b.release_ms(i) / b.release_ms(i + 1) < 1.10f);
+    CHECK(b.attack_ms(i) / b.attack_ms(i + 1) < 1.10f);
+  }
+  CHECK(b.release_ms(0) == doctest::Approx(40.0f).epsilon(0.02));
+  CHECK(b.release_ms(15) == doctest::Approx(15.6f).epsilon(0.03));
+  // the middle of the range keeps today's 25 ms and 2 ms: the two middle bands straddle them
+  CHECK(b.release_ms(7) > 25.0f);
+  CHECK(b.release_ms(8) < 25.0f);
+  CHECK(std::sqrt(b.release_ms(7) * b.release_ms(8)) == doctest::Approx(25.0f).epsilon(0.02));
+  CHECK(std::sqrt(b.attack_ms(7) * b.attack_ms(8)) == doctest::Approx(2.0f).epsilon(0.02));
+}
+
+TEST_CASE("bands: FORMANT 0 stays on the merged path; two passes only away from 0 and for one block after it") {
+  Bands b;
+  b.prepare(kFs);
+  CHECK_FALSE(b.shifted());
+  b.set_formant(0.0f);
+  CHECK_FALSE(b.shifted());
+  float mod[64] = {}, car[64] = {}, out[64];
+  b.set_formant(5.0f);
+  CHECK(b.shifted());
+  b.process(mod, car, out, 64);
+  b.set_formant(0.0f);
+  CHECK(b.shifted());  // the gains come back to the followers in one more two-pass block
+  b.process(mod, car, out, 64);
+  CHECK_FALSE(b.shifted());
+}
+
+TEST_CASE("bands: FORMANT 0 set explicitly is bit-exact with FORMANT never touched") {
+  const std::vector<float> mod = speech(kVowelA, 64 * 120);
+  const std::vector<float> car = noise_vec(mod.size(), 0.2f);
+  Bands b;
+  b.prepare(kFs);
+  std::vector<float> ref(mod.size());
+  for (std::size_t at = 0; at < mod.size(); at += 64) {
+    b.process(mod.data() + at, car.data() + at, ref.data() + at, 64);
+  }
+  const std::vector<float> z = bands_run(mod, car, 0.0f);
+  bool same = true;
+  for (std::size_t i = 0; i < mod.size(); ++i) {
+    same = same && z[i] == ref[i];
+  }
+  CHECK(same);
+}
+
+TEST_CASE("bands: FORMANT +12 and -12 move the spectral peak by about an octave") {
+  const std::size_t total = 64 * 400 + 32 * 1024;
+  const std::vector<float> mod = speech(kVowelOne, total);
+  const std::vector<float> car = noise_vec(total, 0.2f);
+  const float p0 = peak_hz(bands_run(mod, car, 0.0f), 64 * 400);
+  const float pu = peak_hz(bands_run(mod, car, 12.0f), 64 * 400);
+  const float pd = peak_hz(bands_run(mod, car, -12.0f), 64 * 400);
+  MESSAGE("peak at 0: " << p0 << " Hz, +12: " << pu << " Hz, -12: " << pd << " Hz");
+  CHECK(p0 > 800.0f);
+  CHECK(p0 < 1250.0f);
+  // an octave, tolerance a ratio of 1.7 to 2.4 (a band is 0.4 octave wide, the follower row is interpolated between bands)
+  CHECK(pu / p0 > 1.7f);
+  CHECK(pu / p0 < 2.4f);
+  CHECK(p0 / pd > 1.7f);
+  CHECK(p0 / pd < 2.4f);
+}
+
+TEST_CASE("bands: moving FORMANT between 0 and other values, and sweeping it, makes no jump") {
+  // A steady 1 kHz sine carrier: a gain step shows as a jump in the second difference, which a sine keeps small (amplitude * w^2).
+  const std::size_t total = 64 * 260;
+  const std::vector<float> mod = speech(kVowelA, total);
+  std::vector<float> car(total);
+  for (std::size_t i = 0; i < total; ++i) {
+    car[i] = 0.3f * std::sin(kPi2 * 1000.0f * static_cast<float>(i) / kFs);
+  }
+  const auto worst = [&](int mode) {
+    Bands b;
+    b.prepare(kFs);
+    std::vector<float> out(total);
+    for (std::size_t blk = 0; blk < total / 64; ++blk) {
+      if (mode == 1 && blk >= 100) {  // 0 <-> 7 semitones every 3 blocks
+        b.set_formant(((blk / 3) % 2) != 0 ? 7.0f : 0.0f);
+      }
+      if (mode == 2 && blk >= 100) {  // a sweep from -12 to +12, one semitone every 5 blocks, then back
+        const long k = static_cast<long>((blk - 100) / 5) % 48;
+        b.set_formant(static_cast<float>(k < 24 ? k - 12 : 36 - k));
+      }
+      b.process(mod.data() + blk * 64, car.data() + blk * 64, out.data() + blk * 64, 64);
+    }
+    float w = 0.0f;
+    for (std::size_t i = 102 * 64; i + 1 < total; ++i) {
+      w = std::fmax(w, std::fabs(out[i + 1] - 2.0f * out[i] + out[i - 1]));
+    }
+    return w;
+  };
+  const float steady = worst(0);
+  const float toggle = worst(1);
+  const float sweep = worst(2);
+  MESSAGE("worst second difference: steady " << steady << ", toggle " << toggle << ", sweep " << sweep);
+  CHECK(steady > 0.0f);
+  // the bound: 2x the steady case
+  CHECK(toggle < 2.0f * steady);
+  CHECK(sweep < 2.0f * steady);
+}
+
+TEST_CASE("bands: FORMANT away from 0 gives blocks of any size the output of blocks of 64 within -50 dB") {
+  // The gains ramp across each block from the last block's follower, so a block size moves the gain's timing by up to one block: a steady
+  // modulator under the AGC gate (as in the chunking test above) isolates the maths from that lag (a speech-like one reads about -32 dB; this one -55 to -57 dB: the follower ripple times the lag),
+  // and the first 250 blocks, where the followers still rise, are left out of the comparison.
+  const std::size_t total = 64 * 400;
+  std::vector<float> mod(total);
+  for (std::size_t i = 0; i < total; ++i) {
+    mod[i] = 0.001f * std::sin(0.3f * static_cast<float>(i)) + 0.0005f * std::sin(0.9f * static_cast<float>(i));
+  }
+  const std::vector<float> car = noise_vec(total, 0.2f);
+  const std::vector<float> ref = bands_run(mod, car, 6.0f, 0.0f, 64, 300);
+  float sig = 0.0f;
+  for (std::size_t i = 64 * 250; i < total; ++i) {
+    sig += ref[i] * ref[i];
+  }
+  CHECK(sig > 0.0f);
+  for (const std::uint32_t blk : {1u, 7u, 13u, 33u}) {
+    const std::vector<float> o = bands_run(mod, car, 6.0f, 0.0f, blk, 300);
+    float err = 0.0f;
+    for (std::size_t i = 64 * 250; i < total; ++i) {
+      err += (o[i] - ref[i]) * (o[i] - ref[i]);
+    }
+    const float db = 10.0f * std::log10(err / sig + 1.0e-30f);
+    MESSAGE("block " << blk << ": error " << db << " dB");
+    CHECK(db < -50.0f);
+  }
+}
+
+TEST_CASE("bands: THRU 0 is bit-exact, THRU 100 adds the modulator only while the high followers are open") {
+  const std::size_t total = 64 * 200;
+  const std::vector<float> zero(total, 0.0f);
+  const std::vector<float> noise = noise_vec(total, 0.3f);
+  const std::vector<float> vowel = speech(kVowelA, total);
+  const std::vector<float> car = noise_vec(total, 0.2f);
+  // THRU 0 (also set to 100 and back before the first block): identical to the code being absent, which is the default
+  Bands b;
+  b.prepare(kFs);
+  std::vector<float> ref(total);
+  for (std::size_t at = 0; at < total; at += 64) {
+    b.process(vowel.data() + at, car.data() + at, ref.data() + at, 64);
+  }
+  Bands c;
+  c.prepare(kFs);
+  c.set_thru(1.0f);
+  c.set_thru(0.0f);
+  std::vector<float> a(total);
+  for (std::size_t at = 0; at < total; at += 64) {
+    c.process(vowel.data() + at, car.data() + at, a.data() + at, 64);
+  }
+  bool same = true;
+  for (std::size_t i = 0; i < total; ++i) {
+    same = same && a[i] == ref[i];
+  }
+  CHECK(same);
+  // THRU only adds to the output (it touches no state), so the difference of two runs is exactly its contribution; above 6 kHz it is the
+  // modulator's, scaled by the followers of bands 13..15
+  const auto contribution = [&](const std::vector<float>& mod) {
+    const std::vector<float> o0 = bands_run(mod, car, 0.0f, 0.0f);
+    const std::vector<float> o1 = bands_run(mod, car, 0.0f, 1.0f);
+    std::vector<float> d(total);
+    for (std::size_t i = 0; i < total; ++i) {
+      d[i] = o1[i] - o0[i];
+    }
+    float e = 0.0f;
+    for (const float hz : {6500.0f, 7500.0f, 8500.0f, 9500.0f}) {
+      e += tone_energy(d, 64 * 100, total, hz);
+    }
+    MESSAGE("THRU contribution rms " << rms(d, 64 * 100, total) << " against the output rms " << rms(o0, 64 * 100, total));
+    return e;
+  };
+  const float noisy = contribution(noise);
+  const float voiced = contribution(vowel);
+  MESSAGE("above 6 kHz: THRU 100 on noise " << noisy << ", on a vowel " << voiced);
+  CHECK(noisy > 1.0e-12f);
+  CHECK(voiced < noisy * 1.0e-3f);  // 30 dB under: the followers of the top bands are closed on a vowel
+}
+
+TEST_CASE("vocoder: FORMANT and THRU are parameters 40 and 41, appended after NOTES-IN") {
+  CHECK(Vocoder::NotesIn == 39);
+  CHECK(Vocoder::Formant == 40);
+  CHECK(Vocoder::Thru == 41);
+  Vocoder v;
+  const dsp::UnitInfo& info = v.info();
+  REQUIRE(info.param_count > 41);
+  CHECK(std::string(info.params[40].name) == "FORMANT");
+  CHECK(info.params[40].min == -12.0f);
+  CHECK(info.params[40].max == 12.0f);
+  CHECK(info.params[40].def == 0.0f);
+  CHECK(std::string(info.params[41].name) == "THRU");
+  CHECK(info.params[41].min == 0.0f);
+  CHECK(info.params[41].max == 1.0f);
+  CHECK(info.params[41].def == 0.0f);
+}
+
+// The unit end to end at FORMANT -12/0/+12 and THRU 0/100 on a vowel with an "s" every half second. Always checked (finite, and the settings
+// change the sound); with O3_VOC03ER_WAV_DIR set, the five runs are written there as 16-bit mono WAVs for listening (the scenarios cannot set a
+// parameter that has no screen row yet, so this is the V2f listening render: formant_m12.wav, formant_0.wav, formant_p12.wav, thru_0.wav, thru_100.wav).
+namespace {
+
+void write_wav16(const std::string& path, const std::vector<float>& v) {
+  std::FILE* f = std::fopen(path.c_str(), "wb");
+  if (f == nullptr) {
+    return;
+  }
+  const std::uint32_t bytes = static_cast<std::uint32_t>(v.size() * 2);
+  const auto u32 = [&](std::uint32_t x) {
+    const unsigned char b[4] = {static_cast<unsigned char>(x), static_cast<unsigned char>(x >> 8), static_cast<unsigned char>(x >> 16), static_cast<unsigned char>(x >> 24)};
+    std::fwrite(b, 1, 4, f);
+  };
+  const auto u16 = [&](std::uint16_t x) {
+    const unsigned char b[2] = {static_cast<unsigned char>(x), static_cast<unsigned char>(x >> 8)};
+    std::fwrite(b, 1, 2, f);
+  };
+  std::fwrite("RIFF", 1, 4, f);
+  u32(36 + bytes);
+  std::fwrite("WAVEfmt ", 1, 8, f);
+  u32(16);
+  u16(1);
+  u16(1);
+  u32(44100);
+  u32(88200);
+  u16(2);
+  u16(16);
+  std::fwrite("data", 1, 4, f);
+  u32(bytes);
+  for (const float x : v) {
+    const float c = std::fmax(-1.0f, std::fmin(1.0f, x));
+    u16(static_cast<std::uint16_t>(static_cast<std::int16_t>(c * 32767.0f)));
+  }
+  std::fclose(f);
+}
+
+}  // namespace
+
+TEST_CASE("vocoder: FORMANT and THRU through the unit change the sound, and the five renders are written on request") {
+  const std::size_t total = 64 * 1380;  // 2 s
+  std::vector<float> mod = speech(kVowelA, total);
+  const std::vector<float> hiss = noise_vec(total, 0.35f);
+  for (std::size_t i = 0; i < total; ++i) {
+    // an "s" every half second, 120 ms long: noise through a one-pole high-pass-ish difference (bright)
+    if ((i % 22050) < 5292 && i > 0) {
+      mod[i] += hiss[i] - hiss[i - 1];
+    }
+  }
+  const auto render = [&](float formant, float thru) {
+    Rig rig;
+    return rig.run(mod, at_block0({dsp::param_change(Vocoder::Formant, formant), dsp::param_change(Vocoder::Thru, thru), dsp::note_on(48, 100),
+                                   dsp::note_on(55, 100), dsp::note_on(60, 100)}));
+  };
+  const std::vector<float> f_m12 = render(-12.0f, 0.0f);
+  const std::vector<float> f_0 = render(0.0f, 0.0f);
+  const std::vector<float> f_p12 = render(12.0f, 0.0f);
+  const std::vector<float> t_100 = render(0.0f, 1.0f);
+  for (const auto* v : {&f_m12, &f_0, &f_p12, &t_100}) {
+    bool finite = true;
+    for (const float x : *v) {
+      finite = finite && std::isfinite(x);
+    }
+    CHECK(finite);
+    CHECK(peak(*v) < 1.0f);
+  }
+  const auto diff_rms = [&](const std::vector<float>& a, const std::vector<float>& b) {
+    std::vector<float> d(a.size());
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      d[i] = a[i] - b[i];
+    }
+    return rms(d, 64 * 200, d.size());
+  };
+  MESSAGE("rms " << rms(f_0, 64 * 200, total) << "; difference to FORMANT 0: -12 " << diff_rms(f_m12, f_0) << ", +12 " << diff_rms(f_p12, f_0)
+                 << ", THRU 100 " << diff_rms(t_100, f_0));
+  CHECK(diff_rms(f_m12, f_0) > 0.1f * rms(f_0, 64 * 200, total));
+  CHECK(diff_rms(f_p12, f_0) > 0.1f * rms(f_0, 64 * 200, total));
+  CHECK(diff_rms(t_100, f_0) > 0.0f);
+  const char* dir = std::getenv("O3_VOC03ER_WAV_DIR");
+  if (dir != nullptr) {
+    const std::string d = dir;
+    write_wav16(d + "/formant_m12.wav", f_m12);
+    write_wav16(d + "/formant_0.wav", f_0);
+    write_wav16(d + "/formant_p12.wav", f_p12);
+    write_wav16(d + "/thru_0.wav", f_0);
+    write_wav16(d + "/thru_100.wav", t_100);
   }
 }

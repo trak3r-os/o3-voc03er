@@ -46,7 +46,13 @@
 //            38 Amount  0..1 (default 1): how much of the error is corrected (0 passes the voice, delayed 1 ms)
 //            39 NotesIn 0 OFF, 1 ON (default): the most recent held note is the target, in the octave nearest the voice; none held: the scale
 //            Unvoiced input passes unshifted. Range is the Normal detector range (70 to 919 Hz).
-// The bands' followers are fixed (2 ms attack, 25 ms release, 40 ms on the three lowest bands; Bands::set_envelope).
+//  40..41    BANDS (they act in BANDS only):
+//            40 Formant st, -12..+12 (default 0, integer steps): the spectral envelope moved against the carrier; +12 raises the formants an octave
+//                     (0.4 octave a band: st / 4.8 bands, linear between bands). 0 is the exact unshifted path; other values run two passes and
+//                     ramp each band's gain across the block.
+//            41 Thru  %, 0..100 (default 0): the high-passed modulator added to the output, scaled by the followers of bands 13..15 (sibilants
+//                     come through), next to the noise path; 0 is the output without it, bit for bit.
+// The bands' followers are fixed: 2 ms attack and 25 ms release in the middle of the range, graded geometrically (Bands::set_envelope).
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
 // block, 35 % of the 261,224 a block has at 44.1 kHz. TALK replaces Bands: Talk about 16,600 at order 16 (talk.h) + the same Carrier
@@ -72,7 +78,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            CarSrc, Key, Scale, Speed, Amount, NotesIn, kParamCount };
+                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
