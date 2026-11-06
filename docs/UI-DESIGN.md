@@ -183,8 +183,8 @@ Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cp
 slice), the bank of eight patterns is `O3SDK_BIG`, and the hook reads one word per step with a relaxed atomic, so an edit is heard whole at the
 step's next visit. A chord step stores its root as the note, so the old PLAY screen keeps working on pattern A. Settled where the spec was open:
 the gate is 75 % of a sixteenth, notes also end at Stop; carrier 0 (FOLLOW) emits nothing, and a Stop restores the carrier the user picked only
-if a step changed it (LIVE is never a lane value); LEVEL 0 means 100 and is sent as the NoteOn velocity, which the vocoder ignores today (it
-changes nothing audible yet); a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the
+if a step changed it (LIVE is never a lane value); LEVEL 0 means 100 and is sent as the NoteOn velocity: the last note sets the synth's level, 100 and up being full, so a level above 100 sounds as 100 and the
+lane only turns a step down; a soft note also lowers what is still held, because it is one gain and not one a voice. It acts on the SYNTH and NOISE carriers, not on a slot or LIVE; a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the
 previous step's notes; `pattern.o3a` v2 adds a BANK chunk after the v1 chunks (an older reader gets pattern A), a v1 file loads into A only,
 and a file that fails any check loads nothing. The console has `pat` (print, `len`, `note`, `chord`, `car`, `lvl`). SLICE is stored and ignored (U6c).
 
@@ -404,7 +404,7 @@ Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns 
 | 47 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
 | 48 | LiveCh | 0 L, 1 R: the channel a live carrier reads. The app writes R with USB (section 2): SPEAKS takes USB L, SOUNDS USB R. Built in U3c |
 | 49 .. 60 | Reader n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples at the reader's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT). Start counts from the start of the bank, not of a slot (both exact in a float up to 16.7 M; the bank is 2,822,400), so any reader plays any slot and CHOKE OFF can overlap slices of one slot. Speed, direction, level and role are the reader's own `Loop n` values: the app copies the source slot's before the Trig. A whole-loop play on that reader pauses under the slice and resumes at its position |
-| 61, 62 | LoadSlot, LoadLen | the length of a sample the app wrote into a slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it: LoadSlot first, then LoadLen. One pair and not four: `kMaxParamsPerUnit` is 64, so the unit stops at id 63 and one id is left |
+| 61 | Load | the length of a sample the app wrote into a slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it: one value, slot x 705,600 + length, exact in a float. One id and not four: `kMaxParamsPerUnit` is 64, and U10's SUB and TILT need 62 and 63 (`Wave` and `Detune` become SHAPE and SPREAD). That fills the table |
 | CarSrc | value 7 LIVE | `in_l` on the carrier bus: the line, the radio or USB R sounds. A routing inside the unit, instant and click-free with the same 5 ms ramp; the ADC source itself is the app's one `AudioIn::select` |
 
 The slots' roles (`Loop n Role`) stay the unit's mechanism; the app sets them from the two pickers. `Loop` grows `start_region(i, a, b)` and a

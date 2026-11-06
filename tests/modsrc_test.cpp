@@ -163,6 +163,18 @@ TEST_CASE("LiveCh: USB speaks on the left and sounds on the right") {
   CHECK(level(1.0f, x) > 1.0e-3f);     // R and a tone on the right: the voice speaks through it
 }
 
+TEST_CASE("velocity: a soft note turns the synth down, 100 and up is the full level") {
+  const auto x = tone(4096, 300.0f, 0.4f);
+  const auto level = [&](std::uint8_t vel) {
+    Rig r;
+    return rms(run(r, x, 80, {dsp::param_change(Vocoder::CarSrc, 1.0f), dsp::note_on(60, vel)}));
+  };
+  const float full = level(100);
+  CHECK(full > 1.0e-3f);
+  CHECK(level(127) == full);  // pads play at 110: not a bit louder or softer than before
+  CHECK(level(50) == doctest::Approx(full * 0.5f).epsilon(0.1));
+}
+
 TEST_CASE("CarSrc LIVE: GATE cuts it like any carrier") {
   const auto x = tone(4096, 300.0f, 0.4f);
   Rig g;

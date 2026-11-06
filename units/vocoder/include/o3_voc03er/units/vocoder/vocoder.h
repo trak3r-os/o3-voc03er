@@ -207,6 +207,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   unsigned msel_ = 0;                // ModSrc: 0 LIVE, 1 NONE, 3..6 the slot that speaks (any other value acts as NONE)
   o3sdk::dsp::Ramp live_car_;        // the live input on the carrier bus (CarSrc 7), 5 ms
   bool live_r_ = false;              // LiveCh: that input is in_r
+  float vel_gain_ = 1.0f;            // the last NoteOn's velocity as the synth's level, 1 from 100 up
   float noise_user_ = 0.0f;
   o3sdk::dsp::Ramp synth_gain_{1.0f};
   o3sdk::dsp::Ramp noise_amt_;

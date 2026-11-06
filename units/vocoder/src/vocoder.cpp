@@ -324,7 +324,14 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
 void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
   using o3sdk::dsp::EventKind;
   switch (e.kind) {
-    case EventKind::NoteOn:
+    case EventKind::NoteOn: {
+      // The last note sets the synth's level (one gain: a chord step shares its velocity). 100 and up is the full level, so pads and
+      // old patterns are unchanged, and it costs nothing a sample: the gain is the synth_gain_ ramp that is there anyway.
+      const float vg = e.velocity >= 100u ? 1.0f : static_cast<float>(e.velocity) * 0.01f;
+      if (vg != vel_gain_) {
+        vel_gain_ = vg;
+        synth_gain_.target(sel_ >= 3u ? 0.0f : vel_gain_);
+      }
       held_insert(e.note);
       if (arp_ == 0u) {
         carrier_.note_on(e.note);
@@ -333,6 +340,7 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       }
       tune_.note_on(e.note);
       break;
+    }
     case EventKind::NoteOff:
       held_remove(e.note);
       if (arp_ == 0u) {
@@ -451,7 +459,7 @@ void Vocoder::region_param_event(std::uint16_t id, float v, std::uint32_t frame)
 // rendered), the loops' at the same frame through pend_.
 void Vocoder::select_carrier(float v, std::uint32_t frame) noexcept {
   sel_ = static_cast<unsigned>(v + 0.5f);
-  synth_gain_.target(sel_ >= 3u ? 0.0f : 1.0f);
+  synth_gain_.target(sel_ >= 3u ? 0.0f : vel_gain_);
   live_car_.target(sel_ == 7u ? 1.0f : 0.0f);
   noise_amt_.target(noise_target());
   retarget(frame);
