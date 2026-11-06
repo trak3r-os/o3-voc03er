@@ -460,7 +460,8 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     pads.row_name[2] = pl::kRowNames[2];
     pads.row_name[3] = pl::kKindNames[bottom_ & 3u];
   }
-  pads.hint_left = keys_ ? "KEYS  LEFT RIGHT OCTAVE" : "SHIFT LATCH  DELETE RELEASE  UP DOWN BOTTOM ROW  LEFT RIGHT OCTAVE";
+  pads.key_hint = pl::key_hint(focus_, mode);
+  pads.hint_left = keys_ ? "KEYS  LEFT RIGHT OCTAVE" : "SHIFT LATCH  DELETE RELEASE  UP DOWN ROW  LEFT RIGHT OCTAVE";
 
   ui::plot::Canvas c(r);
   c.open();

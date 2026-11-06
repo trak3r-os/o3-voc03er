@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // PERFORM's pure logic (app/src/perform_logic.h) and OR NOIR's arithmetic and bitmaps (app/src/skin/).
+#include <string>
 #include <doctest/doctest.h>
 
 #include "../app/src/perform_logic.h"
@@ -79,4 +80,18 @@ TEST_CASE("or noir: the bitmaps hold the pinhole and the glyphs") {
   CHECK(a > 0u);
   CHECK(ornoir::glyph_cell('A') == 1u);
   CHECK(ornoir::glyph_cell('?') == 0u);
+}
+
+TEST_CASE("perform: the hint line says what every F key does and fits beside the pads' gestures") {
+  for (unsigned mode = 0; mode < 3; ++mode) {
+    for (unsigned focus = 0; focus < 8; ++focus) {
+      const std::string hint = pl::key_hint(focus, mode);
+      CHECK(hint.size() > 3u);
+      CHECK(hint.size() <= pl::kKeyHintMax);
+      CHECK(hint[0] == 'F');
+      CHECK(hint[1] == static_cast<char>('1' + focus));
+    }
+  }
+  CHECK(std::string(pl::key_hint(7, 1)).find("QUALITY") != std::string::npos);
+  CHECK(std::string(pl::key_hint(7, 2)).find("SPEED") != std::string::npos);
 }

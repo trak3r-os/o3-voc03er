@@ -110,7 +110,7 @@ struct PadsView {
   const char* row_name[4] = {"", "", "", ""};
   bool column_in_scale_known = true;
   const char* hint_left = "";
-  const char* hint_right = "";
+  const char* key_hint = "";  // right of the same line: what the F key under the encoder does
 };
 
 // The whole frame's shapes and text of the PERFORM screen, in the order the draw needs them. The screen calls these two once.

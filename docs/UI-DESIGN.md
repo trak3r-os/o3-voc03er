@@ -195,6 +195,8 @@ from the cursor while this screen is up. Before U9 the one-line screen of sectio
 
 **OR NOIR, the only skin, chosen by the maintainer on 2026-11-06 ("me gusta el OR NOIR", "solo ese, por defecto").** Its idea, frames, tokens and costs are the OR NOIR section of `docs/ui-skins.html`, which replaces 5.1, the token table of 5.2 and the look of 5.3 below: gold speaks, chrome sounds, on a black wall of round LEDs, the voiceprint as sixteen upright columns of dots. There is no skin byte and no seam: the screens draw OR NOIR directly. What still stands below: the rule of the two inks, what each mode's voiceprint shows and where its values come from, the grid and type of 5.4, the budget of 5.5, the memory of 5.6. Text uses `>`, since the faces hold U+0020 to U+007E only. F6 on PERFORM is CHORD (section 4), whatever the pictures show.
 
+**The F row, by the maintainer on 2026-11-06.** The metal is gold, not steel: pale gold, gold and brass (`Fx` is brass). Each key's name sits on a gold bar under its value window, y 453 to 478, right above the physical key, so the name is below y 452 and the kit's strip hides it for about 3 seconds at a time, while the value stays. That frees 15 px above: the chord grid's cells are 27 px high, with their names in the Label face, and one line under the grid, y 403, holds the pads' gestures on the left and, on the right, what the F key under the encoder does. This replaces the F row of 5.4 and the picture in `docs/ui-skins.html`.
+
 ### 5.1 Point of view
 
 A **voiceprint reader**: a dark slate instrument whose only bright things are the signals. One rule gives it its character and its legibility:

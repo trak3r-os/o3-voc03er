@@ -107,4 +107,16 @@ inline std::uint8_t level_byte(float linear) noexcept {
   return static_cast<std::uint8_t>(b < 0.0f ? 0.0f : (b > 255.0f ? 255.0f : b));
 }
 
+// The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE) picks F8's word.
+inline constexpr unsigned kKeyHintMax = 40;  // characters of the Micro face that fit beside the pads' hint
+inline const char* key_hint(unsigned focus, unsigned mode) noexcept {
+  static constexpr const char* kHints[7] = {
+      "F1 MODE: BANDS, TALK OR TUNE",           "F2 SPEAKS: THE AUDIO SOURCE THAT TALKS", "F3 SOUNDS: THE CARRIER THE VOICE SHAPES",
+      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: THE KIND ON THE BOTTOM ROW",
+      "F7 PADS: CHORDS OR A KEYBOARD",
+  };
+  static constexpr const char* kF8[3] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
+  return focus < 7u ? kHints[focus] : kF8[mode < 3u ? mode : 0u];
+}
+
 }  // namespace o3_voc03er::perform

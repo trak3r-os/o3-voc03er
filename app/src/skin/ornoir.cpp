@@ -32,7 +32,7 @@ constexpr ui::Theme kTheme = {
         {74, 58, 28},     // Empty: the unlit pinhole
         {234, 142, 86},   // Instr
         {255, 232, 164},  // Vol
-        {148, 164, 182},  // Fx
+        {160, 118, 44},  // Fx: brass, the F row's lower band
         {196, 218, 238},  // Sel: what sounds
         {0, 0, 0},        // SelText
         {255, 255, 255},  // Accent: the latched slot, a toast
@@ -53,7 +53,7 @@ int len(const char* s) noexcept { return static_cast<int>(std::strlen(s)); }
 
 // Layout (px).
 constexpr int kVx = 256, kVy = 72, kHorizon = 204, kPitch = 6, kColStride = 18, kColW = 12, kRowsUp = 22;
-constexpr int kPadX = 64, kPadY = 292, kPadW = 60, kPadH = 24;
+constexpr int kPadX = 64, kPadY = 292, kPadW = 60, kPadH = 27;
 constexpr std::uint8_t kDim = 120;  // the unlit pinhole's alpha
 constexpr unsigned kAtlasAdvance = 32;
 
@@ -196,22 +196,26 @@ void header_text(ui::Renderer& r, const HeaderState& h) noexcept {
 
 // ---- F row ----------------------------------------------------------------------------------------------------------------------------
 
+constexpr Rgb kGoldBand{228, 186, 92};  // the F row's metal, between Vol's pale gold and Fx's brass
+
 void frow_shapes(plot::Canvas& c, const FKey (&keys)[kFKeys]) noexcept {
-  fill(c, 0, 404, 800, 1, Color::Accent);
-  fill(c, 0, 405, 800, 6, Color::Vol);
-  fill(c, 0, 411, 800, 11, Color::Sel);
-  fill(c, 0, 422, 800, 28, Color::Fx);
-  fill(c, 0, 450, 800, 2, Color::PlayText);
-  fill(c, 0, 452, 800, 3, Color::Play);
-  fill(c, 0, 455, 800, 2, Color::Instr);
-  fill(c, 0, 457, 800, 23, Color::Chrome);
+  // The value windows sit in the brass; each key's name is on the gold bar under them, right above the key itself.
+  fill(c, 0, 419, 800, 1, Color::Accent);
+  fill(c, 0, 420, 800, 2, Color::Vol);
+  c.rect(Rect{0, 422, 800, 2}, kGoldBand);
+  fill(c, 0, 424, 800, 26, Color::Fx);
+  fill(c, 0, 450, 800, 1, Color::PlayText);
+  fill(c, 0, 451, 800, 2, Color::Vol);
+  c.rect(Rect{0, 453, 800, 25}, kGoldBand);
+  fill(c, 0, 478, 800, 2, Color::Instr);
   for (unsigned i = 0; i < kFKeys; ++i) {
     const int x = static_cast<int>(i) * 100;
     const FKey& k = keys[i];
     if (i > 0) {
-      fill(c, x, 405, 1, 45, Color::PlayText);
+      fill(c, x, 420, 1, 30, Color::PlayText);
+      fill(c, x, 451, 1, 27, Color::PlayText);
     }
-    fill(c, x + 5, 408, 18, 12, Color::PlayText);
+    fill(c, x + 5, 460, 18, 12, Color::PlayText);
     fill(c, x + 5, 424, 90, 24, k.hot ? Color::Accent : Color::Pane);
     if (k.pct >= 0) {
       fill(c, x + 10, 445, 80, 1, k.hot ? Color::Fx : Color::Empty);
@@ -228,8 +232,8 @@ void frow_text(ui::Renderer& r, const FKey (&keys)[kFKeys]) noexcept {
     const int x = static_cast<int>(i) * 100;
     const FKey& k = keys[i];
     const char fn[3] = {'F', static_cast<char>('1' + i), '\0'};
-    r.text(x + 8, 408, fn, Color::Sel, Face::Micro);
-    r.text(x + 27, 406, k.name, Color::PlayText, Face::Label);
+    r.text(x + 8, 460, fn, Color::Vol, Face::Micro);
+    r.text(x + 27, 458, k.name, Color::PlayText, Face::Label);
     const Color ink = k.hot ? Color::AccentText : k.role == KeyRole::Voice ? Color::Play : k.role == KeyRole::Carrier ? Color::Sel : Color::Text;
     r.text(x + 10, 425, k.value, ink, Face::Data);
   }
@@ -476,7 +480,7 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
   // Pads.
   for (unsigned row = 0; row < 4; ++row) {
     const char* nm = pads.row_name[row];
-    r.text(60 - len(nm) * 6, kPadY + static_cast<int>(row) * kPadH + 6, nm, Color::TextDim, Face::Micro);
+    r.text(60 - len(nm) * 6, kPadY + static_cast<int>(row) * kPadH + 8, nm, Color::TextDim, Face::Micro);
   }
   if (pads.label != nullptr) {
     for (unsigned p = 0; p < 48; ++p) {
@@ -484,11 +488,15 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
       const bool hot = ((pads.held >> p) & 1u) != 0 || static_cast<int>(p) == pads.latched;
       const Color ink = hot ? Color::SelText : ((pads.scale_cols >> cl) & 1u) != 0 ? Color::Text : Color::TextDim;
       const char* s = pads.label[p];
-      r.text(kPadX + static_cast<int>(cl) * kPadW + (kPadW - len(s) * 6) / 2 + 1, kPadY + static_cast<int>(row) * kPadH + 6, s, ink, Face::Micro);
+      r.text(kPadX + static_cast<int>(cl) * kPadW + (kPadW - len(s) * 8) / 2 + 1, kPadY + static_cast<int>(row) * kPadH + 6, s, ink, Face::Label);
     }
   }
-  r.text(16, 391, pads.hint_left, Color::TextDim, Face::Micro);
-  r.text(310, 391, pads.hint_right, Color::TextDim, Face::Micro);
+  // One line under the grid: the pads' gestures at the left, what the F key under the encoder does at the right.
+  static constexpr const char kTurn[] = "  TURN TO CHANGE";
+  const int turn_x = 784 - len(kTurn) * 6;
+  r.text(16, 403, pads.hint_left, Color::TextDim, Face::Micro);
+  r.text(turn_x - len(pads.key_hint) * 6, 403, pads.key_hint, Color::Text, Face::Micro);
+  r.text(turn_x, 403, kTurn, Color::TextDim, Face::Micro);
 
   frow_text(r, keys);
 }
