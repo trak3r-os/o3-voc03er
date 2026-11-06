@@ -421,7 +421,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
       {Button::Master, "MASTER (SLICE U9)", nullptr},
       {Button::File, "FILE (SLICE U9)", nullptr},
       {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
-      {Button::SamplePlay, "SAMPLE PLAY (SLICE U8)", nullptr},
+      {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
       {Button::SampleRec, "THIS SCREEN", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},

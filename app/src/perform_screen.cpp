@@ -667,6 +667,11 @@ void PerformScreen::pad_event(app::Context& ctx, const app::Input& in) noexcept 
   }
 }
 
+void PerformScreen::step_octave(app::Context& ctx, int delta) noexcept {
+  octave_ = clamp_octave(octave_ + delta);
+  ctx.redraw();
+}
+
 route::Route PerformScreen::route_now(const app::Context& ctx) const noexcept { return route_of(ctx.engine(), voice_); }
 
 // The cursor's row is taken. A dimmed LIVE source arms a capture (REC does it, the source follows); another dimmed row says why it cannot.
@@ -1346,7 +1351,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Master, "MASTER (SLICE U9)", nullptr},
       {Button::File, "FILE (SLICE U9)", nullptr},
       {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
-      {Button::SamplePlay, "SAMPLE (SLICE U4)", nullptr},
+      {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
       {Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},

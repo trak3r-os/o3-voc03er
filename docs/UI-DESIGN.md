@@ -142,6 +142,7 @@ so what was sung is heard at once.
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
 Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
+Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SIDE moves the slot (it leaves the other side first); it refuses only an empty slot or a route `allowed` rejects, and says why. F1 shares PERFORM's chord kind; LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. Only pads of the lower two rows reach the chord; F6 and F7 stay blank until U5.
 A refused AFTER leaves the slot on no side and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
 again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
 

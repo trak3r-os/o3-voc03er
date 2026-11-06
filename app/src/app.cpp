@@ -31,6 +31,7 @@
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
 #include "sample_rec_screen.h"
+#include "sample_screen.h"
 #include "stub_screen.h"
 #include <o3_voc03er/carrier_seq.h>
 
@@ -147,6 +148,7 @@ class MyApp final : public app::App {
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
+    sample_.init(voice, &voc_, &perform_);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     (void)ctx.midi().route(voice, 0);
     carriers_.init(voice);
@@ -234,13 +236,20 @@ class MyApp final : public app::App {
         ctx.redraw();
         return true;
       }
+      if (in.press(app::Button::SamplePlay)) {
+        if (ctx.screen() != &sample_) {
+          ctx.show(sample_);
+        }
+        ctx.redraw();
+        return true;
+      }
       struct Open {
         app::Button button;
         const o3_voc03er::StubInfo* info;
       };
       static constexpr Open kOpen[] = {
           {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
-          {app::Button::SampleLoad, &kStubs[3]}, {app::Button::SamplePlay, &kStubs[4]}, {app::Button::SampleEdit, &kStubs[5]},
+          {app::Button::SampleLoad, &kStubs[3]}, {app::Button::SampleEdit, &kStubs[5]},
           {app::Button::Pattern, &kStubs[7]},    {app::Button::Note, &kStubs[8]},
           {app::Button::Instr, &kStubs[9]},     {app::Button::Vol, &kStubs[10]},       {app::Button::Fx, &kStubs[11]},
       };
@@ -536,6 +545,7 @@ class MyApp final : public app::App {
   o3_voc03er::PlayScreen play_;
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
+  o3_voc03er::SampleScreen sample_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::CarrierSeq carriers_;
 

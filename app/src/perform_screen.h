@@ -78,6 +78,11 @@ class PerformScreen final : public o3sdk::app::Screen {
   route::Route route_now(const o3sdk::app::Context& ctx) const noexcept;
   void apply_route(o3sdk::app::Context& ctx, route::Side side, route::Route from, route::Route to) noexcept { set_route(ctx, side, from, to); }
 
+  // SAMPLE's F1 CHORD and LEFT / RIGHT are PERFORM's own: the bottom row's ChordKind (0..3) and the octave.
+  unsigned chord_kind() const noexcept { return bottom_ & 3u; }
+  void step_chord(o3sdk::app::Context& ctx, int delta) noexcept { bottom_kind(ctx, delta); }
+  void step_octave(o3sdk::app::Context& ctx, int delta) noexcept;
+
   int octave() const noexcept { return octave_; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }
