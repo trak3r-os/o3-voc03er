@@ -58,6 +58,15 @@
 //                     0 is the exact unbent path.
 //            43 Vib     0..1 (default 0): vibrato on the SYNTH carrier, a ~5.5 Hz sine LFO stepped once a block (one sin a block while on),
 //                     peak +-0.5 st at 1, added to Bend before the increments. 0 is the exact path of Bend alone and resets the phase.
+//  44..46    RHYTHM (the carrier's time and pitch; all three at 0 are bit for bit the sound without them):
+//            44 Glide   ms, 0..500 (default 0): each carrier voice's oscillator increment slews exponentially toward its note (a time constant of
+//                     ms / 4: the pitch is within 2 % of the step after Glide ms), once a run; a new voice starts from the newest sounding one's pitch. 0 jumps.
+//            45 Gate    0 OFF, 1 1/4, 2 1/8, 3 1/16, 4 1/32: the carrier is cut on a 50 % duty clock (on the first half of a step), edges of 2 ms,
+//                     one multiply a sample for the carrier and its held-notes gate while on. CAR loops are not gated.
+//            46 Arp     0 OFF, 1 UP, 2 DOWN, 3 UP-DOWN, 4 RANDOM: the held notes (up to Carrier::kVoices, kept in pitch order here, whatever the
+//                     source: pads, MIDI, console) are sounded one at a time on the step clock, GATE's rate or 1/16 with GATE off. With none held the
+//                     voice releases. Off with notes held sounds them all again. The clock comes from the transport's tempo, runs with the transport
+//                     stopped (its own grid), restarts at the bar when the transport starts, and splits a run at each half step.
 // The bands' followers are fixed: 2 ms attack and 25 ms release in the middle of the range, graded geometrically (Bands::set_envelope).
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
@@ -84,7 +93,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, kParamCount };
+                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
@@ -139,6 +148,14 @@ class Vocoder final : public o3sdk::dsp::Unit {
   float noise_target() const noexcept { return sel_ == 2u ? 1.0f : (sel_ == 1u ? 0.0f : noise_user_); }
   float car_target(unsigned loop) const noexcept { return (sel_ == 0u ? slot_[loop].carrier : sel_ == 3u + loop) ? 1.0f : 0.0f; }
   void step_bend(std::uint32_t n) noexcept;
+  void step_glide(std::uint32_t n) noexcept;
+  void held_insert(std::uint8_t note) noexcept;
+  void held_remove(std::uint8_t note) noexcept;
+  void set_arp(unsigned mode) noexcept;
+  void arp_step() noexcept;
+  void clock_start_now() noexcept;
+  void clock_edge() noexcept;
+  void apply_gate(float* car, float* gate, std::uint32_t from, std::uint32_t k) noexcept;
   void render_carrier(float* out, float* gate, std::uint32_t n) noexcept;
   void mix_car(unsigned loop, std::uint32_t from, std::uint32_t n, float* car, float* tmp) noexcept;
 
@@ -177,6 +194,26 @@ class Vocoder final : public o3sdk::dsp::Unit {
   float vib_phase_ = 0.0f;  // cycles, 0..1; reset while the depth is 0
   float vib_inc_ = 0.0f;    // cycles a sample
   bool vib_was_ = false;    // the last step_bend had a vibrato, so the next one returns the ratio to the bend alone
+  // GLIDE, GATE, ARP: the render context only. One step clock for GATE and ARP: clock_cnt_ samples to the next half-step edge (fractional carry),
+  // second_half_ the off half of the step; the step edge is the end of the second half. held_ is the sorted list of held notes.
+  float fs_ = 44100.0f;
+  float glide_ms_ = 0.0f;
+  float glide_coef_ = 0.0f;   // for glide_n_ samples
+  std::uint32_t glide_n_ = 0;
+  float clock_cnt_ = 0.0f;
+  float half_len_ = 1000.0f;  // samples in half a step
+  float gate_g_ = 1.0f;       // the gate's gain, slewed 2 ms
+  float gate_step_ = 0.01f;
+  std::uint32_t rng_ = 0x1F123BB5u;
+  std::uint8_t gate_ = 0;
+  std::uint8_t arp_ = 0;
+  std::uint8_t nheld_ = 0;
+  std::uint8_t arp_pos_ = 0xFFu;   // index in held_ of the note sounding, 0xFF none yet
+  std::uint8_t arp_note_ = 0xFFu;  // the note the arp has on in the carrier, 0xFF none
+  bool arp_down_ = false;
+  bool second_half_ = true;
+  bool clock_on_ = false;
+  std::uint8_t held_[Carrier::kVoices] = {};
   o3sdk::dsp::Ramp loop_car_[Loop::kCount];
   struct Retarget {
     std::uint16_t frame = 0;

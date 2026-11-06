@@ -197,10 +197,42 @@ void Carrier::note_on(std::uint8_t note) noexcept {
     pick->env = 0.0f;
   }
   pick->note = note;
+  const Voice* last = nullptr;  // the newest sounding voice: where a glide starts
+  for (const Voice& v : voices_) {
+    if (&v != pick && v.stage != Stage::Idle && (last == nullptr || v.age > last->age)) {
+      last = &v;
+    }
+  }
+  const float from = last != nullptr && pick->stage == Stage::Idle ? last->cur : pick->cur;
   pick->inc = 440.0f * std::exp2((static_cast<float>(note) - 69.0f) / 12.0f) / fs_;
   pick->inc = pick->inc > 0.45f ? 0.45f : pick->inc;
+  pick->cur = glide_ > 0.0f && from > 0.0f ? from : pick->inc;
   pick->age = ++counter_;
   pick->stage = Stage::Attack;  // from where the envelope stands: a steal does not click
+}
+
+void Carrier::set_glide(float coef) noexcept {
+  const bool was = glide_ > 0.0f;
+  glide_ = coef < 0.0f ? 0.0f : (coef > 1.0f ? 1.0f : coef);
+  if (was && glide_ == 0.0f) {
+    for (Voice& v : voices_) {
+      v.cur = v.inc;
+    }
+  }
+}
+
+void Carrier::step_glide() noexcept {
+  if (glide_ <= 0.0f) {
+    return;
+  }
+  for (Voice& v : voices_) {
+    if (v.stage == Stage::Idle) {
+      v.cur = v.inc;
+      continue;
+    }
+    const float d = v.inc - v.cur;
+    v.cur = (d < 1.0e-6f * v.inc && d > -1.0e-6f * v.inc) ? v.inc : v.cur + d * glide_;
+  }
 }
 
 void Carrier::note_off(std::uint8_t note) noexcept {
@@ -254,7 +286,8 @@ void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
     if (v.stage == Stage::Idle) {
       continue;
     }
-    const float dt1 = v.inc * bend_ratio_ > 0.45f ? 0.45f : v.inc * bend_ratio_;  // x 1.0f is exact: Bend 0 is the unbent path
+    const float base = glide_ > 0.0f ? v.cur : v.inc;
+    const float dt1 = base * bend_ratio_ > 0.45f ? 0.45f : base * bend_ratio_;  // x 1.0f is exact: Bend 0 is the unbent path
     float dt2 = dt1 * detune_ratio_;
     dt2 = dt2 > 0.45f ? 0.45f : dt2;
     VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(dt1), make_edge(dt2), attack_step_, release_coef_};

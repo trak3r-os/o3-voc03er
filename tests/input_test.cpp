@@ -128,6 +128,18 @@ TEST_CASE("voc formant and voc thru: the console's two BANDS values") {
   CHECK_FALSE(parse_voc_shape("thru", "-1", s));
   CHECK_FALSE(parse_voc_shape("thru", "101", s));
   CHECK_FALSE(parse_voc_shape("thru", "1x", s));
+  CHECK(parse_voc_shape("glide", "500", s));
+  CHECK((s.glide && !s.thru && s.value == 500));
+  CHECK(parse_voc_shape("glide", "0", s));
+  CHECK_FALSE(parse_voc_shape("glide", "501", s));
+  CHECK_FALSE(parse_voc_shape("glide", "-1", s));
+  CHECK(parse_voc_shape("gate", "4", s));
+  CHECK((s.gate && s.value == 4));
+  CHECK_FALSE(parse_voc_shape("gate", "5", s));
+  CHECK(parse_voc_shape("arp", "3", s));
+  CHECK((s.arp && s.value == 3));
+  CHECK_FALSE(parse_voc_shape("arp", "5", s));
+  CHECK_FALSE(parse_voc_shape("arp", "", s));
   CHECK_FALSE(parse_voc_shape("bands", "3", s));
   CHECK_FALSE(parse_voc_shape("thru", nullptr, s));
 }

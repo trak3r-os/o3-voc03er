@@ -108,9 +108,12 @@ struct VocCommand {
   unsigned notes = 0;
 };
 // false (out untouched) for a word that is not a mode, a count that is not 0..8 or an extra word. No count means 0 (release all).
-// `voc formant <-12..12>` and `voc thru <0..100>`: which of the two and its value.
+// `voc formant <-12..12>`, `voc thru <0..100>`, `voc glide <0..500 ms>`, `voc gate <0..4>` and `voc arp <0..4>`: which one and its value.
 struct VocShape {
   bool thru = false;
+  bool glide = false;
+  bool gate = false;
+  bool arp = false;
   bool range = false;  // `bendrange`: value is 2, 5 or 12
   int value = 0;
 };
@@ -128,19 +131,33 @@ inline bool parse_voc_shape(const char* what, const char* value, VocShape& out) 
     out = v;
     return true;
   }
+  int max = 12;
+  bool signed_ok = false;
   if (std::strcmp(what, "thru") == 0) {
     v.thru = true;
-  } else if (std::strcmp(what, "formant") != 0) {
+    max = 100;
+  } else if (std::strcmp(what, "glide") == 0) {
+    v.glide = true;
+    max = 500;
+  } else if (std::strcmp(what, "gate") == 0) {
+    v.gate = true;
+    max = 4;
+  } else if (std::strcmp(what, "arp") == 0) {
+    v.arp = true;
+    max = 4;
+  } else if (std::strcmp(what, "formant") == 0) {
+    signed_ok = true;
+  } else {
     return false;
   }
-  const bool negative = value[0] == '-' && !v.thru;
+  const bool negative = value[0] == '-' && signed_ok;
   std::size_t i = negative ? 1u : 0u;
   const std::size_t first = i;
   int n = 0;
   for (; value[i] >= '0' && value[i] <= '9' && i < first + 3u; ++i) {
     n = n * 10 + (value[i] - '0');
   }
-  if (i == first || value[i] != '\0' || n > (v.thru ? 100 : 12)) {
+  if (i == first || value[i] != '\0' || n > max) {
     return false;
   }
   v.value = negative ? -n : n;

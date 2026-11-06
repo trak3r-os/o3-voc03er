@@ -18,6 +18,8 @@ constexpr const char* kFreezeNames[] = {"OFF", "ON"};
 constexpr const char* kKeyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 constexpr const char* kScaleNames[] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
 constexpr const char* kNotesInNames[] = {"OFF", "ON"};
+constexpr const char* kGateNames[] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
+constexpr const char* kArpNames[] = {"OFF", "UP", "DOWN", "UP-DOWN", "RANDOM"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
 constexpr const char* kRecNames[] = {"OFF", "ARM"};
@@ -67,6 +69,9 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"THRU", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"BEND", "st", nullptr, nullptr, -12.0f, 12.0f, 0.0f, 24, 4, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"VIB", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
+    {"GLIDE", "ms", nullptr, nullptr, 0.0f, 500.0f, 0.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"GATE", "", kGateNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"ARP", "", kArpNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -75,6 +80,8 @@ constexpr float kRampMs = 5.0f;
 constexpr float kVibHz = 5.5f;     // the vibrato's rate
 constexpr float kVibPeakSt = 0.5f;  // its peak at depth 1
 constexpr float kBendMs = 20.0f;  // the glide of a stepped Bend
+constexpr float kGateEdgeMs = 2.0f;   // the soft edges of GATE
+constexpr float kHalfBeats[4] = {0.5f, 0.25f, 0.125f, 0.0625f};  // half a step in beats for 1/4, 1/8, 1/16, 1/32
 constexpr float kModeFadeMs = 10.0f;  // crossfade between the modes
 constexpr float kTuneGain = 1.0f;     // Tune returns the voice itself: unity
 constexpr float kTalkGain = 1.0f;     // Talk's output is a carrier-level signal shaped by the modulator's rms; not tuned (needs the unit's ears)
@@ -117,6 +124,14 @@ int locate(const o3sdk::dsp::Transport& t, std::uint32_t n, std::uint32_t min) n
 const o3sdk::dsp::UnitInfo& Vocoder::info() const noexcept { return kInfo; }
 
 void Vocoder::prepare(float sample_rate) noexcept {
+  fs_ = sample_rate;
+  gate_step_ = 1.0f / (kGateEdgeMs * 0.001f * sample_rate);
+  gate_g_ = 1.0f;
+  clock_on_ = false;
+  nheld_ = 0;
+  arp_note_ = 0xFFu;
+  arp_pos_ = 0xFFu;
+  glide_n_ = 0;
   carrier_.set_noise_source(&noise_);  // one generator for the carrier's noise and the unvoiced path
   bands_.set_noise_source(&noise_);
   carrier_.prepare(sample_rate);
@@ -241,6 +256,22 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     case Vib:
       vib_.target(v);
       break;
+    case Glide:
+      glide_ms_ = v;
+      glide_n_ = 0;
+      break;
+    case Gate: {
+      const bool was_on = clock_on_;
+      gate_ = static_cast<std::uint8_t>(v + 0.5f);
+      clock_on_ = gate_ != 0u || arp_ != 0u;
+      if (clock_on_ && !was_on) {
+        clock_start_now();
+      }
+      break;
+    }
+    case Arp:
+      set_arp(static_cast<unsigned>(v + 0.5f));
+      break;
     case Quality:
       talk_.set_order(static_cast<std::uint32_t>(v + 0.5f));
       break;
@@ -259,11 +290,20 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
   using o3sdk::dsp::EventKind;
   switch (e.kind) {
     case EventKind::NoteOn:
-      carrier_.note_on(e.note);
+      held_insert(e.note);
+      if (arp_ == 0u) {
+        carrier_.note_on(e.note);
+      }
       tune_.note_on(e.note);
       break;
     case EventKind::NoteOff:
-      carrier_.note_off(e.note);
+      held_remove(e.note);
+      if (arp_ == 0u) {
+        carrier_.note_off(e.note);
+      } else if (nheld_ == 0u && arp_note_ != 0xFFu) {  // the last note let go: the arp's voice releases
+        carrier_.note_off(arp_note_);
+        arp_note_ = 0xFFu;
+      }
       tune_.note_off(e.note);
       break;
     case EventKind::Param:
@@ -277,6 +317,9 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       break;
     case EventKind::AllNotesOff:
       carrier_.all_notes_off();
+      nheld_ = 0;
+      arp_note_ = 0xFFu;
+      arp_pos_ = 0xFFu;
       tune_.all_notes_off();
       break;
   }
@@ -377,6 +420,178 @@ void Vocoder::step_bend(std::uint32_t n) noexcept {
   }
   vib_was_ = depth > 0.0f;
   carrier_.set_bend_ratio(st == 0.0f ? 1.0f : std::exp2(st * (1.0f / 12.0f)));
+}
+
+// Once a run: the carrier's glide coefficient for `n` samples (an exp only when the run length or GLIDE changed), then one slew step.
+void Vocoder::step_glide(std::uint32_t n) noexcept {
+  if (glide_ms_ <= 0.0f) {
+    carrier_.set_glide(0.0f);
+    return;
+  }
+  if (n != glide_n_) {
+    glide_n_ = n;
+    glide_coef_ = 1.0f - std::exp(-4000.0f * static_cast<float>(n) / (glide_ms_ * fs_));  // four time constants over glide_ms_
+  }
+  carrier_.set_glide(glide_coef_);
+  carrier_.step_glide();
+}
+
+// The held notes, ascending by pitch (the arp's UP is the list's order). A full list ignores a ninth note: the carrier steals for it as ever.
+void Vocoder::held_insert(std::uint8_t note) noexcept {
+  unsigned i = 0;
+  while (i < nheld_ && held_[i] < note) {
+    ++i;
+  }
+  if ((i < nheld_ && held_[i] == note) || nheld_ >= Carrier::kVoices) {
+    return;
+  }
+  for (unsigned j = nheld_; j > i; --j) {
+    held_[j] = held_[j - 1u];
+  }
+  held_[i] = note;
+  ++nheld_;
+}
+
+void Vocoder::held_remove(std::uint8_t note) noexcept {
+  for (unsigned i = 0; i < nheld_; ++i) {
+    if (held_[i] == note) {
+      for (unsigned j = i; j + 1u < nheld_; ++j) {
+        held_[j] = held_[j + 1u];
+      }
+      --nheld_;
+      if (nheld_ == 0u) {
+        arp_pos_ = 0xFFu;  // the next chord starts from its bottom
+        arp_down_ = false;
+      }
+      return;
+    }
+  }
+}
+
+// A step begins now: the first half (gate open) runs for half_len_ samples.
+void Vocoder::clock_start_now() noexcept {
+  second_half_ = false;
+  clock_cnt_ = half_len_;
+  if (arp_ != 0u) {
+    arp_step();
+  }
+}
+
+// The end of a half step; the end of the second one is the step edge.
+void Vocoder::clock_edge() noexcept {
+  second_half_ = !second_half_;
+  clock_cnt_ += half_len_;
+  if (!second_half_ && arp_ != 0u) {
+    arp_step();
+  }
+}
+
+void Vocoder::set_arp(unsigned mode) noexcept {
+  const unsigned was = arp_;
+  if (mode == was) {
+    return;
+  }
+  if (mode == 0u) {  // off: what the arp had on goes, every held note sounds again
+    arp_ = 0;
+    if (arp_note_ != 0xFFu) {
+      carrier_.note_off(arp_note_);
+      arp_note_ = 0xFFu;
+    }
+    for (unsigned i = 0; i < nheld_; ++i) {
+      carrier_.note_on(held_[i]);
+    }
+    arp_pos_ = 0xFFu;
+    arp_down_ = false;
+    clock_on_ = gate_ != 0u;
+    return;
+  }
+  arp_ = static_cast<std::uint8_t>(mode);
+  if (was == 0u) {  // on: the held notes were sounding all together; the arp takes them one at a time from the bottom
+    for (unsigned i = 0; i < nheld_; ++i) {
+      carrier_.note_off(held_[i]);
+    }
+    arp_pos_ = 0xFFu;
+    arp_down_ = false;
+    const bool clock_was_on = clock_on_;
+    clock_on_ = true;
+    if (!clock_was_on) {
+      clock_start_now();  // a step begins here and sounds the first note
+    } else {
+      arp_step();
+    }
+  }
+}
+
+// One step of the arp: release the note it had on, sound the next of the pattern; with nothing held it only releases.
+void Vocoder::arp_step() noexcept {
+  if (arp_note_ != 0xFFu) {
+    carrier_.note_off(arp_note_);
+    arp_note_ = 0xFFu;
+  }
+  const unsigned n = nheld_;
+  if (n == 0u) {
+    arp_pos_ = 0xFFu;
+    return;
+  }
+  unsigned pos = arp_pos_;
+  unsigned next = 0;
+  switch (arp_) {
+    case 1:  // UP
+      next = (pos == 0xFFu || pos + 1u >= n) ? 0u : pos + 1u;
+      break;
+    case 2:  // DOWN
+      next = (pos == 0xFFu || pos == 0u || pos > n) ? n - 1u : pos - 1u;
+      break;
+    case 3:  // UP-DOWN, the ends sounded once
+      if (pos == 0xFFu) {
+        next = 0;
+        arp_down_ = false;
+      } else {
+        pos = pos < n ? pos : n - 1u;
+        if (!arp_down_) {
+          if (pos + 1u < n) {
+            next = pos + 1u;
+          } else {
+            arp_down_ = n > 1u;
+            next = n > 1u ? pos - 1u : 0u;
+          }
+        } else if (pos > 0u) {
+          next = pos - 1u;
+        } else {
+          arp_down_ = false;
+          next = n > 1u ? 1u : 0u;
+        }
+      }
+      break;
+    default:  // RANDOM, xorshift32; the top 16 bits times n, shifted: no division
+      rng_ ^= rng_ << 13;
+      rng_ ^= rng_ >> 17;
+      rng_ ^= rng_ << 5;
+      next = ((rng_ >> 16) * n) >> 16;
+      break;
+  }
+  arp_pos_ = static_cast<std::uint8_t>(next);
+  arp_note_ = held_[next];
+  carrier_.note_on(arp_note_);
+}
+
+// GATE on frames [from, from + k) of the carrier and its held-notes gate: the gain slews to 0 in the second half of a step and back to 1, 2 ms edges.
+void Vocoder::apply_gate(float* car, float* gate, std::uint32_t from, std::uint32_t k) noexcept {
+  const float tgt = (clock_on_ && gate_ != 0u && second_half_) ? 0.0f : 1.0f;
+  float g = gate_g_;
+  const float st = gate_step_;
+  for (std::uint32_t i = from; i < from + k; ++i) {
+    if (g < tgt) {
+      g += st;
+      g = g > tgt ? tgt : g;
+    } else if (g > tgt) {
+      g -= st;
+      g = g < tgt ? tgt : g;
+    }
+    car[i] *= g;
+    gate[i] *= g;
+  }
+  gate_g_ = g;
 }
 
 void Vocoder::render_carrier(float* out, float* gate, std::uint32_t n) noexcept {
@@ -592,15 +807,54 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   for (std::uint32_t i = 0; i < n; ++i) {
     mod[i] = args.in_l != nullptr ? Bands::clean(args.in_l[i]) : 0.0f;
   }
+  {  // the step clock: half a step in samples at this block's tempo (one division a block); the grid goes back to the bar when the transport starts
+    const float mbpm = static_cast<float>(args.transport->tempo_mbpm < 20000u ? 20000u : args.transport->tempo_mbpm);
+    const unsigned rate = gate_ != 0u ? gate_ : 3u;
+    half_len_ = fs_ * 60000.0f / mbpm * kHalfBeats[rate - 1u];
+    half_len_ = half_len_ < 4.0f ? 4.0f : half_len_;
+    clock_cnt_ = clock_cnt_ > half_len_ ? half_len_ : clock_cnt_;
+    if (args.transport->started && clock_on_) {
+      second_half_ = true;
+      clock_cnt_ = 0.0f;  // the first edge is frame 0: a new step, the pattern from its start
+      arp_pos_ = 0xFFu;
+      arp_down_ = false;
+    }
+  }
   o3sdk::dsp::ProcessArgs run = args;
   run.frames = n;
   o3sdk::dsp::for_each_run(
       run, [&](std::uint32_t from, std::uint32_t to) {
         step_bend(to - from);
-        if (tune_mix_.value() >= 1.0f && tune_mix_.target_value() >= 1.0f) {  // TUNE alone: the carrier is not heard
-          for (std::uint32_t i = from; i < to; ++i) car[i] = gate[i] = 0.0f;
-        } else {
-          render_carrier(car + from, gate + from, to - from);
+        step_glide(to - from);
+        const bool tune_only = tune_mix_.value() >= 1.0f && tune_mix_.target_value() >= 1.0f;  // TUNE alone: the carrier is not heard
+        if (!clock_on_ && gate_g_ == 1.0f) {  // no rhythm: one render, the path of before
+          if (tune_only) {
+            for (std::uint32_t i = from; i < to; ++i) car[i] = gate[i] = 0.0f;
+          } else {
+            render_carrier(car + from, gate + from, to - from);
+          }
+          return;
+        }
+        while (from < to) {  // split at the clock's edges so a step lands on its frame
+          std::uint32_t k = to - from;
+          if (clock_on_) {
+            while (clock_cnt_ <= 0.0f) {
+              clock_edge();
+            }
+            std::uint32_t c = static_cast<std::uint32_t>(clock_cnt_);
+            c += static_cast<float>(c) < clock_cnt_ ? 1u : 0u;
+            k = c < k ? c : k;
+          }
+          if (tune_only) {
+            for (std::uint32_t i = from; i < from + k; ++i) car[i] = gate[i] = 0.0f;
+          } else {
+            render_carrier(car + from, gate + from, k);
+          }
+          apply_gate(car, gate, from, k);
+          if (clock_on_) {
+            clock_cnt_ -= static_cast<float>(k);
+          }
+          from += k;
         }
       },
       [&](const o3sdk::dsp::Event& e) { apply(e); });

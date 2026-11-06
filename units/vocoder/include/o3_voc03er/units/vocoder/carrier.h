@@ -48,6 +48,11 @@ class Carrier {
   void set_detune_cents(float cents) noexcept;  // the second oscillator of each voice, 0..20 cents sharp of the first
   // The pitch ratio of every sounding oscillator (2^(bend / 12)), set by the owner once a block; 1 is the exact unbent path. SYNTH only.
   void set_bend_ratio(float ratio) noexcept { bend_ratio_ = ratio; }
+  // GLIDE: the per-run slew of each voice's increment toward its note, `coef` = 1 - exp(-n / tau) for the run's n samples (the owner computes it
+  // once a run); 0 turns the glide off and every voice returns to its target, the exact path of before. A new voice starts from the pitch of the
+  // newest sounding one. Nothing is added to the sample loop.
+  void set_glide(float coef) noexcept;
+  void step_glide() noexcept;
   void set_noise_source(NoiseSource* src) noexcept { noise_src_ = src; }  // null: the carrier's own
   void set_attack_ms(float ms) noexcept;
   void set_release_ms(float ms) noexcept;
@@ -64,7 +69,8 @@ class Carrier {
   enum class Stage : std::uint8_t { Idle, Attack, Hold, Release };
   struct Voice {
     float phase = 0.0f;
-    float inc = 0.0f;
+    float inc = 0.0f;  // the note's increment: the glide's target
+    float cur = 0.0f;  // the increment the oscillators use while GLIDE is on
     float phase2 = 0.0f;
     float env = 0.0f;
     std::uint32_t age = 0;  // note-on counter: the smallest is the oldest
@@ -78,6 +84,7 @@ class Carrier {
   float release_coef_ = 0.999f;
   float noise_ = 0.0f;
   float detune_ratio_ = 1.0f;  // 2^(cents / 1200)
+  float glide_ = 0.0f;         // the per-run slew coefficient, 0 off
   float bend_ratio_ = 1.0f;    // 2^(semitones / 12), from the unit's Bend
   NoiseSource own_noise_;
   NoiseSource* noise_src_ = nullptr;
