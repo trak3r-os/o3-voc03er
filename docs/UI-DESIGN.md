@@ -188,6 +188,12 @@ lane only turns a step down; a soft note also lowers what is still held, because
 previous step's notes; `pattern.o3a` v2 adds a BANK chunk after the v1 chunks (an older reader gets pattern A), a v1 file loads into A only,
 and a file that fails any check loads nothing. The console has `pat` (print, `len`, `note`, `chord`, `car`, `lvl`). SLICE is stored and ignored (U6c).
 
+Built in U6b (`pattern_screen.cpp`, pure logic in `pattern_logic.h`, `tests/pattern_screen_test.cpp`, `app/scenarios/pattern.txt`): the cells show a
+lane per row (NOTE name and chord kind, CARRIER, LEVEL, SLICE drawn empty), the palette pads write the cursor's step and move it on, a step pad moves
+the cursor, SHIFT + step pad rests the lane in force, a pattern pad shows that pattern and asks the sequencer for it at the end of the one playing.
+F1..F5 point the encoder at a key (a second tap steps it, wrapping), F6 clears the lane at once, F7 is FOLLOW, F8 saves through the app's FILE job.
+The F6 label is `CLR LANE` (it does not fit the key in full); HELP spells it out. SLICE is read-only (U6c). No new unit parameter.
+
 ### PARAMS
 
 Three pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,

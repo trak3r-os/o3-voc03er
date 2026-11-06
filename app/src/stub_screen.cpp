@@ -82,11 +82,11 @@ void StubScreen::help(const app::Context&, app::Help& h) const noexcept {
       {app::Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
       {app::Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
       {app::Button::Song, "SONG (SLICE U9)", nullptr},
-      {app::Button::Pattern, "PATTERN (SLICE U6)", nullptr},
-      {app::Button::Note, "PATTERN: NOTE LANE (U6)", nullptr},
-      {app::Button::Instr, "PATTERN: CARRIER LANE (U6)", nullptr},
-      {app::Button::Vol, "PATTERN: LEVEL LANE (U6)", nullptr},
-      {app::Button::Fx, "PATTERN: SLICE LANE (U6)", nullptr},
+      {app::Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
+      {app::Button::Note, "PATTERN: NOTE LANE", nullptr},
+      {app::Button::Instr, "PATTERN: CARRIER LANE", nullptr},
+      {app::Button::Vol, "PATTERN: LEVEL LANE", nullptr},
+      {app::Button::Fx, "PATTERN: SLICE LANE", nullptr},
       {app::Button::Shift, "NO SHIFT KEYS ON THIS SCREEN", nullptr},
   };
   h.summary = info_ != nullptr ? info_->summary : "THIS SCREEN IS NOT DRAWN YET.";

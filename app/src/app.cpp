@@ -27,6 +27,7 @@
 // audio_in() (line and microphone input, the monitor), radio() (the FM radio) and recorder() (a take of the input or the master, saved to
 // the card as a WAV). The template uses none of them; each is a short call like files() and a line in the app's state.
 
+#include "pattern_screen.h"
 #include "perform_screen.h"
 #include "play_screen.h"
 #include "skin/ornoir_assets.h"
@@ -80,11 +81,6 @@ constexpr o3_voc03er::StubInfo kStubs[] = {
     {"SAMPLE", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE: THE SLOTS AND THEIR SLICES ON THE PADS. NOT DRAWN YET: SLICE U4."},
     {"SAMPLE EDIT", nullptr, "BUILT IN SLICE U7", nullptr, "SAMPLE EDIT: TRIM AND CUT THE SELECTED SLOT. NOT DRAWN YET: SLICE U7."},
     {"SAMPLE REC", nullptr, "BUILT IN SLICE U4", nullptr, "SAMPLE REC: RECORD THE LIVE SOURCE INTO A SLOT. NOT DRAWN YET: SLICE U4."},
-    {"PATTERN", nullptr, "BUILT IN SLICE U6", nullptr, "PATTERN: THE 16-STEP SEQUENCER. NOT DRAWN YET: SLICE U6."},
-    {"PATTERN", "LANE: NOTE", "BUILT IN SLICE U6", nullptr, "PATTERN, THE NOTE LANE. NOT DRAWN YET: SLICE U6."},
-    {"PATTERN", "LANE: CARRIER", "BUILT IN SLICE U6", nullptr, "PATTERN, THE CARRIER LANE. NOT DRAWN YET: SLICE U6."},
-    {"PATTERN", "LANE: LEVEL", "BUILT IN SLICE U6", nullptr, "PATTERN, THE LEVEL LANE. NOT DRAWN YET: SLICE U6."},
-    {"PATTERN", "LANE: SLICE", "BUILT IN SLICE U6", nullptr, "PATTERN, THE SLICE LANE. NOT DRAWN YET: SLICE U6."},
 };
 
 class MyApp;
@@ -156,6 +152,7 @@ class MyApp final : public app::App {
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_);
+    pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     (void)ctx.midi().route(voice, 0);
     carriers_.init(voice, &g_bank);
@@ -264,9 +261,33 @@ class MyApp final : public app::App {
       static constexpr Open kOpen[] = {
           {app::Button::Master, &kStubs[0]},    {app::Button::Song, &kStubs[1]},       {app::Button::File, &kStubs[2]},
           {app::Button::SampleLoad, &kStubs[3]}, {app::Button::SampleEdit, &kStubs[5]},
-          {app::Button::Pattern, &kStubs[7]},    {app::Button::Note, &kStubs[8]},
-          {app::Button::Instr, &kStubs[9]},     {app::Button::Vol, &kStubs[10]},       {app::Button::Fx, &kStubs[11]},
       };
+      struct Lane {
+        app::Button button;
+        o3_voc03er::pattern::Lane lane;
+      };
+      static constexpr Lane kLanes[] = {
+          {app::Button::Note, o3_voc03er::pattern::Lane::Note},
+          {app::Button::Instr, o3_voc03er::pattern::Lane::Carrier},
+          {app::Button::Vol, o3_voc03er::pattern::Lane::Level},
+          {app::Button::Fx, o3_voc03er::pattern::Lane::Slice},
+      };
+      if (in.press(app::Button::Pattern)) {  // the 16 steps, on the lane it was left on
+        if (ctx.screen() != &pattern_) {
+          ctx.show(pattern_);
+        }
+        ctx.redraw();
+        return true;
+      }
+      for (const Lane& l : kLanes) {  // NOTE, INSTR, VOL and FX open the same screen on their lane
+        if (in.press(l.button)) {
+          pattern_.set_lane(ctx, l.lane);
+          if (ctx.screen() != &pattern_) {
+            ctx.show(pattern_);
+          }
+          return true;
+        }
+      }
       for (const Open& o : kOpen) {
         if (in.press(o.button)) {
           stub_.set(o.info);
@@ -295,18 +316,32 @@ class MyApp final : public app::App {
     }
     app::Files& files = ctx.files();
     if (op_ == Op::None && !files.busy()) {
-      files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
-      play_.set_note(nullptr);
       if (save) {
-        const std::size_t n = o3_voc03er::write_bank(g_bank, g_save_buf, sizeof g_save_buf);
-        op_ = n != 0u && files.save("", o3_voc03er::kPatternFile, g_save_buf, n) ? Op::SavePattern : Op::None;
+        (void)save_bank(ctx);
       } else {
+        files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
+        play_.set_note(nullptr);
         op_ = files.load("", o3_voc03er::kPatternFile, g_load_buf, sizeof g_load_buf) ? Op::LoadPattern : Op::None;
       }
       ctx.redraw();
     }
     return true;
   }
+
+  // FILE's save, and PATTERN's F8 (through save_bank_cb): the bank to the card; false when a file job is still running.
+  bool save_bank(app::Context& ctx) noexcept {
+    app::Files& files = ctx.files();
+    if (op_ != Op::None || files.busy()) {
+      return false;
+    }
+    files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
+    play_.set_note(nullptr);
+    const std::size_t n = o3_voc03er::write_bank(g_bank, g_save_buf, sizeof g_save_buf);
+    op_ = n != 0u && files.save("", o3_voc03er::kPatternFile, g_save_buf, n) ? Op::SavePattern : Op::None;
+    ctx.redraw();
+    return true;
+  }
+  static bool save_bank_cb(void* user, app::Context& ctx) noexcept { return static_cast<MyApp*>(user)->save_bank(ctx); }
 
   // MIDI pitch bend and the mod wheel (docs/UI-DESIGN.md 7c), on the user's channel (0 is omni). The wheel is scaled into BEND RANGE and adds to the
   // screen's own bend (the encoder and the strip), so the encoder's spring leaves a held wheel where it is; CC1 is the vibrato depth, held apart
@@ -617,6 +652,7 @@ class MyApp final : public app::App {
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::SampleScreen sample_;
+  o3_voc03er::PatternScreen pattern_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::StepSeq carriers_;  // the step sequencer hook (stepseq.h)
 

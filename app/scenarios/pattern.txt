@@ -1,0 +1,105 @@
+# PATTERN (U6b): a pattern built by hand with the pads (notes, carriers, levels, a rest), played with FOLLOW, then pattern B and a rest, F2 LANE and
+# F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap performance
+wait 100
+tap pattern
+wait 150
+snap 01_empty
+# NOTE lane: eight chords from the upper palette rows, the cursor steps on by itself
+paddown 0
+wait 40
+padup 0
+wait 40
+paddown 3
+wait 40
+padup 3
+wait 40
+paddown 7
+wait 40
+padup 7
+wait 40
+paddown 12
+wait 40
+padup 12
+wait 40
+paddown 15
+wait 40
+padup 15
+wait 40
+paddown 19
+wait 40
+padup 19
+wait 40
+snap 02_notes
+# a rest on step 3 (SHIFT + the step pad)
+press shift
+paddown 26
+wait 40
+padup 26
+release shift
+wait 100
+# CARRIER lane
+tap instr
+paddown 1
+wait 40
+padup 1
+wait 40
+paddown 2
+wait 40
+padup 2
+wait 40
+paddown 4
+wait 40
+padup 4
+wait 100
+snap 03_carrier
+# LEVEL lane
+tap vol
+paddown 24
+wait 40
+padup 24
+wait 40
+paddown 10
+wait 40
+padup 10
+wait 40
+paddown 23
+wait 40
+padup 23
+wait 100
+snap 04_level
+# SLICE lane: drawn, read only
+tap fx
+wait 100
+snap 05_slice
+# play with FOLLOW on the NOTE lane
+tap note
+tap f7
+record on
+tap play
+wait 1500
+snap 06_follow
+tap f7
+# pattern B: next to play, then LENGTH and the LANE key
+paddown 33
+wait 40
+padup 33
+wait 1500
+snap 07_pattern_b
+tap f3
+turn -6
+wait 100
+snap 08_length
+tap f2
+tap f2
+wait 100
+snap 09_lane_key
+tap f6
+wait 100
+snap 10_cleared
+tap play
+wait 200
+wav pattern

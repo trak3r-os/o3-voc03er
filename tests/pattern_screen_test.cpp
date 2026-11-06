@@ -1,0 +1,252 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The PATTERN screen (U6b): the pad map and the LEVEL palette as pure logic, then the screen on the simulator, read through the pad LEDs.
+
+#include <doctest/doctest.h>
+
+#include <o3sdk/app/app.h>
+#include <o3sdk/app/help.h>
+#include <o3sdk/app/pad_leds.h>
+#include <o3sdk/app/runtime.h>
+#include <o3sdk/platform/host/fake_capture.h>
+#include <o3sdk/sim/harness.h>
+
+#include "../app/src/pattern_logic.h"
+
+#include <cstddef>
+#include <memory>
+#include <string>
+
+namespace app = o3sdk::app;
+namespace sim = o3sdk::sim;
+namespace pt = o3_voc03er::pattern;
+
+TEST_CASE("pattern: the pad map") {
+  CHECK(pt::step_of_pad(24) == 0);
+  CHECK(pt::step_of_pad(31) == 7);
+  CHECK(pt::step_of_pad(36) == 8);
+  CHECK(pt::step_of_pad(43) == 15);
+  CHECK(pt::step_of_pad(32) == -1);  // a pattern pad
+  CHECK(pt::step_of_pad(5) == -1);   // the palette
+  CHECK(pt::pattern_of_pad(32) == 0);
+  CHECK(pt::pattern_of_pad(35) == 3);
+  CHECK(pt::pattern_of_pad(44) == 4);
+  CHECK(pt::pattern_of_pad(47) == 7);
+  CHECK(pt::pattern_of_pad(24) == -1);
+  for (unsigned i = 0; i < 16; ++i) {
+    CHECK(pt::step_of_pad(pt::pad_of_step(i)) == static_cast<int>(i));
+  }
+  for (unsigned q = 0; q < 8; ++q) {
+    CHECK(pt::pattern_of_pad(pt::pad_of_pattern(q)) == static_cast<int>(q));
+  }
+}
+
+TEST_CASE("pattern: the LEVEL palette is 24 distinct steps up to 100, not 127") {
+  CHECK(pt::level_of_pad(23) == 100u);
+  CHECK(pt::level_of_pad(0) >= 1u);
+  for (unsigned p = 1; p < 24; ++p) {
+    CHECK(pt::level_of_pad(p) > pt::level_of_pad(p - 1));
+  }
+}
+
+TEST_CASE("pattern: value steps and rests by lane") {
+  o3_voc03er::PatternData p{};
+  CHECK(pt::step_value(p, 0, pt::Lane::Note, 1));  // a rest starts at C3
+  CHECK(o3_voc03er::get_step(p, 0).note == 48u);
+  CHECK(pt::step_value(p, 0, pt::Lane::Note, 2));
+  CHECK(o3_voc03er::get_step(p, 0).note == 50u);
+  CHECK_FALSE(pt::step_value(p, 1, pt::Lane::Note, -1));  // a rest does not go down
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Carrier, -1));
+  CHECK(pt::step_value(p, 0, pt::Lane::Carrier, 3));
+  CHECK(o3_voc03er::get_step(p, 0).carrier == 3u);
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Carrier, 9));
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Slice, 1));
+  CHECK(pt::rest_lane(p, 0, pt::Lane::Note));
+  CHECK(o3_voc03er::get_step(p, 0).note == 0u);
+  CHECK(o3_voc03er::get_step(p, 0).carrier == 3u);  // the other lanes stay
+  CHECK(pt::rest_lane(p, 0, pt::Lane::Carrier));
+  CHECK(o3_voc03er::get_step(p, 0).carrier == 0u);
+}
+
+namespace {
+void tap(sim::Harness& h, app::Button b) {
+  h.press(b);
+  h.run_ms(5);
+  h.release(b);
+  h.run_ms(40);  // the LEDs refresh on the main loop's tick
+}
+void pad(sim::Harness& h, unsigned p, bool shift = false) {
+  if (shift) {
+    h.press(app::Button::Shift);
+    h.run_ms(5);
+  }
+  h.pad_down(p);
+  h.run_ms(20);
+  h.pad_up(p);
+  h.run_ms(20);
+  if (shift) {
+    h.release(app::Button::Shift);
+    h.run_ms(5);
+  }
+}
+
+struct Rig {
+  o3sdk::platform::host::FakeCapture cap;
+  std::unique_ptr<sim::Harness> h;
+  Rig() {
+    cap.input_tone(220.0f, -12.0f);
+    h = std::make_unique<sim::Harness>(::o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
+    REQUIRE(h->start());
+    h->run_ms(100);
+    tap(*h, app::Button::Performance);  // the old PLAY screen takes these buttons for itself
+    tap(*h, app::Button::Pattern);
+    h->run_ms(60);
+  }
+  unsigned led(unsigned p) const { return h->leds().level(p); }
+  unsigned count(unsigned from, unsigned to, unsigned level) const {
+    unsigned n = 0;
+    for (unsigned p = from; p <= to; ++p) {
+      n += led(p) == level ? 1u : 0u;
+    }
+    return n;
+  }
+};
+
+bool has_row(const app::Help& help, app::Button b) {
+  for (std::size_t i = 0; i < help.button_count; ++i) {
+    if (help.buttons[i].button == b) {
+      return help.buttons[i].text != nullptr;
+    }
+  }
+  return false;
+}
+}  // namespace
+
+TEST_CASE("pattern: a palette pad writes the cursor's step and moves on; a step pad moves the cursor") {
+  Rig rig;
+  CHECK(rig.led(24) == app::kLedMid);  // step 1: the cursor, nothing in it
+  CHECK(rig.led(25) == app::kLedOff);
+  pad(*rig.h, 5);  // a NOTE
+  CHECK(rig.led(24) == app::kLedDim);  // content now
+  CHECK(rig.led(25) == app::kLedMid);  // the cursor moved on
+  CHECK(rig.led(5) == app::kLedDim);   // the palette shows the step the cursor is on: empty, so no match
+  pad(*rig.h, 30);                     // step 7
+  CHECK(rig.led(30) == app::kLedMid);
+  CHECK(rig.led(25) == app::kLedOff);
+  pad(*rig.h, 24);  // back on step 1: the palette's mid is the note it holds
+  CHECK(rig.led(5) == app::kLedMid);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+  CHECK(rig.h->display().peak_frame_words() < 2048u);
+}
+
+TEST_CASE("pattern: SHIFT + a step pad writes a rest in the lane") {
+  Rig rig;
+  pad(*rig.h, 5);
+  pad(*rig.h, 7);
+  CHECK(rig.led(24) == app::kLedDim);
+  CHECK(rig.led(25) == app::kLedDim);
+  pad(*rig.h, 24, true);
+  CHECK(rig.led(24) == app::kLedMid);  // the cursor is there, and the step holds nothing
+  pad(*rig.h, 26);
+  CHECK(rig.led(24) == app::kLedOff);
+  CHECK(rig.led(25) == app::kLedDim);
+}
+
+TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and the LEDs show") {
+  Rig rig;
+  tap(*rig.h, app::Button::Instr);  // CARRIER: seven values
+  CHECK(rig.count(0, 23, app::kLedOff) == 17u);
+  CHECK(rig.led(0) == app::kLedMid);  // FOLLOW is what an empty step stores
+  pad(*rig.h, 2);                     // NOISE into step 1
+  pad(*rig.h, 24);
+  CHECK(rig.led(2) == app::kLedMid);
+  CHECK(rig.led(24) == app::kLedMid);
+  tap(*rig.h, app::Button::Vol);  // LEVEL: all 24 pads lit
+  CHECK(rig.count(0, 23, app::kLedOff) == 0u);
+  pad(*rig.h, 23);
+  pad(*rig.h, 24);
+  CHECK(rig.led(23) == app::kLedMid);  // the top is 100
+  tap(*rig.h, app::Button::Fx);        // SLICE: drawn, dark
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);
+  tap(*rig.h, app::Button::Note);
+  CHECK(rig.count(0, 23, app::kLedOff) == 0u);
+  tap(*rig.h, app::Button::F2);  // focus LANE
+  tap(*rig.h, app::Button::F2);  // a tap steps it: CARRIER
+  CHECK(rig.count(0, 23, app::kLedOff) == 17u);
+  tap(*rig.h, app::Button::Down);
+  tap(*rig.h, app::Button::Down);
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // UP and DOWN move the lane too
+  tap(*rig.h, app::Button::Up);
+  CHECK(rig.count(0, 23, app::kLedOff) == 0u);
+}
+
+TEST_CASE("pattern: LENGTH cuts the steps, CLEAR LANE empties the lane") {
+  Rig rig;
+  for (unsigned i = 0; i < 16; ++i) {
+    pad(*rig.h, 5);  // fill all sixteen steps; the cursor wraps back to step 1
+  }
+  CHECK(rig.led(43) == app::kLedDim);
+  tap(*rig.h, app::Button::F3);  // focus LENGTH
+  rig.h->turn(-8);
+  rig.h->run_ms(60);
+  CHECK(rig.led(24 + 7) != app::kLedOff);  // step 8 is still in
+  CHECK(rig.led(36) == app::kLedOff);      // step 9 is out
+  CHECK(rig.led(43) == app::kLedOff);
+  tap(*rig.h, app::Button::F6);  // CLEAR LANE
+  CHECK(rig.led(25) == app::kLedOff);  // the lane is empty
+  CHECK(rig.led(24) == app::kLedMid);  // the cursor stays
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: pattern pads show the pattern and the one playing; FOLLOW rides the playhead") {
+  Rig rig;
+  CHECK(rig.led(32) == app::kLedMid);  // A
+  CHECK(rig.led(44) == app::kLedDim);
+  pad(*rig.h, 44);  // E
+  CHECK(rig.led(44) == app::kLedMid);
+  CHECK(rig.led(32) == app::kLedDim);
+  pad(*rig.h, 32);
+  pad(*rig.h, 5);
+  tap(*rig.h, app::Button::F7);  // FOLLOW
+  tap(*rig.h, app::Button::Play);
+  rig.h->run_ms(900);
+  CHECK(rig.led(32) == app::kLedOn);  // A is playing
+  CHECK(rig.count(24, 31, app::kLedOn) + rig.count(36, 43, app::kLedOn) == 1u);  // the playhead
+  CHECK(rig.count(24, 31, app::kLedMid) + rig.count(36, 43, app::kLedMid) == 0u);  // the cursor is on it
+  tap(*rig.h, app::Button::F7);                 // FOLLOW off: the cursor stays where it was
+  rig.h->run_ms(300);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+  CHECK(rig.h->display().peak_frame_words() < 2048u);
+}
+
+TEST_CASE("pattern: HELP gives a row to every button the screen answers") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Config);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  REQUIRE(h.runtime().help_open());
+  const app::Help& help = h.runtime().help_overlay().help();
+  app::HelpProblem p;
+  const bool ok = app::help_check(help, &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+  for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Shift, app::Button::Rec,
+                              app::Button::Params, app::Button::Performance, app::Button::Play, app::Button::Master, app::Button::File,
+                              app::Button::SampleLoad, app::Button::SamplePlay, app::Button::SampleEdit, app::Button::SampleRec,
+                              app::Button::Song, app::Button::Pattern, app::Button::Note, app::Button::Instr, app::Button::Vol,
+                              app::Button::Fx}) {
+    INFO(std::string(app::button_name(b)));
+    CHECK(has_row(help, b));
+  }
+  for (unsigned k = 0; k < 8; ++k) {
+    CHECK(help.fkey[k] != nullptr);
+  }
+  CHECK(help.pad_group[0] != 0u);   // the palette
+  CHECK(help.pad_group[24] != 0u);  // the steps
+  CHECK(help.pad_group[32] != 0u);  // the patterns
+  CHECK(help.pad_group[24] != help.pad_group[32]);
+  CHECK(help.pad_label[24] != nullptr);
+  CHECK(help.pad_label[32] != nullptr);
+  CHECK(help.pad_label[5] != nullptr);
+}

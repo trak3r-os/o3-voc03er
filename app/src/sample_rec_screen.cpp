@@ -425,11 +425,11 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
       {Button::SampleEdit, "SAMPLE EDIT (SLICE U7)", nullptr},
       {Button::SampleRec, "THIS SCREEN", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},
-      {Button::Pattern, "PATTERN (SLICE U6)", nullptr},
-      {Button::Note, "PATTERN: NOTE LANE (U6)", nullptr},
-      {Button::Instr, "PATTERN: CARRIER LANE (U6)", nullptr},
-      {Button::Vol, "PATTERN: LEVEL LANE (U6)", nullptr},
-      {Button::Fx, "PATTERN: SLICE LANE (U6)", nullptr},
+      {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
+      {Button::Note, "PATTERN: NOTE LANE", nullptr},
+      {Button::Instr, "PATTERN: CARRIER LANE", nullptr},
+      {Button::Vol, "PATTERN: LEVEL LANE", nullptr},
+      {Button::Fx, "PATTERN: SLICE LANE", nullptr},
       {Button::Shift, "FINER GAIN STEPS ON F2", nullptr},
   };
   if (perform_ != nullptr) {
