@@ -2,7 +2,7 @@
 #pragma once
 
 // The pattern bank and the step sequencer (U6a): eight patterns A..H of 16 steps, LENGTH 1..16 each, and the clocked hook that plays them
-// (it replaces the V5c CarrierSeq). docs/UI-DESIGN.md "PATTERN" is the spec; the PATTERN screen is U6b, the SLICE lane's behaviour U6c.
+// (it replaces the V5c CarrierSeq). docs/UI-DESIGN.md "PATTERN" is the spec; the PATTERN screen is U6b, the SLICE lane U6c.
 //
 // A step is ONE 32-bit word, so the render context reads a whole step with a single aligned load (atomic on the M4) and an edit made
 // during playback is seen as the old step or the new one, never a mix of the two:
@@ -13,7 +13,8 @@
 //           bits 5..7 carrier  CARRIER lane: 0 FOLLOW (the step changes nothing: what SOUNDS says stays), 1 SYNTH, 2 NOISE, 3..6 SLOT 1..4.
 //                              LIVE is never a lane value (it is the user's pick and the lane cannot reach it, V5c)
 //   byte 2  level    LEVEL lane = the note's velocity, 0 means the default (kLevelDefault), else 1..127
-//   byte 3  slice    reserved for the SLICE lane (U6c): stored, saved and loaded, no behaviour
+//   byte 3  slice    SLICE lane (U6c): 0 none, 1..24 fires that slice of the SPEAKS slot at the step's frame (kSliceMax); a value above the
+//                    slot's slice count is stored and stays silent
 // Everything zero is a valid step (a rest, FOLLOW, default level), so the bank can live zero-initialised in the SDRAM (O3SDK_BIG).
 //
 // Threads: the main loop edits through the functions below (relaxed atomic word stores, single writer); the render context reads in
@@ -40,6 +41,14 @@ inline constexpr std::uint8_t kLevelDefault = 100;
 // The v2 pattern file: the app's PATN with the old STEP and CARR chunks (pattern A, so an older reader still gets it) and BANK (all eight).
 inline constexpr std::size_t kBankFileMax = 768;  // about 600 bytes with room to spare
 
+// The slices of the SPEAKS slot as the hook needs them (U6c): `start` already counts from the start of the bank (what the unit's Start takes),
+// `len` in samples. Lives in the SDRAM (O3SDK_BIG), written by the main loop through StepSeq::slices_open / slices_close.
+inline constexpr unsigned kSliceMax = 24;
+struct SliceMap {
+  std::uint32_t start[kSliceMax];
+  std::uint32_t len[kSliceMax];
+};
+
 struct Step {
   std::uint8_t note = 0;
   std::uint8_t kind = 0;
@@ -50,7 +59,7 @@ struct Step {
 };
 
 constexpr bool step_valid(const Step& s) noexcept {
-  return s.note <= 127u && s.kind <= 4u && s.voicing <= 3u && s.carrier <= kCarrierMax && s.level <= 127u;
+  return s.note <= 127u && s.kind <= 4u && s.voicing <= 3u && s.carrier <= kCarrierMax && s.level <= 127u && s.slice <= kSliceMax;
 }
 constexpr std::uint32_t pack_step(const Step& s) noexcept {
   return static_cast<std::uint32_t>(s.note) |
@@ -136,6 +145,7 @@ inline bool set_chord(PatternData& p, unsigned i, unsigned root, ChordKind kind,
 }
 inline bool set_carrier(PatternData& p, unsigned i, unsigned c) noexcept { return edit_step(p, i, &Step::carrier, c, kCarrierMax); }
 inline bool set_level(PatternData& p, unsigned i, unsigned v) noexcept { return edit_step(p, i, &Step::level, v, 127u); }
+inline bool set_slice(PatternData& p, unsigned i, unsigned v) noexcept { return edit_step(p, i, &Step::slice, v, kSliceMax); }
 // The next carrier of step `i` (FOLLOW, SYNTH, NOISE, SLOT 1..4, FOLLOW ...).
 inline bool cycle_carrier(PatternData& p, unsigned i) noexcept {
   if (i >= kPatternSteps) {
@@ -325,23 +335,49 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
 //   CARRIER  a Param event for Vocoder::CarSrc at the step's frame when the lane is not FOLLOW (the unit starts its 5 ms fade there);
 //   NOTE     the previous step's notes off, then the notes on at the step's frame; they go off at 75 % of the step (a gate of 180 ticks, a second
 //            for_each_step grid), so a step never runs into the next, and at a Stop;
-//   LEVEL    the notes' velocity (the Vocoder ignores the velocity of a NoteOn today: the lane is stored and sent, and becomes audible when the
-//            unit takes it).
-// An event budget for a block: a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate and one CarSrc: 11 of kMaxEventsPerUnit
-// (32, of which the notes injected by the main loop take at most kMaxInjectPerUnit = 16); a block holds at most one step edge.
+//   SLICE    when the step's slice is 1..count of the SPEAKS slot's map: Start, Len and Trig 1 of that slot's own reader at the step's frame (a
+//            rest in NOTE still fires it). Always one shot: it plays to its end or until the next slice on that reader; the slot's TRIG and
+//            CHOKE are the pads' and do not apply. A slice above the count, or no source, emits nothing. At a Stop one Trig 0 releases the
+//            reader that fired, only if a slice fired since the last Stop.
+//   LEVEL    the notes' velocity: the last note sets the level of the SYNTH and NOISE carriers (one gain, 100 and up are full). A slice has no level.
+// An event budget for a block: a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate, one CarSrc and the 3 region events:
+// 14 of kMaxEventsPerUnit (32, of which the notes injected by the main loop take at most kMaxInjectPerUnit = 16, so 16 are left); a block holds
+// at most one step edge.
 // PATTERN CHANGE: request_pattern() only stores the wish; the hook takes it when the playing pattern reaches its end (and at a Play). A LENGTH
 // change takes effect at the same boundary or earlier: the end is read from the pattern each step.
 // STOP: the notes still sounding get their offs at frame 0 of the stopped block; the carrier the lane set is restored to what the user picked
 // (SOUNDS: LIVE or a slot) and only then: a Stop of a pattern that never changed the carrier emits no CarSrc at all.
-// Objects: about 40 bytes of SRAM_U, no heap, no division beyond `% 12` in make_chord, no libm, no double.
+// Objects: about 56 bytes of SRAM_U, no heap, no division beyond `% 12` in make_chord, no libm, no double.
 class StepSeq final : public o3sdk::dsp::Clocked {
  public:
   static constexpr std::uint8_t kNoPattern = 0xFF;
 
-  void init(o3sdk::dsp::UnitId vocoder, const Bank* bank) noexcept {
+  static constexpr std::uint8_t kNoReader = 0xFF;
+
+  void init(o3sdk::dsp::UnitId vocoder, const Bank* bank, SliceMap* map = nullptr) noexcept {
     unit_ = vocoder;
     bank_ = bank;
+    map_ = map;
+    count_.store(0, std::memory_order_relaxed);
+    reader_.store(kNoReader, std::memory_order_relaxed);
   }
+  // Main loop (single writer): the SPEAKS slot's slices. slices_open() hides the map (count 0, release) and returns it to rewrite; slices_close()
+  // shows it again (reader, then count with release). The hook loads count with acquire, so it never reads a half-written map. A null map
+  // (none given at init) returns null and publishes nothing. `count` is clamped to kSliceMax; a reader above 3 or a count of 0 means none.
+  SliceMap* slices_open() noexcept {
+    count_.store(0, std::memory_order_release);
+    return map_;
+  }
+  void slices_close(unsigned reader, unsigned count) noexcept {
+    const bool ok = map_ != nullptr && reader < 4u && count != 0u;
+    reader_.store(ok ? static_cast<std::uint8_t>(reader) : kNoReader, std::memory_order_relaxed);
+    count_.store(ok ? static_cast<std::uint8_t>(count < kSliceMax ? count : kSliceMax) : std::uint8_t{0}, std::memory_order_release);
+  }
+  // The published source (UI: the PATTERN palette). 0 slices: none.
+  unsigned slice_count() const noexcept { return count_.load(std::memory_order_acquire); }
+  unsigned slice_reader() const noexcept { return reader_.load(std::memory_order_relaxed); }
+  // The slice the last step that fired one played; 0 after a Stop (relaxed, may be a block old).
+  unsigned playing_slice() const noexcept { return playing_slice_.load(std::memory_order_relaxed); }
   // Main loop: the pattern that plays after the current one's last step (or from the next Play). 0..7.
   void request_pattern(unsigned p) noexcept {
     next_.store(p < kBankPatterns ? static_cast<std::uint8_t>(p) : kNoPattern, std::memory_order_relaxed);
@@ -365,6 +401,11 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     const dsp::Transport& t = ctx.transport();
     if (t.stopped) {
       release(ctx, 0);
+      if (fired_ != kNoReader) {  // one Trig 0 on the reader a lane step fired (the render-context byte: a source change loses nothing)
+        (void)ctx.emit(unit_, dsp::param_change(Vocoder::region_param(fired_, Vocoder::RegionField::Trig), 0.0f, 0));
+        fired_ = kNoReader;
+      }
+      playing_slice_.store(0, std::memory_order_relaxed);
       if (changed_) {  // only what a lane step did is undone, to the user's pick (never FOLLOW: LIVE and slots survive a Stop)
         (void)ctx.emit(unit_, dsp::param_change(Vocoder::CarSrc, static_cast<float>(picked_.load(std::memory_order_relaxed)), 0));
         changed_ = false;
@@ -390,6 +431,18 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       if (s.carrier != 0u && s.carrier <= kCarrierMax) {
         changed_ = true;
         (void)ctx.emit(unit_, dsp::param_change(Vocoder::CarSrc, static_cast<float>(s.carrier), static_cast<std::uint16_t>(frame)));
+      }
+      if (s.slice != 0u) {  // the SLICE lane, independent of the NOTE lane
+        const unsigned n = count_.load(std::memory_order_acquire);
+        const unsigned rd = reader_.load(std::memory_order_relaxed);
+        if (n != 0u && s.slice <= n && rd < 4u && map_ != nullptr) {
+          const std::uint16_t f = static_cast<std::uint16_t>(frame);
+          (void)ctx.emit(unit_, dsp::param_change(Vocoder::region_param(rd, Vocoder::RegionField::Start), static_cast<float>(map_->start[s.slice - 1u]), f));
+          (void)ctx.emit(unit_, dsp::param_change(Vocoder::region_param(rd, Vocoder::RegionField::Len), static_cast<float>(map_->len[s.slice - 1u]), f));
+          (void)ctx.emit(unit_, dsp::param_change(Vocoder::region_param(rd, Vocoder::RegionField::Trig), 1.0f, f));
+          fired_ = static_cast<std::uint8_t>(rd);
+          playing_slice_.store(s.slice, std::memory_order_relaxed);
+        }
       }
       std::uint8_t notes[kChordMaxNotes] = {};
       Chord prev;
@@ -448,6 +501,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   std::uint8_t last_count_ = 0;
   bool sounding_ = false;
   bool changed_ = false;
+  std::uint8_t fired_ = kNoReader;  // the reader a lane slice was fired on since the last Stop
   // Shared with the main loop (relaxed, single writer each): next_ and key_ / scale_ / picked_ are written by the main loop, cur_ and step_ by
   // the render context.
   std::atomic<std::uint8_t> next_{kNoPattern};
@@ -456,6 +510,12 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   std::atomic<std::uint8_t> picked_{1};
   std::atomic<std::uint8_t> key_{0};
   std::atomic<std::uint8_t> scale_{0};
+  // The SPEAKS slot's slices: map_ is set at init and written by the main loop only while count_ is 0 (see slices_open); reader_ and count_ are
+  // written by the main loop, read by the render context. playing_slice_ is written by the render context.
+  SliceMap* map_ = nullptr;
+  std::atomic<std::uint8_t> reader_{kNoReader};
+  std::atomic<std::uint8_t> count_{0};
+  std::atomic<std::uint8_t> playing_slice_{0};
 };
 
 }  // namespace o3_voc03er

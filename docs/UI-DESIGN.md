@@ -186,13 +186,18 @@ the gate is 75 % of a sixteenth, notes also end at Stop; carrier 0 (FOLLOW) emit
 if a step changed it (LIVE is never a lane value); LEVEL 0 means 100 and is sent as the NoteOn velocity: the last note sets the synth's level, 100 and up being full, so a level above 100 sounds as 100 and the
 lane only turns a step down; a soft note also lowers what is still held, because it is one gain and not one a voice. It acts on the SYNTH and NOISE carriers, not on a slot or LIVE; a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the
 previous step's notes; `pattern.o3a` v2 adds a BANK chunk after the v1 chunks (an older reader gets pattern A), a v1 file loads into A only,
-and a file that fails any check loads nothing. The console has `pat` (print, `len`, `note`, `chord`, `car`, `lvl`). SLICE is stored and ignored (U6c).
+and a file that fails any check loads nothing. The console has `pat` (print, `len`, `note`, `chord`, `car`, `lvl`, `slc`): a step's slice (0 none, 1 to 24) fires that slice of the SPEAKS slot (U6c).
 
 Built in U6b (`pattern_screen.cpp`, pure logic in `pattern_logic.h`, `tests/pattern_screen_test.cpp`, `app/scenarios/pattern.txt`): the cells show a
 lane per row (NOTE name and chord kind, CARRIER, LEVEL, SLICE drawn empty), the palette pads write the cursor's step and move it on, a step pad moves
 the cursor, SHIFT + step pad rests the lane in force, a pattern pad shows that pattern and asks the sequencer for it at the end of the one playing.
 F1..F5 point the encoder at a key (a second tap steps it, wrapping), F6 clears the lane at once, F7 is FOLLOW, F8 saves through the app's FILE job.
 The F6 label is `CLR LANE` (it does not fit the key in full); HELP spells it out. SLICE is read-only (U6c). No new unit parameter.
+
+Built in U6c (`sample_logic.h` publish_slices, `stepseq.h`, `tests/slice_lane_test.cpp`, `app/scenarios/slice_lane.txt`): a step's slice fires a cut of the
+SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and CHOKE do not apply). Stop releases it
+(Trig 0, once). A slice above the slot's cut count stays silent, and LEVEL does not touch a slice. The palette's two upper rows are slices 1 to 24, lit up to
+the count; with no slices a palette pad or the encoder says SPEAKS HAS NO SLICES and writes nothing. No new unit parameter.
 
 ### PARAMS
 

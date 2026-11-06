@@ -17,6 +17,7 @@
 #include "perform_screen.h"
 
 #include <o3_voc03er/input.h>
+#include <o3_voc03er/stepseq.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <o3sdk/app/help.h>
@@ -30,7 +31,10 @@ namespace o3_voc03er {
 class SampleScreen final : public o3sdk::app::Screen {
  public:
   // `perform` is the app's PERFORM (the pads, the chord and the route code).
-  void init(o3sdk::dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform) noexcept;
+  // `seq` is the step sequencer: service() publishes the SPEAKS slot's slices to it (U6c), and the pad LEDs show the slice it plays.
+  void init(o3sdk::dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform, StepSeq* seq = nullptr) noexcept;
+  // The map service() fills (in the SDRAM): the app hands it to StepSeq::init.
+  SliceMap* slice_map() noexcept;
 
   const char* title() const noexcept override { return "SAMPLE"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -48,7 +52,8 @@ class SampleScreen final : public o3sdk::app::Screen {
   unsigned slot() const noexcept { return slot_; }
 
   // Once a pass of the main loop, whichever screen is up (App::update): ends the slice voices that finished (a borrowed reader gets its own slot's
-  // Speed, Dir, Level and Role back) and rebuilds a slot's cuts when its length changed.
+  // Speed, Dir, Level and Role back), rebuilds a slot's cuts when its length changed and republishes the SPEAKS slot's slices to the step
+  // sequencer when the slot or its cuts changed.
   void service(o3sdk::app::Context& ctx) noexcept;
 
  private:
@@ -65,6 +70,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   const Vocoder* voc_ = nullptr;
   PerformScreen* perform_ = nullptr;
+  StepSeq* seq_ = nullptr;
   std::uint8_t slot_ = 0;       // 0..3
   std::uint8_t focus_ = 0;      // the F key the encoder drives (F1, CHORD)
   bool key_tap_ = false;        // turn() came from a second tap on an F key, not from the encoder

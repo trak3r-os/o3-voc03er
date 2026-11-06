@@ -72,9 +72,21 @@ constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octav
     case Lane::Level:
       return level_of_pad(pad) == step_velocity(s);
     case Lane::Slice:
-      return false;
+      return pad < kSliceMax && pad + 1u == s.slice;
   }
   return false;
+}
+
+// A palette pad of the SLICE lane: pads 0..23 are slices 1..24 of the SPEAKS slot, lit (dim) up to its slice count `count`.
+enum class SliceWrite : std::uint8_t { Written, NoSlices, Dark };
+inline SliceWrite slice_write(PatternData& p, unsigned i, unsigned pad, unsigned count) noexcept {
+  if (count == 0u) {
+    return SliceWrite::NoSlices;  // SPEAKS has no slices: nothing is written
+  }
+  if (pad >= count || pad >= kSliceMax) {
+    return SliceWrite::Dark;
+  }
+  return set_slice(p, i, pad + 1u) ? SliceWrite::Written : SliceWrite::Dark;
 }
 
 // The next step of the cursor after a palette write: one on, wrapping at LENGTH.
@@ -101,8 +113,8 @@ inline void note_name(char (&out)[6], unsigned note) noexcept {
 }
 
 // The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind), CARRIER 0..6, LEVEL 1..127. A step with
-// no change (the end of a range, the SLICE lane) returns false.
-inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta) noexcept {
+// no change (the end of a range, the SLICE lane with no slices) returns false; SLICE steps 0..`slice_count` (0 is none).
+inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigned slice_count = 0) noexcept {
   const Step s = get_step(p, i);
   switch (lane) {
     case Lane::Note: {
@@ -125,13 +137,19 @@ inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta) noexcep
       const int v = static_cast<int>(step_velocity(s)) + delta;
       return v >= 1 && v <= 127 && set_level(p, i, static_cast<unsigned>(v));
     }
-    case Lane::Slice:
-      return false;
+    case Lane::Slice: {
+      if (slice_count == 0u) {
+        return false;
+      }
+      int v = static_cast<int>(s.slice) + delta;
+      v = v < 0 ? 0 : (v > static_cast<int>(slice_count) ? static_cast<int>(slice_count) : v);
+      return v != static_cast<int>(s.slice) && set_slice(p, i, static_cast<unsigned>(v));
+    }
   }
   return false;
 }
 
-// A rest in one lane of a step (SHIFT + step pad, CLEAR LANE): NOTE a rest, CARRIER FOLLOW, LEVEL the default; SLICE is read-only here.
+// A rest in one lane of a step (SHIFT + step pad, CLEAR LANE): NOTE a rest, CARRIER FOLLOW, LEVEL the default, SLICE none.
 inline bool rest_lane(PatternData& p, unsigned i, Lane lane) noexcept {
   switch (lane) {
     case Lane::Note:
@@ -141,7 +159,7 @@ inline bool rest_lane(PatternData& p, unsigned i, Lane lane) noexcept {
     case Lane::Level:
       return set_level(p, i, 0u);
     case Lane::Slice:
-      return false;
+      return set_slice(p, i, 0u);
   }
   return false;
 }

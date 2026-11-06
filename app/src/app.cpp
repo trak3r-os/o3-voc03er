@@ -94,7 +94,7 @@ constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
-    {"pat", "pat [A-H [len n|note s n|chord s root kind voic|car s c|lvl s v]]", &pat_command},
+    {"pat", "pat [A-H [len n|note s n|chord s r k v|car s c|lvl s v|slc s n]]", &pat_command},
 };
 
 constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
@@ -151,11 +151,11 @@ class MyApp final : public app::App {
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
-    sample_.init(voice, &voc_, &perform_);
+    sample_.init(voice, &voc_, &perform_, &carriers_);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     (void)ctx.midi().route(voice, 0);
-    carriers_.init(voice, &g_bank);
+    carriers_.init(voice, &g_bank, sample_.slice_map());
     carriers_.set_picked(1);  // the boot CarSrc above
     (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
@@ -471,6 +471,9 @@ class MyApp final : public app::App {
         if (s.level != 0u) {
           out.chr('v').dec(s.level);
         }
+        if (s.slice != 0u) {
+          out.chr('s').dec(s.slice);
+        }
       }
       out.nl();
     };
@@ -482,7 +485,7 @@ class MyApp final : public app::App {
     }
     ov::PatCommand c;
     if (!ov::parse_pat(args.argv + 1, args.argc - 1u, c)) {
-      out.text("usage: pat [A-H [len n|note s n|chord s root kind voic|car s c|lvl s v]]").nl();
+      out.text("usage: pat [A-H [len n|note s n|chord s root kind voic|car s c|lvl s v|slc s n]]").nl();
       return;
     }
     ov::PatternData& pd = g_bank.pattern[c.pattern];
@@ -494,6 +497,7 @@ class MyApp final : public app::App {
       case ov::PatAct::Chord: ok = ov::set_chord(pd, c.step, c.value, static_cast<ov::ChordKind>(c.kind), static_cast<ov::Voicing>(c.voicing)); break;
       case ov::PatAct::Carrier: ok = ov::set_carrier(pd, c.step, c.value); break;
       case ov::PatAct::Level: ok = ov::set_level(pd, c.step, c.value); break;
+      case ov::PatAct::Slice: ok = ov::set_slice(pd, c.step, c.value); break;
     }
     if (!ok) {
       out.text("refused").nl();

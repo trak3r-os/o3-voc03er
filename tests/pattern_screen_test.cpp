@@ -40,6 +40,50 @@ TEST_CASE("pattern: the pad map") {
   }
 }
 
+TEST_CASE("pattern: the SLICE lane's palette, value and clear") {
+  using o3_voc03er::get_step;
+  o3_voc03er::PatternData p{};
+  // a palette pad writes slice pad + 1, only while SPEAKS has that many cuts; with none it says so and writes nothing
+  CHECK(pt::slice_write(p, 0, 0, 0) == pt::SliceWrite::NoSlices);
+  CHECK(pt::slice_write(p, 0, 23, 0) == pt::SliceWrite::NoSlices);
+  CHECK(get_step(p, 0).slice == 0u);
+  CHECK(pt::slice_write(p, 0, 4, 8) == pt::SliceWrite::Written);
+  CHECK(get_step(p, 0).slice == 5u);
+  CHECK(pt::slice_write(p, 1, 8, 8) == pt::SliceWrite::Dark);  // a dark pad does nothing
+  CHECK(get_step(p, 1).slice == 0u);
+  CHECK(pt::slice_write(p, 1, 7, 8) == pt::SliceWrite::Written);
+  CHECK(get_step(p, 1).slice == 8u);
+  CHECK(pt::slice_write(p, 2, 23, 24) == pt::SliceWrite::Written);
+  CHECK(get_step(p, 2).slice == 24u);
+  // the palette's mid pad is the step's own slice
+  CHECK(pt::palette_matches(pt::Lane::Slice, 4, get_step(p, 0), 0, false, o3_voc03er::ChordKind::Triad));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Slice, 5, get_step(p, 0), 0, false, o3_voc03er::ChordKind::Triad));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Slice, 0, get_step(p, 5), 0, false, o3_voc03er::ChordKind::Triad));  // no slice: nothing matches
+  // VALUE steps 0..count; 0 is none; an out of range stored slice steps down to the count
+  CHECK(pt::step_value(p, 0, pt::Lane::Slice, 1, 8));
+  CHECK(get_step(p, 0).slice == 6u);
+  CHECK(pt::step_value(p, 0, pt::Lane::Slice, 10, 8));
+  CHECK(get_step(p, 0).slice == 8u);
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Slice, 1, 8));  // the end of the range
+  CHECK(pt::step_value(p, 0, pt::Lane::Slice, -20, 8));
+  CHECK(get_step(p, 0).slice == 0u);
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Slice, -1, 8));
+  CHECK(pt::step_value(p, 0, pt::Lane::Slice, 1, 8));
+  CHECK(get_step(p, 0).slice == 1u);
+  CHECK(pt::step_value(p, 2, pt::Lane::Slice, 1, 3));  // a stored 24 with 3 cuts: it comes down to 3
+  CHECK(get_step(p, 2).slice == 3u);
+  CHECK_FALSE(pt::step_value(p, 3, pt::Lane::Slice, 1, 0));
+  // CLEAR LANE and SHIFT + step: slice 0, the other lanes stay
+  REQUIRE(set_note(p, 1, 60));
+  CHECK(pt::rest_lane(p, 1, pt::Lane::Slice));
+  CHECK(get_step(p, 1).slice == 0u);
+  CHECK(get_step(p, 1).note == 60u);
+  // LEVEL does not touch a slice
+  CHECK(pt::slice_write(p, 4, 2, 8) == pt::SliceWrite::Written);
+  CHECK(pt::step_value(p, 4, pt::Lane::Level, 1));
+  CHECK(get_step(p, 4).slice == 3u);
+}
+
 TEST_CASE("pattern: the LEVEL palette is 24 distinct steps up to 100, not 127") {
   CHECK(pt::level_of_pad(23) == 100u);
   CHECK(pt::level_of_pad(0) >= 1u);
@@ -59,7 +103,7 @@ TEST_CASE("pattern: value steps and rests by lane") {
   CHECK(pt::step_value(p, 0, pt::Lane::Carrier, 3));
   CHECK(o3_voc03er::get_step(p, 0).carrier == 3u);
   CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Carrier, 9));
-  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Slice, 1));
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Slice, 1));  // SPEAKS has no slices
   CHECK(pt::rest_lane(p, 0, pt::Lane::Note));
   CHECK(o3_voc03er::get_step(p, 0).note == 0u);
   CHECK(o3_voc03er::get_step(p, 0).carrier == 3u);  // the other lanes stay
@@ -177,6 +221,21 @@ TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and 
   CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // UP and DOWN move the lane too
   tap(*rig.h, app::Button::Up);
   CHECK(rig.count(0, 23, app::kLedOff) == 0u);
+}
+
+TEST_CASE("pattern: with SPEAKS on LIVE the SLICE lane is dark and writes nothing") {
+  Rig rig;
+  tap(*rig.h, app::Button::Fx);
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);
+  pad(*rig.h, 3);  // a palette pad: SPEAKS HAS NO SLICES
+  CHECK(rig.led(24) == app::kLedMid);  // the cursor did not move
+  CHECK(rig.led(25) == app::kLedOff);
+  rig.h->turn(3);  // the encoder on F5: the same
+  rig.h->run_ms(60);
+  CHECK(rig.led(24) == app::kLedMid);
+  tap(*rig.h, app::Button::F6);  // CLEAR LANE is allowed and changes nothing here
+  CHECK(rig.led(24) == app::kLedMid);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
 TEST_CASE("pattern: LENGTH cuts the steps, CLEAR LANE empties the lane") {

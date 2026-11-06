@@ -10,7 +10,7 @@
 //   UP / DOWN: the lane. LEFT / RIGHT: the cursor (they repeat when held). NOTE, INSTR, VOL, FX: the lane (app.cpp opens the screen on it).
 //   Pads: rows 2 and 3, columns 0..7: steps 1..16 (a press moves the cursor; SHIFT + press writes a rest in the lane); columns 8..11: patterns A..H (the
 //   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: PERFORM's two lower chord rows, or two
-//   octaves of keys when PERFORM is on KEYS, at PERFORM's octave; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: dark until U6c).
+//   octaves of keys when PERFORM is on KEYS, at PERFORM's octave; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS slot's cuts 1..24, lit up to its count).
 //   A palette pad writes into the cursor's step and moves the cursor on.
 //
 // Main loop only. The screen keeps a cursor and a few flags; HELP's labels are in the SDRAM (g_pd in the .cpp).

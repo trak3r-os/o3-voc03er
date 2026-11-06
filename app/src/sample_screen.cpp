@@ -94,10 +94,13 @@ struct SampleData {
   std::uint8_t one_shot[sm::kReaders];   // TRIG per slot: 1 ONE SHOT
   std::uint8_t choke_off[sm::kReaders];  // CHOKE per slot: 1 OFF
   std::uint32_t seq;
+  SliceMap map;                 // the SPEAKS slot's slices for the step sequencer's SLICE lane (published through StepSeq::slices_open)
+  sm::SlicePublished published;  // what the map holds
   app::HelpPadGroup groups[app::kHelpMaxGroups];
   char pad_name[sm::kTopPads][app::kHelpPadLabel + 1];
 };
 O3SDK_BIG SampleData g_sd = {};
+static_assert(kSliceMax == sm::kMaxSlices, "the step sequencer's map holds one entry per slice");
 
 // The slices of `slot` that sound, as a bit mask (bit i: slice i + 1).
 std::uint32_t sounding_mask(unsigned slot) noexcept {
@@ -112,7 +115,8 @@ std::uint32_t sounding_mask(unsigned slot) noexcept {
 
 }  // namespace
 
-void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform) noexcept {
+void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform, StepSeq* seq) noexcept {
+  seq_ = seq;
   voice_ = voice;
   voc_ = voc;
   perform_ = perform;
@@ -120,6 +124,8 @@ void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* pe
   focus_ = 0;
   g_sd = SampleData{};  // a restarted app starts from the defaults
 }
+
+SliceMap* SampleScreen::slice_map() noexcept { return &g_sd.map; }
 
 const ui::Theme* SampleScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
 
@@ -291,6 +297,11 @@ void SampleScreen::service(app::Context& ctx) noexcept {
       sm::even_cuts(g_sd.table[j], len);
     }
   }
+  if (seq_ != nullptr && perform_ != nullptr) {  // the SPEAKS slot's slices go to the step sequencer when the slot or its length changed
+    const route::Route rt = perform_->route_now(ctx);
+    const unsigned slot = route::is_slot(rt.speaks) ? static_cast<unsigned>(rt.speaks - route::kFirstSlot) : sm::kReaders;
+    (void)sm::publish_slices(*seq_, g_sd.published, slot, slot < sm::kReaders ? &g_sd.table[slot] : nullptr, Loop::kMaxSamples);
+  }
 }
 
 // F2: the slot moves to the next side. The side it leaves is freed first, so each write keeps the route allowed and the unit stops or plays
@@ -430,8 +441,18 @@ void SampleScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   perform_->leds(ctx, leds);
   const unsigned count = g_sd.table[slot_ & 3u].count;
   const std::uint32_t on = sounding_mask(slot_);
+  // The slice the SLICE lane played last, on the SPEAKS slot: mid, unless a pad press has it on already.
+  unsigned lane_pad = sm::kTopPads;
+  const unsigned lane_slice = seq_ != nullptr ? seq_->playing_slice() : 0u;
+  if (lane_slice != 0u && perform_->route_now(ctx).speaks == sm::slot_value(slot_)) {
+    lane_pad = lane_slice - 1u;
+  }
   for (unsigned pad = 0; pad < sm::kTopPads; ++pad) {
-    leds.set(pad, pad < count ? (((on >> pad) & 1u) != 0u ? app::kLedOn : app::kLedDim) : app::kLedOff);
+    std::uint8_t level = pad < count ? (((on >> pad) & 1u) != 0u ? app::kLedOn : app::kLedDim) : app::kLedOff;
+    if (pad == lane_pad && level != app::kLedOn) {
+      level = app::kLedMid;
+    }
+    leds.set(pad, level);
   }
 }
 

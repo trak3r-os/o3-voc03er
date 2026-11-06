@@ -178,9 +178,15 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad) noexcept {
     case pt::Lane::Level:
       ok = set_level(p, cursor_, pt::level_of_pad(pad));
       break;
-    case pt::Lane::Slice:
-      say(ctx, "SLICE LANE: SOON");
-      return;
+    case pt::Lane::Slice: {
+      const pt::SliceWrite w = pt::slice_write(p, cursor_, pad, seq_ != nullptr ? seq_->slice_count() : 0u);
+      if (w == pt::SliceWrite::NoSlices) {
+        say(ctx, "SPEAKS HAS NO SLICES");
+        return;
+      }
+      ok = w == pt::SliceWrite::Written;
+      break;
+    }
   }
   if (ok) {
     cursor_ = static_cast<std::uint8_t>(pt::next_cursor(cursor_, length_of(p)));
@@ -237,11 +243,11 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       break;
     }
     case 4:  // VALUE
-      if (lane() == pt::Lane::Slice) {
-        say(ctx, "SLICE LANE: SOON");
+      if (lane() == pt::Lane::Slice && (seq_ == nullptr || seq_->slice_count() == 0u)) {
+        say(ctx, "SPEAKS HAS NO SLICES");
         return;
       }
-      (void)pt::step_value(p, cursor_, lane(), delta);
+      (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u);
       break;
     default:
       return;
@@ -260,7 +266,7 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       for (unsigned i = 0; i < kPatternSteps; ++i) {
         (void)pt::rest_lane(p, i, lane());
       }
-      say(ctx, lane() == pt::Lane::Slice ? "SLICE LANE: SOON" : "LANE CLEARED");
+      say(ctx, "LANE CLEARED");
       return;
     }
     if (k == 6u) {  // FOLLOW
@@ -329,9 +335,12 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const bool keys = perform_ != nullptr && perform_->keys_mode();
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
   const ChordKind bottom = static_cast<ChordKind>(perform_ != nullptr ? perform_->chord_kind() : 0u);
+  const unsigned slices = seq_ != nullptr ? seq_->slice_count() : 0u;
   for (unsigned pad = 0; pad < pt::kPalettePads; ++pad) {
     std::uint8_t level = app::kLedDim;
-    if (lane() == pt::Lane::Slice || (lane() == pt::Lane::Carrier && pad >= pt::kCarrierPads)) {
+    if (lane() == pt::Lane::Slice) {  // the SPEAKS slot's slices: dim up to its count, mid on the cursor step's
+      level = pad < slices ? (pt::palette_matches(lane(), pad, cur, oct, keys, bottom) ? app::kLedMid : app::kLedDim) : app::kLedOff;
+    } else if (lane() == pt::Lane::Carrier && pad >= pt::kCarrierPads) {
       level = app::kLedOff;
     } else if (pt::palette_matches(lane(), pad, cur, oct, keys, bottom)) {
       level = app::kLedMid;
@@ -368,7 +377,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Note, "NOTE LANE", nullptr},
       {Button::Instr, "CARRIER LANE", nullptr},
       {Button::Vol, "LEVEL LANE", nullptr},
-      {Button::Fx, "SLICE LANE (READ ONLY)", nullptr},
+      {Button::Fx, "SLICE LANE: A SPEAKS CUT", nullptr},
       {Button::Shift, "WITH A STEP PAD: A REST", nullptr},
       {Button::Rec, "SAMPLE REC: A TAKE", nullptr},
       {Button::Params, "THE OLD PLAY SCREEN: LOOPS", nullptr},
@@ -388,8 +397,8 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {"STEPS", "MOVES THE CURSOR; SHIFT: A REST IN THE LANE", Color::Play},
       {"PATTERNS", "A TO H: SHOW IT, PLAY IT NEXT", Color::Sel},
   };
-  h.summary = "THE 16 STEPS OF A PATTERN WITH THEIR LANES: NOTE, CARRIER, LEVEL AND SLICE.\n"
-              "THE UPPER PADS WRITE THE LIT LANE; THE LOWER PADS PICK STEPS AND PATTERNS.";
+  h.summary = "THE 16 STEPS OF A PATTERN AND THEIR LANES. THE UPPER PADS WRITE THE LIT LANE.\n"
+              "A SLICE FIRES A SPEAKS CUT AT ITS STEP, ONE SHOT; STOP RELEASES IT.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -418,6 +427,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
         cat_uint(l, sizeof g_pd.name[i], pt::level_of_pad(i));
         break;
       case pt::Lane::Slice:
+        cat_uint(l, sizeof g_pd.name[i], i + 1u);
         break;
     }
     h.pad_label[i] = l[0] != '\0' ? l : nullptr;

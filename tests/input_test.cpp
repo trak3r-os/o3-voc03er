@@ -203,6 +203,14 @@ TEST_CASE("parse_pat reads a pattern letter, a step and one lane") {
   CHECK(c.act == PatAct::Level);
   REQUIRE(parse({"A", "5", "lvl", "127"}));
   CHECK(c.value == 127u);
+  REQUIRE(parse({"A", "3", "slc", "5"}));
+  CHECK(c.act == PatAct::Slice);
+  CHECK(c.step == 2u);
+  CHECK(c.value == 5u);
+  REQUIRE(parse({"A", "3", "slc", "0"}));
+  CHECK(c.value == 0u);
+  REQUIRE(parse({"A", "3", "slc", "24"}));
+  CHECK(c.value == 24u);
 }
 
 TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and leaves the command alone") {
@@ -232,6 +240,9 @@ TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and lea
   CHECK(bad({"A", "1", "car", "live"}));  // LIVE is not a lane value
   CHECK(bad({"A", "1", "lvl", "128"}));
   CHECK(bad({"A", "1", "lvl", "-1"}));
+  CHECK(bad({"A", "1", "slc", "25"}));
+  CHECK(bad({"A", "1", "slc", "-1"}));
+  CHECK(bad({"A", "1", "slc"}));
   CHECK(bad({"A", "len", "0"}));
   CHECK(bad({"A", "len", "17"}));
   CHECK(bad({"A", "len"}));

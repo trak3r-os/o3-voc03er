@@ -37,7 +37,8 @@ struct Seen {
   dsp::EventKind kind;
   std::uint8_t note;
   std::uint8_t vel;
-  float value;  // CarSrc only
+  float value;  // Param events only
+  std::uint16_t param;
 };
 
 // An instrument that writes down every note and CarSrc event it is given, with the sample it lands on.
@@ -49,10 +50,11 @@ class Spy final : public dsp::Unit {
   void process(const dsp::ProcessArgs& a) noexcept override {
     for (std::uint32_t i = 0; i < a.event_count; ++i) {
       const dsp::Event& e = a.events[i];
-      if (e.kind == dsp::EventKind::Param && (e.param != Vocoder::CarSrc || block_ == 0)) {
+      const bool mine = e.param == Vocoder::CarSrc || (e.param >= Vocoder::R1Start && e.param <= Vocoder::R4Trig);  // the hook's: CARRIER and the regions
+      if (e.kind == dsp::EventKind::Param && (!mine || block_ == 0)) {
         continue;  // block 0 carries the engine's stored values, not the hook's events
       }
-      seen.push_back({block_ * kBlock + e.frame, e.kind, e.note, e.velocity, e.value});
+      seen.push_back({block_ * kBlock + e.frame, e.kind, e.note, e.velocity, e.value, e.param});
     }
     ++block_;
     for (std::uint32_t i = 0; i < a.frames; ++i) {
@@ -70,7 +72,7 @@ class Spy final : public dsp::Unit {
 struct Rig {
   Rig() {
     id = e.attach(spy);
-    seq.init(id, &bank);
+    seq.init(id, &bank, &map);
     ok = e.set_source(0, id) && e.add_hook(seq);
     e.start();
   }
@@ -106,9 +108,31 @@ struct Rig {
     }
     return n;
   }
+  // The SPEAKS slot's slices as the sample screen would publish them: reader `rd`, `n` cuts, cut i starting at 1000 + 100 i, 500 + i long.
+  void publish(unsigned rd, unsigned n) {
+    SliceMap* m = seq.slices_open();
+    REQUIRE(m == &map);
+    for (unsigned i = 0; i < kSliceMax; ++i) {
+      m->start[i] = 1000u + 100u * i;
+      m->len[i] = 500u + i;
+    }
+    seq.slices_close(rd, n);
+  }
+  // The region events of one reader, in order, as (field, value).
+  std::vector<Seen> region(unsigned rd) const {
+    std::vector<Seen> v;
+    for (const Seen& x : spy.seen) {
+      if (x.kind == dsp::EventKind::Param && x.param >= Vocoder::region_param(rd, Vocoder::RegionField::Start) &&
+          x.param <= Vocoder::region_param(rd, Vocoder::RegionField::Trig)) {
+        v.push_back(x);
+      }
+    }
+    return v;
+  }
   dsp::Engine e;
   Spy spy;
   Bank bank = {};
+  SliceMap map = {};
   StepSeq seq;
   dsp::UnitId id = dsp::kNoUnit;
   bool ok = false;
@@ -137,7 +161,7 @@ Bank full_bank() {
       s.voicing = static_cast<std::uint8_t>((p * 3u + i) % 4u);
       s.carrier = static_cast<std::uint8_t>((p + i * 2u) % (kCarrierMax + 1u));
       s.level = static_cast<std::uint8_t>((p * 17u + i * 5u) % 128u);
-      s.slice = static_cast<std::uint8_t>(p * 16u + i);
+      s.slice = static_cast<std::uint8_t>((p * 16u + i) % (kSliceMax + 1u));
       REQUIRE(set_step(d, i, s));
     }
     REQUIRE(set_length(d, 1u + (p * 5u) % kPatternSteps));
@@ -177,20 +201,22 @@ TEST_CASE("step: every field round trips through the word, and the zero word is 
   s.voicing = 3;
   s.carrier = 6;
   s.level = 127;
-  s.slice = 200;
+  s.slice = 24;
   const Step back = unpack_step(pack_step(s));
   CHECK(back.note == 127);
   CHECK(back.kind == 4);
   CHECK(back.voicing == 3);
   CHECK(back.carrier == 6);
   CHECK(back.level == 127);
-  CHECK(back.slice == 200);
+  CHECK(back.slice == 24);
   CHECK(step_velocity(back) == 127);
   CHECK_FALSE(step_valid(Step{128, 0, 0, 0, 0, 0}));
   CHECK_FALSE(step_valid(Step{1, 5, 0, 0, 0, 0}));
   CHECK_FALSE(step_valid(Step{1, 0, 4, 0, 0, 0}));
   CHECK_FALSE(step_valid(Step{1, 0, 0, 7, 0, 0}));  // LIVE (7) is never a lane value
   CHECK_FALSE(step_valid(Step{1, 0, 0, 0, 128, 0}));
+  CHECK_FALSE(step_valid(Step{1, 0, 0, 0, 0, 25}));  // SLICE is 0..24
+  CHECK(step_valid(Step{1, 0, 0, 0, 0, 24}));
 }
 
 TEST_CASE("editing: the lanes change one field each, a bad value or step changes nothing") {
@@ -366,6 +392,10 @@ TEST_CASE("bank file: a file that fails a check loads nothing") {
   CHECK(refused(with_bank(8, 16, pack_step(Step{1, 0, 0, 0, 0, 0}) | (7u << 13))));  // carrier 7 (LIVE)
   CHECK(refused(with_bank(8, 16, 0x00000080u)));                                     // note 128
   CHECK(refused(with_bank(8, 16, 5u << 8)));                                         // kind 5
+  CHECK(refused(with_bank(8, 16, 25u << 24)));                                       // slice 25
+  const std::vector<std::uint8_t> s24 = with_bank(8, 16, 24u << 24);
+  CHECK(read_bank(s24.data(), s24.size(), t));                                       // slice 24 is the last one
+  CHECK(get_step(t.pattern[6], 9).slice == 24u);
 }
 
 // ---- The hook ------------------------------------------------------------------------------------------------------------------
@@ -524,4 +554,104 @@ TEST_CASE("step hook: a big chord stays within the unit's event budget for a blo
   REQUIRE(rig.e.stop());
   rig.run(4);
   CHECK(rig.hanging() == 0);
+}
+
+// ---- The SLICE lane (U6c) ------------------------------------------------------------------------------------------------------
+
+TEST_CASE("slice: set_slice edits one field, 0..24, a bad value or step changes nothing") {
+  PatternData p = {};
+  REQUIRE(set_note(p, 2, 60));
+  REQUIRE(set_slice(p, 2, 24));
+  CHECK(get_step(p, 2).slice == 24u);
+  CHECK(get_step(p, 2).note == 60u);  // the other lanes stay
+  CHECK_FALSE(set_slice(p, 2, 25));
+  CHECK_FALSE(set_slice(p, 16, 1));
+  CHECK(get_step(p, 2).slice == 24u);
+  REQUIRE(set_slice(p, 2, 0));
+  CHECK(get_step(p, 2).slice == 0u);
+  REQUIRE(set_slice(p, 5, 7));
+  REQUIRE(set_level(p, 5, 90));  // LEVEL does not touch the slice
+  CHECK(get_step(p, 5).slice == 7u);
+}
+
+TEST_CASE("slice hook: Start, Len, Trig 1 of the published reader, in that order, on the step's frame") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  rig.publish(2, 8);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_slice(a, 0, 3));
+  REQUIRE(set_slice(a, 1, 0));   // none
+  REQUIRE(set_slice(a, 2, 9));   // above the count of 8: silent
+  REQUIRE(set_slice(a, 3, 5));   // a rest in NOTE still fires its slice
+  REQUIRE(rig.e.play());
+  rig.run_samples(4 * kSixteenth);
+  const std::vector<Seen> r = rig.region(2);
+  REQUIRE(r.size() == 6);
+  using RF = Vocoder::RegionField;
+  CHECK(r[0].param == Vocoder::region_param(2, RF::Start));
+  CHECK(r[0].value == 1000.0f + 200.0f);
+  CHECK(r[1].param == Vocoder::region_param(2, RF::Len));
+  CHECK(r[1].value == 502.0f);
+  CHECK(r[2].param == Vocoder::region_param(2, RF::Trig));
+  CHECK(r[2].value == 1.0f);
+  CHECK(r[0].at == kBlock);
+  CHECK(r[2].at == kBlock);
+  CHECK(r[3].value == 1000.0f + 400.0f);
+  CHECK(r[4].value == 504.0f);
+  CHECK(r[5].value == 1.0f);
+  CHECK(near(r[3].at, 3 * kSixteenth));
+  CHECK(near(r[5].at, 3 * kSixteenth));
+  for (unsigned k = 0; k < 4; ++k) {
+    if (k != 2) {
+      CHECK(rig.region(k).empty());  // no other reader hears of it
+    }
+  }
+  CHECK(rig.seq.playing_slice() == 5u);
+}
+
+TEST_CASE("slice hook: no source, a hidden map or a SPEAKS with no slices emits nothing, not even a Stop") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  REQUIRE(set_slice(rig.bank.pattern[0], 0, 1));
+  REQUIRE(set_slice(rig.bank.pattern[0], 1, 2));
+  REQUIRE(rig.e.play());  // nothing published
+  rig.run_samples(2 * kSixteenth);
+  CHECK(rig.region(0).empty());
+  rig.publish(1, 4);
+  (void)rig.seq.slices_open();  // a rewrite in progress: count 0 until slices_close
+  CHECK(rig.seq.slice_count() == 0u);
+  rig.run_samples(32 * kSixteenth);
+  for (unsigned k = 0; k < 4; ++k) {
+    CHECK(rig.region(k).empty());
+  }
+  CHECK(rig.seq.playing_slice() == 0u);
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  for (unsigned k = 0; k < 4; ++k) {
+    CHECK(rig.region(k).empty());  // nothing fired: no Trig 0
+  }
+  rig.seq.slices_close(1, 0);  // a count of 0 is none
+  CHECK(rig.seq.slice_reader() == StepSeq::kNoReader);
+}
+
+TEST_CASE("slice hook: Stop releases the reader that fired, once, even after the source changed") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  rig.publish(2, 8);
+  REQUIRE(set_slice(rig.bank.pattern[0], 0, 3));
+  REQUIRE(rig.e.play());
+  rig.run_samples(0.5 * kSixteenth);
+  CHECK(rig.seq.playing_slice() == 3u);
+  rig.publish(1, 6);  // SPEAKS moved to slot 2 while it played
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  const std::vector<Seen> r = rig.region(2);
+  REQUIRE(r.size() == 4);  // Start, Len, Trig 1, then the Trig 0
+  CHECK(r[3].param == Vocoder::region_param(2, Vocoder::RegionField::Trig));
+  CHECK(r[3].value == 0.0f);
+  CHECK(rig.region(1).empty());
+  CHECK(rig.seq.playing_slice() == 0u);
+  rig.run(12);  // a longer stopped stretch: no second release
+  CHECK(rig.region(2).size() == 4);
 }

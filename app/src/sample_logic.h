@@ -5,6 +5,7 @@
 // dB text, the pads' split. Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates or reads the engine.
 
 #include <o3_voc03er/route.h>
+#include <o3_voc03er/stepseq.h>
 
 #include <cstdint>
 
@@ -159,6 +160,38 @@ inline void even_cuts(SliceTable& t, std::uint32_t length, unsigned want = kDefa
 
 // The Start the unit takes: the bank's samples, slot after slot of `per_loop` (the size bind_loops was given).
 constexpr std::uint32_t region_start(unsigned slot, std::uint32_t per_loop, const Cut& c) noexcept { return slot * per_loop + c.start; }
+
+// What the step sequencer's SLICE lane was last given (main loop): the slot + 1 (0 none) and the length its cuts were built for.
+struct SlicePublished {
+  std::uint8_t slot1 = 0;
+  std::uint32_t len = 0;
+};
+
+// The SPEAKS slot's slices to the step sequencer (U6c), only when the slot or its table's length changed since the last call: a pass that finds
+// nothing new costs two compares. `slot` >= kReaders (SPEAKS LIVE or NONE) or an empty table publishes none (reader 0xFF, count 0). The hook
+// never reads the map while it is rewritten (StepSeq::slices_open stores count 0 first). Returns true when it published. Only the length is
+// compared because even cuts follow from it: SAMPLE EDIT (U7) moves cuts at the same length and has to clear `st` to force a publish.
+inline bool publish_slices(StepSeq& seq, SlicePublished& st, unsigned slot, const SliceTable* table, std::uint32_t per_loop) noexcept {
+  const bool have = slot < kReaders && table != nullptr && table->length != 0u;
+  const std::uint8_t want = have ? static_cast<std::uint8_t>(slot + 1u) : std::uint8_t{0};
+  const std::uint32_t len = have ? table->length : 0u;
+  if (st.slot1 == want && st.len == len) {
+    return false;
+  }
+  SliceMap* m = seq.slices_open();
+  unsigned count = 0;
+  if (m != nullptr && have) {
+    count = table->count < kMaxSlices ? table->count : kMaxSlices;
+    for (unsigned i = 0; i < count; ++i) {
+      m->start[i] = region_start(slot, per_loop, table->cut[i]);
+      m->len[i] = table->cut[i].len;
+    }
+  }
+  seq.slices_close(have ? slot : StepSeq::kNoReader, count);
+  st.slot1 = want;
+  st.len = len;
+  return true;
+}
 
 // A slice sounds on the side of its slot; a slot on no side speaks (design section 1). true: the reader's Role is CAR.
 constexpr bool slice_is_carrier(Side s) noexcept { return s == Side::Sounds; }
