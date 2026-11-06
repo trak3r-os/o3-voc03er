@@ -6,8 +6,9 @@
 // the Canvas gives, the clear bits not at all):
 //   coarse mask  288 x 192: a 6 x 6 pitch, Pane ink on the rim of each cell, leaving a 5 x 5 round pinhole (the voiceprint, the ladders)
 //   fine mask    8 x 8, repeated: a 4 px pitch, 3 x 3 pinholes (the chord readout)
-//   dot atlas    22 cells of 24 x 32: a blank cell, then the letters a chord's name can hold, in 5 x 7 dots of 3 x 3 px at a 4 px pitch
-// Pure data and constexpr code: a host test checks the pixels (tests/ornoir_assets_test.cpp).
+//   dot atlas    20 cells of 32 x 40: a blank cell, then the characters a chord's name can hold, the kit's Label face (Spleen 8 x 16, BSD-2-Clause,
+//                third_party/fonts in o3-sdk) rows 2 to 11, each bit a 3 x 3 px dot at a 4 px pitch. No character has a descender: chords.h says "M7" and "+".
+// Pure data and constexpr code: a host test checks the pixels (tests/perform_logic_test.cpp).
 
 #include <o3sdk/app/app_assets.h>
 #include <o3sdk/eve/dl.h>
@@ -22,40 +23,39 @@ namespace o3_voc03er::ornoir {
 inline constexpr unsigned kMaskW = 288, kMaskH = 192, kMaskStride = kMaskW / 8;
 inline constexpr unsigned kMaskBytes = kMaskStride * kMaskH;  // 6912
 inline constexpr unsigned kFineBytes = 8;
-inline constexpr unsigned kCellW = 24, kCellH = 32, kCellStride = kCellW / 8, kCellBytes = kCellStride * kCellH;  // 96
-inline constexpr const char kGlyphChars[] = "ABCDEFG#M257abdgijmsu";  // cell 1 + index; cell 0 is blank
+inline constexpr unsigned kCellW = 32, kCellH = 40, kCellStride = kCellW / 8, kCellBytes = kCellStride * kCellH;  // 160
+inline constexpr const char kGlyphChars[] = "ABCDEFG#M257bdimsu+";  // cell 1 + index; cell 0 is blank
 inline constexpr unsigned kGlyphCount = sizeof kGlyphChars - 1;
 inline constexpr unsigned kAtlasCells = kGlyphCount + 1;
-inline constexpr unsigned kAtlasBytes = kAtlasCells * kCellBytes;  // 2112
+inline constexpr unsigned kAtlasBytes = kAtlasCells * kCellBytes;  // 3200
 
 namespace detail {
 
 // Row `r` of the mask's 6 x 6 cell; '#' is ink.
 inline constexpr const char* kMaskRows[6] = {"#...##", ".....#", ".....#", ".....#", "#...##", "######"};
 
-// The 5 x 7 glyphs, a string of 7 rows of 5 characters each ('1' a lit dot).
-inline constexpr const char* kGlyphs[kGlyphCount] = {
-    "01110" "10001" "10001" "11111" "10001" "10001" "10001",  // A
-    "11110" "10001" "10001" "11110" "10001" "10001" "11110",  // B
-    "01110" "10001" "10000" "10000" "10000" "10001" "01110",  // C
-    "11110" "10001" "10001" "10001" "10001" "10001" "11110",  // D
-    "11111" "10000" "10000" "11110" "10000" "10000" "11111",  // E
-    "11111" "10000" "10000" "11110" "10000" "10000" "10000",  // F
-    "01110" "10001" "10000" "10111" "10001" "10001" "01111",  // G
-    "01010" "01010" "11111" "01010" "11111" "01010" "01010",  // #
-    "10001" "11011" "10101" "10101" "10001" "10001" "10001",  // M
-    "01110" "10001" "00001" "00010" "00100" "01000" "11111",  // 2
-    "11111" "10000" "11110" "00001" "00001" "10001" "01110",  // 5
-    "11111" "00001" "00010" "00100" "01000" "01000" "01000",  // 7
-    "00000" "00000" "01110" "00001" "01111" "10001" "01111",  // a
-    "10000" "10000" "10110" "11001" "10001" "10001" "11110",  // b
-    "00001" "00001" "01101" "10011" "10001" "10001" "01111",  // d
-    "00000" "01111" "10001" "10001" "01111" "00001" "01110",  // g
-    "00100" "00000" "01100" "00100" "00100" "00100" "01110",  // i
-    "00010" "00000" "00110" "00010" "00010" "10010" "01100",  // j
-    "00000" "00000" "11010" "10101" "10101" "10001" "10001",  // m
-    "00000" "00000" "01111" "10000" "01110" "00001" "11110",  // s
-    "00000" "00000" "10001" "10001" "10001" "10011" "01101",  // u
+// The Label face's rows 2 to 11 of each character of kGlyphChars, the left dot in the high bit.
+inline constexpr unsigned kGlyphRows = 10;
+inline constexpr std::uint8_t kGlyphs[kGlyphCount][kGlyphRows] = {
+    {0x7C, 0xC6, 0xC6, 0xC6, 0xFE, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6},  // A
+    {0xFC, 0xC6, 0xC6, 0xC6, 0xFC, 0xC6, 0xC6, 0xC6, 0xC6, 0xFC},  // B
+    {0x7E, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0x7E},  // C
+    {0xFC, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xFC},  // D
+    {0x7E, 0xC0, 0xC0, 0xC0, 0xF8, 0xC0, 0xC0, 0xC0, 0xC0, 0x7E},  // E
+    {0x7E, 0xC0, 0xC0, 0xC0, 0xF8, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0},  // F
+    {0x7E, 0xC0, 0xC0, 0xC0, 0xDE, 0xC6, 0xC6, 0xC6, 0xC6, 0x7E},  // G
+    {0x6C, 0x6C, 0xFE, 0x6C, 0x6C, 0x6C, 0x6C, 0xFE, 0x6C, 0x6C},  // #
+    {0xC6, 0xEE, 0xFE, 0xD6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6},  // M
+    {0x7C, 0xC6, 0x06, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xC6, 0xFE},  // 2
+    {0xFE, 0xC6, 0xC0, 0xC0, 0xFC, 0x06, 0x06, 0x06, 0xC6, 0x7C},  // 5
+    {0xFE, 0xC6, 0x06, 0x06, 0x0C, 0x18, 0x30, 0x30, 0x30, 0x30},  // 7
+    {0xC0, 0xC0, 0xC0, 0xFC, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xFC},  // b
+    {0x06, 0x06, 0x06, 0x7E, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0x7E},  // d
+    {0x18, 0x18, 0x00, 0x38, 0x18, 0x18, 0x18, 0x18, 0x18, 0x1C},  // i
+    {0x00, 0x00, 0x00, 0xEC, 0xD6, 0xD6, 0xD6, 0xD6, 0xC6, 0xC6},  // m
+    {0x00, 0x00, 0x00, 0x7E, 0xC0, 0xC0, 0x7C, 0x06, 0x06, 0xFC},  // s
+    {0x00, 0x00, 0x00, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0x7E},  // u
+    {0x00, 0x00, 0x00, 0x18, 0x18, 0x7E, 0x18, 0x18, 0x00, 0x00},  // +
 };
 
 template <std::size_t N>
@@ -95,9 +95,9 @@ constexpr Bytes<kAtlasBytes> make_atlas() noexcept {
   Bytes<kAtlasBytes> a;
   for (unsigned g = 0; g < kGlyphCount; ++g) {
     std::uint8_t* cell = a.b + (g + 1u) * kCellBytes;
-    for (unsigned row = 0; row < 7; ++row) {
-      for (unsigned col = 0; col < 5; ++col) {
-        if (kGlyphs[g][row * 5u + col] != '1') {
+    for (unsigned row = 0; row < kGlyphRows; ++row) {
+      for (unsigned col = 0; col < 8; ++col) {
+        if ((kGlyphs[g][row] & (0x80u >> col)) == 0u) {
           continue;
         }
         for (unsigned dy = 0; dy < 3; ++dy) {

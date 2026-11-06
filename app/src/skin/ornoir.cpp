@@ -55,7 +55,7 @@ int len(const char* s) noexcept { return static_cast<int>(std::strlen(s)); }
 constexpr int kVx = 256, kVy = 72, kHorizon = 204, kPitch = 6, kColStride = 18, kColW = 12, kRowsUp = 22;
 constexpr int kPadX = 64, kPadY = 292, kPadW = 60, kPadH = 24;
 constexpr std::uint8_t kDim = 120;  // the unlit pinhole's alpha
-constexpr unsigned kAtlasAdvance = 24;
+constexpr unsigned kAtlasAdvance = 32;
 
 void fill(plot::Canvas& c, int x, int y, int w, int h, Color k, std::uint8_t a = 255) noexcept { c.rect(Rect{x, y, w, h}, col(k), a); }
 
@@ -127,7 +127,7 @@ unsigned note_name(int note, char* out) noexcept {
 }
 
 bool atlas_can_spell(const char* name) noexcept {
-  if (len(name) > 9 || name[0] == '\0') {
+  if (len(name) > 6 || name[0] == '\0') {  // six cells of 32 px fill the readout
     return false;
   }
   for (const char* s = name; *s != '\0'; ++s) {

@@ -111,3 +111,23 @@ TEST_CASE("parse_loop reads speed, direction and level") {
   CHECK_FALSE(parse_loop("1", "lvl", c));
   CHECK_FALSE(parse_loop("1", "rev", c, "3"));
 }
+
+TEST_CASE("voc formant and voc thru: the console's two BANDS values") {
+  VocShape s;
+  CHECK(parse_voc_shape("formant", "-12", s));
+  CHECK_FALSE(s.thru);
+  CHECK(s.value == -12);
+  CHECK(parse_voc_shape("formant", "7", s));
+  CHECK(s.value == 7);
+  CHECK(parse_voc_shape("thru", "100", s));
+  CHECK(s.thru);
+  CHECK(s.value == 100);
+  CHECK_FALSE(parse_voc_shape("formant", "13", s));
+  CHECK_FALSE(parse_voc_shape("formant", "-13", s));
+  CHECK_FALSE(parse_voc_shape("formant", "-", s));
+  CHECK_FALSE(parse_voc_shape("thru", "-1", s));
+  CHECK_FALSE(parse_voc_shape("thru", "101", s));
+  CHECK_FALSE(parse_voc_shape("thru", "1x", s));
+  CHECK_FALSE(parse_voc_shape("bands", "3", s));
+  CHECK_FALSE(parse_voc_shape("thru", nullptr, s));
+}

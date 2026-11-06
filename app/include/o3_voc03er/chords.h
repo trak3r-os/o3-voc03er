@@ -88,15 +88,15 @@ inline int smooth_cost(const int* a, std::size_t na, const std::uint8_t* b, std:
 // The name suffix of the stacked thirds (`i3`, `i5`, `i7` semitones above the root).
 inline const char* triad_suffix(int i3, int i5) noexcept {
   if (i3 == 3) return i5 == 6 ? "dim" : i5 == 8 ? "m#5" : "m";
-  return i5 == 8 ? "aug" : i5 == 6 ? "b5" : "";
+  return i5 == 8 ? "+" : i5 == 6 ? "b5" : "";
 }
 inline const char* seventh_suffix(int i3, int i5, int i7) noexcept {
   if (i3 == 3) {
-    if (i5 == 6) return i7 == 9 ? "dim7" : i7 == 10 ? "m7b5" : "mMaj7b5";
-    return i7 == 11 ? "mMaj7" : "m7";
+    if (i5 == 6) return i7 == 9 ? "dim7" : i7 == 10 ? "m7b5" : "mM7b5";
+    return i7 == 11 ? "mM7" : "m7";
   }
-  if (i5 == 8) return i7 == 11 ? "augMaj7" : "aug7";
-  return i7 == 11 ? "maj7" : i7 == 10 ? "7" : "7b5";
+  if (i5 == 8) return i7 == 11 ? "+M7" : "+7";
+  return i7 == 11 ? "M7" : i7 == 10 ? "7" : "7b5";
 }
 
 }  // namespace chords_detail

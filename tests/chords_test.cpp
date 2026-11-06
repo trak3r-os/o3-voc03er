@@ -43,8 +43,8 @@ TEST_CASE("chords: triads of C major, every root") {
 }
 
 TEST_CASE("chords: sevenths of C major, every diatonic root") {
-  const Case t[] = {{0, "Cmaj7", {48, 52, 55, 59}}, {2, "Dm7", {50, 53, 57, 60}}, {4, "Em7", {52, 55, 59, 62}},
-                    {5, "Fmaj7", {53, 57, 60, 64}}, {7, "G7", {55, 59, 62, 65}},   {9, "Am7", {57, 60, 64, 67}},
+  const Case t[] = {{0, "CM7", {48, 52, 55, 59}}, {2, "Dm7", {50, 53, 57, 60}}, {4, "Em7", {52, 55, 59, 62}},
+                    {5, "FM7", {53, 57, 60, 64}}, {7, "G7", {55, 59, 62, 65}},   {9, "Am7", {57, 60, 64, 67}},
                     {11, "Bm7b5", {59, 62, 65, 69}}};
   for (const Case& e : t) expect(make_chord(ChordKind::Seventh, e.pc, 0, 0, kMajor, Voicing::Close), e);
 }
@@ -70,8 +70,8 @@ TEST_CASE("chords: triads and sevenths of A minor, every root") {
   const Case tri[] = {{0, "C", {48, 52, 55}},  {2, "Dm", {50, 53, 57}}, {4, "Em", {52, 55, 59}}, {5, "F", {53, 57, 60}},
                       {7, "G", {55, 59, 62}},  {9, "Am", {57, 60, 64}}, {11, "Bdim", {59, 62, 65}}};
   for (const Case& e : tri) expect(make_chord(ChordKind::Triad, e.pc, 0, 9, kMinor, Voicing::Close), e);
-  const Case sev[] = {{9, "Am7", {57, 60, 64, 67}},  {11, "Bm7b5", {59, 62, 65, 69}}, {0, "Cmaj7", {48, 52, 55, 59}},
-                      {2, "Dm7", {50, 53, 57, 60}},  {4, "Em7", {52, 55, 59, 62}},     {5, "Fmaj7", {53, 57, 60, 64}},
+  const Case sev[] = {{9, "Am7", {57, 60, 64, 67}},  {11, "Bm7b5", {59, 62, 65, 69}}, {0, "CM7", {48, 52, 55, 59}},
+                      {2, "Dm7", {50, 53, 57, 60}},  {4, "Em7", {52, 55, 59, 62}},     {5, "FM7", {53, 57, 60, 64}},
                       {7, "G7", {55, 59, 62, 65}}};
   for (const Case& e : sev) expect(make_chord(ChordKind::Seventh, e.pc, 0, 9, kMinor, Voicing::Close), e);
   // The notes outside the scale: A minor has no C#, D#, F#, G#, A#.

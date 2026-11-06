@@ -108,6 +108,36 @@ struct VocCommand {
   unsigned notes = 0;
 };
 // false (out untouched) for a word that is not a mode, a count that is not 0..8 or an extra word. No count means 0 (release all).
+// `voc formant <-12..12>` and `voc thru <0..100>`: which of the two and its value.
+struct VocShape {
+  bool thru = false;
+  int value = 0;
+};
+inline bool parse_voc_shape(const char* what, const char* value, VocShape& out) noexcept {
+  if (what == nullptr || value == nullptr) {
+    return false;
+  }
+  VocShape v;
+  if (std::strcmp(what, "thru") == 0) {
+    v.thru = true;
+  } else if (std::strcmp(what, "formant") != 0) {
+    return false;
+  }
+  const bool negative = value[0] == '-' && !v.thru;
+  std::size_t i = negative ? 1u : 0u;
+  const std::size_t first = i;
+  int n = 0;
+  for (; value[i] >= '0' && value[i] <= '9' && i < first + 3u; ++i) {
+    n = n * 10 + (value[i] - '0');
+  }
+  if (i == first || value[i] != '\0' || n > (v.thru ? 100 : 12)) {
+    return false;
+  }
+  v.value = negative ? -n : n;
+  out = v;
+  return true;
+}
+
 inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noexcept {
   VocCommand v;
   if (mode != nullptr && std::strcmp(mode, "bands") == 0) {

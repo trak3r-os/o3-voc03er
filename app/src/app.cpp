@@ -71,7 +71,7 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
-    {"voc", "voc <bands|talk|tune> [notes 0..8]: set the vocoder mode, hold N notes", &voc_command},
+    {"voc", "voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100>", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
@@ -119,6 +119,9 @@ class MyApp final : public app::App {
     // simulator and app_test fail on it, so the result need not be checked here.
     (void)e.set_source(0, voice);
     voc_id_ = voice;
+    // the first boot of section 10 of docs/UI-DESIGN.md: the synth under the voice, in C major
+    (void)e.set_param(voice, o3_voc03er::Vocoder::CarSrc, 1.0f);
+    (void)e.set_param(voice, o3_voc03er::Vocoder::Scale, 1.0f);
     meter_.reset(0, 0);
     console_notes_ = 0;
     play_.init(voice, &meter_, &voc_);
@@ -310,10 +313,22 @@ class MyApp final : public app::App {
 
   // `voc <bands|talk|tune> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    o3_voc03er::VocShape shape;
+    if (ctx_ != nullptr && args.argc == 3u && o3_voc03er::parse_voc_shape(args.arg(1), args.arg(2), shape)) {
+      dsp::Engine& e = ctx_->engine();
+      if (shape.thru) {
+        (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Thru, static_cast<float>(shape.value) * 0.01f);
+      } else {
+        (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Formant, static_cast<float>(shape.value));
+      }
+      const unsigned size = static_cast<unsigned>(shape.value < 0 ? -shape.value : shape.value);
+      out.text("voc: ").text(shape.thru ? "thru " : "formant ").text(shape.value < 0 ? "-" : "").dec(size).nl();
+      return;
+    }
     o3_voc03er::VocCommand c;
     if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
         !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
-      out.text("usage: voc <bands|talk|tune> [notes 0..8]").nl();
+      out.text("usage: voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100>").nl();
       return;
     }
     dsp::Engine& e = ctx_->engine();
