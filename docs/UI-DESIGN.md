@@ -100,6 +100,13 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
   (TRIAD, 7TH, OPEN, POWER: the kind of the bottom chord row, section 7) · F7 PADS (CHORDS, CHORDS + BEND, KEYS) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
   A tap on F2 or F3 opens its picker as a list over the column (UP / DOWN or the encoder, the key again or F1 takes it, F8 backs out); the
   dimmed rows are the rule of section 2.
+  Built in U3b: this replaces the second-tap-steps rule for F2 and F3 only (the other F keys keep it); the same key again takes the row the cursor is
+  on, F1 too, F2 and F3 switch lists, F4 to F7 and SHIFT close the list and act, the pads, LEFT / RIGHT and the other keys work as usual under it.
+  A dimmed LIVE source arms a capture (the chip reads "REC > SLOT, THEN <source>"; REC runs it); a dimmed slot only says IN USE. REC takes the
+  first slot that is empty, on no side and not recording (none: "NO EMPTY SLOT"; there is no re-record), records 2 bars (`kCapBars`; the
+  stop is written in the middle of the second bar while the transport plays, so the unit stops at the bar line, and at once when it is stopped),
+  and REC again cancels while it waits for the bar or stops early while it records. The ADC and the route change in one step, when the loop holds audio.
+  The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side is SAMPLE's F2 SIDE, and FOLLOW is a value of the pattern's CARRIER lane.
 - Pads: CHORDS (default, section 7) or KEYS (a four-octave keyboard, today's `pad_map.h`); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
   releases. REC captures.
 - LEDs: section 7 for CHORDS; KEYS: white keys `kLedDim`, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays.

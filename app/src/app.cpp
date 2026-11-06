@@ -143,7 +143,7 @@ class MyApp final : public app::App {
     meter_.reset(0, 0);
     console_notes_ = 0;
     play_.init(voice, &meter_, &voc_);
-    perform_.init(voice, &meter_, &voc_, &step_source_cb, this);
+    perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     stub_.init(voice);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     (void)ctx.midi().route(voice, 0);
@@ -483,12 +483,11 @@ class MyApp final : public app::App {
     return acked;
   }
 
-  // PERFORM's F2: the next audio source, at its own starting gain.
-  static void step_source_cb(void* user) noexcept {
+  // PERFORM's pickers: the audio source a pick or a finished capture asks for.
+  static void pick_source_cb(void* user, hal::capture::Source src, unsigned gain) noexcept {
     MyApp& a = *static_cast<MyApp*>(user);
     if (a.ctx_ != nullptr && a.ctx_->audio_in().available()) {
-      const hal::capture::Source next = o3_voc03er::next_source(a.ctx_->audio_in().source());
-      (void)a.select_source(next, o3_voc03er::default_gain(next));
+      (void)a.select_source(src, gain);
     }
   }
 

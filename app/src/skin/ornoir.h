@@ -82,8 +82,27 @@ unsigned ladder_height(std::uint8_t level, unsigned full_px) noexcept;  // whole
 
 // ---- SPEAKS and SOUNDS columns ------------------------------------------------------------------------------------------------------
 
+// A picker over a column (docs/UI-DESIGN.md section 3, PERFORM): up to kPickerRows rows, the cursor one framed hot, the row in force marked, a dimmed
+// row with its reason in `note`. Plain bytes, no initialisers: the screen keeps one in the SDRAM (O3SDK_BIG, zero at start).
+inline constexpr unsigned kPickerRows = 13;
+struct PickerRow {
+  char name[12];
+  char note[16];  // a dimmed row: why (CAPTURE FIRST); else the source or the slot's state
+  bool dimmed;
+  bool on;  // the value in force
+};
+struct PickerView {
+  unsigned count;
+  unsigned cursor;
+  PickerRow row[kPickerRows];
+};
+
 struct SpeaksState {
-  const char* source = "";  // the chip: LINE, MIC LOW ...
+  const char* source = "";  // the chip: what speaks (MIC LOW, SLOT 2 ...)
+  const char* live = nullptr;  // the ADC's source under LIVE (null: `source`)
+  const char* capture = "";    // the capture chip under the column ("REC: CAPTURE MIC > SLOT 2"); empty: none
+  std::uint8_t slot[4] = {};   // the slot boxes: 0 empty, 1 holds audio, 2 on a side, 3 recording
+  const PickerView* picker = nullptr;  // open: the list replaces the column's body
   unsigned gain = 0;
   Ladder in;
   bool clipping = false;
@@ -99,6 +118,7 @@ struct SoundsState {
   Ladder out;
   int out_db = -60;
   const char* held = "";  // "HELD", "LATCHED" or ""
+  const PickerView* picker = nullptr;  // open: the list replaces the column's body
 };
 
 // ---- pads ---------------------------------------------------------------------------------------------------------------------------

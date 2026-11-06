@@ -5,7 +5,10 @@
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/runtime.h>
+#include <o3sdk/platform/host/fake_capture.h>
 #include <o3sdk/sim/harness.h>
+
+#include <o3_voc03er/route.h>
 
 #include <cmath>
 #include <cstddef>
@@ -81,7 +84,7 @@ TEST_CASE("perform: HELP names every control, and its legend is the page in forc
       INFO(std::string(app::button_name(b)));
       CHECK(has_row(help, b));
     }
-    for (const app::Button b : {app::Button::Shift, app::Button::Delete, app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right}) {
+    for (const app::Button b : {app::Button::Rec, app::Button::Shift, app::Button::Delete, app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right}) {
       INFO(std::string(app::button_name(b)));
       CHECK(has_row(help, b));
     }
@@ -317,4 +320,97 @@ TEST_CASE("stub: HELP gives a row to every button the stub answers") {
     CHECK(has_row(help, b));
   }
   tap(*h, app::Button::Config);
+}
+
+// ---- the F2 SPEAKS and F3 SOUNDS pickers, and the REC capture (slice U3b) ----------------------------------------------------------------
+
+namespace {
+constexpr std::uint16_t kCarSrc = 34, kModSrc = 47;
+
+struct Rig {
+  o3sdk::platform::host::FakeCapture cap;
+  std::unique_ptr<sim::Harness> h;
+  Rig() {
+    cap.input_tone(220.0f, -12.0f);
+    h = std::make_unique<sim::Harness>(::o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
+    REQUIRE(h->start());
+    h->run_ms(100);
+  }
+  // SOUNDS on the live input, so the SPEAKS picker's other sources are dimmed (CAPTURE FIRST).
+  void sounds_live() {
+    tap(*h, app::Button::F3);
+    tap(*h, app::Button::Down);
+    tap(*h, app::Button::Down);
+    tap(*h, app::Button::F1);
+    h->run_ms(20);
+  }
+};
+}  // namespace
+
+TEST_CASE("perform: F2 and F3 open a list: the cursor moves, the key again takes the row, F8 backs out") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F3);  // opens: nothing changes
+  h.run_ms(20);
+  const float car0 = unit_param(h, kCarSrc);
+  tap(h, app::Button::Down);
+  tap(h, app::Button::F8);  // backs out: the cursor's row is not taken
+  h.run_ms(20);
+  CHECK(unit_param(h, kCarSrc) == doctest::Approx(car0));
+  tap(h, app::Button::F3);
+  tap(h, app::Button::Down);  // NOISE
+  tap(h, app::Button::F3);    // the key again takes it
+  h.run_ms(20);
+  CHECK(unit_param(h, kCarSrc) == doctest::Approx(2.0f));
+  tap(h, app::Button::F3);  // the encoder moves the cursor, F1 takes it
+  h.turn(-1);
+  tap(h, app::Button::F1);
+  h.run_ms(20);
+  CHECK(unit_param(h, kCarSrc) == doctest::Approx(1.0f));
+  CHECK(h.display().peak_frame_words() < 2048u);
+}
+
+TEST_CASE("perform: a dimmed LIVE source pre-arms a capture; the ADC moves only when the slot has taken over") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.sounds_live();
+  REQUIRE(unit_param(h, kCarSrc) == doctest::Approx(7.0f));
+  const auto src0 = rig.cap.source();
+  // The dimmed row the design says: another source while the other side holds LIVE.
+  namespace route = o3_voc03er::route;
+  route::Route r;
+  r.sounds = route::kSoundsLive;
+  REQUIRE(route::row_state(route::Side::Speaks, r, route::Row{route::Kind::Source, 0}).pre_arm());
+  tap(h, app::Button::F2);
+  tap(h, app::Button::Down);  // the first other source: dimmed
+  tap(h, app::Button::F1);
+  h.run_ms(500);
+  CHECK(rig.cap.source() == src0);  // picking only arms
+  tap(h, app::Button::Rec);
+  h.run_ms(1500);  // recording, not finished
+  CHECK(rig.cap.source() == src0);
+  CHECK(unit_param(h, kCarSrc) == doctest::Approx(7.0f));
+  h.run_ms(9000);  // two bars at the default tempo, with room
+  CHECK(unit_param(h, kCarSrc) == doctest::Approx(3.0f));  // SOUNDS took SLOT 1 ...
+  CHECK(rig.cap.source() != src0);                         // ... and the ADC moved to the picked source, for SPEAKS
+  CHECK(unit_param(h, kModSrc) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: REC captures the live source into the first empty slot and the side that held LIVE takes it; REC again while armed cancels") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  const auto src0 = rig.cap.source();
+  tap(h, app::Button::Rec);
+  h.run_ms(300);
+  tap(h, app::Button::Rec);  // a second tap before the end of the bar wait or the record: stops or cancels; either leaves a consistent route
+  h.run_ms(9000);
+  CHECK(rig.cap.source() == src0);  // no pre-arm: the ADC never moves
+  const float mod = unit_param(h, kModSrc);
+  CHECK((mod == doctest::Approx(0.0f) || mod == doctest::Approx(3.0f)));
+  tap(h, app::Button::Rec);
+  h.run_ms(9000);
+  const float mod2 = unit_param(h, kModSrc);
+  CHECK(mod2 == doctest::Approx(3.0f));  // SPEAKS holds SLOT 1 (the cancelled one stayed empty, or was the first)
+  CHECK(h.runtime().frame_failures() == 0u);
 }

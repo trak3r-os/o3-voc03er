@@ -41,6 +41,7 @@ struct PerformData {
   std::uint8_t age[ornoir::kBandCount];
   std::uint8_t in_level, in_peak, in_age;
   std::uint8_t out_level, out_peak, out_age;
+  ornoir::PickerView pick;  // the open picker's rows (build_picker)
 };
 O3SDK_BIG PerformData g_pd = {};
 O3SDK_BIG app::HelpPadNames g_help_names = {};  // help(): valid while HELP is open
@@ -74,6 +75,63 @@ void append(char (&dst)[12], const char* s) noexcept {
 unsigned round_param(const dsp::Engine& e, dsp::UnitId id, std::uint16_t p) noexcept {
   const float v = e.param(id, p);
   return v < 0.0f ? 0u : static_cast<unsigned>(v + 0.5f);
+}
+
+// ---- the pickers' and the capture's helpers --------------------------------------------------------------------------------------------
+
+constexpr unsigned kCapBars = 2;            // a capture is two bars long
+constexpr std::uint64_t kCapStartMs = 250;  // the unit shows the Rec within this, or the capture failed
+constexpr const char* kSlotNames[route::kSlots] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
+static_assert(kSourceCount == route::kLiveSrcCount, "route.h's LiveSrc order is input.h's kSources");
+
+template <std::size_t N>
+void put(char (&dst)[N], const char* s) noexcept {
+  std::size_t n = 0;
+  while (*s != '\0' && n + 1u < N) {
+    dst[n++] = *s++;
+  }
+  dst[n] = '\0';
+}
+
+void cat(char* dst, std::size_t cap, const char* s) noexcept {
+  std::size_t n = std::strlen(dst);
+  while (*s != '\0' && n + 1u < cap) {
+    dst[n++] = *s++;
+  }
+  dst[n] = '\0';
+}
+
+// The route the engine holds, as route.h knows it: a ModSrc that is not LIVE or a slot (NONE) counts as LIVE, a CarSrc that is not a route value
+// (FOLLOW) as SYNTH. Only the side a pick changes is written back, so those values survive a pick on the other side.
+route::Route route_of(const dsp::Engine& e, dsp::UnitId id) noexcept {
+  const unsigned m = round_param(e, id, Vocoder::ModSrc);
+  const unsigned c = round_param(e, id, Vocoder::CarSrc);
+  route::Route r;
+  r.speaks = m < 256u && route::speaks_valid(static_cast<std::uint8_t>(m)) ? static_cast<std::uint8_t>(m) : route::kSpeaksLive;
+  r.sounds = c < 256u && route::sounds_valid(static_cast<std::uint8_t>(c)) ? static_cast<std::uint8_t>(c) : route::kSoundsSynth;
+  if (!route::allowed(r)) {
+    r.sounds = route::kSoundsSynth;
+  }
+  return r;
+}
+
+unsigned live_index(const app::AudioIn& a) noexcept {
+  if (a.available()) {
+    for (unsigned i = 0; i < kSourceCount; ++i) {
+      if (kSources[i].source == a.source()) {
+        return i;
+      }
+    }
+  }
+  return 0;
+}
+
+// Samples in one 4/4 bar at `mbpm` milli-BPM (a stopped or odd tempo reads as 20 BPM at the slowest).
+float bar_samples(unsigned mbpm) noexcept {
+  if (mbpm < 20000u) {
+    mbpm = 20000u;
+  }
+  return 1.152e10f / static_cast<float>(mbpm);
 }
 
 Chord chord_from(const std::uint8_t* notes, unsigned count) noexcept {
@@ -119,6 +177,15 @@ void PerformScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocod
   held_ = 0;
   label_sig_ = 0xFFFFFFFFu;
   frame_ = 0;
+  pick_ = 0;
+  pick_cursor_ = 0;
+  cap_ = Cap::Idle;
+  cap_slot_ = 0;
+  cap_stop_ = false;
+  cap_pre_ = false;
+  cap_pre_src_ = 0;
+  cap_pre_side_ = 0;
+  cap_t0_ = 0;
   std::memset(&g_pd, 0, sizeof g_pd);
 }
 
@@ -126,7 +193,10 @@ const ui::Theme* PerformScreen::theme(const app::Context&) const noexcept { retu
 
 void PerformScreen::enter(app::Context& ctx) noexcept { ctx.redraw(); }
 
-void PerformScreen::leave(app::Context& ctx) noexcept { release_all(ctx); }
+void PerformScreen::leave(app::Context& ctx) noexcept {
+  pick_ = 0;  // a picker does not outlive the screen; a capture does (update() resumes it)
+  release_all(ctx);
+}
 
 std::uint64_t PerformScreen::repeat_buttons(const app::Context&) const noexcept {
   return (std::uint64_t{1} << static_cast<unsigned>(Button::Left)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Right));
@@ -316,6 +386,7 @@ void PerformScreen::toggle_strip(app::Context& ctx) noexcept {
 void PerformScreen::apply_bend(app::Context& ctx) noexcept { (void)ctx.engine().set_param(voice_, Vocoder::Bend, pl::bend_sum(local_, wheel_)); }
 
 void PerformScreen::free_encoder(app::Context& ctx) noexcept {
+  pick_ = 0;
   focus_ = pl::kBendFocus;
   sfocus_ = pl::kNoShiftFocus;
   ctx.redraw();
@@ -487,6 +558,276 @@ void PerformScreen::update(app::Context& ctx) noexcept {
     flash_[0] = '\0';
     ctx.redraw();
   }
+  if (cap_ != Cap::Idle) {
+    capture_tick(ctx);
+  }
+}
+
+// ---- the pickers and the capture ------------------------------------------------------------------------------------------------------
+
+void PerformScreen::open_picker(app::Context& ctx, route::Side side) noexcept {
+  pick_ = side == route::Side::Speaks ? 1u : 2u;
+  focus_ = side == route::Side::Speaks ? 1u : 2u;
+  build_picker(ctx);
+  pick_cursor_ = 0;
+  for (unsigned i = 0; i < g_pd.pick.count; ++i) {  // the cursor starts on the value in force
+    if (g_pd.pick.row[i].on) {
+      pick_cursor_ = static_cast<std::uint8_t>(i);
+      break;
+    }
+  }
+  g_pd.pick.cursor = pick_cursor_;
+  ctx.redraw();
+}
+
+void PerformScreen::close_picker(app::Context& ctx) noexcept {
+  if (pick_ != 0u) {
+    pick_ = 0;
+    ctx.redraw();
+  }
+}
+
+// The rows of the open picker, from route.h, with the state the engine and the loops are in now.
+void PerformScreen::build_picker(app::Context& ctx) noexcept {
+  const route::Side side = pick_ == 1u ? route::Side::Speaks : route::Side::Sounds;
+  const route::Route r = route_of(ctx.engine(), voice_);
+  const route::LiveSrc cur = static_cast<route::LiveSrc>(live_index(ctx.audio_in()));
+  const std::uint8_t now = side == route::Side::Speaks ? r.speaks : r.sounds;
+  route::Row rows[route::kMaxRows];
+  const unsigned n = route::rows(side, cur, rows, route::kMaxRows);
+  ornoir::PickerView& v = g_pd.pick;
+  v.count = n < ornoir::kPickerRows ? n : ornoir::kPickerRows;
+  for (unsigned i = 0; i < v.count; ++i) {
+    ornoir::PickerRow& pr = v.row[i];
+    pr.name[0] = pr.note[0] = '\0';
+    pr.on = false;
+    const route::RowState st = route::row_state(side, r, rows[i]);
+    pr.dimmed = st.dimmed;
+    switch (rows[i].kind) {
+      case route::Kind::Synth:
+        put(pr.name, "SYNTH");
+        pr.on = now == route::kSoundsSynth;
+        break;
+      case route::Kind::Noise:
+        put(pr.name, "NOISE");
+        pr.on = now == route::kSoundsNoise;
+        break;
+      case route::Kind::Live:
+        put(pr.name, "LIVE");
+        put(pr.note, kSources[static_cast<unsigned>(cur)].label);
+        pr.on = now == (side == route::Side::Speaks ? route::kSpeaksLive : route::kSoundsLive);
+        break;
+      case route::Kind::Source:
+        put(pr.name, kSources[rows[i].arg < kSourceCount ? rows[i].arg : 0u].label);
+        put(pr.note, route::reason_text(st.reason));
+        break;
+      case route::Kind::Slot: {
+        put(pr.name, kSlotNames[rows[i].arg & 3u]);
+        const std::uint32_t len = voc_ != nullptr ? voc_->loop_status(rows[i].arg & 3u).length : 0u;
+        put(pr.note, st.dimmed ? route::reason_text(st.reason) : (len != 0u ? "LOOP" : "EMPTY"));
+        pr.on = now == route::kFirstSlot + (rows[i].arg & 3u);
+        break;
+      }
+    }
+  }
+  if (pick_cursor_ >= v.count) {
+    pick_cursor_ = static_cast<std::uint8_t>(v.count != 0u ? v.count - 1u : 0u);
+  }
+  v.cursor = pick_cursor_;
+}
+
+void PerformScreen::loop_rec(app::Context& ctx, unsigned slot, bool on) noexcept {
+  (void)ctx.engine().set_param(voice_, Vocoder::loop_param(slot, Vocoder::LoopField::Rec), on ? 1.0f : 0.0f);
+}
+
+void PerformScreen::switch_source(unsigned live_index_) noexcept {
+  if (step_source_ != nullptr && live_index_ < kSourceCount) {
+    step_source_(source_user_, kSources[live_index_].source, default_gain(kSources[live_index_].source));
+  }
+}
+
+// The engine side of a route change: the one side `side` is written; a slot that left a side stops (its role, MOD by default, would replace the
+// modulator for as long as it played), a slot that took one starts when it holds audio (a slot speaks or sounds only while it plays).
+void PerformScreen::set_route(app::Context& ctx, route::Side side, route::Route from, route::Route to) noexcept {
+  dsp::Engine& e = ctx.engine();
+  const route::Roles a = route::roles(from);
+  const route::Roles b = route::roles(to);
+  for (unsigned i = 0; i < route::kSlots; ++i) {
+    const std::uint16_t play = Vocoder::loop_param(i, Vocoder::LoopField::Play);
+    if (a.slot[i] != route::SlotRole::Free && b.slot[i] == route::SlotRole::Free) {
+      (void)e.set_param(voice_, play, 0.0f);
+    } else if (a.slot[i] == route::SlotRole::Free && b.slot[i] != route::SlotRole::Free && voc_ != nullptr && voc_->loop_status(i).length != 0u) {
+      (void)e.set_param(voice_, play, 1.0f);
+    }
+  }
+  if (side == route::Side::Speaks) {
+    (void)e.set_param(voice_, Vocoder::ModSrc, static_cast<float>(to.speaks));
+  } else {
+    (void)e.set_param(voice_, Vocoder::CarSrc, static_cast<float>(to.sounds));
+  }
+}
+
+// The cursor's row is taken. A dimmed LIVE source arms a capture (REC does it, the source follows); another dimmed row says why it cannot.
+void PerformScreen::take_choice(app::Context& ctx) noexcept {
+  const route::Side side = pick_ == 1u ? route::Side::Speaks : route::Side::Sounds;
+  const route::Route r = route_of(ctx.engine(), voice_);
+  route::Row rows[route::kMaxRows];
+  const unsigned n = route::rows(side, static_cast<route::LiveSrc>(live_index(ctx.audio_in())), rows, route::kMaxRows);
+  const unsigned at = pick_cursor_;
+  close_picker(ctx);
+  if (at >= n) {
+    return;
+  }
+  const route::Row row = rows[at];
+  const route::RowState st = route::row_state(side, r, row);
+  if (st.dimmed) {
+    if (st.pre_arm()) {
+      cap_pre_ = true;
+      cap_pre_src_ = row.arg;
+      cap_pre_side_ = side == route::Side::Speaks ? 1u : 2u;
+      show_flash(ctx, "REC", "CAPTURES FIRST");
+    } else {
+      show_flash(ctx, route::reason_text(st.reason), "");
+    }
+    return;
+  }
+  if (cap_ != Cap::Idle && (row.kind == route::Kind::Source || (row.kind == route::Kind::Slot && row.arg == cap_slot_))) {
+    show_flash(ctx, "CAPTURING", "");  // the input and the slot are busy until it ends
+    return;
+  }
+  route::Route to = r;
+  if (!route::pick(side, to, row)) {
+    return;
+  }
+  cap_pre_ = false;  // a plain choice drops the pre-arm
+  if (row.kind == route::Kind::Source) {
+    switch_source(row.arg);
+  }
+  set_route(ctx, side, r, to);
+  ctx.redraw();
+}
+
+void PerformScreen::abort_capture(app::Context& ctx, const char* why) noexcept {
+  loop_rec(ctx, cap_slot_, false);
+  cap_ = Cap::Idle;
+  cap_stop_ = false;
+  show_flash(ctx, "REC", why);
+}
+
+// REC: capture the live source into the first empty slot. Again while it waits for the bar line: cancel. Again while it records: stop there.
+void PerformScreen::rec_press(app::Context& ctx) noexcept {
+  if (voc_ == nullptr) {
+    return;
+  }
+  if (cap_ != Cap::Idle) {
+    const bool armed = cap_ == Cap::Starting || voc_->loop_status(cap_slot_).rec == Vocoder::LoopStatus::Rec::Armed;
+    if (armed) {
+      abort_capture(ctx, "CANCELLED");  // no switch, no slot taken
+    } else if (!cap_stop_) {
+      loop_rec(ctx, cap_slot_, false);  // stops at the bar line; update() sees the loop end and finishes
+      cap_stop_ = true;
+    }
+    return;
+  }
+  if (!ctx.audio_in().available()) {
+    show_flash(ctx, "REC", "NO INPUT");
+    return;
+  }
+  const route::Route r = route_of(ctx.engine(), voice_);
+  int slot = -1;
+  for (unsigned i = 0; i < route::kSlots && slot < 0; ++i) {
+    const Vocoder::LoopStatus ls = voc_->loop_status(i);
+    const auto v = static_cast<std::uint8_t>(route::kFirstSlot + i);
+    if (ls.length == 0u && ls.rec == Vocoder::LoopStatus::Rec::Idle && !ls.playing && r.speaks != v && r.sounds != v) {
+      slot = static_cast<int>(i);
+    }
+  }
+  if (slot < 0) {
+    show_flash(ctx, "REC", "NO EMPTY SLOT");
+    return;
+  }
+  cap_slot_ = static_cast<std::uint8_t>(slot);
+  cap_stop_ = false;
+  cap_t0_ = ctx.uptime_ms();
+  loop_rec(ctx, cap_slot_, false);  // the Rec parameter's stored value stays 1 after a stop: 0 then 1 records again
+  loop_rec(ctx, cap_slot_, true);
+  cap_ = Cap::Starting;
+  ctx.redraw();
+}
+
+// Two bars from the bar line the unit starts at. The transport running: Rec 0 is written in the middle of the second bar and the unit stops at its
+// end line; stopped: both happen at once, so 0 goes out when two bars have been recorded. The end of the loop (Idle with audio) finishes it.
+void PerformScreen::capture_tick(app::Context& ctx) noexcept {
+  if (voc_ == nullptr) {
+    return;
+  }
+  using R = Vocoder::LoopStatus::Rec;
+  const Vocoder::LoopStatus ls = voc_->loop_status(cap_slot_);
+  if (cap_ == Cap::Starting) {
+    if (ls.rec != R::Idle) {
+      cap_ = Cap::Active;
+    } else if (ctx.uptime_ms() - cap_t0_ > kCapStartMs) {
+      abort_capture(ctx, "FAILED");
+      return;
+    }
+  }
+  if (cap_ == Cap::Active) {
+    if (ls.rec == R::Idle) {
+      if (ls.length != 0u) {
+        finish_capture(ctx);
+      } else {
+        abort_capture(ctx, "FAILED");
+      }
+      return;
+    }
+    if (ls.rec == R::Recording && !cap_stop_) {
+      const dsp::Engine& e = ctx.engine();
+      const float bar = bar_samples(e.stats().tempo_mbpm);
+      const float need = e.playing() ? (static_cast<float>(kCapBars) - 0.5f) * bar : static_cast<float>(kCapBars) * bar;
+      if (static_cast<float>(ls.length) >= need) {
+        loop_rec(ctx, cap_slot_, false);
+        cap_stop_ = true;
+      }
+    }
+  }
+  ctx.redraw();
+}
+
+// The loop holds audio: the side that held LIVE takes the slot (SPEAKS first), or, for a capture a dimmed row armed, the other side than the one that
+// armed it. A pre-armed source then goes to the ADC and to the picker's side, in this same step: the source never changes without the slot taking over.
+void PerformScreen::finish_capture(app::Context& ctx) noexcept {
+  const route::Route r = route_of(ctx.engine(), voice_);
+  route::Route cur = r;
+  const route::Row slot_row{route::Kind::Slot, cap_slot_};
+  cap_ = Cap::Idle;
+  cap_stop_ = false;
+  bool has = false;
+  route::Side take = route::Side::Speaks;
+  if (cap_pre_) {
+    take = cap_pre_side_ == 1u ? route::Side::Sounds : route::Side::Speaks;
+    has = take == route::Side::Speaks ? r.speaks == route::kSpeaksLive : r.sounds == route::kSoundsLive;
+  } else if (r.speaks == route::kSpeaksLive) {
+    has = true;
+  } else if (r.sounds == route::kSoundsLive) {
+    take = route::Side::Sounds;
+    has = true;
+  }
+  if (has && route::pick(take, cur, slot_row)) {
+    set_route(ctx, take, r, cur);
+  } else {
+    cur = r;
+    has = false;
+  }
+  if (cap_pre_) {
+    const route::Side side = cap_pre_side_ == 1u ? route::Side::Speaks : route::Side::Sounds;
+    route::Route to = cur;
+    if (route::pick(side, to, route::Row{route::Kind::Source, cap_pre_src_})) {
+      switch_source(cap_pre_src_);
+      set_route(ctx, side, cur, to);
+    }
+    cap_pre_ = false;
+  }
+  show_flash(ctx, kSlotNames[cap_slot_ & 3u], has ? "TAKEN" : "CAPTURED");
 }
 
 // ---- input --------------------------------------------------------------------------------------------------------------------------
@@ -531,6 +872,13 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
     ctx.redraw();
     return;
   }
+  if (pick_ != 0u) {  // an open picker: the encoder moves its cursor
+    build_picker(ctx);
+    pick_cursor_ = static_cast<std::uint8_t>(pl::step_wrapped(pick_cursor_, delta, g_pd.pick.count != 0u ? g_pd.pick.count : 1u));
+    g_pd.pick.cursor = pick_cursor_;
+    ctx.redraw();
+    return;
+  }
   if (focus_ >= pl::kBendFocus) {  // the encoder is free: it bends
     if (delta != 0) {
       local_ = pl::bend_step(local_, delta, coarse, range_);
@@ -545,14 +893,15 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
       (void)e.set_param(voice_, Vocoder::Mode, static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, 2)));
       break;
     case 1:
-      if (step_source_ != nullptr && delta != 0) {
-        step_source_(source_user_);
+      if (delta != 0) {
+        open_picker(ctx, route::Side::Speaks);
       }
-      break;
+      return;
     case 2:
-      (void)e.set_param(voice_, Vocoder::CarSrc,
-                        static_cast<float>(pl::step_clamped(static_cast<int>(round_param(e, voice_, Vocoder::CarSrc)), delta, 0, 6)));
-      break;
+      if (delta != 0) {
+        open_picker(ctx, route::Side::Sounds);
+      }
+      return;
     case 3:
       (void)e.set_param(voice_, Vocoder::Key, static_cast<float>(pl::step_wrapped(round_param(e, voice_, Vocoder::Key), delta, 12)));
       break;
@@ -613,7 +962,16 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
     if (in.shift) {
+      close_picker(ctx);
       shift_key(ctx, k);
+    } else if (pick_ != 0u && (k == 0u || k == pick_)) {  // F1 or the picker's own key takes the cursor's row
+      take_choice(ctx);
+    } else if (pick_ != 0u && k == 7u) {  // F8 backs out
+      close_picker(ctx);
+    } else if (pick_ != 0u && (k == 1u || k == 2u)) {  // the other list
+      open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
+    } else if (pick_ == 0u && sfocus_ == pl::kNoShiftFocus && (k == 1u || k == 2u)) {  // F2 SPEAKS, F3 SOUNDS: a list, not a step
+      open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
     } else if (sfocus_ != pl::kNoShiftFocus) {  // a plain tap goes back to the plain row, its key focused
       sfocus_ = pl::kNoShiftFocus;
       focus_ = k;
@@ -621,6 +979,7 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     } else if (k == focus_) {
       turn(ctx, 1, false);  // a second tap steps the value on
     } else {
+      close_picker(ctx);
       focus_ = k;
       ctx.redraw();
     }
@@ -634,10 +993,20 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     latch(ctx, true);
   } else if (in.press(Button::Delete)) {
     latch(ctx, false);
+  } else if (in.press(Button::Rec)) {
+    rec_press(ctx);
   } else if (in.press(Button::Up)) {
-    bottom_kind(ctx, 1);
+    if (pick_ != 0u) {
+      turn(ctx, -1, false);
+    } else {
+      bottom_kind(ctx, 1);
+    }
   } else if (in.press(Button::Down)) {
-    bottom_kind(ctx, -1);
+    if (pick_ != 0u) {
+      turn(ctx, 1, false);
+    } else {
+      bottom_kind(ctx, -1);
+    }
   } else if (in.press(Button::Left) || in.press(Button::Right)) {  // repeats arrive as presses (repeat_buttons)
     octave_ = clamp_octave(octave_ + (in.press(Button::Left) ? -1 : 1));
     ctx.redraw();
@@ -726,9 +1095,12 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     follow(pl::level_byte(st.peak_l > st.peak_r ? st.peak_l : st.peak_r), g_pd.out_level, g_pd.out_peak, g_pd.out_age);
   }
 
+  const route::Route rt = route_of(e, voice_);
+  const char* live = src != nullptr ? src->label : "NONE";
   ornoir::HeaderState h;
-  h.speaks = src != nullptr ? src->label : "NONE";
-  h.sounds = pl::kCarrierNames[car < 8u ? car : 0u];
+  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (rt.speaks == route::kSpeaksLive ? live : "NONE");
+  h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
+                                                                              : (rt.sounds == route::kSoundsLive ? live : pl::kCarrierNames[car < 8u ? car : 0u]);
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = st.tempo_mbpm / 100u;
@@ -824,6 +1196,29 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   sp.gain = ain.available() ? ain.gain() : 0u;
   sp.in = {g_pd.in_level, g_pd.in_peak};
   sp.clipping = meter_ != nullptr && ain.available() && meter_->clipping();
+  sp.live = live;
+  char capture[40] = {};
+  if (voc_ != nullptr) {
+    for (unsigned i = 0; i < route::kSlots; ++i) {
+      const Vocoder::LoopStatus ls = voc_->loop_status(i);
+      const auto v = static_cast<std::uint8_t>(route::kFirstSlot + i);
+      sp.slot[i] = ls.rec != Vocoder::LoopStatus::Rec::Idle ? 3u : (rt.speaks == v || rt.sounds == v ? 2u : (ls.length != 0u ? 1u : 0u));
+    }
+    if (cap_ != Cap::Idle) {
+      cat(capture, sizeof capture, "REC: CAPTURE ");
+      cat(capture, sizeof capture, live);
+      cat(capture, sizeof capture, " > ");
+      cat(capture, sizeof capture, kSlotNames[cap_slot_ & 3u]);
+    } else if (cap_pre_) {
+      cat(capture, sizeof capture, "REC > SLOT, THEN ");
+      cat(capture, sizeof capture, kSources[cap_pre_src_ < kSourceCount ? cap_pre_src_ : 0u].label);
+    }
+  }
+  sp.capture = capture;
+  if (pick_ != 0u) {
+    build_picker(ctx);
+    sp.picker = pick_ == 1u ? &g_pd.pick : nullptr;
+  }
 
   // The readout is the latched pad's chord, else the lowest held one.
   const std::uint64_t sounding = strip_ ? held_ & ((std::uint64_t{1} << (pl::kStripRow * app::kPadCols)) - 1u) : held_;  // the strip's pads sound nothing
@@ -850,6 +1245,9 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     so.held = latched_ >= 0 ? "LATCHED" : "HELD";
   }
 
+  if (pick_ == 2u) {
+    so.picker = &g_pd.pick;
+  }
   ornoir::PadsView pads;
   pads.label = g_pd.label;
   pads.scale_cols = keys_ ? 0xFFFu : pl::scale_cols(key, scale);
@@ -866,8 +1264,10 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   } else if (keys_) {
     pads.row_name[pl::kStripRow] = "FORMANT";
   }
-  pads.key_hint = flash_[0] != '\0' ? flash_ : pl::key_hint(focus_, mode, sfocus_);
-  if (keys_) {
+  pads.key_hint = flash_[0] != '\0' ? flash_ : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_));
+  if (pick_ != 0u) {
+    pads.hint_left = "UP DOWN OR TURN: CURSOR   F1 OR SAME KEY: TAKE   F8: BACK";
+  } else if (keys_) {
     pads.hint_left = strip_ ? "BOTTOM ROW BENDS  LEFT RIGHT OCTAVE" : "KEYS  LEFT RIGHT OCTAVE";
   } else {
     pads.hint_left = strip_ ? "BOTTOM ROW BENDS  SHIFT LATCH  UP DOWN KIND  LEFT RIGHT OCTAVE" : "SHIFT LATCH  DELETE RELEASE  UP DOWN ROW  LEFT RIGHT OCTAVE";
@@ -952,6 +1352,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Instr, "PATTERN: CARRIER LANE (U6)", nullptr},
       {Button::Vol, "PATTERN: LEVEL LANE (U6)", nullptr},
       {Button::Fx, "PATTERN: SLICE LANE (U6)", nullptr},
+      {Button::Rec, "CAPTURE LIVE INTO A SLOT", nullptr},
       {Button::Shift, "HOLD A PAD, TAP: LATCH CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
       {Button::Up, "BOTTOM ROW: NEXT KIND", nullptr},
@@ -986,10 +1387,10 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   }
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
-              "F KEYS: A TAP POINTS THE ENCODER, A SECOND TAP STEPS. HOLD SHIFT FOR GATE, ARP, GLIDE, PRESET...";
+              "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
   h.fkey[0] = "BANDS, TALK, TUNE";
-  h.fkey[1] = "THE NEXT AUDIO SOURCE";
-  h.fkey[2] = "FOLLOW, SYNTH, NOISE, LOOPS";
+  h.fkey[1] = "A LIST OF WHAT TALKS";
+  h.fkey[2] = "A LIST OF THE CARRIERS";
   h.fkey[3] = "THE SCALE'S ROOT";
   h.fkey[4] = "SCALE OF THE CHORDS";
   h.fkey[5] = "BOTTOM ROW KIND";

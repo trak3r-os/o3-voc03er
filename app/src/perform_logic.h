@@ -304,6 +304,7 @@ constexpr bool formant_lit(int formant, unsigned col) noexcept { return col < 12
 
 // The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE) picks F8's word.
 inline constexpr unsigned kKeyHintMax = 40;  // characters of the Micro face that fit beside the pads' hint
+// With a picker open the line right of the grid is empty and the left one says what its keys do (perform_screen.cpp).
 inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNoShiftFocus) noexcept {
   if (sfocus == 4u) {
     return "SHIFT F5 FORMANT: THE VOWEL'S PITCH";
@@ -327,7 +328,7 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
     return "ENCODER FREE: IT BENDS THE PITCH";
   }
   static constexpr const char* kHints[7] = {
-      "F1 MODE: BANDS, TALK OR TUNE",           "F2 SPEAKS: THE AUDIO SOURCE THAT TALKS", "F3 SOUNDS: THE CARRIER THE VOICE SHAPES",
+      "F1 MODE: BANDS, TALK OR TUNE",           "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
       "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: THE KIND ON THE BOTTOM ROW",
       "F7 PADS: CHORDS OR KEYS. SHIFT: BEND ROW",
   };

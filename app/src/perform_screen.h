@@ -6,6 +6,10 @@
 //
 //   F1 MODE  F2 SPEAKS  F3 SOUNDS  F4 KEY  F5 SCALE  F6 CHORD  F7 PADS  F8 by mode (BANDS SPREAD, TALK QUALITY, TUNE SPEED)
 //   A tap on an F key points the encoder at it (the key stays lit); a second tap steps it on. The encoder changes the value.
+//   F2, F3      a tap opens a list over the column (SPEAKS: sources and slots; SOUNDS: SYNTH, NOISE, LIVE, sources, slots): UP / DOWN or the encoder move the
+//               cursor, the key again or F1 takes the row, F8 backs out; F4..F7, SHIFT, PERFORMANCE and the screen buttons close it, the pads sound as ever.
+//               A dimmed row (a second LIVE source) arms a capture. REC records the live source for two bars into the first empty slot, which then takes
+//               the side that held LIVE (route.h; the capture is a state machine run by update()).
 //   pads          F7: CHORDS (rows POWER, OPEN, 7TH and the bottom row's kind) or KEYS (a chromatic keyboard). SHIFT + F7 toggles BEND ROW (kept when F7
 //                 moves): the bottom row is a bend strip; the chord rows move up one, or the keyboard keeps the three rows above it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
@@ -23,6 +27,7 @@
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pad_map.h>
+#include <o3_voc03er/route.h>
 
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
@@ -36,8 +41,9 @@ namespace o3_voc03er {
 
 class PerformScreen final : public o3sdk::app::Screen {
  public:
-  // The app asks the screen to step the audio source (F2): it owns the input and its meter (app.cpp's select_source).
-  using SourceStep = void (*)(void* user) noexcept;
+  // The app switches the audio input for the screen (a pick in the SPEAKS or SOUNDS list, the end of a capture): it owns the input and its meter
+  // (app.cpp's select_source).
+  using SourceStep = void (*)(void* user, o3sdk::hal::capture::Source src, unsigned gain) noexcept;
 
   void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, const Vocoder* voc, SourceStep step, void* user) noexcept;
 
@@ -89,6 +95,18 @@ class PerformScreen final : public o3sdk::app::Screen {
   void bottom_kind(o3sdk::app::Context& ctx, int delta) noexcept;
   void refresh_labels(const o3sdk::dsp::Engine& e) noexcept;
   bool note_in_use(std::uint8_t note, unsigned except_pad) const noexcept;
+  // The pickers and the capture (perform_screen.cpp).
+  void open_picker(o3sdk::app::Context& ctx, route::Side side) noexcept;
+  void close_picker(o3sdk::app::Context& ctx) noexcept;
+  void build_picker(o3sdk::app::Context& ctx) noexcept;
+  void take_choice(o3sdk::app::Context& ctx) noexcept;
+  void set_route(o3sdk::app::Context& ctx, route::Side side, route::Route from, route::Route to) noexcept;
+  void switch_source(unsigned live_index) noexcept;
+  void rec_press(o3sdk::app::Context& ctx) noexcept;
+  void capture_tick(o3sdk::app::Context& ctx) noexcept;
+  void finish_capture(o3sdk::app::Context& ctx) noexcept;
+  void abort_capture(o3sdk::app::Context& ctx, const char* why) noexcept;
+  void loop_rec(o3sdk::app::Context& ctx, unsigned slot, bool on) noexcept;
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   const InputMeter* meter_ = nullptr;
@@ -119,6 +137,18 @@ class PerformScreen final : public o3sdk::app::Screen {
   float vib_sent_ = 0.0f;            // the last Vib written (only a change is written)
   char flash_[24] = {};              // a moment's text on the hint line (VOL, ROOT, OCT), until flash_until_
   std::uint64_t flash_until_ = 0;
+  // The pickers: 0 closed, 1 SPEAKS, 2 SOUNDS (its rows are g_pd.pick). Main loop only.
+  std::uint8_t pick_ = 0;
+  std::uint8_t pick_cursor_ = 0;
+  // The capture (REC): Starting (Rec written, waiting for the unit to show it), Active (armed or recording). Main loop only, advanced by update().
+  enum class Cap : std::uint8_t { Idle, Starting, Active };
+  Cap cap_ = Cap::Idle;
+  std::uint8_t cap_slot_ = 0;
+  bool cap_stop_ = false;      // Rec 0 has been written: the loop ends at its bar line
+  bool cap_pre_ = false;       // armed by a dimmed source row: REC captures, then that source goes to cap_pre_side_
+  std::uint8_t cap_pre_src_ = 0;   // the row's LiveSrc
+  std::uint8_t cap_pre_side_ = 0;  // 1 SPEAKS, 2 SOUNDS: the side whose picker armed it
+  std::uint64_t cap_t0_ = 0;
   int latched_ = -1;         // the latched pad, or -1
   std::uint64_t held_ = 0;   // the pads this screen holds notes for (bit pad)
   std::uint32_t label_sig_ = 0xFFFFFFFFu;  // what the labels were built for

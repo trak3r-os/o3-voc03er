@@ -59,6 +59,35 @@ constexpr unsigned kAtlasAdvance = 32;
 
 void fill(plot::Canvas& c, int x, int y, int w, int h, Color k, std::uint8_t a = 255) noexcept { c.rect(Rect{x, y, w, h}, col(k), a); }
 
+// The list over a column: a frame, the cursor's row lit (Accent), the row in force marked with a dot in the column's colour.
+constexpr int kPickY = 96, kPickRowH = 14;
+
+void picker_shapes(plot::Canvas& c, const PickerView& p, int x, int w, Color side) noexcept {
+  const unsigned n = p.count < kPickerRows ? p.count : kPickerRows;
+  const int h = static_cast<int>(n) * kPickRowH + 4;
+  fill(c, x, kPickY - 2, w, h, Color::Empty, kDim);
+  fill(c, x, kPickY - 2, w, 1, side);
+  fill(c, x, kPickY - 3 + h, w, 1, side);
+  for (unsigned i = 0; i < n; ++i) {
+    const int y = kPickY + static_cast<int>(i) * kPickRowH;
+    if (i == p.cursor) fill(c, x + 1, y, w - 2, kPickRowH, Color::Accent);
+    if (p.row[i].on) c.round_rect(Rect{x + 5, y + 4, 6, 6}, 128, col(i == p.cursor ? Color::AccentText : side));
+  }
+}
+
+void picker_text(ui::Renderer& r, const PickerView& p, int x, int w) noexcept {
+  const unsigned n = p.count < kPickerRows ? p.count : kPickerRows;
+  for (unsigned i = 0; i < n; ++i) {
+    const PickerRow& row = p.row[i];
+    const int y = kPickY + static_cast<int>(i) * kPickRowH + 1;
+    const bool hot = i == p.cursor;
+    r.text(x + 16, y, row.name, hot ? Color::AccentText : row.dimmed ? Color::TextDim : Color::Text, Face::Micro);
+    if (row.note[0] != '\0') {
+      r.text(x + w - 6 - len(row.note) * 6, y, row.note, hot ? Color::AccentText : row.dimmed ? Color::Rec : Color::TextDim, Face::Micro);
+    }
+  }
+}
+
 }  // namespace
 
 const ui::Theme& theme() noexcept { return kTheme; }
@@ -263,24 +292,37 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
 
   // SPEAKS.
   c.round_rect(Rect{16, 68, 208, 20}, 160, col(Color::Play));
-  fill(c, 16, 120, 12, 150, Color::Empty, kDim);
-  c.round_rect(Rect{60, 120, 44, 18}, 144, col(Color::Empty));
-  c.round_rect(Rect{61, 121, 42, 16}, 128, sp.clipping ? col(Color::Rec) : col(Color::Pane));
-  for (int i = 0; i < 4; ++i) {
-    c.round_rect(Rect{60 + i * 40, 244, 34, 20}, 128, col(Color::Empty));
-    c.round_rect(Rect{61 + i * 40, 245, 32, 18}, 112, col(Color::Pane));
+  if (sp.picker != nullptr) {
+    picker_shapes(c, *sp.picker, 16, 208, Color::Play);
+  } else {
+    fill(c, 16, 120, 12, 150, Color::Empty, kDim);
+    c.round_rect(Rect{60, 120, 44, 18}, 144, col(Color::Empty));
+    c.round_rect(Rect{61, 121, 42, 16}, 128, sp.clipping ? col(Color::Rec) : col(Color::Pane));
+    for (int i = 0; i < 4; ++i) {
+      const std::uint8_t st = sp.slot[i];
+      c.round_rect(Rect{60 + i * 40, 244, 34, 20}, 128, col(st == 3 ? Color::Rec : st == 2 ? Color::Play : Color::Empty));
+      c.round_rect(Rect{61 + i * 40, 245, 32, 18}, 112, col(st == 1 ? Color::Empty : Color::Pane));
+    }
+  }
+  if (sp.capture[0] != '\0') {
+    c.round_rect(Rect{16, 274, 208, 14}, 128, col(Color::Rec));
+    c.round_rect(Rect{17, 275, 206, 12}, 112, col(Color::Pane));
   }
 
   // SOUNDS.
   c.round_rect(Rect{576, 68, 72, 20}, 160, col(Color::Sel));
-  fill(c, 576, 94, 216, 48, Color::Empty, kDim);
-  fill(c, 576, 216, 216, 12, Color::Empty, kDim);
-  {
-    const bool five = so.note_count >= 5;
-    const int w = five ? 40 : 44;
-    const int pitch = five ? 42 : 50;
-    for (unsigned i = 0; i < so.note_count && i < 5; ++i) {
-      c.round_rect(Rect{576 + static_cast<int>(i) * pitch, 148, w, 22}, 96, col(Color::Sel));
+  if (so.picker != nullptr) {
+    picker_shapes(c, *so.picker, 576, 216, Color::Sel);
+  } else {
+    fill(c, 576, 94, 216, 48, Color::Empty, kDim);
+    fill(c, 576, 216, 216, 12, Color::Empty, kDim);
+    {
+      const bool five = so.note_count >= 5;
+      const int w = five ? 40 : 44;
+      const int pitch = five ? 42 : 50;
+      for (unsigned i = 0; i < so.note_count && i < 5; ++i) {
+        c.round_rect(Rect{576 + static_cast<int>(i) * pitch, 148, w, 22}, 96, col(Color::Sel));
+      }
     }
   }
 
@@ -343,13 +385,15 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
   }
   {
     const int h_in = static_cast<int>(ladder_height(sp.in.level, 150));
-    if (h_in > 0) {
+    if (h_in > 0 && sp.picker == nullptr) {
       fill(c, 16, 270 - h_in, 12, h_in, Color::Play);
     }
     const int pk = static_cast<int>(ladder_height(sp.in.peak, 150));
-    fill(c, 16, 270 - pk - kPitch, 12, kPitch, Color::Text);
+    if (sp.picker == nullptr) {
+      fill(c, 16, 270 - pk - kPitch, 12, kPitch, Color::Text);
+    }
     const int w_out = static_cast<int>(ladder_height(so.out.level, 216));
-    if (w_out > 0) {
+    if (w_out > 0 && so.picker == nullptr) {
       fill(c, 576, 216, w_out, 12, Color::Sel);
     }
   }
@@ -357,13 +401,17 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
   // The masks (Pane ink over the lit dots: the pinholes), then what sits on top of them.
   c.bind(coarse_mask(288, 174));
   c.sprite(0, kVx, kVy, col(Color::Pane));
-  c.bind(coarse_mask(12, 150));
-  c.sprite(0, 16, 120, col(Color::Pane));
-  c.bind(coarse_mask(216, 12));
-  c.sprite(0, 576, 216, col(Color::Pane));
-  c.bind(fine_mask(216, 48));
-  c.sprite(0, 576, 94, col(Color::Pane));
-  if (so.chord[0] != '\0' && atlas_can_spell(so.chord)) {
+  if (sp.picker == nullptr) {  // an open list covers the meter, the notes' strip and the OUT bar: their masks go with them
+    c.bind(coarse_mask(12, 150));
+    c.sprite(0, 16, 120, col(Color::Pane));
+  }
+  if (so.picker == nullptr) {
+    c.bind(coarse_mask(216, 12));
+    c.sprite(0, 576, 216, col(Color::Pane));
+    c.bind(fine_mask(216, 48));
+    c.sprite(0, 576, 94, col(Color::Pane));
+  }
+  if (so.picker == nullptr && so.chord[0] != '\0' && atlas_can_spell(so.chord)) {
     c.bind(kAtlasDesc);
     int x = 580;
     for (const char* s = so.chord; *s != '\0'; ++s) {
@@ -412,19 +460,27 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
     while (t != 0) buf[n++] = tmp[--t];
     buf[n] = '\0';
   }
-  r.text(16, 96, buf, Color::TextDim, Face::Label);
-  r.text(36, 120, "0", Color::TextDim, Face::Micro);
-  r.text(36, 180, "-12", Color::TextDim, Face::Micro);
-  r.text(36, 258, "-48", Color::TextDim, Face::Micro);
-  r.text(70, 121, "CLIP", sp.clipping ? Color::Text : Color::TextDim, Face::Micro);
-  r.text(60, 150, "LIVE", Color::Text, Face::Label);
-  r.text(60, 168, sp.source, Color::Play, Face::Label);
-  r.text(60, 188, "NO SLOTS YET", Color::TextDim, Face::Micro);
-  r.text(60, 226, "SLOTS", Color::TextDim, Face::Label);
-  for (int i = 0; i < 4; ++i) {
-    const char d[2] = {static_cast<char>('1' + i), '\0'};
-    r.text(74 + i * 40, 246, d, Color::TextDim, Face::Micro);
+  if (sp.picker != nullptr) {
+    picker_text(r, *sp.picker, 16, 208);
+  } else {
+    r.text(16, 96, buf, Color::TextDim, Face::Label);
+    r.text(36, 120, "0", Color::TextDim, Face::Micro);
+    r.text(36, 180, "-12", Color::TextDim, Face::Micro);
+    r.text(36, 258, "-48", Color::TextDim, Face::Micro);
+    r.text(70, 121, "CLIP", sp.clipping ? Color::Text : Color::TextDim, Face::Micro);
+    r.text(60, 150, "LIVE", Color::Text, Face::Label);
+    r.text(60, 168, sp.live != nullptr ? sp.live : sp.source, Color::Play, Face::Label);
+    bool any = false;
+    for (int i = 0; i < 4; ++i) any = any || sp.slot[i] != 0;
+    if (!any) r.text(60, 188, "NO SLOTS YET", Color::TextDim, Face::Micro);
+    r.text(60, 226, "SLOTS", Color::TextDim, Face::Label);
+    for (int i = 0; i < 4; ++i) {
+      const char d[2] = {static_cast<char>('1' + i), '\0'};
+      const std::uint8_t st = sp.slot[i];
+      r.text(74 + i * 40, 246, d, st == 3 ? Color::Rec : st == 2 ? Color::Play : st == 1 ? Color::Text : Color::TextDim, Face::Micro);
+    }
   }
+  if (sp.capture[0] != '\0') r.text(22, 277, sp.capture, Color::Rec, Face::Micro);
 
   // SOUNDS.
   r.text(576, 48, "SOUNDS", Color::Sel, Face::Label);
@@ -446,35 +502,39 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
     buf[n] = '\0';
   }
   r.text(660, 70, buf, Color::TextDim, Face::Label);
-  if (so.chord[0] != '\0' && !atlas_can_spell(so.chord)) {
-    r.text(580, 102, so.chord, Color::Sel, Face::Display);
-  }
-  {
-    const bool five = so.note_count >= 5;
-    const int w = five ? 40 : 44;
-    const int pitch = five ? 42 : 50;
-    for (unsigned i = 0; i < so.note_count && i < 5; ++i) {
-      char nm[8];
-      const unsigned n = note_name(so.notes[i], nm);
-      r.text(576 + static_cast<int>(i) * pitch + (w - static_cast<int>(n) * 8) / 2, 150, nm, Color::SelText, Face::Label);
+  if (so.picker != nullptr) {
+    picker_text(r, *so.picker, 576, 216);
+  } else {
+    if (so.chord[0] != '\0' && !atlas_can_spell(so.chord)) {
+      r.text(580, 102, so.chord, Color::Sel, Face::Display);
     }
-  }
-  r.text(576, 178, so.voicing, Color::TextDim, Face::Micro);
-  r.text(576, 198, "OUT", Color::TextDim, Face::Label);
-  {
-    unsigned n = 0;
-    int db = so.out_db < -99 ? -99 : so.out_db > 0 ? 0 : so.out_db;
-    if (db < 0) {
-      buf[n++] = '-';
-      db = -db;
+    {
+      const bool five = so.note_count >= 5;
+      const int w = five ? 40 : 44;
+      const int pitch = five ? 42 : 50;
+      for (unsigned i = 0; i < so.note_count && i < 5; ++i) {
+        char nm[8];
+        const unsigned n = note_name(so.notes[i], nm);
+        r.text(576 + static_cast<int>(i) * pitch + (w - static_cast<int>(n) * 8) / 2, 150, nm, Color::SelText, Face::Label);
+      }
     }
-    if (db >= 10) {
-      buf[n++] = static_cast<char>('0' + db / 10);
+    r.text(576, 178, so.voicing, Color::TextDim, Face::Micro);
+    r.text(576, 198, "OUT", Color::TextDim, Face::Label);
+    {
+      unsigned n = 0;
+      int db = so.out_db < -99 ? -99 : so.out_db > 0 ? 0 : so.out_db;
+      if (db < 0) {
+        buf[n++] = '-';
+        db = -db;
+      }
+      if (db >= 10) {
+        buf[n++] = static_cast<char>('0' + db / 10);
+      }
+      buf[n++] = static_cast<char>('0' + db % 10);
+      for (const char* s = " dB"; *s != '\0'; ++s) buf[n++] = *s;
+      buf[n] = '\0';
+      r.text(792 - static_cast<int>(n) * 6, 200, buf, Color::TextDim, Face::Micro);
     }
-    buf[n++] = static_cast<char>('0' + db % 10);
-    for (const char* s = " dB"; *s != '\0'; ++s) buf[n++] = *s;
-    buf[n] = '\0';
-    r.text(792 - static_cast<int>(n) * 6, 200, buf, Color::TextDim, Face::Micro);
   }
 
   // Pads.
@@ -495,8 +555,10 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
   static constexpr const char kTurn[] = "  TURN TO CHANGE";
   const int turn_x = 784 - len(kTurn) * 6;
   r.text(16, 403, pads.hint_left, Color::TextDim, Face::Micro);
-  r.text(turn_x - len(pads.key_hint) * 6, 403, pads.key_hint, Color::Text, Face::Micro);
-  r.text(turn_x, 403, kTurn, Color::TextDim, Face::Micro);
+  if (pads.key_hint[0] != '\0') {
+    r.text(turn_x - len(pads.key_hint) * 6, 403, pads.key_hint, Color::Text, Face::Micro);
+    r.text(turn_x, 403, kTurn, Color::TextDim, Face::Micro);
+  }
 
   frow_text(r, keys);
 }

@@ -1,0 +1,59 @@
+# The F2 SPEAKS and F3 SOUNDS pickers and the REC capture (slice U3b): both lists open, SOUNDS taken to LIVE, a dimmed SPEAKS row (CAPTURE FIRST) pre-arms a capture,
+# REC records the live input into SLOT 1 and the ADC moves only when the slot has taken over, then every kind of pick (SYNTH, NOISE, a slot, a source).
+# The simulator shows the screens and that the capture is heard in the WAV; it cannot say how the unit's bar timing or its input sound.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/route.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+record on
+wait 400
+tap f2
+wait 100
+snap 01_speaks_list
+tap f3
+wait 100
+snap 02_sounds_list
+tap down
+tap down
+snap 03_sounds_live_row
+tap f3
+wait 100
+snap 04_sounds_live_taken
+tap f2
+tap down
+wait 100
+snap 05_dimmed_row
+tap f1
+wait 100
+snap 06_prearmed
+tap rec
+wait 1500
+snap 07_capturing
+wait 9000
+snap 08_captured
+tap f3
+wait 100
+snap 09_sounds_slot_on
+turn -9
+tap f3
+wait 300
+snap 10_sounds_synth
+tap f3
+turn 1
+tap f3
+wait 300
+snap 11_sounds_noise
+tap f2
+turn 7
+snap 12_speaks_slot_row
+tap f2
+wait 300
+snap 13_speaks_slot
+tap f2
+turn -6
+tap f1
+wait 300
+snap 14_speaks_source
+tap f2
+tap f8
+wait 100
+snap 15_backed_out
+wav route
