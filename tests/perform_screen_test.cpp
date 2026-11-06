@@ -105,12 +105,58 @@ TEST_CASE("perform: HELP names every control, and its legend is the page in forc
     app::HelpProblem p;
     const bool ok = app::help_check(help, &p);
     CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
-    CHECK(help.group_count == 2u);  // white and black keys, none of the chord rows
+    CHECK(help.group_count == 3u);  // white keys, black keys, controls: none of the chord rows, no strip
     for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
-      CHECK(help.pad_group[pad] <= 2u);
+      CHECK(help.pad_group[pad] <= 3u);
     }
   }
   tap(*h, app::Button::Config);
+
+  h->press(app::Button::Shift);  // SHIFT + F7: BEND ROW on, over KEYS: row 3 is the strip, a fourth group
+  h->run_ms(2);
+  tap(*h, app::Button::F7);
+  h->release(app::Button::Shift);
+  h->run_ms(20);
+  open_help(*h);
+  {
+    const app::Help& help = h->runtime().help_overlay().help();
+    app::HelpProblem p;
+    const bool ok = app::help_check(help, &p);
+    CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+    CHECK(help.group_count == 4u);
+    for (unsigned col = 0; col < app::kPadCols; ++col) {
+      CHECK(help.pad_group[3u * app::kPadCols + col] == 4u);
+    }
+  }
+  tap(*h, app::Button::Config);
+}
+
+TEST_CASE("perform: KEYS controls light while held and play no note; a gap is dark") {
+  auto h = std::make_unique<sim::Harness>(::o3sdk_app());
+  REQUIRE(h->start());
+  h->run_ms(100);
+  tap(*h, app::Button::F7);
+  tap(*h, app::Button::F7);  // KEYS
+  h->run_ms(60);
+  CHECK(h->leds().level(7) == 24);   // ROOT+: dim
+  CHECK(h->leds().level(2) == 0);    // a gap
+  CHECK(h->leds().level(36) == 0);   // row 3 without BEND ROW: dark
+  h->pad_down(7);
+  h->run_ms(60);
+  CHECK(h->leds().level(7) == 255);
+  h->pad_up(7);
+  h->run_ms(60);
+  CHECK(h->leds().level(7) == 24);
+  h->pad_down(2);  // a gap: nothing
+  h->run_ms(60);
+  CHECK(h->leds().level(2) == 0);
+  h->pad_up(2);
+  h->pad_down(9);  // MOD, held for the ramp
+  h->run_ms(500);
+  CHECK(h->leds().level(9) == 255);
+  h->pad_up(9);
+  h->run_ms(500);
+  CHECK(h->runtime().frame_failures() == 0u);
 }
 
 TEST_CASE("stub: HELP gives a row to every button the stub answers") {

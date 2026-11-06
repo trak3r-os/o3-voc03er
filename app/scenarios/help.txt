@@ -105,7 +105,7 @@ snap 13_help_note
 tap config
 wait 50
 
-# PERFORM's PADS page in KEYS: the legend carries the keyboard's two groups only.
+# PERFORM's PADS page in KEYS: the legend carries the piano's groups (white, black, controls), then with BEND ROW on (SHIFT + F7) the strip too.
 tap performance
 wait 50
 tap f7
@@ -117,5 +117,16 @@ release shift
 wait 50
 tap f2
 snap 14_perform_keys
+tap f8
+wait 50
+press shift
+tap f7
+release shift
+wait 50
+press shift
+tap config
+release shift
+wait 50
+snap 15_perform_keys_bend
 tap f8
 wait 50

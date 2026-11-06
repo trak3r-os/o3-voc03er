@@ -89,7 +89,7 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
-    {"voc", "voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100>", &voc_command},
+    {"voc", "voc <mode> [n] | formant <st> | thru <0-100> | bendrange <2|5|12>", &voc_command},
     {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
@@ -209,7 +209,11 @@ class MyApp final : public app::App {
       return true;
     }
     if (in.press(app::Button::Performance)) {  // PERFORM, the home screen
-      ctx.show(perform_);
+      if (ctx.screen() == &perform_) {  // already up: the encoder is freed to bend
+        perform_.free_encoder(ctx);
+      } else {
+        ctx.show(perform_);
+      }
       return true;
     }
     if (in.press(app::Button::Play)) {  // the transport, on every screen (the per-step carriers and the loops' bar lines run on it); MODE is F1 on PERFORM
@@ -268,6 +272,26 @@ class MyApp final : public app::App {
         op_ = files.load("", o3_voc03er::kPatternFile, g_load_buf, sizeof g_load_buf) ? Op::LoadPattern : Op::None;
       }
       ctx.redraw();
+    }
+    return true;
+  }
+
+  // MIDI pitch bend and the mod wheel (docs/UI-DESIGN.md 7c), on the user's channel (0 is omni). The wheel is scaled into BEND RANGE and adds to the
+  // screen's own bend (the encoder and the strip), so the encoder's spring leaves a held wheel where it is; CC1 is the vibrato depth, held apart
+  // from the MOD pad (the larger wins). A controller the user bound by MIDI learn never reaches here (midi_learned_moved takes it). Main loop.
+  bool midi(app::Context& ctx, const core::MidiMessage& m) noexcept override {
+    const unsigned kind = core::midi_kind(m.status);
+    if (kind != 0xE0u && !(kind == 0xB0u && m.data1 == 1u)) {
+      return false;
+    }
+    const std::uint8_t ch = ctx.midi().config().channel;
+    if (ch != 0u && core::midi_channel(m.status) != ch) {
+      return false;
+    }
+    if (kind == 0xE0u) {
+      perform_.set_wheel(ctx, m.data1, m.data2);
+    } else {
+      perform_.set_mod_wheel(ctx, m.data2);
     }
     return true;
   }
@@ -359,6 +383,11 @@ class MyApp final : public app::App {
     o3_voc03er::VocShape shape;
     if (ctx_ != nullptr && args.argc == 3u && o3_voc03er::parse_voc_shape(args.arg(1), args.arg(2), shape)) {
       dsp::Engine& e = ctx_->engine();
+      if (shape.range) {
+        (void)perform_.set_bend_range(static_cast<unsigned>(shape.value));
+        out.text("voc: bendrange ").dec(static_cast<unsigned>(shape.value)).nl();
+        return;
+      }
       if (shape.thru) {
         (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Thru, static_cast<float>(shape.value) * 0.01f);
       } else {
@@ -371,7 +400,7 @@ class MyApp final : public app::App {
     o3_voc03er::VocCommand c;
     if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
         !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
-      out.text("usage: voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100>").nl();
+      out.text("usage: voc <bands|talk|tune> [notes 0..8] | formant <st> | thru <0..100> | bendrange <2|5|12>").nl();
       return;
     }
     dsp::Engine& e = ctx_->engine();

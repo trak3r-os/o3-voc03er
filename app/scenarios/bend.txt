@@ -1,0 +1,79 @@
+# The bend (docs/UI-DESIGN.md sections 7b and 7c): a chord held while the free encoder bends it and springs back, the BEND ROW strip, KEYS with
+# the BND and MOD pads, the MIDI wheel and the mod wheel. The WAV carries the pitch; it is not the unit (the encoder's feel, the ramps' glide
+# and the vibrato's rate are for the unit).
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/bend.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+paddown 26
+wait 300
+snap 01_chord
+tap performance
+tap performance
+wait 50
+snap 02_encoder_free
+turn 4
+wait 100
+snap 03_bent
+wait 400
+snap 04_sprung_back
+press shift
+turn 1
+release shift
+wait 100
+snap 05_coarse
+wait 400
+padup 26
+tap f7
+turn 1
+wait 100
+snap 06_keys
+press shift
+tap f7
+release shift
+wait 100
+snap 07_f7_bend_row
+paddown 28
+wait 200
+paddown 38
+wait 200
+snap 08_strip_pad
+padup 38
+wait 200
+padup 28
+paddown 28
+paddown 11
+wait 200
+snap 09_bnd_up_rising
+wait 400
+snap 10_bnd_up_full
+padup 11
+wait 300
+padup 28
+paddown 9
+wait 200
+snap 11_mod_rising
+wait 400
+paddown 28
+wait 300
+snap 12_mod_full
+padup 9
+wait 500
+padup 28
+midi usb e0 00 7f
+wait 300
+paddown 28
+wait 300
+snap 13_wheel_up
+midi usb e0 00 40
+wait 200
+padup 28
+midi usb b0 01 7f
+paddown 28
+wait 400
+snap 14_modwheel
+padup 28
+midi usb b0 01 00
+wait 100
+record off
+wav bend

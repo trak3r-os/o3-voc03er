@@ -95,3 +95,105 @@ TEST_CASE("perform: the hint line says what every F key does and fits beside the
   CHECK(std::string(pl::key_hint(7, 1)).find("QUALITY") != std::string::npos);
   CHECK(std::string(pl::key_hint(7, 2)).find("SPEED") != std::string::npos);
 }
+
+TEST_CASE("perform: the hint of the free encoder fits") {
+  const std::string hint = pl::key_hint(pl::kBendFocus, 0);
+  CHECK(hint.size() <= pl::kKeyHintMax);
+  CHECK(hint.find("ENCODER") != std::string::npos);
+}
+
+TEST_CASE("perform: the piano pad map") {
+  using F = pl::PianoFn;
+  // Row 2: white keys C D E F G A B C D E F G.
+  const int white[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(pl::piano_pad(2, c, false).fn == F::White);
+    CHECK(pl::piano_pad(2, c, false).offset == white[c]);
+  }
+  // Row 1: blacks on columns 1 2 4 5 6 8 9 11 (C# D# F# G# A# C# D# F#).
+  const unsigned black_cols[8] = {1, 2, 4, 5, 6, 8, 9, 11};
+  const int black[8] = {1, 3, 6, 8, 10, 13, 15, 18};
+  unsigned n = 0;
+  for (unsigned c = 0; c < 12; ++c) {
+    const pl::PianoPad p = pl::piano_pad(1, c, false);
+    if (p.fn == F::Black) {
+      REQUIRE(n < 8u);
+      CHECK(c == black_cols[n]);
+      CHECK(p.offset == black[n]);
+      ++n;
+    }
+  }
+  CHECK(n == 8u);
+  // Row 0: the controls, the gaps dark.
+  const F ctl[12] = {F::OctDown, F::OctUp, F::None, F::VolDown, F::VolUp, F::None, F::RootDown, F::RootUp, F::None, F::Mod, F::BndDown, F::BndUp};
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(pl::piano_pad(0, c, false).fn == ctl[c]);
+    CHECK(pl::piano_pad(0, c, true).fn == ctl[c]);
+    CHECK(pl::piano_note(pl::piano_pad(0, c, false), 0) == -1);  // no control plays a note
+  }
+  // Row 3: the strip only with BEND ROW on.
+  CHECK(pl::piano_pad(3, 4, false).fn == F::None);
+  CHECK(pl::piano_pad(3, 4, true).fn == F::Strip);
+  CHECK(pl::piano_note(pl::piano_pad(3, 4, true), 0) == -1);
+  CHECK(pl::is_control(F::Mod));
+  CHECK_FALSE(pl::is_control(F::White));
+  CHECK_FALSE(pl::is_control(F::None));
+}
+
+TEST_CASE("perform: octave end stops, and a note is not moved by the octave") {
+  const pl::PianoPad c = pl::piano_pad(2, 0, false);
+  const int n0 = pl::piano_note(c, 0);
+  REQUIRE(n0 >= 0);
+  CHECK(pl::piano_note(c, 1) == n0 + 12);
+  CHECK(pl::piano_note(c, -1) == n0 - 12);
+  // The end of the range reads -1 (no note), never wraps.
+  CHECK(pl::piano_note(c, 100) == -1);
+  CHECK(pl::piano_note(c, -100) == -1);
+  // clamp_octave holds the end stops the OCT pads dim at.
+  CHECK(clamp_octave(1000) != 1000);
+  CHECK(clamp_octave(-1000) != -1000);
+  // PERFORM keeps the note a pad began with (g_pd.notes), so the note value of a pad pressed at octave 0 stays n0 after the octave moves.
+  const int pressed = pl::piano_note(c, 0);
+  CHECK(pressed == n0);
+}
+
+TEST_CASE("perform: VOL clamps and ROOT wraps") {
+  CHECK(pl::step_wrapped(11, 1, 12) == 0);
+  CHECK(pl::step_wrapped(0, -1, 12) == 11);
+  char t[12] = {};
+  pl::format_db(-6.0f, t);
+  CHECK(std::string(t) == "-6.0");
+  pl::format_db(0.5f, t);
+  CHECK(std::string(t) == "0.5");
+  pl::format_db(-48.0f, t);
+  CHECK(std::string(t) == "-48.0");
+  pl::format_db(6.0f, t);
+  CHECK(std::string(t) == "6.0");
+}
+
+TEST_CASE("perform: the BND and MOD curves are linear in the time held and full after 400 ms") {
+  CHECK(pl::bend_time_semitones(0, 1, 5) == doctest::Approx(0.0f));
+  CHECK(pl::bend_time_semitones(200, 1, 5) == doctest::Approx(2.5f));
+  CHECK(pl::bend_time_semitones(200, -1, 12) == doctest::Approx(-6.0f));
+  CHECK(pl::bend_time_semitones(400, 1, 2) == doctest::Approx(2.0f));
+  CHECK(pl::bend_time_semitones(5000, -1, 2) == doctest::Approx(-2.0f));
+  CHECK(pl::vib_rise(100) == doctest::Approx(0.25f));
+  CHECK(pl::vib_rise(900) == doctest::Approx(1.0f));
+  CHECK(pl::vib_fall(1.0f, 100) == doctest::Approx(0.75f));
+  CHECK(pl::vib_fall(0.5f, 400) == doctest::Approx(0.0f));
+  CHECK(pl::vib_fall(0.2f, 1000) == doctest::Approx(0.0f));
+  CHECK(pl::vib_depth(0.3f, 127) == doctest::Approx(1.0f));
+  CHECK(pl::vib_depth(0.8f, 0) == doctest::Approx(0.8f));
+  CHECK(pl::vib_depth(0.0f, 64) == doctest::Approx(64.0f / 127.0f));
+}
+
+TEST_CASE("perform: the bend sums the wheel and the local bend, and the encoder steps by range") {
+  CHECK(pl::bend_step(0.0f, 1, false, 2) == doctest::Approx(0.25f));
+  CHECK(pl::bend_step(0.0f, 1, true, 12) == doctest::Approx(6.0f));
+  CHECK(pl::bend_step(5.0f, 3, true, 5) == doctest::Approx(5.0f));
+  CHECK(pl::bend_sum(10.0f, 5.0f) == doctest::Approx(12.0f));
+  CHECK(pl::bend_sum(-10.0f, -5.0f) == doctest::Approx(-12.0f));
+  CHECK(pl::wheel_semitones(0, 64, 5) == doctest::Approx(0.0f));
+  CHECK(pl::wheel_semitones(127, 127, 5) == doctest::Approx(5.0f * 8191.0f / 8192.0f));
+  CHECK(pl::wheel_semitones(0, 0, 12) == doctest::Approx(-12.0f));
+}

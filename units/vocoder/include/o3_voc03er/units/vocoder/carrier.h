@@ -46,6 +46,8 @@ class Carrier {
   void set_wave(Wave w) noexcept { wave_ = w; }
   void set_noise(float amount) noexcept { noise_ = amount < 0.0f ? 0.0f : (amount > 1.0f ? 1.0f : amount); }  // 0 oscillators .. 1 noise
   void set_detune_cents(float cents) noexcept;  // the second oscillator of each voice, 0..20 cents sharp of the first
+  // The pitch ratio of every sounding oscillator (2^(bend / 12)), set by the owner once a block; 1 is the exact unbent path. SYNTH only.
+  void set_bend_ratio(float ratio) noexcept { bend_ratio_ = ratio; }
   void set_noise_source(NoiseSource* src) noexcept { noise_src_ = src; }  // null: the carrier's own
   void set_attack_ms(float ms) noexcept;
   void set_release_ms(float ms) noexcept;
@@ -76,6 +78,7 @@ class Carrier {
   float release_coef_ = 0.999f;
   float noise_ = 0.0f;
   float detune_ratio_ = 1.0f;  // 2^(cents / 1200)
+  float bend_ratio_ = 1.0f;    // 2^(semitones / 12), from the unit's Bend
   NoiseSource own_noise_;
   NoiseSource* noise_src_ = nullptr;
   Wave wave_ = Wave::Saw;

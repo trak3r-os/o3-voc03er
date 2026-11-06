@@ -177,7 +177,8 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
     REQUIRE(card_dir.ok());
     platform::host::DirCard card(card_dir.path());
     platform::host::FakeCapture cap;
-    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card, nullptr, &cap);
+    platform::host::FakeMidi midi;  // for the scenarios with a midi line (bend.txt)
+    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, &midi, &card, nullptr, &cap);
     REQUIRE(h->start());
     const sim::ScenarioResult r = sim::run_scenario(*h, text.str(), out.string());
     CHECK_MESSAGE(r.ok, r.error);
@@ -316,4 +317,57 @@ TEST_CASE("app: PLAY is the transport and leaves MODE alone; every screen button
   }
   CHECK(h->runtime().frame_failures() == 0u);
   CHECK(h->display().peak_frame_words() < 2048u);
+}
+
+// PERFORM's BND pads, the MIDI wheel and the mod wheel reach the unit's Bend (42) and Vib (43). The vocoder is one of the first units attached:
+// the test reads both parameters off whichever unit moves.
+namespace {
+float peak_param(sim::Harness& h, std::uint16_t id) {
+  float best = 0.0f;
+  for (unsigned u = 0; u < 8; ++u) {
+    const float v = h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    best = std::fabs(v) > std::fabs(best) ? v : best;
+  }
+  return best;
+}
+}  // namespace
+
+TEST_CASE("app: BND+ ramps the bend up while held and back to 0 on release; MOD ramps the vibrato; the wheels sum") {
+  platform::host::FakeMidi midi;
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, &midi, nullptr, nullptr, nullptr);
+  REQUIRE(h->start());
+  h->run_ms(100);
+  tap(*h, app::Button::F7);
+  tap(*h, app::Button::F7);  // KEYS
+  h->run_ms(50);
+  CHECK(peak_param(*h, 42) == doctest::Approx(0.0f));
+  h->pad_down(11);  // BND+
+  h->run_ms(250);
+  const float mid = peak_param(*h, 42);
+  CHECK(mid > 0.3f);
+  CHECK(mid < 2.0f);
+  h->run_ms(400);
+  CHECK(peak_param(*h, 42) == doctest::Approx(2.0f));  // BEND RANGE 2
+  h->pad_up(11);
+  h->run_ms(100);
+  CHECK(peak_param(*h, 42) == doctest::Approx(0.0f));
+
+  h->pad_down(9);  // MOD
+  h->run_ms(600);
+  CHECK(peak_param(*h, 43) == doctest::Approx(1.0f));
+  h->pad_up(9);
+  h->run_ms(600);
+  CHECK(peak_param(*h, 43) == doctest::Approx(0.0f));
+
+  midi.in(hal::midi::Port::Usb, 0xB0, 1, 127);  // CC1 to the top: the vibrato at 1
+  h->run_ms(50);
+  CHECK(peak_param(*h, 43) == doctest::Approx(1.0f));
+  midi.in(hal::midi::Port::Usb, 0xE0, 0, 127);  // the wheel to the top (14 bit 16256): about +2 st
+  h->run_ms(50);
+  CHECK(peak_param(*h, 42) > 1.9f);
+  h->pad_down(11);
+  h->run_ms(600);
+  CHECK(peak_param(*h, 42) == doctest::Approx(3.96875f));  // the wheel (1.96875) and the pad (2) sum
+  h->pad_up(11);
+  CHECK(h->runtime().frame_failures() == 0u);
 }

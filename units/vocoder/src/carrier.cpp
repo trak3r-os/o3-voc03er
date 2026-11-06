@@ -254,9 +254,10 @@ void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
     if (v.stage == Stage::Idle) {
       continue;
     }
-    float dt2 = v.inc * detune_ratio_;
+    const float dt1 = v.inc * bend_ratio_ > 0.45f ? 0.45f : v.inc * bend_ratio_;  // x 1.0f is exact: Bend 0 is the unbent path
+    float dt2 = dt1 * detune_ratio_;
     dt2 = dt2 > 0.45f ? 0.45f : dt2;
-    VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(v.inc), make_edge(dt2), attack_step_, release_coef_};
+    VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(dt1), make_edge(dt2), attack_step_, release_coef_};
     std::uint8_t stage = static_cast<std::uint8_t>(v.stage);
     static_assert(static_cast<unsigned>(Stage::Attack) == 1 && static_cast<unsigned>(Stage::Hold) == 2 &&
                       static_cast<unsigned>(Stage::Release) == 3, "run_voice reads the Stage values");

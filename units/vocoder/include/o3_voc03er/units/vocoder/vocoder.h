@@ -52,6 +52,12 @@
 //                     ramp each band's gain across the block.
 //            41 Thru  %, 0..100 (default 0): the high-passed modulator added to the output, scaled by the followers of bands 13..15 (sibilants
 //                     come through), next to the noise path; 0 is the output without it, bit for bit.
+//  42        CARRIER:
+//            42 Bend    st, -12..+12 (default 0): the SYNTH carrier's pitch, every oscillator's increment times 2^(Bend / 12), once a block through
+//                     a 20 ms dsp::Ramp (a stepped input glides). Only SYNTH moves: a live source has no pitch and a slot reads at fixed speeds.
+//                     0 is the exact unbent path.
+//            43 Vib     0..1 (default 0): vibrato on the SYNTH carrier, a ~5.5 Hz sine LFO stepped once a block (one sin a block while on),
+//                     peak +-0.5 st at 1, added to Bend before the increments. 0 is the exact path of Bend alone and resets the phase.
 // The bands' followers are fixed: 2 ms attack and 25 ms release in the middle of the range, graded geometrically (Bands::set_envelope).
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
@@ -78,7 +84,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   enum Param : std::uint16_t { Wave, Noise, Attack, Release, Dry, Level, Detune, Mode, Quality, Freeze,
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
-                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, kParamCount };
+                            CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, kParamCount };
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
@@ -132,6 +138,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void retarget(std::uint32_t frame) noexcept;
   float noise_target() const noexcept { return sel_ == 2u ? 1.0f : (sel_ == 1u ? 0.0f : noise_user_); }
   float car_target(unsigned loop) const noexcept { return (sel_ == 0u ? slot_[loop].carrier : sel_ == 3u + loop) ? 1.0f : 0.0f; }
+  void step_bend(std::uint32_t n) noexcept;
   void render_carrier(float* out, float* gate, std::uint32_t n) noexcept;
   void mix_car(unsigned loop, std::uint32_t from, std::uint32_t n, float* car, float* tmp) noexcept;
 
@@ -165,6 +172,11 @@ class Vocoder final : public o3sdk::dsp::Unit {
   float noise_user_ = 0.0f;
   o3sdk::dsp::Ramp synth_gain_{1.0f};
   o3sdk::dsp::Ramp noise_amt_;
+  o3sdk::dsp::Ramp bend_;  // semitones; the carrier's ratio follows it (step_bend)
+  o3sdk::dsp::Ramp vib_;   // vibrato depth 0..1 (20 ms glide); an LFO of kVibHz, peak +-0.5 st at 1, added to the bend (step_bend)
+  float vib_phase_ = 0.0f;  // cycles, 0..1; reset while the depth is 0
+  float vib_inc_ = 0.0f;    // cycles a sample
+  bool vib_was_ = false;    // the last step_bend had a vibrato, so the next one returns the ratio to the bend alone
   o3sdk::dsp::Ramp loop_car_[Loop::kCount];
   struct Retarget {
     std::uint16_t frame = 0;

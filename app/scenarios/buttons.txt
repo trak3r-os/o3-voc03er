@@ -24,6 +24,9 @@ tap params
 snap 09_params
 tap performance
 snap 10_performance
+tap performance
+snap 10b_performance_free
+tap f3
 tap file
 snap 11_file
 tap config

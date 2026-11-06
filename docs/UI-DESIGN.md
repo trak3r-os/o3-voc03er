@@ -323,7 +323,9 @@ voice-leading for free, the default). The chord's notes become `note_on`s to the
 kinds of the same root `kLedLow` while it is held (the column lights up: "this root"), the pattern's chord `kLedMid` on its step. Monochrome
 LEDs cannot name a chord: the screen does, in Display type, with the notes as tiles.
 
-**Keys** (PADS = KEYS) stay: the four-octave chromatic keyboard of today, for melodies and for anyone who wants to voice by hand.
+**Keys** (PADS = KEYS) are a piano on PERFORM (PLAY keeps its chromatic map). Row 2 (from the top, 0) holds the white keys, C D E F G A B C D E F G of the octave LEFT / RIGHT chose; row 1 the black keys on the column of the white key to their right (C# D# F# G# A# C# D# F#: columns 1, 2, 4, 5, 6, 8, 9, 11); row 0 the controls, below; row 3 is dark and silent, or the strip when BEND ROW is on. LEDs: the key's root `kLedLow`, the scale `kLedDim`, outside the scale off, held `kLedOn`.
+
+Row 0 by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; columns 2, 5 and 8 are dark and silent. No control plays a note, and a note held when the octave moves ends with the note it began with. OCT steps the octave. VOL steps the unit's `Level` (PLAY's OUTPUT LEVEL) by its coarse step, 6 dB, held to -48..6. ROOT steps `Key` round the twelve. The hint line shows the new OCT, VOL or ROOT for a moment. A VOL or OCT pad at the end of its range is off; ROOT, BND and MOD stay `kLedDim`; a held control `kLedOn`. BND- and BND+ and MOD act while held (section 7b). F7 PADS has two values, CHORDS and KEYS; BEND ROW is independent of them, SHIFT + F7 toggles it and F7's value shows "+B".
 
 ## 7b. Pitch bend
 
@@ -331,20 +333,17 @@ Asked by the maintainer on 2026-11-06, in two forms. Both bend the SYNTH carrier
 under a held vowel is the classic robot glide. The unit gets one parameter, `Bend` in semitones, appended after the ids of section 8, applied to the oscillators' increments through a
 `dsp::Ramp` once a block, so a stepped input arrives as a glide; the cost is a multiply a voice a block [est].
 
-- **The encoder.** On PERFORM and SAMPLE, with no F value latched (a tap on the latched key frees it; the slice checks the kit's helper allows this), the encoder bends. An encoder has no
-  spring, so the bend returns to 0 by itself about 120 ms after the last detent. BEND RANGE (+-2, +-5, +-12 semitones, default +-2) is on PARAMS page CARRIER. Hold + turn on an F key
-  still moves that value, as everywhere.
-- **The pad strip.** F7 PADS gains CHORDS + BEND. The bottom row of 12 stops being chords and becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one
-  semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. The chord rows move up one and the
-  row above the strip plays F6 CHORD's kind, so no kind is lost: the three rows are that kind, 7TH and OPEN, or the next ones when that kind is one of them. On SAMPLE the strip takes the bottom row and one chord row stays. LEDs: the middle pair `kLedDim`, the held pad
-  `kLedOn`.
+- **The encoder.** On PERFORM the encoder bends once it is free: PERFORMANCE pressed while PERFORM is up frees it, and a tap on any F key takes it back (a second tap on the focused F key keeps stepping its value). Boot focus is F6. A detent is range / 8, SHIFT coarse range / 2, held to +-range. An encoder has no spring, so the bend returns to 0 about 120 ms after the last detent. BEND RANGE (+-2, +-5, +-12 semitones, default +-2) is set with the console command `voc bendrange <2|5|12>`. SAMPLE keeps its own encoder.
+- **The pad strip.** BEND ROW (SHIFT + F7), on either F7 value: the bottom row becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. In CHORDS the chord rows move up one and the row above the strip plays F6 CHORD's kind, so no kind is lost: the three rows are that kind, 7TH and OPEN, or the next ones when that kind is one of them. In KEYS the piano does not move (row 3 was free). LEDs: the middle pair `kLedDim`, the held pad `kLedOn`.
+- **BND- and BND+ (KEYS, row 0).** While held, the local bend grows linearly to -BEND RANGE or +BEND RANGE in 400 ms (the main loop's `uptime_ms`, written only when it changes); on release it returns to 0 through the unit's ramp. The last pressed of these and the strip wins. It sums with the MIDI wheel (clamped +-12).
+- **MOD (KEYS, col 9) and `Vib` (id 43).** The unit adds a vibrato to the bend: about 5.5 Hz, +-0.5 semitone at depth 1. At Vib 0 the output is bit-identical to Bend 0 and the phase resets. Held, the MOD pad raises the depth linearly to 1 in 400 ms; released, it falls to 0 in 400 ms. MIDI CC1 writes Vib too (when it is not learned): the larger of the pad's and the wheel's depth wins.
 
 ## 7c. MIDI in
 
 Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns played from MIDI in, pitch bend included, so that the machine can sequence what it recorded, from an outside sequencer or from its own PATTERN.
 
 - **The carrier.** `ctx.midi().route(unit, 0)`: the notes of the user's channel reach the unit at their frame, about 1.5 ms after they came in, and play the SYNTH carrier beside the pads, sharing its voices. `Vocoder::apply` takes them already and also gives them to TUNE, so they serve NOTES-IN too. Only SYNTH sounds them: another carrier has no notes to play.
-- **Pitch bend.** `App::midi()` scales the message into BEND RANGE and writes `Bend`, the parameter of section 7b. The encoder's spring does not touch it: the sender holds its own wheel. As in 7b it moves the SYNTH carrier only; a slot reads at three fixed speeds, and bending one needs a variable-speed read that this design does not have.
+- **Pitch bend.** `App::midi()` scales the message into BEND RANGE and keeps it as the wheel's bend, held apart from the local one (encoder, strip, BND pads); `Bend` is their sum, clamped +-12. The encoder's spring does not touch the wheel's part: the sender holds its own wheel. CC1 (not learned) is the vibrato depth, `Vib`. As in 7b it moves the SYNTH carrier only; a slot reads at three fixed speeds, and bending one needs a variable-speed read that this design does not have.
 - **Controllers.** The kit's MIDI learn, up to 16 bindings, on any parameter of the unit.
 - **Clock.** FOLLOW in the system Config, as the kit gives it.
 - **Slices.** A note fires a slice, the velocity sets its level. These go by `route` and not through `App::midi()`, because at the worst load the main loop runs at about half speed. The slice decides how the unit tells them from the carrier's notes: a note range, or a second channel if a second route to one unit proves to work.
@@ -353,13 +352,15 @@ Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns 
 
 ## 8. What the unit and the app need
 
-**The unit (`units/vocoder/`, parameters appended, never inserted; ids 40 and 41 are FORMANT and THRU, slice V2f of `docs/PLAN.md`; these from 42 on):**
+**The unit (`units/vocoder/`, parameters appended, never inserted; ids 40 and 41 are FORMANT and THRU, slice V2f of `docs/PLAN.md`; 42 and 43 are Bend and Vib, slice U2b; these from 44 on):**
 
 | Id | Name | What |
 |---|---|---|
-| 42 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
-| 43 .. 54 | Slot n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples (both exact in a float up to 16.7 M; a slot is 705,600) at the slot's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT); a whole-loop play of that slot pauses under a slice and resumes at its position |
-| 55 .. 58 | Slot n Loaded | the length of a sample the app wrote into the slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it |
+| 42 | Bend | semitones, -12..12: the SYNTH carrier's increments, once a block through a `dsp::Ramp` (20 ms) |
+| 43 | Vib | 0..1: a ~5.5 Hz vibrato, +-0.5 st at 1, added to Bend; 0 is bit-identical to no vibrato |
+| 44 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
+| 45 .. 56 | Slot n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples (both exact in a float up to 16.7 M; a slot is 705,600) at the slot's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT); a whole-loop play of that slot pauses under a slice and resumes at its position |
+| 57 .. 60 | Slot n Loaded | the length of a sample the app wrote into the slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it |
 | CarSrc | value 7 LIVE | `in_l` on the carrier bus: the line, the radio or USB R sounds. A routing inside the unit, instant and click-free with the same 5 ms ramp; the ADC source itself is the app's one `AudioIn::select` |
 
 The slots' roles (`Loop n Role`) stay the unit's mechanism; the app sets them from the two pickers. `Loop` grows `start_region(i, a, b)` and a

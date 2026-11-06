@@ -65,11 +65,16 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"NOTES-IN", "", kNotesInNames, nullptr, 0.0f, 1.0f, 1.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"FORMANT", "st", nullptr, nullptr, -12.0f, 12.0f, 0.0f, 24, 4, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"THRU", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
+    {"BEND", "st", nullptr, nullptr, -12.0f, 12.0f, 0.0f, 24, 4, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"VIB", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
 
 constexpr float kRampMs = 5.0f;
+constexpr float kVibHz = 5.5f;     // the vibrato's rate
+constexpr float kVibPeakSt = 0.5f;  // its peak at depth 1
+constexpr float kBendMs = 20.0f;  // the glide of a stepped Bend
 constexpr float kModeFadeMs = 10.0f;  // crossfade between the modes
 constexpr float kTuneGain = 1.0f;     // Tune returns the voice itself: unity
 constexpr float kTalkGain = 1.0f;     // Talk's output is a carrier-level signal shaped by the modulator's rms; not tuned (needs the unit's ears)
@@ -124,11 +129,19 @@ void Vocoder::prepare(float sample_rate) noexcept {
   const auto ramp = static_cast<std::uint32_t>(kRampMs * 0.001f * sample_rate);
   level_.set_length(ramp);
   dry_.set_length(ramp);
+  bend_.set_length(static_cast<std::uint32_t>(kBendMs * 0.001f * sample_rate));
   for (unsigned p = 0; p < kParamCount; ++p) {
     set(static_cast<std::uint16_t>(p), kParams[p].def);
   }
   level_.jump(level_.target_value());
   dry_.jump(dry_.target_value());
+  vib_.set_length(static_cast<std::uint32_t>(kBendMs * 0.001f * sample_rate));
+  vib_inc_ = kVibHz / sample_rate;
+  vib_.jump(0.0f);
+  vib_phase_ = 0.0f;
+  vib_was_ = false;
+  bend_.jump(0.0f);
+  carrier_.set_bend_ratio(1.0f);
   bands_mix_.jump(1.0f);
   talk_mix_.jump(0.0f);
   tune_mix_.jump(0.0f);
@@ -221,6 +234,12 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       break;
     case Thru:
       bands_.set_thru(v);
+      break;
+    case Bend:
+      bend_.target(v);
+      break;
+    case Vib:
+      vib_.target(v);
       break;
     case Quality:
       talk_.set_order(static_cast<std::uint32_t>(v + 0.5f));
@@ -335,6 +354,31 @@ void Vocoder::retarget(std::uint32_t frame) noexcept {
 
 // The synth for `n` samples: while a ramp is moving, in slices of 16 so the noise amount follows it (the Carrier takes one value a call) and the
 // gain per sample; settled, one call and at most one multiply.
+// Advances the Bend ramp over `n` samples and gives the carrier the ratio at their end: once a run, a multiply-free loop while it moves and one exp2
+// then, nothing at rest (the ratio stays 1.0f or the last one).
+void Vocoder::step_bend(std::uint32_t n) noexcept {
+  if (!bend_.moving() && !vib_.moving() && vib_.value() == 0.0f && !vib_was_) {
+    return;
+  }
+  for (std::uint32_t i = 0; bend_.moving() && i < n; ++i) {
+    (void)bend_.next();
+  }
+  for (std::uint32_t i = 0; vib_.moving() && i < n; ++i) {
+    (void)vib_.next();
+  }
+  float st = bend_.value();
+  const float depth = vib_.value();
+  if (depth > 0.0f) {
+    vib_phase_ += vib_inc_ * static_cast<float>(n);
+    vib_phase_ -= std::floor(vib_phase_);
+    st += depth * kVibPeakSt * std::sin(vib_phase_ * 6.2831853f);
+  } else {
+    vib_phase_ = 0.0f;
+  }
+  vib_was_ = depth > 0.0f;
+  carrier_.set_bend_ratio(st == 0.0f ? 1.0f : std::exp2(st * (1.0f / 12.0f)));
+}
+
 void Vocoder::render_carrier(float* out, float* gate, std::uint32_t n) noexcept {
   if (!synth_gain_.moving() && !noise_amt_.moving()) {
     carrier_.set_noise(noise_amt_.value());
@@ -552,6 +596,7 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   run.frames = n;
   o3sdk::dsp::for_each_run(
       run, [&](std::uint32_t from, std::uint32_t to) {
+        step_bend(to - from);
         if (tune_mix_.value() >= 1.0f && tune_mix_.target_value() >= 1.0f) {  // TUNE alone: the carrier is not heard
           for (std::uint32_t i = from; i < to; ++i) car[i] = gate[i] = 0.0f;
         } else {

@@ -107,13 +107,171 @@ inline std::uint8_t level_byte(float linear) noexcept {
   return static_cast<std::uint8_t>(b < 0.0f ? 0.0f : (b > 255.0f ? 255.0f : b));
 }
 
+// ---- F7 PADS and the bend -----------------------------------------------------------------------------------------------------------
+// BEND ROW (SHIFT + F7), on either F7 page: the bottom row of the grid is a bend strip.
+inline constexpr unsigned kStripRow = 3;  // the bend strip: the bottom row of the grid
+inline constexpr unsigned kBendFocus = 8;  // PerformScreen's focus value when no F key is hot: the encoder bends
+inline constexpr float kBendMaxSt = 12.0f;  // the unit's Bend range (Vocoder::Bend)
+inline constexpr std::uint64_t kBendSpringMs = 120;  // the encoder's bend returns to 0 this long after the last detent
+inline constexpr unsigned kBendRanges[3] = {2, 5, 12};  // BEND RANGE, semitones either way
+
+// The semitones of a strip column: 5 and 6 are 0, each pad outwards is one (-5 at column 0, +5 at column 11).
+constexpr int strip_semitone(unsigned col) noexcept {
+  return col <= 5u ? static_cast<int>(col) - 5 : static_cast<int>(col) - 6;
+}
+// Whether `pad` is on the strip (bottom row) and the strip is up.
+constexpr bool on_strip(unsigned pad, bool strip) noexcept { return strip && o3sdk::app::pad_row(pad) == kStripRow; }
+
+// The KEYS page is a piano (PERFORM only; PLAY keeps its chromatic grid). Rows count from the top (pad_row): row 2 the white keys from C of
+// the current octave, row 1 the black keys on the column of the white key to their right, row 0 the controls, row 3 the strip (BEND ROW on;
+// dark and silent otherwise).
+enum class PianoFn : std::uint8_t { None, White, Black, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip };
+struct PianoPad {
+  PianoFn fn = PianoFn::None;
+  int offset = 0;  // semitones above C of the octave (White, Black)
+};
+inline constexpr int kWhiteOffset[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};          // C D E F G A B C D E F G
+inline constexpr int kBlackOffset[12] = {-1, 1, 3, -1, 6, 8, 10, -1, 13, 15, -1, 18};       // C# D# . F# G# A# . C# D# . F#; -1 no key
+// Row 0, by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; 2, 5 and 8 are gaps.
+inline constexpr PianoFn kControlFn[12] = {PianoFn::OctDown, PianoFn::OctUp,   PianoFn::None,    PianoFn::VolDown, PianoFn::VolUp,  PianoFn::None,
+                                           PianoFn::RootDown, PianoFn::RootUp, PianoFn::None,    PianoFn::Mod,     PianoFn::BndDown, PianoFn::BndUp};
+inline constexpr const char* kControlName[12] = {"OCT-", "OCT+", "", "VOL-", "VOL+", "", "ROOT-", "ROOT+", "", "MOD", "BND-", "BND+"};
+constexpr PianoPad piano_pad(unsigned row, unsigned col, bool strip) noexcept {
+  PianoPad p;
+  if (col >= 12u) {
+    return p;
+  }
+  if (row == 2u) {
+    p.fn = PianoFn::White;
+    p.offset = kWhiteOffset[col];
+  } else if (row == 1u && kBlackOffset[col] >= 0) {
+    p.fn = PianoFn::Black;
+    p.offset = kBlackOffset[col];
+  } else if (row == 0u) {
+    p.fn = kControlFn[col];
+  } else if (row == kStripRow && strip) {
+    p.fn = PianoFn::Strip;
+  }
+  return p;
+}
+// A control pad plays no note; BND and MOD act while held, the others on the press.
+constexpr bool is_control(PianoFn f) noexcept { return f != PianoFn::None && f != PianoFn::White && f != PianoFn::Black && f != PianoFn::Strip; }
+constexpr bool is_held_control(PianoFn f) noexcept { return f == PianoFn::Mod || f == PianoFn::BndDown || f == PianoFn::BndUp; }
+
+// The time bend (BND- and BND+) and the vibrato (MOD): linear in the time held, full after kRampMs; the vibrato falls the same way on release.
+inline constexpr std::uint64_t kRampMs = 400;
+// The bend in semitones after `held_ms` of BND+ (dir +1) or BND- (dir -1) at `range`.
+constexpr float bend_time_semitones(std::uint64_t held_ms, int dir, unsigned range) noexcept {
+  const std::uint64_t t = held_ms < kRampMs ? held_ms : kRampMs;
+  return static_cast<float>(dir) * static_cast<float>(range) * static_cast<float>(t) / static_cast<float>(kRampMs);
+}
+// The vibrato depth 0..1 after `held_ms` of MOD, starting from 0, and `ms` after the release from depth `from`.
+constexpr float vib_rise(std::uint64_t held_ms) noexcept {
+  return static_cast<float>(held_ms < kRampMs ? held_ms : kRampMs) / static_cast<float>(kRampMs);
+}
+constexpr float vib_fall(float from, std::uint64_t ms) noexcept {
+  const float v = from - static_cast<float>(ms < kRampMs ? ms : kRampMs) / static_cast<float>(kRampMs);
+  return v > 0.0f ? v : 0.0f;
+}
+// The unit's Vib: the pad's depth and the mod wheel's (CC1, 0..127), the larger.
+constexpr float vib_depth(float pad, unsigned cc1) noexcept {
+  const float w = static_cast<float>(cc1 < 127u ? cc1 : 127u) * (1.0f / 127.0f);
+  return pad > w ? pad : w;
+}
+
+// A level as text with one decimal ("-6.0", "0.5"), into out; the hint line's VOL.
+inline void format_db(float db, char (&out)[12]) noexcept {
+  const int t = static_cast<int>(db < 0.0f ? db * 10.0f - 0.5f : db * 10.0f + 0.5f);
+  unsigned n = 0;
+  if (t < 0) {
+    out[n++] = '-';
+  }
+  const unsigned a = static_cast<unsigned>(t < 0 ? -t : t);
+  if (a >= 100u) {
+    out[n++] = static_cast<char>('0' + (a / 100u) % 10u);
+  }
+  out[n++] = static_cast<char>('0' + (a / 10u) % 10u);
+  out[n++] = '.';
+  out[n++] = static_cast<char>('0' + a % 10u);
+  out[n] = '\0';
+}
+
+// The MIDI note of a key pad at `octave` (C of octave 0 is kBottomLeftNote), or -1 for a pad that is no key or past 0..127.
+constexpr int piano_note(const PianoPad& p, int octave) noexcept {
+  if (p.fn != PianoFn::White && p.fn != PianoFn::Black) {
+    return -1;
+  }
+  const int n = kBottomLeftNote + 12 * octave + p.offset;
+  return n >= 0 && n <= 127 ? n : -1;
+}
+
+// With BEND ROW on in CHORDS the chord rows move up one: the row above the strip (2) plays `bottom` (F6 CHORD's kind), the two above it 7TH and
+// OPEN, or the next ones (POWER, TRIAD) when `bottom` is one of them. Row 3 is the strip (it returns `bottom`, unused).
+constexpr ChordKind bend_row_kind(unsigned row, ChordKind bottom) noexcept {
+  if (row >= 2u) {
+    return bottom;
+  }
+  const ChordKind cand[4] = {ChordKind::Seventh, ChordKind::Open, ChordKind::Power, ChordKind::Triad};
+  unsigned seen = 0;
+  const unsigned want = row == 1u ? 0u : 1u;  // row 1 takes the first candidate, row 0 the second
+  for (unsigned i = 0; i < 4; ++i) {
+    if (cand[i] == bottom) {
+      continue;
+    }
+    if (seen == want) {
+      return cand[i];
+    }
+    ++seen;
+  }
+  return bottom;
+}
+// The ChordKind of a chord row (the strip up or not).
+constexpr ChordKind row_kind(unsigned row, ChordKind bottom, bool strip) noexcept { return strip ? bend_row_kind(row, bottom) : kind_for_row(row, bottom); }
+
+// The local bend (semitones) after one encoder detent: range / 8, SHIFT coarse range / 2, held inside +-range.
+constexpr float bend_step(float st, int delta, bool coarse, unsigned range) noexcept {
+  const float r = static_cast<float>(range);
+  const float v = st + static_cast<float>(delta) * (coarse ? r * 0.5f : r * 0.125f);
+  return v < -r ? -r : (v > r ? r : v);
+}
+// The Bend value: the local and the wheel's semitones added, held inside +-12.
+constexpr float bend_sum(float local, float wheel) noexcept {
+  const float v = local + wheel;
+  return v < -kBendMaxSt ? -kBendMaxSt : (v > kBendMaxSt ? kBendMaxSt : v);
+}
+// A 14-bit pitch bend (lsb, msb: 7 bits each; 8192 is centre) into semitones for a BEND RANGE.
+constexpr float wheel_semitones(unsigned lsb, unsigned msb, unsigned range) noexcept {
+  const int v = static_cast<int>(((msb & 0x7Fu) << 7) | (lsb & 0x7Fu)) - 8192;
+  const float n = static_cast<float>(v) * (1.0f / 8192.0f);
+  const float c = n > 1.0f ? 1.0f : (n < -1.0f ? -1.0f : n);
+  return c * static_cast<float>(range);
+}
+// Strip text: "-5", "0", "+5".
+inline void strip_label(int st, char (&out)[kLabelChars + 1]) noexcept {
+  unsigned n = 0;
+  if (st < 0) {
+    out[n++] = '-';
+  } else if (st > 0) {
+    out[n++] = '+';
+  }
+  const unsigned a = static_cast<unsigned>(st < 0 ? -st : st);
+  if (a >= 10u) {
+    out[n++] = static_cast<char>('0' + a / 10u);
+  }
+  out[n++] = static_cast<char>('0' + a % 10u);
+  out[n] = '\0';
+}
+
 // The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE) picks F8's word.
 inline constexpr unsigned kKeyHintMax = 40;  // characters of the Micro face that fit beside the pads' hint
 inline const char* key_hint(unsigned focus, unsigned mode) noexcept {
+  if (focus >= kBendFocus) {
+    return "ENCODER FREE: IT BENDS THE PITCH";
+  }
   static constexpr const char* kHints[7] = {
       "F1 MODE: BANDS, TALK OR TUNE",           "F2 SPEAKS: THE AUDIO SOURCE THAT TALKS", "F3 SOUNDS: THE CARRIER THE VOICE SHAPES",
       "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: THE KIND ON THE BOTTOM ROW",
-      "F7 PADS: CHORDS OR A KEYBOARD",
+      "F7 PADS: CHORDS OR KEYS. SHIFT: BEND ROW",
   };
   static constexpr const char* kF8[3] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
   return focus < 7u ? kHints[focus] : kF8[mode < 3u ? mode : 0u];

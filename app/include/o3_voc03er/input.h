@@ -111,6 +111,7 @@ struct VocCommand {
 // `voc formant <-12..12>` and `voc thru <0..100>`: which of the two and its value.
 struct VocShape {
   bool thru = false;
+  bool range = false;  // `bendrange`: value is 2, 5 or 12
   int value = 0;
 };
 inline bool parse_voc_shape(const char* what, const char* value, VocShape& out) noexcept {
@@ -118,6 +119,15 @@ inline bool parse_voc_shape(const char* what, const char* value, VocShape& out) 
     return false;
   }
   VocShape v;
+  if (std::strcmp(what, "bendrange") == 0) {
+    if (std::strcmp(value, "2") != 0 && std::strcmp(value, "5") != 0 && std::strcmp(value, "12") != 0) {
+      return false;
+    }
+    v.range = true;
+    v.value = value[1] == '\0' ? value[0] - '0' : 12;
+    out = v;
+    return true;
+  }
   if (std::strcmp(what, "thru") == 0) {
     v.thru = true;
   } else if (std::strcmp(what, "formant") != 0) {
