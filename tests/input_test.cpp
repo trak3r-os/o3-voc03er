@@ -81,6 +81,9 @@ TEST_CASE("parse_loop reads a loop number 1..4 and an action") {
   CHECK(c.act == LoopAct::Rec);
   CHECK(parse_loop("1", "car", c));
   CHECK(c.act == LoopAct::Car);
+  LoopCommand clear;  // its own, because the refusals below check that `c` keeps its value
+  CHECK(parse_loop("4", "clear", clear));
+  CHECK(clear.act == LoopAct::Clear);
   CHECK_FALSE(parse_loop("5", "play", c));
   CHECK_FALSE(parse_loop("0", "play", c));
   CHECK_FALSE(parse_loop("12", "play", c));

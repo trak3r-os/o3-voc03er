@@ -266,6 +266,35 @@ Image 1bb3c54 on o3-sdk ef6b1a0, CRC 1092751B, tester o3-303-b1. Three reads a r
 - `files=failed` shows after boot with no config.o3a on the card, probably the quiet config load; not confirmed.
 - The console has no main-loop pass rate and cannot delete a card file: `pattern.o3a` and `.bak` of this round stay in `/Apps/o3_voc03er/`, and the next boot of this app loads them.
 
+## 4i. U2 to U3 on the unit, 2026-11-06
+
+Image e0ac557 on o3-sdk ef6b1a0, CRC D33D8674, SHA-256 81b41127...3013, tester o3-303-b1, raw log kept outside the repository. No hang, 0 underruns, 0 shed in any row. Means and peaks of `render last` computed from the raw log; budget 60 % = 156,734.
+
+| Row | Mean | Peak | Peak % |
+|---|---|---|---|
+| BANDS 8 notes, 4 loops 2x, noise | 166.7k | 176.6k | 67.6 |
+| TALK, the same load | 164.6k | 182.1k | 69.7 |
+| TUNE, the same load | 139.9k | 154.2k | 59.0 |
+| BANDS at that load, with screenshots | 168.1k | 181.2k | 69.4 |
+| The same, GATE 3 | 167.4k | 178.0k | 68.1 |
+| The same, ARP 1 | 142.2k | 153.3k | 58.7 |
+| The same, GLIDE 100 | 163.4k | 172.5k | 66.0 |
+| USB L > USB R, both LIVE, GATE 3 | 114.7k | 124.5k | 47.7 |
+| A capture, no loops playing | 111.6k | 121.4k | 46.5 |
+
+The worst case stays over the 60 % budget on the mean, as in 4g, and below that round's 72.9 %. GATE costs about 3k, GLIDE nothing visible. ARP reads about 22k lower because it sounds one note of the chord at a time. The 93.9 % peak of the last round did not come back with mode changes or screenshots, so its cause stays unknown.
+
+Read on the unit: the buttons and HELP; USB notes, bend and CC1 reaching the app; the lists of F2 and F3, the dimmed rows and the armed chip; a capture at the bar with the ADC moving right after it; USB L and USB R on the header.
+
+- A capture with the transport stopped gave 192,000 samples against 176,400 running: 2 bars at 48 kHz. That is the `bar_samples` error, fixed in 8f12755, and this image predates it. To read again.
+- USB L noise with a silent USB R still gave output at -4 dB. By the code this is the unvoiced path (`bands.cpp`), which adds its own noise to the upper bands when the modulator is mostly high: a sibilance is heard over a silent carrier by design. Not measured on the unit. A tone on the left with a silent right is silent on the host.
+- `files=failed` after boot is the quiet load of a `config.o3a` that is not on the card yet.
+- The USB hub 3-1.4 dropped at 13:38:19 during the first upload and reset the unit (0x0082, power-on + low-voltage); the retry installed cleanly.
+
+Tool findings, not fixed: `o3console --put` spins at 100 % CPU on a deleted tty instead of exiting; `--update` refuses a path over 30 characters; `state` reports screen=PERFORM on every screen the tester read.
+
+Owed to the maintainer's ear and hand: glides, gate edges, vibrato and MOD, the eight presets' levels, clicks at the capture switch, the carrier sound, the wheel against the spring, BEND ROW, the formant steps, VOL, ROOT and BND on KEYS (no visible effect on screen).
+
 ## 5. How the work runs
 
 Lanes of one or two subagents, Sonnet for code and review, Haiku for mechanical checks. A brief names the files; agents use LSP and targeted reads

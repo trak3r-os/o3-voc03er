@@ -204,7 +204,7 @@ inline constexpr std::uint8_t kVocChord[kVocMaxNotes] = {48, 52, 55, 59, 60, 64,
 // `loop <1-4> <rec|stop|play|halt|mod|car>`: rec arms the recording (it starts at the next bar line), stop ends it at the next bar line,
 // play and halt start and stop playback, mod and car set the role, half x1 x2 the speed, fwd and rev the direction, `lvl <dB>` the level
 // (a whole number, -24..12).
-enum class LoopAct : std::uint8_t { Rec, StopRec, Play, Halt, Mod, Car, Half, X1, X2, Fwd, Rev, Level };
+enum class LoopAct : std::uint8_t { Rec, StopRec, Play, Halt, Clear, Mod, Car, Half, X1, X2, Fwd, Rev, Level };
 struct LoopCommand {
   unsigned loop = 0;  // 0..3
   LoopAct act = LoopAct::Rec;
@@ -216,7 +216,7 @@ inline bool parse_loop(const char* num, const char* act, LoopCommand& out, const
     const char* word;
     LoopAct act;
   } kActs[] = {{"rec", LoopAct::Rec}, {"stop", LoopAct::StopRec}, {"play", LoopAct::Play},
-               {"halt", LoopAct::Halt}, {"mod", LoopAct::Mod}, {"car", LoopAct::Car}, {"half", LoopAct::Half},
+               {"halt", LoopAct::Halt}, {"clear", LoopAct::Clear}, {"mod", LoopAct::Mod}, {"car", LoopAct::Car}, {"half", LoopAct::Half},
                {"x1", LoopAct::X1}, {"x2", LoopAct::X2}, {"fwd", LoopAct::Fwd}, {"rev", LoopAct::Rev}, {"lvl", LoopAct::Level}};
   if (num == nullptr || act == nullptr || num[0] < '1' || num[0] > '4' || num[1] != '\0') {
     return false;

@@ -92,7 +92,7 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
-    {"loop", "loop <n> rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
+    {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
 };
 
 constexpr const char* kModeWord[3] = {"bands", "talk", "tune"};
@@ -372,7 +372,7 @@ class MyApp final : public app::App {
       return;
     }
     if (ctx_ == nullptr || (args.argc != 3u && args.argc != 4u) || !o3_voc03er::parse_loop(args.arg(1), args.arg(2), c, args.argc == 4u ? args.arg(3) : nullptr)) {
-      out.text("usage: loop [1-4 rec|stop|play|halt|mod|car|half|x1|x2|fwd|rev|lvl dB]").nl();
+      out.text("usage: loop [1-4 rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl dB]").nl();
       return;
     }
     using LF = o3_voc03er::Vocoder::LoopField;
@@ -384,6 +384,8 @@ class MyApp final : public app::App {
       case o3_voc03er::LoopAct::StopRec: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Rec), 0.0f); break;
       case o3_voc03er::LoopAct::Play: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Play), 1.0f); break;
       case o3_voc03er::LoopAct::Halt: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Play), 0.0f); break;
+      case o3_voc03er::LoopAct::Clear: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Rec), 2.0f);
+                                       (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Rec), 0.0f); break;
       case o3_voc03er::LoopAct::Mod: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Role), 0.0f); break;
       case o3_voc03er::LoopAct::Car: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Role), 1.0f); break;
       case o3_voc03er::LoopAct::Half: (void)e.set_param(voc_id_, o3_voc03er::Vocoder::loop_param(i, LF::Speed), 0.0f); break;
