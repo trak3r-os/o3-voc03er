@@ -363,10 +363,10 @@ the skin's theme and its contrast test; every screen's `help()` checked with `he
 
 ## 10. The first five minutes
 
-No manual, the unit just switched on. PERFORM comes up: LIVE ▸ SYNTH, BANDS, PADS = CHORDS, KEY C, SCALE MAJOR, the stored source (section 11
-for the first boot).
+No manual, the unit just switched on. PERFORM comes up: LIVE ▸ SYNTH, BANDS, PADS = CHORDS, KEY C, SCALE MAJOR, the stored source (LINE on the first
+boot, section 11).
 
-**To a vocoded chord.** Speak: the IN meter moves and the voiceprint flickers in the voice ink; nothing sounds yet, the carrier has no note. Press
+**To a vocoded chord.** Play something into the line jack, or pick MIC on MASTER and speak: the IN meter moves and the voiceprint flickers in the voice ink; nothing sounds yet, the carrier has no note. Press
 one pad of the bottom row: a C major chord speaks your words; the screen says "C" and lights its three notes; the next pad to the right is D minor.
 Zero button presses. SHIFT + that pad latches it; both hands are free for the microphone. The top row is the robot fifth.
 
@@ -383,19 +383,14 @@ on PERFORM F3 SOUNDS to NOISE makes the same slices whisper. Four presses; a WAV
 SPEAKS the row LINE reads "CAPTURE FIRST": take it (2 presses) and REC (3): the voice is captured to a slot and speaks from there, the ADC moves
 to LINE, and the external synth on the jack sounds under your recorded voice. Three presses, and the screen said what would happen before it did.
 
-## 11. Open choices (the maintainer's taste), with a recommendation
+## 11. Choices, as the maintainer made them on 2026-11-06
 
-1. **The first boot's live source.** The kit stores the last one; the first boot has none. MIC HIGH at gain 50 is what a vocoder player expects,
-   LINE at gain 0 is what the unit has measured. Recommendation: MIC HIGH; the IN meter on PERFORM says at once whether anything arrives.
-2. **The voice ink.** The chartreuse of 5.2 (200, 245, 49) reads as a phosphor and is far from o3-303's amber; an amber would make the two apps a
-   family. Recommendation: chartreuse; the mock shows it.
-3. **The split in SAMPLE: 24 slices over two chord rows,** or 48 slices with the chords behind SHIFT. Recommendation: the split; a slice and a chord
-   are played together, and 24 slices of 16 s are enough.
-4. **After a take or a capture the slot plays by itself** (AUTOPLAY ON) or waits. Recommendation: ON; the first five minutes depend on hearing it.
-5. **The chord rows' order** (power at the top, triad at the bottom) or triads at the top. Recommendation: as designed; the bottom row is the
-   one the thumbs find and should be the plainest chord.
-6. **SONG as a chain in U9,** or the button stays an honest one-line screen for this version. Recommendation: build U9; the chain is small once
-   the eight patterns exist.
+1. **The first boot's live source:** LINE at gain 0. After that the kit stores the last one.
+2. **The voice ink:** the chartreuse of 5.2, in this skin. The skin itself is still to choose (`docs/ui-skins.html`).
+3. **The split in SAMPLE:** 24 slices over two chord rows.
+4. **After a take or a capture the slot plays by itself:** yes, AUTOPLAY ON.
+5. **The chord rows' order:** as designed, power at the top, triad at the bottom.
+6. **SONG:** a chain of patterns, built in U9.
 
 ## 12. Slices
 
