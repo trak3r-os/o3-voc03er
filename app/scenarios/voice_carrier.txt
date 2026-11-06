@@ -1,0 +1,25 @@
+# SOUNDS VOICE (slice E2): the F3 list has a VOICE row, the header names it, the synth carrier plays the pitch the singer sings (a 233 Hz tone here,
+# A#3), then a held pad plays a chord around it, then the singer stops and the note is let go. Check the WAV: a buzz at the snapped note, a chord on
+# the pad, then silence. The simulator cannot say how it sounds with a voice, the onset lag or the octave errors of a real microphone.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/voice_carrier.txt --out <dir>   (the dir must exist)
+input tone 233 -12
+record on
+wait 400
+tap f3
+wait 100
+turn 2
+snap 01_sounds_list_voice_row
+tap f3
+wait 800
+snap 02_voice_header
+snap 03_voice_alone
+paddown 20
+wait 1500
+snap 04_voice_chord_held
+padup 20
+wait 300
+input off
+wait 600
+snap 05_singer_stopped
+wait 600
+wav voice_carrier

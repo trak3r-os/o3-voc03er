@@ -44,6 +44,12 @@
 //            from the event's frame (the noise amount in slices of 16 samples, since the Carrier takes it once a run).
 //            7 LIVE: the live input (in_l, or in_r with LiveCh) is the carrier: the synth and the CAR loops are muted, the same 5 ms ramp
 //            (from the start of the block the event lands in). GATE cuts it like any carrier, ARP does not act on it. The ADC source itself is the app's.
+//            8 VOICE (appended, E2): the synth plays the pitch the modulator sings, snapped by KEY and SCALE (Autotune::voice_note, SPEED as TUNE
+//            reads it), in any MODE. With no pad held the carrier plays the sung note alone; with pads held each voice sounds at sung + (held - lowest
+//            held), the chord transposed onto the sung note; with the ARP on the arp's one note is mapped the same way. No sung note (unvoiced past the
+//            hold, Autotune::kVoiceHoldMs) and pads held: silence from the carrier. GATE acts as on any carrier. The detector runs only in VOICE
+//            (shared with TUNE, which has it anyway); the loops are muted as with SYNTH; NOISE is the knob's, as FOLLOW. A note changes by
+//            note_off and note_on, so GLIDE and the carrier's attack and release shape it. Not offered per step (the pattern's carrier lane).
 //  47        ModSrc  0 LIVE (default, the modulator as before), 1 NONE, 3..6 SLOT 1..4 (CarSrc's values): what speaks. NONE or a slot take the live
 //            input out of the modulator sum (no bleed; a recording still takes it); a slot plays as the modulator whatever its role, unless it
 //            is also the CarSrc. Acts from the block it lands in. 2 acts as NONE.
@@ -177,6 +183,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   };
   View view() const noexcept;
 
+  static constexpr unsigned kCarVoice = 8;  // CarSrc VOICE
   const Carrier& carrier() const noexcept { return carrier_; }
   const Bands& bands() const noexcept { return bands_; }
   const Talk& talk() const noexcept { return talk_; }
@@ -193,6 +200,12 @@ class Vocoder final : public o3sdk::dsp::Unit {
   void publish_loops() noexcept;
   void publish_view() noexcept;
   void select_carrier(float v, std::uint32_t frame) noexcept;
+  void voice_sync() noexcept;                      // VOICE: the carrier's voices to the sung note and the pads (render_carrier calls it)
+  void voice_switch(bool on) noexcept;             // entering or leaving VOICE: hand the carrier's notes over
+  float synth_target() const noexcept { return (sel_ >= 3u && sel_ != kCarVoice) ? 0.0f : vel_gain_; }
+  // The pads reach the carrier here: in VOICE they are not played as such (voice_sync maps them onto the sung note).
+  void car_on(std::uint8_t n) noexcept { if (sel_ != kCarVoice) carrier_.note_on(n); }
+  void car_off(std::uint8_t n) noexcept { if (sel_ != kCarVoice) carrier_.note_off(n); }
   void retarget(std::uint32_t frame) noexcept;
   float noise_target() const noexcept { return sel_ == 2u ? 1.0f : (sel_ == 1u ? 0.0f : noise_user_); }
   float car_target(unsigned loop) const noexcept { return (sel_ == 0u ? slot_[loop].carrier : sel_ == 3u + loop) ? 1.0f : 0.0f; }
@@ -237,6 +250,8 @@ class Vocoder final : public o3sdk::dsp::Unit {
   // The carrier switch (render context only). sel_ is the CarSrc value; the ramps are 5 ms. pend_: the carrier-side loop gains each
   // event of this block set, in order, so run_loops can start the ramp at the same frame (the oldest are overwritten past 8).
   unsigned sel_ = 0;
+  std::uint8_t vsnd_[Carrier::kVoices] = {};  // VOICE: the notes the carrier has been given, ascending (vn_ of them)
+  std::uint8_t vn_ = 0;
   unsigned msel_ = 0;                // ModSrc: 0 LIVE, 1 NONE, 3..6 the slot that speaks (any other value acts as NONE)
   o3sdk::dsp::Ramp live_car_;        // the live input on the carrier bus (CarSrc 7), 5 ms
   bool live_r_ = false;              // LiveCh: that input is in_r

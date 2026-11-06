@@ -604,6 +604,11 @@ void PerformScreen::build_picker(app::Context& ctx) noexcept {
         put(pr.name, "NOISE");
         pr.on = now == route::kSoundsNoise;
         break;
+      case route::Kind::Voice:
+        put(pr.name, "VOICE");
+        put(pr.note, "SUNG PITCH");
+        pr.on = now == route::kSoundsVoice;
+        break;
       case route::Kind::Live:
         put(pr.name, "LIVE");
         put(pr.note, route::live_name(kSources[static_cast<unsigned>(cur)].label, kSources[static_cast<unsigned>(cur)].source == hal::capture::Source::Usb, side));
@@ -1123,7 +1128,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   ornoir::HeaderState h;
   h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (rt.speaks == route::kSpeaksLive ? route::live_name(live, usb, route::Side::Speaks) : "NONE");
   h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
-                                                                              : (rt.sounds == route::kSoundsLive ? route::live_name(live, usb, route::Side::Sounds) : pl::kCarrierNames[car < 8u ? car : 0u]);
+                                                                              : (rt.sounds == route::kSoundsLive ? route::live_name(live, usb, route::Side::Sounds) : pl::kCarrierNames[car < 9u ? car : 0u]);
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = st.tempo_mbpm / 100u;
@@ -1413,7 +1418,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
               "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
   h.fkey[0] = "BANDS, TALK, TUNE, ROBOT";
   h.fkey[1] = "A LIST OF WHAT TALKS";
-  h.fkey[2] = "A LIST OF THE CARRIERS";
+  h.fkey[2] = "SYNTH, LOOPS, VOICE, LIVE";
   h.fkey[3] = "THE SCALE'S ROOT";
   h.fkey[4] = "SCALE OF THE CHORDS";
   h.fkey[5] = "BOTTOM ROW KIND";

@@ -41,6 +41,19 @@ void Autotune::reset() {
   m_ = m_s_ = 0.0f;
   cur_ = -1;
   e_ = c_ = 0.0f;
+  vvoiced_ = false;
+  vnote_ = -1;
+  vhold_ = 0;
+  vm_s_ = vf_last_ = 0.0f;
+}
+
+void Autotune::set_voice(bool on) {
+  if (on == voice_on_) return;
+  voice_on_ = on;
+  vvoiced_ = false;
+  vnote_ = -1;
+  vhold_ = 0;
+  vf_last_ = 0.0f;
 }
 
 void Autotune::set_key(unsigned k) { key_ = k % 12u; }
@@ -107,7 +120,7 @@ void Autotune::jump() {
   start_xfade(d_ + static_cast<float>(k) * period_);
 }
 
-int Autotune::pick(float m) const {
+int Autotune::pick(float m, int cur) const {
   const int base = static_cast<int>(std::floor(m + 0.5f));
   int best = -1;
   float bd = 1.0e9f;
@@ -120,8 +133,8 @@ int Autotune::pick(float m) const {
     }
   }
   if (best < 0) return base;
-  if (cur_ >= 0 && in_scale(cur_) && best != cur_ && bd + kSnapBias >= std::fabs(m - static_cast<float>(cur_))) {
-    return cur_;
+  if (cur >= 0 && in_scale(cur) && best != cur && bd + kSnapBias >= std::fabs(m - static_cast<float>(cur))) {
+    return cur;
   }
   return best;
 }
@@ -141,11 +154,42 @@ void Autotune::new_estimate(float f) {
     cur_ = static_cast<int>(target);
   } else {
     if (!was_voiced_) cur_ = -1;
-    cur_ = pick(m_s_);
+    cur_ = pick(m_s_, cur_);
     target = static_cast<float>(cur_);
   }
   float e = (target - m_) * 100.0f;
   e_ = e < -kMaxCents ? -kMaxCents : (e > kMaxCents ? kMaxCents : e);
+}
+
+// VOICE: once a segment, after the detector's slice. The estimate (new f) is turned to a note by the same pick() as TUNE, with the voice's own
+// state (vnote_ is the note being kept, kept through a short unvoiced gap so the hysteresis holds across a consonant). log2f once per new estimate.
+void Autotune::voice_step() {
+  if (tune_.voiced()) {
+    const float f = tune_.frequency();
+    if (f > 0.0f && (f != vf_last_ || !vvoiced_)) {
+      vf_last_ = f;
+      const float m = 69.0f + 12.0f * std::log2(f * (1.0f / 440.0f));
+      vm_s_ = alpha_ >= 1.0f || vnote_ < 0 || !vvoiced_ ? m : vm_s_ + kSmooth * (m - vm_s_);
+      vnote_ = pick(vm_s_, vnote_);
+    }
+    vhold_ = 0;
+    vvoiced_ = true;
+  } else {
+    vvoiced_ = false;
+    if (vnote_ >= 0 && ++vhold_ >= kVoiceHoldSegs) vnote_ = -1;
+  }
+}
+
+void Autotune::detect(const float* in, unsigned n) {
+  for (unsigned i = 0; i < n; ++i) {
+    seg_[seg_n_] = clean(in[i]);
+    ++w_;
+    if (++seg_n_ == kSeg) {
+      seg_n_ = 0;
+      tune_.push(seg_, kSeg);
+      if (voice_on_) voice_step();
+    }
+  }
 }
 
 void Autotune::control() {
@@ -208,6 +252,7 @@ void Autotune::process(const float* in, float* out, unsigned n) {
       seg_n_ = 0;
       tune_.push(seg_, kSeg);
       control();
+      if (voice_on_) voice_step();
     }
   }
 }

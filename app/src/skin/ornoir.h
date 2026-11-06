@@ -91,7 +91,7 @@ unsigned ladder_height(std::uint8_t level, unsigned full_px) noexcept;  // whole
 
 // A picker over a column (docs/UI-DESIGN.md section 3, PERFORM): up to kPickerRows rows, the cursor one framed hot, the row in force marked, a dimmed
 // row with its reason in `note`. Plain bytes, no initialisers: the screen keeps one in the SDRAM (O3SDK_BIG, zero at start).
-inline constexpr unsigned kPickerRows = 13;
+inline constexpr unsigned kPickerRows = 14;
 struct PickerRow {
   char name[12];
   char note[16];  // a dimmed row: why (CAPTURE FIRST); else the source or the slot's state

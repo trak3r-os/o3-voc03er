@@ -16,7 +16,7 @@ TEST_CASE("route: every pair of picker values is allowed except one slot on both
       ok += allowed(Route{sp, so}) ? 1u : 0u;
     }
   }
-  CHECK(ok == 5u * 7u - 4u);  // 5 SPEAKS x 7 SOUNDS minus the 4 same-slot pairs
+  CHECK(ok == 5u * 8u - 4u);  // 5 SPEAKS x 8 SOUNDS minus the 4 same-slot pairs
   CHECK_FALSE(speaks_valid(1));  // NONE is the unit's, not a choice
   CHECK_FALSE(speaks_valid(2));
   CHECK_FALSE(sounds_valid(0));  // FOLLOW is the pattern's
@@ -91,12 +91,13 @@ TEST_CASE("route: a slot on the other side is dimmed IN USE") {
 TEST_CASE("route: the picker rows and picking") {
   Row rs[kMaxRows];
   CHECK(rows(Side::Speaks, LiveSrc::MicLow, rs, kMaxRows) == 1u + 6u + 4u);
-  CHECK(rows(Side::Sounds, LiveSrc::MicLow, rs, kMaxRows) == 2u + 1u + 6u + 4u);
+  CHECK(rows(Side::Sounds, LiveSrc::MicLow, rs, kMaxRows) == 3u + 1u + 6u + 4u);
   CHECK(rows(Side::Sounds, LiveSrc::MicLow, rs, 0) == kMaxRows);  // counts without writing
   CHECK(rs[0].kind == Kind::Synth);
-  CHECK(rs[2].kind == Kind::Live);
-  for (unsigned i = 3; i < 9; ++i) CHECK((rs[i].kind == Kind::Source && rs[i].arg != static_cast<unsigned>(LiveSrc::MicLow)));
-  CHECK(rs[9].kind == Kind::Slot);
+  CHECK(rs[2].kind == Kind::Voice);
+  CHECK(rs[3].kind == Kind::Live);
+  for (unsigned i = 4; i < 10; ++i) CHECK((rs[i].kind == Kind::Source && rs[i].arg != static_cast<unsigned>(LiveSrc::MicLow)));
+  CHECK(rs[10].kind == Kind::Slot);
 
   Route r{kSpeaksLive, kSoundsSynth};
   CHECK(pick(Side::Sounds, r, Row{Kind::Slot, 0}));  // MIC > SLOT 1
@@ -112,4 +113,11 @@ TEST_CASE("route: the picker rows and picking") {
   CHECK(r.speaks == kSpeaksLive);
   CHECK(roles(r).live_speaks);
   CHECK(roles(r).live_sounds);
+
+  Route v{kSpeaksLive, kSoundsSynth};  // SOUNDS VOICE: a picker choice, the synth plays, the ADC is the singer's
+  CHECK(pick(Side::Sounds, v, Row{Kind::Voice, 0}));
+  CHECK(v.sounds == kSoundsVoice);
+  CHECK(sounds_valid(kSoundsVoice));
+  CHECK(roles(v).synth);
+  CHECK_FALSE(roles(v).noise_only);
 }

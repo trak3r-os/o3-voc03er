@@ -70,10 +70,22 @@ class Autotune {
   int target_note() const { return cur_; }  // the MIDI note being aimed at, -1 before the first voiced estimate
   bool voiced() const { return tune_.voiced(); }
 
+  // VOICE (the vocoder's CarSrc 8): the sung note, for the synth carrier to play. set_voice(true) makes the control step (process or detect)
+  // also decide it once a segment: the detected pitch snapped by KEY and SCALE with pick() (kSnapBias, SPEED 0 unsmoothed, as TUNE decides
+  // it), through its own hysteresis state (a held NOTES-IN note does not steer it). Off, nothing of it runs and every output is as before.
+  // detect() is process() without the shifter: the detector alone, no output, nothing read back. Unvoiced, the note is held kVoiceHoldMs
+  // (counted in segments, so block-length independent) before voice_note() gives -1: a consonant does not chop the note.
+  static constexpr float kVoiceHoldMs = 60.0f;
+  static constexpr unsigned kVoiceHoldSegs = static_cast<unsigned>(kVoiceHoldMs * Tune::kFs * 0.001f / static_cast<float>(Tune::kTick));
+  void set_voice(bool on);
+  void detect(const float* in, unsigned n);
+  int voice_note() const { return vnote_; }  // the sung MIDI note, -1 when none (before the first voiced estimate, or after the hold)
+
  private:
+  void voice_step();
   void control();
   void new_estimate(float f);
-  int pick(float m) const;
+  int pick(float m, int cur) const;
   float read(float d) const;
   void start_xfade(float d2);
   void jump();
@@ -104,6 +116,13 @@ class Autotune {
   int cur_ = -1;
   float e_ = 0.0f;               // the wanted shift, cents
   float c_ = 0.0f;               // the shift now, cents
+
+  bool voice_on_ = false;        // VOICE: the render context only, with every member below
+  bool vvoiced_ = false;
+  int vnote_ = -1;
+  unsigned vhold_ = 0;           // unvoiced segments since the note was last sung
+  float vm_s_ = 0.0f;            // the voice's smoothed decision pitch, MIDI
+  float vf_last_ = 0.0f;
 };
 
 }  // namespace o3_voc03er
