@@ -312,7 +312,7 @@ Candidate 6a19f36 (BANDS with the slow AGC, TALK at fs/4), kit ef6b1a0, SRAM_U m
 
 Candidate 37fa85f, kit ef6b1a0, SRAM_U margin 10,408 B. The figures are in `docs/ENGINE-REALISM.md`.
 
-- **TALK at `Quality` 16 with 8 notes and 4 loops: 142.8k, down from 160k,** inside the budget of 156,734 by its mean, one block over it. `Quality` 24 150.3k, 492 blocks over. BANDS at the same load 165.4k, still over at every peak. Underruns 0, shed 0, worst peak 70.3 %.
+- **TALK at `Quality` 16 with 8 notes and 4 loops: 142.8k, down from 160k,** inside the budget of 156,734 by its mean, one block over it. `Quality` 24 150.3k, 492 blocks over. BANDS at the same load 165.4k, still over at every peak: accepted by the maintainer, its limit is now 66 % at the peak. Underruns 0, shed 0, worst peak 70.3 %.
 - **AGC: passed at the meter's resolution** on a steady vowel: within 2 dB over 24 dB of input. The spoken reading of 4j does not stand.
 - **`pat A 3 car synth`** sets the step and a wrong word prints the words.
 - **SAMPLE EDIT's picture was not read.** The tester stayed on the old PLAY screen, which keeps the Sample keys for itself until U9, and reported that the image had no such screen. It has: open PERFORM first. The chunked upload on the FT812 is still owed.
