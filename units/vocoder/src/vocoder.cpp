@@ -681,6 +681,9 @@ void Vocoder::held_insert(std::uint8_t note) noexcept {
   }
   held_[i] = note;
   ++nheld_;
+  if (arp_pos_ != 0xFFu && i <= arp_pos_) {
+    ++arp_pos_;  // a note entered at or below the sounding one: the index follows its note, the run neither repeats nor skips
+  }
 }
 
 void Vocoder::held_remove(std::uint8_t note) noexcept {
@@ -693,6 +696,17 @@ void Vocoder::held_remove(std::uint8_t note) noexcept {
       if (nheld_ == 0u) {
         arp_pos_ = 0xFFu;  // the next chord starts from its bottom
         arp_down_ = false;
+      } else if (arp_pos_ != 0xFFu) {
+        if (i < arp_pos_) {
+          --arp_pos_;  // a note below the sounding one left: the index follows its note
+        } else if (i == arp_pos_) {
+          // The sounding note itself left. Going down, the next step takes the one below (index - 1) as ever. Going up, the note that took its
+          // place is the next of the run: step the index back one (0xFF = before the bottom) so the step lands on it.
+          const bool down = arp_ == 2u || (arp_ == 3u && arp_down_);
+          if (!down || (arp_ == 3u && arp_pos_ == 0u)) {
+            arp_pos_ = arp_pos_ == 0u ? 0xFFu : static_cast<std::uint8_t>(arp_pos_ - 1u);
+          }
+        }
       }
       return;
     }
