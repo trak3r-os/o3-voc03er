@@ -145,7 +145,8 @@ __attribute__((always_inline)) inline void voice_step(const VoiceRun& v, float& 
 // Samples i..n of one voice in one envelope segment; Gate: accumulate the held-notes gate. Returns the index it stopped at. Attack stops
 // after the sample that reaches 1 (`done`), Release after the sample that falls under kIdle (`done`), Hold runs to n.
 template <bool Two, bool Saw, bool Gate, Seg S, bool Third = false, bool Sub = false, bool M = false>
-inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint32_t i, std::uint32_t n, float g1, bool& done) noexcept {
+inline std::uint32_t run_segment(VoiceRun& v, float* __restrict out, float* __restrict gate, std::uint32_t i, std::uint32_t n, float g1, bool& done) noexcept {
+  const VoiceRun k = v;  // a local whose address never escapes: the edges stay in registers, where a store to out[] through `v` would force a reload a sample
   float phase = v.phase;
   float phase2 = v.phase2;
   float phase3 = v.phase3;
@@ -157,7 +158,7 @@ inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint
     const float eg = env * g1;
     for (; i < n; ++i) {
       float x, s;
-      voice_step<Two, Saw, Third, Sub, M>(v, phase, phase2, phase3, sub_sign, sub_g, x, s);
+      voice_step<Two, Saw, Third, Sub, M>(k, phase, phase2, phase3, sub_sign, sub_g, x, s);
       out[i] += mulb(x, eg);
       if constexpr (Sub) {
         out[i] += mulb(s, sub_g * env);
@@ -169,7 +170,7 @@ inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint
   } else {
     for (; i < n;) {
       float x, s;
-      voice_step<Two, Saw, Third, Sub, M>(v, phase, phase2, phase3, sub_sign, sub_g, x, s);
+      voice_step<Two, Saw, Third, Sub, M>(k, phase, phase2, phase3, sub_sign, sub_g, x, s);
       out[i] += mulb(x * env, g1);
       if constexpr (Sub) {
         out[i] += mulb(s, sub_g * env);
@@ -179,14 +180,14 @@ inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint
       }
       ++i;
       if constexpr (S == Seg::Attack) {
-        env += v.attack_step;
+        env += k.attack_step;
         if (env >= 1.0f) {
           env = 1.0f;
           done = true;
           break;
         }
       } else {
-        env *= v.release_coef;
+        env *= k.release_coef;
         if (env < kIdle) {
           env = 0.0f;
           done = true;
