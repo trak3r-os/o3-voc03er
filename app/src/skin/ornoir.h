@@ -161,7 +161,7 @@ void perform_shapes(o3sdk::ui::plot::Canvas& c, const HeaderState& h, const FKey
 void perform_text(o3sdk::ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKeys], const Voiceprint& vp, const SpeaksState& sp,
                   const SoundsState& so, const PadsView& pads, const char* placeholder) noexcept;
 
-// "C3", "F#4", "A-1" into out[8] (60 is C4, as the kit's help and the PLAY screen name them); returns the length.
+// "C3", "F#4", "A-1" into out[8] (60 is C4, as the kit's help and the screens name them); returns the length.
 unsigned note_name(int note, char* out) noexcept;
 
 // Whether the atlas holds every character of `name` and it fits the readout (at most 6): else the readout is drawn in the Display face.

@@ -11,12 +11,12 @@ Unofficial; not affiliated with or endorsed by Polyend. "Tracker" is used only t
 
 A starter from o3-sdk's `templates/app`: one unit (`VOICE`, a small monophonic instrument), one screen (`PLAY`: the pads are a chromatic
 keyboard that also records a 16-step pattern, F1-F3 and the encoder edit the voice), the card (FILE saves the pattern, SAMPLE LOAD loads it,
-the pattern and the octave come back after a reboot: the file API, `../o3-sdk/kit/app/include/o3sdk/app/files.h`), HELP on Shift + Config (`PlayScreen::help()`: what each control does, drawn by the kit), three scenarios, and tests.
+the pattern and the octave come back after a reboot: the file API, `../o3-sdk/kit/app/include/o3sdk/app/files.h`), HELP on Shift + Config (each screen has its own: what each control does, drawn by the kit), three scenarios, and tests.
 Replace the voice with your engine and keep the shape.
 
 | Path | What |
 |---|---|
-| `app/` | the app: `src/app.cpp` (units and screens wired into the engine, the entry point), `src/play_screen.cpp` (the screen), `include/o3_voc03er/pad_map.h` (pure pad logic), `include/o3_voc03er/pattern.h` (the bytes kept on the card) |
+| `app/` | the app: `src/app.cpp` (units and screens wired into the engine, the entry point), `src/*_screen.cpp` (the screens), `include/o3_voc03er/pad_map.h` (pure pad logic), `include/o3_voc03er/pattern.h` (the bytes kept on the card) |
 | `app/scenarios/` | simulator scenarios: screens as PNG, audio as WAV (commands: `../o3-sdk/sim/README.md`) |
 | `units/voice/` | the DSP unit: a parameter table and `process()`; one directory per unit, each with a `CMakeLists.txt` calling `o3sdk_unit()` |
 | `tests/` | host tests (doctest): the unit against the engine, the pad map, the file format, the app in the simulator (the card included) |

@@ -1,6 +1,6 @@
 # PARAMS: the unit's values in three pages of eight (CARRIER, SHAPE, TUNE) on the F row, PERFORM's voiceprint small above them. Each page, a value
 # changed and seen (NOISE under the encoder, a bigger voiceprint noise floor is not what is checked: the number and its bar are), a key that comes
-# later (a tap says COMES LATER), QUALITY at 24, PARAMS pressed again paging on, SHIFT + PARAMS the old PLAY.
+# later (a tap says COMES LATER), QUALITY at 24, PARAMS pressed again paging on, SHIFT + PARAMS the same as PARAMS.
 # The simulator shows the screen and that the engine takes the values; it cannot say what the frame costs or how it sounds.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/params.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -42,4 +42,4 @@ press shift
 tap params
 release shift
 wait 300
-snap 10_play_with_shift
+snap 10_shift_params_pages

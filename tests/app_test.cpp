@@ -51,15 +51,6 @@ void tap(sim::Harness& h, app::Button b) {
   h.run_ms(5);
 }
 
-// SHIFT + PARAMS: the old PLAY screen (PARAMS alone opens the PARAMS screen).
-void open_play(sim::Harness& h) {
-  h.press(app::Button::Shift);
-  h.run_ms(2);
-  tap(h, app::Button::Params);
-  h.release(app::Button::Shift);
-  h.run_ms(5);
-}
-
 }  // namespace
 
 TEST_CASE("app: it starts, a pad sounds, and every frame fits the display list") {
@@ -89,15 +80,16 @@ TEST_CASE("app: it starts, a pad sounds, and every frame fits the display list")
 TEST_CASE("app: the console's state line carries the app's pairs") {
   auto h = std::make_unique<sim::Harness>(o3sdk_app());
   REQUIRE(h->start());
-  open_play(*h);  // PERFORM is home; the old PLAY screen is on SHIFT + PARAMS
-  h->run_ms(100);
+  h->run_ms(100);  // PERFORM is home
   char line[300];
   const std::size_t n = h->runtime().state_line(line, sizeof line);
   const std::string text(line, n);
   CHECK(text.find("app=O3-VOC03ER") == 0);
-  CHECK(text.find("screen=PLAY") != std::string::npos);
+  CHECK(text.find("screen=PERFORM") != std::string::npos);
   CHECK(text.find("octave=0") != std::string::npos);
-  CHECK(text.find("focus=0") != std::string::npos);
+  CHECK(text.find("steps=0") != std::string::npos);
+  CHECK(text.find("cursor=0") != std::string::npos);
+  CHECK(text.find("carriers=0") != std::string::npos);
 }
 
 TEST_CASE("app: a pattern and an octave saved on the card come back after a restart, a bad file changes nothing") {
@@ -106,18 +98,20 @@ TEST_CASE("app: a pattern and an octave saved on the card come back after a rest
   platform::host::DirCard card(card_dir.path());
   auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
   REQUIRE(h->start());
-  open_play(*h);  // the old PLAY screen
   h->run_ms(100);
   CHECK(state(*h).find("steps=0") != std::string::npos);
-  for (unsigned pad : {36u, 40u, 43u}) {
+  tap(*h, app::Button::Left);  // PERFORM's octave down: it saves itself
+  h->run_ms(100);              // (a key pressed while a file job runs is ignored: let that one end)
+  tap(*h, app::Button::Pattern);
+  h->run_ms(60);
+  for (unsigned pad : {0u, 3u, 7u}) {  // the NOTE lane's palette: each pad writes the cursor's step and moves it on
     h->pad_down(pad);
     h->run_ms(20);
     h->pad_up(pad);
     h->run_ms(20);
   }
-  tap(*h, app::Button::Left);  // an octave down: it saves itself
-  h->run_ms(100);              // (a key pressed while a file job runs is ignored: let that one end)
-  tap(*h, app::Button::File);
+  CHECK(state(*h).find("steps=3") != std::string::npos);
+  tap(*h, app::Button::F8);  // PATTERN's SAVE
   h->run_ms(300);
   CHECK(state(*h).find("files=done") != std::string::npos);
 
@@ -127,46 +121,16 @@ TEST_CASE("app: a pattern and an octave saved on the card come back after a rest
   CHECK(after.find("steps=3") != std::string::npos);
   CHECK(after.find("octave=-1") != std::string::npos);
 
-  // A file that is not a pattern: the load works, the file is refused whole, the pattern stays and the screen says BAD FILE.
+  // A file that is not a pattern: the next start refuses it whole and the bank starts empty.
   const std::filesystem::path file = std::filesystem::path(card_dir.path()) / "Apps" / "o3_voc03er" / "pattern.o3a";
   {
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
     out << "not a pattern file, but longer than the header of one";
   }
-  tap(*h, app::Button::SampleLoad);
+  REQUIRE(h->reboot());
   h->run_ms(300);
-  CHECK(state(*h).find("steps=3") != std::string::npos);
+  CHECK(state(*h).find("steps=0") != std::string::npos);
   CHECK(h->runtime().frame_failures() == 0u);
-}
-
-TEST_CASE("app: HELP holds to the kit's limits, names every pad the keyboard uses, and follows the octave") {
-  auto h = std::make_unique<sim::Harness>(o3sdk_app());
-  REQUIRE(h->start());
-  open_play(*h);  // the old PLAY screen; PERFORM's own HELP is tested in perform_screen_test
-  h->run_ms(100);
-  for (int step = 0; step < 3; ++step) {  // the octave moves the labels: look at the screen as it is, one octave down, and two
-    if (step != 0) {
-      tap(*h, app::Button::Left);
-    }
-    h->press(app::Button::Shift);
-    h->run_ms(2);
-    tap(*h, app::Button::Config);
-    h->release(app::Button::Shift);
-    h->run_ms(60);
-    REQUIRE(h->runtime().help_open());
-    const app::Help& help = h->runtime().help_overlay().help();
-    app::HelpProblem p;
-    const bool ok = app::help_check(help, &p);  // the same limits and the same wrap rule the kit draws with
-    CHECK_MESSAGE(ok, app::help_field_name(p.field) << " " << static_cast<unsigned>(p.index) << ": " << p.what);
-    CHECK(help.summary != nullptr);
-    for (unsigned pad = 0; pad < app::kPadCount; ++pad) {  // the template's keyboard is a key on every pad at these octaves
-      CHECK(help.pad_group[pad] != 0);
-      CHECK(help.pad_label[pad] != nullptr);
-    }
-    CHECK(std::string(help.pad_label[app::pad_at(app::kPadRows - 1u, 0u)]) == (step == 0 ? "C3" : (step == 1 ? "C2" : "C1")));
-    tap(*h, app::Button::Config);  // closes it
-    REQUIRE_FALSE(h->runtime().help_open());
-  }
 }
 
 namespace {
@@ -362,7 +326,7 @@ TEST_CASE("app: PLAY is the transport and leaves MODE alone; every screen button
                                  app::Button::SampleLoad,  app::Button::SamplePlay, app::Button::SampleEdit, app::Button::SampleRec,
                                  app::Button::Pattern,     app::Button::Note, app::Button::Instr, app::Button::Vol, app::Button::Fx};
   for (const app::Button b : screens) {
-    tap(*h, app::Button::Performance);  // from PERFORM the screens open (the old PLAY screen keeps its own buttons)
+    tap(*h, app::Button::Performance);  // from PERFORM the screens open
     h->run_ms(50);
     tap(*h, b);
     h->run_ms(100);
