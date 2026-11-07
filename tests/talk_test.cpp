@@ -1289,3 +1289,63 @@ TEST_CASE("talk: S1b, sss (noise above 4 kHz) and sh (above 2.5 kHz) take the du
     CHECK(hi <= 0.06f);
   }
 }
+
+// ---- S3: TALK's output goes through RobotComp with a 2:1 setting ----------------------------------------------------------------------
+// The input AGC of TALK already holds a voice from 0.1 down to 0.001 within 0.1 dB (the test above), so the step the compressor adds shows
+// at the hot end only: a full-scale voice against one 20 dB down (0.1, where the AGC's lowest gain stops) comes out 7 dB apart, not 20 (the
+// brief asked for 8 to 14: the AGC's own compression is in that figure and the bench reads 6.9 dB).
+TEST_CASE("talk: S3, a loud phrase and one 20 dB down come out closer than 20 dB, between 5 and 14 dB") {
+  static Vocoder vo;
+  const auto level = [&](float in) {
+    vo.prepare(kFs);
+    const std::size_t blocks = 3000;
+    const auto out = run_unit(vo, blocks, 0, 1000000, in);
+    float s = 0.0f;
+    for (std::size_t i = 2000 * 64; i < blocks * 64; ++i) s += out[i] * out[i];
+    return std::sqrt(s / static_cast<float>((blocks - 2000) * 64));
+  };
+  const float loud = level(1.0f), quiet = level(0.1f);
+  const float db = 20.0f * std::log10(loud / quiet);
+  std::printf("talk: S3 loud %.5f quiet %.5f apart %.2f dB\n", static_cast<double>(loud), static_cast<double>(quiet), static_cast<double>(db));
+  CHECK(db > 5.0f);
+  CHECK(db < 14.0f);
+}
+
+TEST_CASE("robot: S3, a 2:1 instance gives the square root of threshold over envelope, and ROBOT's default is unchanged") {
+  const auto gain_at = [](RobotComp& c, float peak) {
+    c.prepare(kFs);
+    float x[512];
+    for (int pass = 0; pass < 40; ++pass) {  // 40 blocks of 512 settle the envelope (5 ms attack)
+      for (float& v : x) v = peak;
+      c.process(x, 512);
+    }
+    return x[511] / peak;
+  };
+  RobotComp two;
+  two.configure(5.0f, 20.0f, 0.01f, 1.5f, true);
+  CHECK(gain_at(two, 0.001f) == doctest::Approx(1.5f).epsilon(0.01));
+  const float g4 = gain_at(two, 0.04f), g16 = gain_at(two, 0.16f);
+  CHECK(g4 == doctest::Approx(1.5f * 0.5f).epsilon(0.02));    // sqrt(0.01 / 0.04)
+  CHECK(g16 == doctest::Approx(1.5f * 0.25f).epsilon(0.02));  // sqrt(0.01 / 0.16): 2:1 is 6 dB per 12 dB
+  // ROBOT: an FNV-1a digest of the bit patterns of the default instance on a fixed signal; the value is from main's robot.cpp (4a922d9), built alone.
+  RobotComp rob;
+  rob.prepare(kFs);
+  std::uint32_t h = 2166136261u;
+  float x[64];
+  std::uint32_t seed = 12345u;
+  for (int b = 0; b < 400; ++b) {
+    const float amp = 0.0003f * static_cast<float>(1 + (b / 50) % 4 * 3);
+    for (float& v : x) {
+      seed = seed * 1664525u + 1013904223u;
+      v = amp * (static_cast<float>(seed >> 8) * (1.0f / 8388608.0f) - 1.0f);
+    }
+    rob.process(x, 64);
+    for (float v : x) {
+      std::uint32_t u;
+      std::memcpy(&u, &v, sizeof u);
+      h = (h ^ u) * 16777619u;
+    }
+  }
+  std::printf("robot: S3 default digest %08X\n", static_cast<unsigned>(h));
+  CHECK(h == 0x49115C4Du);
+}

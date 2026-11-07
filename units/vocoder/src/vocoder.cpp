@@ -110,7 +110,12 @@ constexpr float kGateEdgeMs = 2.0f;   // the soft edges of GATE
 constexpr float kHalfBeats[4] = {0.5f, 0.25f, 0.125f, 0.0625f};  // half a step in beats for 1/4, 1/8, 1/16, 1/32
 constexpr float kModeFadeMs = 10.0f;  // crossfade between the modes
 constexpr float kTuneGain = 1.0f;     // Tune returns the voice itself: unity
+// S3, TALK's output compression (the RobotComp of ROBOT with other constants): starting values, a bench's, by ear on the unit.
+constexpr float kTalkCompAttackMs = 5.0f;
+constexpr float kTalkCompReleaseMs = 120.0f;
+constexpr float kTalkCompMakeup = 2.0f;
 constexpr float kTalkGain = 28.0f;    // speech on a one-note saw has the rms in TALK that it has in BANDS, so a change of MODE keeps the level (bench, docs/ENGINE-REALISM.md); by ear on the unit
+constexpr float kTalkCompThreshold = 0.125893f / kTalkGain;  // -18 dBFS (peak) of the TALK wet sum after kTalkGain, in TALK's own units; 2:1 above it
 constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC holds at a mean-abs of 0.1, and each band passes a slice of the carrier: a vowel on a three-note saw chord peaks at about 0.9 at LEVEL 0 dB (0.47 at the default -6)
 
 // Cubic soft clip: linear near 0, flat at +-1.5 where it reaches 0.999: the peak never goes above it.
@@ -169,6 +174,8 @@ void Vocoder::prepare(float sample_rate) noexcept {
   tune_mix_.set_length(fade);
   robot_mix_.set_length(fade);
   comp_.prepare(sample_rate);
+  talk_comp_.configure(kTalkCompAttackMs, kTalkCompReleaseMs, kTalkCompThreshold, kTalkCompMakeup, true);
+  talk_comp_.prepare(sample_rate);
   const auto ramp = static_cast<std::uint32_t>(kRampMs * 0.001f * sample_rate);
   level_.set_length(ramp);
   dry_.set_length(ramp);
@@ -284,6 +291,7 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
             if (i == 3u) comp_.reset();
           } else if (i == 1u) {
             talk_.reset();
+            talk_comp_.reset();
             talk_.adopt_level(lvl);
           } else {
             tune_.reset();
@@ -1192,6 +1200,7 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   }
   if (runs(talk_mix_)) {
     talk_.process(mod, car, tw, n);
+    talk_comp_.process(tw, n);
   } else {
     for (std::uint32_t i = 0; i < n; ++i) tw[i] = 0.0f;
   }

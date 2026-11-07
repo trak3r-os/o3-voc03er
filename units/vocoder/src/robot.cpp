@@ -13,14 +13,14 @@ constexpr float kPeakMax = 1.0e6f;  // a non-finite or absurd peak is read as th
 }  // namespace
 
 void RobotComp::prepare(float sample_rate) noexcept {
-  att_ = std::exp(-static_cast<float>(kSeg) / (kAttackMs * 0.001f * sample_rate));
-  rel_ = std::exp(-static_cast<float>(kSeg) / (kReleaseMs * 0.001f * sample_rate));
+  att_ = std::exp(-static_cast<float>(kSeg) / (attack_ms_ * 0.001f * sample_rate));
+  rel_ = std::exp(-static_cast<float>(kSeg) / (release_ms_ * 0.001f * sample_rate));
   reset();
 }
 
 void RobotComp::reset() noexcept {
   env_ = 0.0f;
-  gain_ = kMakeup;
+  gain_ = makeup_;
 }
 
 void RobotComp::process(float* x, std::uint32_t n) noexcept {
@@ -35,11 +35,11 @@ void RobotComp::process(float* x, std::uint32_t n) noexcept {
     peak = peak < kPeakMax ? peak : kPeakMax;  // false for NaN as well
     env = peak > env ? peak + mulb(att_, env - peak) : peak + mulb(rel_, env - peak);
     env = env > kTiny ? env : 0.0f;
-    float target = kMakeup;
-    if (env > kThreshold) {
-      const float q = kThreshold / env;  // < 1
+    float target = makeup_;
+    if (env > thr_) {
+      const float q = thr_ / env;  // < 1
       const float r = std::sqrt(q);
-      target = mulb(kMakeup, mulb(r, std::sqrt(r)));  // q^0.75
+      target = ratio2_ ? mulb(makeup_, r) : mulb(makeup_, mulb(r, std::sqrt(r)));  // q^0.5 or q^0.75
     }
     const float step = (target - g) / static_cast<float>(len);
     for (std::uint32_t k = 0; k < len; ++k) {

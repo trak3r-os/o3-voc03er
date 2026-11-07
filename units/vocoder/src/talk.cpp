@@ -47,7 +47,7 @@ constexpr float kUnvGate = 10.0f * kGate;  // lf + hf (both as mean powers) at o
 constexpr float kRatioEps = kGate;      // keeps the divide finite when lf is 0
 constexpr float kHopFrames = 128.0f;    // the hf accumulator's hop, as Talk::kHop * 4
 constexpr float kBreathHz = 5000.0f;
-constexpr float kBreathTopHz = 7000.0f;  // one pole on the breath: the player's air at the mic, not a full-band hiss (a starting value)
+constexpr float kBreathTopHz = 4000.0f;  // two cascaded poles on the breath: the player's air at the mic, not a full-band hiss (a starting value)
 constexpr float kOpenPeak = 1.0e-3f;    // the carrier's peak over a call above which the breath is open
 constexpr float kOpenMs = 5.0f;
 
@@ -106,7 +106,7 @@ void Talk::prepare(float sample_rate) noexcept {
   hp_a1_ = -2.0f * cw / a0;
   hp_a2_ = (1.0f - al) / a0;
   open_step_ = 1.0f / (kOpenMs * 0.001f * sample_rate);
-  br_lp_a_ = 1.0f - std::exp(-kPi2 * kBreathTopHz / sample_rate);
+  br_lp_a_ = 1.0f - std::exp(-kPi2 * kBreathTopHz / sample_rate);  // both poles of the cascade take this one coefficient
   car_lp_a_ = 1.0f - std::exp(-kPi2 * kCarLpHz / fl);
   lvl_att_ = 1.0f - std::exp(-1000.0f / (kAgcAttackMs * fl));
   lvl_rel_ = 1.0f - std::exp(-1000.0f / (kAgcReleaseMs * fl));
@@ -136,7 +136,7 @@ void Talk::reset() noexcept {
   stage_ = cpos_ = lag_ = total_ = done_ = ramp_left_ = 0;
   for (auto& v : acc_) v = 0.0f;
   emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
-  hp_s1_ = hp_s2_ = br_lp_y_ = 0.0f;
+  hp_s1_ = hp_s2_ = br_lp_y_ = br_lp2_y_ = 0.0f;
   hf_acc_ = hf_done_ = ms_acc_ = ms_done_ = unv_ = car_lp_y_ = 0.0f;
   duck_ = 1.0f;
   open_ = breath_ = breath_step_ = 0.0f;
@@ -412,7 +412,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   // most 64 of the hop's 128), so the output does not depend on how the frames are split into calls.
   float breath = breath_, breath_step = breath_step_;
   std::uint32_t breath_pos = breath_pos_;
-  float s1 = hp_s1_, s2 = hp_s2_, open = open_, hf = hf_acc_, ms = ms_acc_, bl = br_lp_y_;
+  float s1 = hp_s1_, s2 = hp_s2_, open = open_, hf = hf_acc_, ms = ms_acc_, bl = br_lp_y_, bl2 = br_lp2_y_;
   const float bla = br_lp_a_;
   const float b0 = hp_b0_, b1 = hp_b1_, b2 = hp_b2_, a1 = hp_a1_, a2 = hp_a2_;  // in locals: a store to out must not reload them
   const float ostep = open_step_;
@@ -438,7 +438,8 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         ms += mulb(x, x);
         breath += breath_step;
         bl += mulb(bla, h - bl);
-        out[i] += mulb(breath * open, bl);
+        bl2 += mulb(bla, bl - bl2);
+        out[i] += mulb(breath * open, bl2);
       }
     } else {
       for (; i < last; ++i) {
@@ -451,7 +452,8 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         ms += mulb(x, x);
         breath += breath_step;
         bl += mulb(bla, h - bl);
-        out[i] += mulb(breath * open, bl);
+        bl2 += mulb(bla, bl - bl2);
+        out[i] += mulb(breath * open, bl2);
       }
     }
   }
@@ -461,6 +463,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   hp_s1_ = flush(s1);
   hp_s2_ = flush(s2);
   br_lp_y_ = flush(bl);
+  br_lp2_y_ = flush(bl2);
   open_ = open;
   hf_acc_ = hf;
   ms_acc_ = ms;

@@ -214,6 +214,40 @@ Owed: by ear on a real microphone (fricatives, plosives, whisper, the hop-and-a-
 
 **S1c, the breath's top.** With S1b the consonants carry the breath (kBreath 0.5) instead of the carrier, and >12 kHz rose to -36.3 / -39.8 dB (saw110 / Am) against -44.5 / -46.1 before S1, 93 % of it on unvoiced frames. A one-pole low-pass at 7 kHz on the breath (`kBreathTopHz`, a starting value: the player's air at the microphone, not a full-band hiss; one multiply-add per frame) brings it to -43.3 / -47.3 dB. Same speech.wav, metrics2.py labelled from the speech: tilt -1.56 / -2.30 dB/oct (V0 -1.00 / -1.41), contrast 26.4 / 26.0 (V0 26.6 / 26.3), >8 kHz -24.7 / -28.8 (V0 -24.4 / -28.5), gap -59.8 / -63.4 dB (V0 -49.4 / -53.3). The 4-8 kHz unvoiced-over-voiced share is +9.4 / +9.1 dB (V0 +5.9 / +6.4): the consonants are now the breath and the vowels lost their breath floor, which is the point of S1; whether that reads as a talkbox is for the ear.
 
+**S3, Part A: the breath's top against a measured target.** Five dry/vocoded reference pairs show a real vocoder lowering the share above 8 kHz by 5-7 dB and above 12 kHz by 5-11 dB against the dry voice. Our speech.wav reads >8k -29.5 dB and >12k -56.0 dB; S1c's TALK read -24.7 / -43.3 (saw110), above the dry voice, and nearly all of that is the breath path (the carrier is band-limited at fs/4). Target: >8k at or below -33 and >12k at or below -58 on saw110 and Am, with hfUV (4-8 kHz unvoiced over voiced) at or above +3 dB. Sweep (one render each, `metrics2.py`; each cell saw110 / Am; `top` is the pole's corner, `x2` a second identical cascaded pole, one multiply-add more per frame):
+
+| kBreath | top | >8k dB | >12k dB | hfUV dB |
+|---|---|---|---|---|
+| 0.5 | 7000 (S1c) | -24.7 / -28.8 | -43.3 / -47.3 | 9.4 / 9.1 |
+| 0.5 | 5500 | -25.7 / -30.0 | -46.1 / -50.2 | 9.4 / 9.1 |
+| 0.5 | 4500 | -26.7 / -31.1 | -48.9 / -53.1 | 9.4 / 9.0 |
+| 0.4 | 7000 | -26.1 / -30.5 | -48.4 / -52.7 | 9.3 / 9.0 |
+| 0.4 | 4500 | -28.3 / -32.9 | -53.9 / -58.3 | 9.2 / 8.7 |
+| 0.5 | 7000 x2 | -27.3 / -31.8 | -49.4 / -53.7 | 9.4 / 9.0 |
+| 0.5 | 5500 x2 | -29.6 / -34.3 | -55.0 / -59.4 | 9.3 / 8.7 |
+| 0.5 | 4500 x2 | -31.8 / -36.7 | -60.4 / -64.7 | 9.1 / 8.2 |
+| 0.4 | 5000 x2 | -32.3 / -37.2 | -62.2 / -66.3 | 9.0 / 8.0 |
+| 0.4 | 4500 x2 | -33.6 / -38.6 | -64.7 / -68.5 | 8.9 / 7.6 |
+| **0.5** | **4000 x2** | **-33.3 / -38.3** | **-63.6 / -67.6** | **9.0 / 7.8** |
+| 0.5 | 3500 x2 | -35.1 / -40.1 | -66.9 / -70.1 | 8.7 / 7.2 |
+
+No single pole reaches the target on both files. The nearest with the fewest changes is kBreath unchanged (0.5) and two cascaded poles at `kBreathTopHz` 4000 (the only change besides the second state); it is the only row at kBreath 0.5 that meets both figures on saw110. Starting values, to be confirmed by ear and on the unit: the consonants lose the air above 4 kHz, so hfUV (the 4-8 kHz band) is the number to watch for intelligibility.
+
+**S3, Part B: output compression on TALK.** `RobotComp` (ROBOT's compressor) now takes its constants through `configure(attack_ms, release_ms, threshold, makeup, ratio2)`, called before `prepare()`; the default instance is ROBOT's, and ratio2 selects 2:1 (the gain is `makeup * sqrt(thr / env)`, from the square root ROBOT already takes). TALK's own instance (`talk_comp_` in `vocoder.cpp`) runs on TALK's wet output before the sum, with `kTalkCompAttackMs` 5, `kTalkCompReleaseMs` 20, 2:1, threshold -18 dBFS of the wet sum after `kTalkGain` (so `0.125893 / kTalkGain` in TALK's own units), make-up 1.5. Release is the one value moved from the brief's 120 ms: the 2-8 Hz depth (`mod_idx`, 300-3400 Hz envelope) only moved with the release, not with the threshold (saw110: 120 ms 77.1 %, 50 ms 71.2 %, 30 ms 69.6 %, 20 ms 69.0 %, at -18 dBFS 2:1; a threshold of -30 or -36 changed it by less than 2 points). Level: the TALK unit rms against BANDS on the chord test went from 0.94 to 0.64 (about -3.4 dB), so a MODE change is quieter in TALK; make-up 2.0 would give most of it back (not rendered). ROBOT is unchanged: `tests/talk_test.cpp` holds an FNV-1a digest of the default `RobotComp` on a fixed signal (49115C4D), equal to the one from main's `robot.cpp` built alone. The AGC of TALK already holds a voice from 0.1 down to 0.001 within 0.1 dB, so the compressor shows at the hot end: a full-scale voice against one 20 dB down comes out 6.9 dB apart (not the 8-14 dB the brief expected; the AGC is part of that figure), and the test asserts 5-14 dB.
+
+**S3, release back to 120 ms, make-up 2.0** (the maintainer's lane, after the run above). A 20 ms release is about two periods of a 110 Hz voice, close to where a compressor starts to follow the waveform, and the depth target it bought (55-70 %) is this document's own guess, not a measurement of a talkbox. With release 120 ms and make-up 2.0: the non-harmonic share on a steady vowel is the same in all three renders (-20.9 dB, metrics.py; no measurable distortion from either release), the rms comes back to S1c's (-21.3 dBFS against -21.7; with 20 ms and 1.5 it was -22.7), and the 2-8 Hz depth is 76.9 / 73.4 % (saw110 / Am) against 81.9 / 75.6 before S3 and 69.0 / 63.3 at 20 ms. Tilt -2.64 / -3.04, contrast 26.2 / 25.8, >8 kHz -33.5 / -36.5, >12 kHz -63.0 / -66.0, gap -69.5 / -66.7 dB. The release is a starting value for the ear: shorter if the phrases want flatter, longer if anything pumps.
+
+Metrics (renders of `ours_talk_saw110` / `ours_talk_Am` from speech.wav, `metrics2.py`), S1c against S3 (A + B):
+
+| | contrast dB | hfUV dB | >8k dB | >12k dB | mod_idx % |
+|---|---|---|---|---|---|
+| S1c saw110 | 26.4 | 9.4 | -24.7 | -43.3 | 81.9 |
+| S3 saw110 | 26.2 | 7.8 | -33.9 | -65.6 | 69.0 |
+| S1c Am | 26.0 | 9.1 | -28.8 | -47.3 | 75.6 |
+| S3 Am | 25.8 | 7.8 | -36.5 | -67.6 | 63.3 |
+
+Cost [estimate, not a measurement]: the second pole is one multiply-add per frame (64 per block, about 200 cycles with the loads); the compressor is the ROBOT's, per sample one abs, one compare, one multiply, per 16-frame segment two divides and two square roots (about 4 segments x 100 cycles + 64 x 4 cycles = 650 cycles a block); together under 1,000 cycles a block, about 0.7 % of the 138k read; to be measured on the unit. Owed: by ear (the release, and the air above 4 kHz the consonants lost), and the CPU and the level change on the unit.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.
