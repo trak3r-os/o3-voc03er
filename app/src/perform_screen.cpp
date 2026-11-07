@@ -1278,7 +1278,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     for (unsigned i = 0; i < route::kSlots; ++i) {
       const Vocoder::LoopStatus ls = voc_->loop_status(i);
       const auto v = static_cast<std::uint8_t>(route::kFirstSlot + i);
-      sp.slot[i] = ls.rec != Vocoder::LoopStatus::Rec::Idle ? 3u : (rt.speaks == v || rt.sounds == v ? 2u : (ls.length != 0u ? 1u : 0u));
+      sp.slot[i] = ((slots_waiting_ >> i) & 1u) != 0u ? ornoir::kSlotWaiting : ls.rec != Vocoder::LoopStatus::Rec::Idle ? 3u : (rt.speaks == v || rt.sounds == v ? 2u : (ls.length != 0u ? 1u : 0u));
     }
     if (cap_ != Cap::Idle) {
       cat(capture, sizeof capture, "REC: CAPTURE ");

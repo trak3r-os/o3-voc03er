@@ -105,6 +105,9 @@ class PerformScreen final : public o3sdk::app::Screen {
   void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
   void set_chord_kind(unsigned k) noexcept { bottom_ = static_cast<decltype(bottom_)>(k & 3u); }
   void set_keys(bool on) noexcept { keys_ = on; }
+  // FILE's load marks the slots whose WAV is still on its way (bit n: slot n): PERFORM and FILE draw them grey (ornoir::kSlotWaiting). Main loop only.
+  void set_slots_waiting(unsigned mask) noexcept { slots_waiting_ = static_cast<std::uint8_t>(mask & 0xFu); }
+  unsigned slots_waiting() const noexcept { return slots_waiting_; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }
   bool strip_mode() const noexcept { return strip_; }
@@ -151,6 +154,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   int octave_ = 0;
   unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
   unsigned bottom_ = 0;      // ChordKind of the bottom row
+  std::uint8_t slots_waiting_ = 0;  // see set_slots_waiting
   bool keys_ = false;        // F7 PADS: false CHORDS, true KEYS
   bool strip_ = false;       // BEND ROW (SHIFT + F7): the bottom row is the bend strip
   unsigned strip_last_ = 0;  // the strip pad pressed last

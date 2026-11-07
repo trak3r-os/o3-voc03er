@@ -53,6 +53,7 @@ Project full() {
     s.speed = static_cast<std::int8_t>(static_cast<int>(i % 3) - 1);
     s.reverse = static_cast<std::uint8_t>(i & 1u);
     s.level_half = static_cast<std::int8_t>(static_cast<int>(i) * 10 - 20);
+    s.values = static_cast<std::uint8_t>(i != 1u ? 1u : 0u);  // slot 1 is a record from before: no captured values
     const char* nm = i == 0 ? "KICK LOOP 1.wav" : (i == 1 ? "a-31-byte-name-0123456789abcd.wav" : "take3");
     s.name_len = static_cast<std::uint8_t>(std::strlen(nm) > kWavNameMax ? kWavNameMax : std::strlen(nm));
     std::memcpy(s.name, nm, s.name_len);
@@ -110,7 +111,7 @@ bool same(const Project& a, const Project& b) {
     const ProjectSlot& x = a.slot[i];
     const ProjectSlot& y = b.slot[i];
     if (x.cuts.length != y.cuts.length || x.cuts.count != y.cuts.count || x.trim_start != y.trim_start || x.trim_end != y.trim_end || x.speed != y.speed ||
-        x.reverse != y.reverse || x.level_half != y.level_half || x.name_len != y.name_len || std::memcmp(x.name, y.name, sizeof x.name) != 0) {
+        x.reverse != y.reverse || x.level_half != y.level_half || x.values != y.values || x.name_len != y.name_len || std::memcmp(x.name, y.name, sizeof x.name) != 0) {
       return false;
     }
     for (unsigned k = 0; k < x.cuts.count; ++k) {
@@ -221,6 +222,7 @@ TEST_CASE("project: the worst case fits the buffer") {
     sample::even_cuts(s.cuts, Loop::kMaxSamples, sample::kMaxSlices);
     s.name_len = static_cast<std::uint8_t>(kWavNameMax);
     std::memset(s.name, 'x', kWavNameMax);
+    s.values = 1;
   }
   p.chain.count = kChainMax;
   for (unsigned i = 0; i < kChainMax; ++i) {
@@ -506,4 +508,49 @@ TEST_CASE("project: STAT (U9c2) round trip, a file without it, a tempo out of ra
   bad = p;
   bad.pattern = static_cast<std::uint8_t>(kBankPatterns);
   CHECK(write_project(bad, buf.data(), buf.size()) == 0u);
+}
+
+TEST_CASE("project: U9c4 the captured trim, speed, reverse and level round-trip one by one, and a file from before loads as it did") {
+  const auto one = [](auto&& set) {
+    Project p = small();
+    p.slot[0].values = 1;
+    set(p.slot[0]);
+    const Bytes f = write(p);
+    REQUIRE(!f.empty());
+    Project got = {};
+    REQUIRE(read(f, got));
+    CHECK(same(p, got));
+    CHECK(got.slot[0].values == 1u);
+    return got;
+  };
+  CHECK(one([](ProjectSlot& s) { s.trim_start = 10; s.trim_end = 900; }).slot[0].trim_end == 900u);
+  CHECK(one([](ProjectSlot& s) { s.speed = -1; }).slot[0].speed == -1);
+  CHECK(one([](ProjectSlot& s) { s.speed = 1; }).slot[0].speed == 1);
+  CHECK(one([](ProjectSlot& s) { s.reverse = 1; }).slot[0].reverse == 1u);
+  CHECK(one([](ProjectSlot& s) { s.level_half = -48; }).slot[0].level_half == -48);
+  CHECK(one([](ProjectSlot& s) { s.level_half = 24; }).slot[0].level_half == 24);
+
+  // The record of an app from before this minor ends at the name: values is 0 and every other field is read as it was.
+  Bytes rec;
+  put16(rec, 0x0100);
+  rec.push_back(1);
+  put16(rec, 4 + 1 + 8 + 4 + 1);
+  put32(rec, 1000);
+  rec.push_back(0);
+  put32(rec, 20);
+  put32(rec, 800);
+  rec.push_back(1);
+  rec.push_back(1);
+  rec.push_back(static_cast<std::uint8_t>(-6));
+  rec.push_back(1);
+  rec.push_back('b');
+  Project got = {};
+  REQUIRE(read(rebuild(write(small()), Edit{nullptr, "SLOT", rec, false}), got));
+  CHECK(got.slot[0].values == 0u);
+  CHECK(got.slot[0].trim_start == 20u);
+  CHECK(got.slot[0].trim_end == 800u);
+  CHECK(got.slot[0].speed == 1);
+  CHECK(got.slot[0].reverse == 1u);
+  CHECK(got.slot[0].level_half == -6);
+  CHECK(got.slot[0].name_len == 1);
 }

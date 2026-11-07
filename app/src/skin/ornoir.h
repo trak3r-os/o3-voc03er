@@ -118,11 +118,19 @@ struct PickerView {
   PickerRow row[kPickerRows];
 };
 
+// The states of a slot box (SpeaksState::slot, slot_shapes, slot_text). kSlotWaiting is a slot whose WAV is on its way (a project load): the box is a dim
+// grey fill, in the theme's own Empty and TextDim, until the file has landed.
+inline constexpr std::uint8_t kSlotEmpty = 0, kSlotAudio = 1, kSlotSide = 2, kSlotRecording = 3, kSlotWaiting = 4;
+
+// The four boxes of a row at (x, y), 40 px apart, each 34 x 20, and their numbers: the one drawing every screen that shows the slots uses (PERFORM, FILE).
+void slot_shapes(o3sdk::ui::plot::Canvas& c, int x, int y, const std::uint8_t (&slot)[4]) noexcept;
+void slot_text(o3sdk::ui::Renderer& r, int x, int y, const std::uint8_t (&slot)[4]) noexcept;
+
 struct SpeaksState {
   const char* source = "";  // the chip: what speaks (MIC LOW, SLOT 2 ...)
   const char* live = nullptr;  // the ADC's source under LIVE (null: `source`)
   const char* capture = "";    // the capture chip under the column ("REC: CAPTURE MIC > SLOT 2"); empty: none
-  std::uint8_t slot[4] = {};   // the slot boxes: 0 empty, 1 holds audio, 2 on a side, 3 recording
+  std::uint8_t slot[4] = {};   // the slot boxes: 0 empty, 1 holds audio, 2 on a side, 3 recording, 4 waiting for its WAV (kSlot*)
   const PickerView* picker = nullptr;  // open: the list replaces the column's body
   unsigned gain = 0;
   Ladder in;

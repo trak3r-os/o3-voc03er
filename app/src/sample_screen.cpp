@@ -168,8 +168,11 @@ void SampleScreen::say(app::Context& ctx, const char* text) noexcept {
 
 // SPEED, DIR, LEVEL and LOOP of the selected slot. While a slice of another slot borrows its reader the new value waits in `saved` (the reader
 // plays that slice); while a slice of its own slot plays on it both are written, or the end of the region would undo the change.
-void SampleScreen::write(app::Context& ctx, Field f, float v) noexcept {
-  SliceVoice& sv = g_sd.voice[slot_ & 3u];
+void SampleScreen::write(app::Context& ctx, Field f, float v) noexcept { write_slot(ctx, slot_, f, v); }
+
+void SampleScreen::write_slot(app::Context& ctx, unsigned loop, Field f, float v) noexcept {
+  loop &= 3u;
+  SliceVoice& sv = g_sd.voice[loop];
   if (sv.modified) {
     if (f == Field::Speed) {
       sv.speed = static_cast<std::uint8_t>(v);
@@ -178,11 +181,17 @@ void SampleScreen::write(app::Context& ctx, Field f, float v) noexcept {
     } else if (f == Field::Level) {
       sv.level_db = v;
     }
-    if (sv.slot != slot_ && f != Field::Play) {
+    if (sv.slot != loop && f != Field::Play) {
       return;
     }
   }
-  (void)ctx.engine().set_param(voice_, Vocoder::loop_param(slot_, f), v);
+  (void)ctx.engine().set_param(voice_, Vocoder::loop_param(loop, f), v);
+}
+
+void SampleScreen::set_values(app::Context& ctx, unsigned loop, unsigned speed, bool reverse, float level_db) noexcept {
+  write_slot(ctx, loop, Field::Speed, static_cast<float>(speed < sm::kSpeedCount ? speed : 1u));
+  write_slot(ctx, loop, Field::Dir, reverse ? 1.0f : 0.0f);
+  write_slot(ctx, loop, Field::Level, level_db < sm::kLevelMinDb ? sm::kLevelMinDb : (level_db > sm::kLevelMaxDb ? sm::kLevelMaxDb : level_db));
 }
 
 // The slot's status as the screen shows it: a borrowed reader's own values come from `saved`, not from what the slice has put there.

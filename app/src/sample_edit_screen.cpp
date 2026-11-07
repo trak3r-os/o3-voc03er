@@ -187,6 +187,32 @@ void SampleEditScreen::slot_replaced(unsigned slot) noexcept {
   g_se.beats[slot] = 0;
 }
 
+bool SampleEditScreen::trim_brackets(unsigned slot, std::uint32_t length, std::uint32_t& start, std::uint32_t& end) noexcept {
+  slot &= 3u;
+  start = 0;
+  end = 0;
+  if (length == 0u || g_se.br_len[slot] != length || !se::trim_moved(g_se.br[slot], length)) {
+    return false;
+  }
+  start = g_se.br[slot].start;
+  end = g_se.br[slot].end;
+  return true;
+}
+
+bool SampleEditScreen::set_trim_brackets(unsigned slot, std::uint32_t length, std::uint32_t start, std::uint32_t end) noexcept {
+  slot &= 3u;
+  if (start == 0u && end == 0u) {
+    g_se.br_len[slot] = 0;  // not moved: the brackets start from the slot's own ends again when the screen next needs them
+    return true;
+  }
+  if (length < 2u * se::kMinCutSamples || start >= end || end > length || end - start < se::kMinCutSamples) {
+    return false;
+  }
+  g_se.br[slot] = se::Brackets{start, end};
+  g_se.br_len[slot] = length;
+  return true;
+}
+
 void SampleEditScreen::say(app::Context& ctx, const char* text) noexcept {
   g_se.note = text;
   g_se.note_until = ctx.uptime_ms() + kNoteMs;

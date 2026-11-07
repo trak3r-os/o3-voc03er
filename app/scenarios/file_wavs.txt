@@ -1,7 +1,7 @@
 # FILE (U9c3): F5 SAVE WAVS writes the WAV of every slot that holds audio into the project's folder (slotN_NNN.wav, one card job after another) and saves the project again so
 # that its records name them; after a reboot (empty slots) LOAD reads the .o3a and then the WAVs it names, and the record's cuts go back on the landed audio. A take of 1 BAR
 # in slot 1, one cut added by hand, SAVE AS, F5, a second F5 (the next free number), reboot, LOAD: the slot is back with its length and its hand-made cuts. The simulator shows the
-# screens and that the card jobs run in order; it says nothing about the time per slot on a real card. Start from an empty card directory:
+# screens, the grey slot while a WAV is on its way, the restored speed and direction, and that the card jobs run in order; it says nothing about the time per slot on a real card. Start from an empty card directory:
 #
 #   mkdir <dir> <card> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/file_wavs.txt --card <card> --out <dir>
 input tone 220 -8
@@ -28,6 +28,15 @@ wait 100
 tap insert         # a cut by hand: the record keeps it
 wait 150
 expect state edited1=1
+tap sampleplay      # U9c4: the speed, the direction and the level are the project's too
+wait 60
+tap f3              # SPEED (the first tap of a key only selects it)
+wait 40
+tap f3              # 1X to 2X
+tap f4              # DIR: REV
+wait 60
+expect state speed1=2
+expect state rev1=1
 tap file
 wait 40
 tap f5              # no project yet
@@ -53,8 +62,17 @@ wait 40
 tap f1              # LOAD asks
 tap f1              # the picker lists the project folders
 wait 80
-tap f1              # OPEN
+press f1              # OPEN
+snap 03a_opening
+release f1
+wait 2
 snap 03_loading
-wait 1500
+wait 2
+snap 03b_slot_grey
+wait 3
+snap 03c_slot_grey     # U9c4: the slot is grey (dim fill) in FILE's slot row until its WAV has landed
+wait 1400
 snap 04_loaded
 expect state edited1=1
+expect state speed1=2   # restored after the landing
+expect state rev1=1
