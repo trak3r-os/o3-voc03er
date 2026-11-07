@@ -13,7 +13,8 @@
 //   CHAI 1.0  u8 count (0..16), u8 loop (0/1), then count x (u8 pattern 0..7, u8 repeats 1..kChainRepeatMax): the SONG chain
 //   ROUT 1.0  u8 speaks, u8 sounds (route.h values; the pair must be allowed), u8 live source (route::LiveSrc). Absent: the default route
 //   SLOT 1.0  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
-//             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL)
+//             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL),
+//             then u8 values (appended: 1 = the trim, speed, reverse and level above were captured live and are restored; 0 or absent = a file from before, they are left alone)
 //   VALU 1.0  u16 count, then count x (u16 parameter id, f32 value): the engine's state, by id
 //   STAT 1.0  u32 tempo (milli-BPM), u8 swing (0: none yet), u8 current pattern 0..7, i8 octave, u8 chord kind 0..3, u8 pads mode (0 pads, 1 keys). Absent: those stay as they are
 //
@@ -76,6 +77,7 @@ struct ProjectSlot {
   std::int8_t level_half = 0;    // half-dB, -48..+24 (the unit's L n LEVEL is -24..+12 dB); 0 is 0 dB
   std::uint8_t name_len = 0;     // 0: no WAV (an empty slot, or a take that was not saved)
   char name[kWavNameMax + 1] = {};  // the WAV's file name in the project folder, name_len bytes, printable, no '/' or '\\'
+  std::uint8_t values = 0;       // 1: trim_*, speed, reverse and level_half were captured at save and are put back on load; 0: they are not (a file from before)
 };
 
 inline constexpr unsigned kEngineIds = 64;  // the unit's table is at most 64 parameters (the kit's limit): the ids a Project can hold
@@ -149,7 +151,7 @@ inline bool project_set_engine(Project& p, unsigned id, float v) noexcept {
 namespace project_detail {
 
 constexpr std::size_t chunk_bytes(std::size_t payload) noexcept { return 8 + payload + (payload & 1u); }
-inline constexpr std::size_t kSlotRecMax = 4 + 1 + 8 * sample::kMaxSlices + 8 + 4 + kWavNameMax;
+inline constexpr std::size_t kSlotRecMax = 4 + 1 + 8 * sample::kMaxSlices + 8 + 4 + kWavNameMax + 1;
 inline constexpr std::size_t kPtnsMax = 2 + 1 + kBankPatterns * (2 + 1 + 4 * kPatternSteps);
 inline constexpr std::size_t kChaiMax = 2 + 2 + 2 * kChainMax;
 inline constexpr std::size_t kRoutMax = 2 + 3;
@@ -266,7 +268,7 @@ inline constexpr std::uint16_t kProjectChunkVersion = 0x0100;
 namespace project_detail {
 
 constexpr std::uint16_t slot_rec_bytes(const ProjectSlot& s) noexcept {
-  return static_cast<std::uint16_t>(4 + 1 + 8u * s.cuts.count + 8 + 4 + s.name_len);
+  return static_cast<std::uint16_t>(4 + 1 + 8u * s.cuts.count + 8 + 4 + s.name_len + 1);
 }
 
 // The tail of a record: skips what a newer minor appended; false when the record's known fields ran past its length.
@@ -386,6 +388,12 @@ inline bool read_slot(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
     for (unsigned k = 0; k < s.name_len; ++k) {
       s.name[k] = static_cast<char>(f.u8());
     }
+    if (!f.ok()) {
+      return false;
+    }
+    if (start - f.left() < rec_len) {
+      s.values = f.u8() == 1u ? 1u : 0u;  // appended in this minor: a record from before ends at the name; any other byte is not a flag
+    }
     if (!f.ok() || !slot_valid(s) || !rec_done(f, start, rec_len)) {
       return false;
     }
@@ -481,7 +489,8 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
       }
     }
     if (!w.u32(s.trim_start) || !w.u32(s.trim_end) || !w.u8(static_cast<std::uint8_t>(s.speed)) || !w.u8(s.reverse) ||
-        !w.u8(static_cast<std::uint8_t>(s.level_half)) || !w.u8(s.name_len) || !w.bytes(s.name, s.name_len)) {
+        !w.u8(static_cast<std::uint8_t>(s.level_half)) || !w.u8(s.name_len) || !w.bytes(s.name, s.name_len) ||
+        !w.u8(s.values != 0u ? 1u : 0u)) {
       return 0;
     }
   }

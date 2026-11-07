@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -221,4 +222,45 @@ TEST_CASE("file: a damaged project is refused and the unit keeps its values") {
   CHECK(h->runtime().frame_failures() == 0u);
   // The refusal is real: the card still holds the damaged file as it was (a load never writes).
   CHECK(std::filesystem::file_size(folder / "project.o3a") == 67u);
+}
+
+TEST_CASE("file: U9c4 level steps, captured values and their restore") {
+  CHECK(fl::level_to_half(0.0f) == 0);
+  CHECK(fl::level_to_half(-3.5f) == -7);
+  CHECK(fl::level_to_half(2.25f) == 5);  // rounded away from zero
+  CHECK(fl::level_to_half(-2.25f) == -5);
+  CHECK(fl::level_to_half(100.0f) == 24);  // held to the file's range
+  CHECK(fl::level_to_half(-100.0f) == -48);
+  CHECK(fl::level_to_half(std::numeric_limits<float>::quiet_NaN()) == 0);
+  CHECK(fl::half_to_level(-7) == doctest::Approx(-3.5f));
+
+  ProjectSlot rec = {};
+  rec.cuts.length = 1000;
+  fl::SlotValues v;
+  v.speed = 2;
+  v.reverse = true;
+  v.level_db = -6.0f;
+  v.trim_start = 100;
+  v.trim_end = 900;
+  fl::capture_values(rec, v);
+  CHECK(rec.values == 1u);
+
+  fl::SlotValues back;
+  CHECK(fl::restore_values(rec, 1000, back));
+  CHECK(back.speed == 2u);
+  CHECK(back.reverse);
+  CHECK(back.level_db == doctest::Approx(-6.0f));
+  CHECK(back.trim_start == 100u);
+  CHECK(back.trim_end == 900u);
+  CHECK_FALSE(fl::restore_values(rec, 999, back));  // another audio: nothing restored
+
+  v.trim_end = 1001;  // a trim off the slot is not kept
+  fl::capture_values(rec, v);
+  CHECK(fl::restore_values(rec, 1000, back));
+  CHECK(back.trim_start == 0u);
+  CHECK(back.trim_end == 0u);
+
+  ProjectSlot old = {};  // a record from before: no values
+  old.cuts.length = 1000;
+  CHECK_FALSE(fl::restore_values(old, 1000, back));
 }

@@ -33,6 +33,11 @@ class SampleEditScreen final : public o3sdk::app::Screen {
   // A load (SAMPLE LOAD) put new samples into `slot`: its cached energies, beats, hits, brackets and cursor were the old samples'.
   static void slot_replaced(unsigned slot) noexcept;
 
+  // The trim's brackets of `slot` (SAMPLE EDIT, F4 START and F5 END) for a project: `start`, `end` when a bracket is off its slot's end (`length` is the slot's), else
+  // false and 0, 0. set_trim_brackets puts a saved pair back on a slot of that length (0, 0: back to the slot's own ends; false: it does not fit the slot, nothing changes). Main loop only.
+  static bool trim_brackets(unsigned slot, std::uint32_t length, std::uint32_t& start, std::uint32_t& end) noexcept;
+  static bool set_trim_brackets(unsigned slot, std::uint32_t length, std::uint32_t start, std::uint32_t end) noexcept;
+
   const char* title() const noexcept override { return "SAMPLE EDIT"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
   const o3sdk::ui::Theme* theme(const o3sdk::app::Context&) const noexcept override;

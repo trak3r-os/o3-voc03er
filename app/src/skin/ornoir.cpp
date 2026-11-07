@@ -345,6 +345,25 @@ void frow_text(ui::Renderer& r, const FKey (&keys)[kFKeys]) noexcept {
 
 // ---- the frame ------------------------------------------------------------------------------------------------------------------------
 
+void slot_shapes(plot::Canvas& c, int x, int y, const std::uint8_t (&slot)[4]) noexcept {
+  for (int i = 0; i < 4; ++i) {
+    const std::uint8_t st = slot[i];
+    c.round_rect(Rect{x + i * 40, y, 34, 20}, 128, col(st == kSlotRecording ? Color::Rec : st == kSlotSide ? Color::Play : Color::Empty));
+    c.round_rect(Rect{x + 1 + i * 40, y + 1, 32, 18}, 112, col(st == kSlotAudio ? Color::Empty : Color::Pane));
+    if (st == kSlotWaiting) {
+      fill(c, x + 1 + i * 40, y + 1, 32, 18, Color::Empty, kDim);  // grey: not empty and not yet audio
+    }
+  }
+}
+
+void slot_text(ui::Renderer& r, int x, int y, const std::uint8_t (&slot)[4]) noexcept {
+  for (int i = 0; i < 4; ++i) {
+    const char d[2] = {static_cast<char>('1' + i), '\0'};
+    const std::uint8_t st = slot[i];
+    r.text(x + 14 + i * 40, y + 2, d, st == kSlotRecording ? Color::Rec : st == kSlotSide ? Color::Play : st == kSlotAudio ? Color::Text : Color::TextDim, Face::Micro);
+  }
+}
+
 void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kFKeys], const Voiceprint& vp, const SpeaksState& sp,
                     const SoundsState& so, const PadsView& pads) noexcept {
   header_shapes(c, h);
@@ -373,11 +392,7 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
     fill(c, 16, 120, 12, 150, Color::Empty, kDim);
     c.round_rect(Rect{60, 120, 44, 18}, 144, col(Color::Empty));
     c.round_rect(Rect{61, 121, 42, 16}, 128, sp.clipping ? col(Color::Rec) : col(Color::Pane));
-    for (int i = 0; i < 4; ++i) {
-      const std::uint8_t st = sp.slot[i];
-      c.round_rect(Rect{60 + i * 40, 244, 34, 20}, 128, col(st == 3 ? Color::Rec : st == 2 ? Color::Play : Color::Empty));
-      c.round_rect(Rect{61 + i * 40, 245, 32, 18}, 112, col(st == 1 ? Color::Empty : Color::Pane));
-    }
+    slot_shapes(c, 60, 244, sp.slot);
   }
   if (sp.capture[0] != '\0') {
     c.round_rect(Rect{16, 274, 208, 14}, 128, col(Color::Rec));
@@ -553,11 +568,7 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
     for (int i = 0; i < 4; ++i) any = any || sp.slot[i] != 0;
     if (!any) r.text(60, 188, "NO SLOTS YET", Color::TextDim, Face::Micro);
     r.text(60, 226, "SLOTS", Color::TextDim, Face::Label);
-    for (int i = 0; i < 4; ++i) {
-      const char d[2] = {static_cast<char>('1' + i), '\0'};
-      const std::uint8_t st = sp.slot[i];
-      r.text(74 + i * 40, 246, d, st == 3 ? Color::Rec : st == 2 ? Color::Play : st == 1 ? Color::Text : Color::TextDim, Face::Micro);
-    }
+    slot_text(r, 60, 244, sp.slot);
   }
   if (sp.capture[0] != '\0') r.text(22, 277, sp.capture, Color::Rec, Face::Micro);
 

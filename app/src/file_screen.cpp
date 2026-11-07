@@ -2,6 +2,7 @@
 #include "file_screen.h"
 
 #include "file_logic.h"
+#include "sample_edit_screen.h"
 #include "skin/ornoir.h"
 
 #include <o3sdk/app/context.h>
@@ -64,6 +65,7 @@ struct FileData {
   char why[40];
   char line[56];                      // the strip while a WAV job runs
   char wait[48];                      // a slot is grey until its WAV has landed
+  std::uint8_t waiting;               // bit n: slot n's WAV is on its way (grey in FILE's slot row and in PERFORM's); main loop only
 };
 O3SDK_BIG FileData g_fd = {};
 O3SDK_BIG Project g_proj = {};  // what the last load read or save wrote: the records a slot without audio keeps wait here
@@ -137,6 +139,7 @@ void FileScreen::leave(app::Context& ctx) noexcept {
   if (wav_stage()) {
     abort_wavs(ctx);
   }
+  set_waiting(0);
   g_fd.stage = kMenu;
   g_fd.ask = kNone;
   picker_.close();
@@ -272,6 +275,34 @@ void FileScreen::capture(app::Context& ctx) noexcept {
     const sample::SliceTable& t2 = sample_->table(s);
     const std::uint32_t len = t2.length != 0u ? t2.length : sample_->status(s).length;
     fl::merge_slot(p.slot[s], p.slot[s], t2, len);
+    if (len != 0u) {
+      // What is live goes in the record: SAMPLE's speed, direction and level, SAMPLE EDIT's trim brackets.
+      const Vocoder::LoopStatus st = sample_->status(s);
+      fl::SlotValues v;
+      v.speed = st.speed;
+      v.reverse = st.reverse;
+      v.level_db = st.level_db;
+      (void)SampleEditScreen::trim_brackets(s, len, v.trim_start, v.trim_end);
+      fl::capture_values(p.slot[s], v);
+    }
+  }
+}
+
+// A record's captured values put on its slot (the slot holds audio of the record's length): by the SAMPLE screen's own setters. A record without them (a file from
+// before) leaves the slot as it is.
+void FileScreen::restore_values(app::Context& ctx, unsigned s, std::uint32_t len) noexcept {
+  fl::SlotValues v;
+  if (!fl::restore_values(g_proj.slot[s], len, v)) {
+    return;
+  }
+  sample_->set_values(ctx, s, v.speed, v.reverse, v.level_db);
+  (void)SampleEditScreen::set_trim_brackets(s, len, v.trim_start, v.trim_end);
+}
+
+void FileScreen::set_waiting(unsigned mask) noexcept {
+  g_fd.waiting = static_cast<std::uint8_t>(mask & 0xFu);
+  if (perform_ != nullptr) {
+    perform_->set_slots_waiting(g_fd.waiting);
   }
 }
 
@@ -443,13 +474,13 @@ void FileScreen::apply_slots(app::Context& ctx) noexcept {
     if (fl::slot_fits(rec, len)) {
       t = rec.cuts;
       sample_->set_edited(s, true);
+      restore_values(ctx, s, len);
       ++g_fd.restored;
     } else {
       ++g_fd.kept;
     }
   }
   sample_->cuts_changed();
-  (void)ctx;
 }
 
 // The values are in: the patterns, then the route, the slots, and STAT's fields.
@@ -612,6 +643,11 @@ void FileScreen::begin_wav_loads(app::Context& ctx) noexcept {
   for (unsigned s = 0; s < fl::kWavSlots; ++s) {
     g_fd.wav_total += g_proj.slot[s].name_len != 0u ? 1u : 0u;
   }
+  unsigned grey = 0;
+  for (unsigned s = 0; s < fl::kWavSlots; ++s) {
+    grey |= g_proj.slot[s].name_len != 0u ? 1u << s : 0u;
+  }
+  set_waiting(grey);  // every slot a WAV is coming for is grey until it has landed or been skipped
   g_fd.wl_loaded = 0;
   g_fd.wl_skipped = 0;
   g_fd.wl_first = 0;
@@ -621,6 +657,7 @@ void FileScreen::begin_wav_loads(app::Context& ctx) noexcept {
 }
 
 void FileScreen::skip_wav(const char* why) noexcept {
+  set_waiting(g_fd.waiting & ~(1u << (g_fd.wav_cur & 3u)));
   if (g_fd.wl_skipped == 0u) {
     g_fd.wl_first = g_fd.wav_cur;
     copy_name(g_fd.why, sizeof g_fd.why, why != nullptr && why[0] != '\0' ? why : "NOT LOADED");
@@ -678,6 +715,10 @@ void FileScreen::tick_wav_load(app::Context& ctx) noexcept {
     sample_->set_edited(s, true);
     sample_->cuts_changed();
   }
+  if (seen) {
+    restore_values(ctx, s, len);  // after the landing: the load puts the slot's own speed, direction, level and trim, and these go over them
+  }
+  set_waiting(g_fd.waiting & ~(1u << (s & 3u)));
   ++g_fd.wl_loaded;
   ++g_fd.wav_done;
   g_fd.wav_cur = s + 1u;
@@ -686,6 +727,7 @@ void FileScreen::tick_wav_load(app::Context& ctx) noexcept {
 }
 
 void FileScreen::end_wav_loads(app::Context& ctx) noexcept {
+  set_waiting(0);
   g_fd.stage = kMenu;
   fl::wavs_loaded_note(g_fd.note_buf, sizeof g_fd.note_buf, g_fd.wl_loaded, g_fd.wl_skipped, g_fd.wl_first, g_fd.why);
   say(ctx, g_fd.note_buf);
@@ -700,6 +742,7 @@ void FileScreen::abort_wavs(app::Context& ctx) noexcept {
   }
   g_fd.wav_end = false;
   g_fd.wl_settle = false;
+  set_waiting(0);
   g_fd.stage = kMenu;
   say(ctx, "CANCELLED");
 }
@@ -761,6 +804,19 @@ void FileScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.encoder = "MOVES THE CURSOR IN THE LIST";
 }
 
+// The four slots as PERFORM shows them: a box each, grey while its WAV is on its way (the picker's list takes this place when it is up).
+void FileScreen::slots_draw(ui::Renderer& r) const noexcept {
+  std::uint8_t st[4];
+  for (unsigned s = 0; s < 4u; ++s) {
+    st[s] = ((g_fd.waiting >> s) & 1u) != 0u ? ornoir::kSlotWaiting : (sample_->status(s).length != 0u ? ornoir::kSlotAudio : ornoir::kSlotEmpty);
+  }
+  ui::plot::Canvas c(r);
+  c.open();
+  ornoir::slot_shapes(c, kX + 90, 270, st);
+  c.close();
+  ornoir::slot_text(r, kX + 90, 270, st);
+}
+
 void FileScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect& area) noexcept {
   if (sample_ == nullptr) {
     return;
@@ -794,7 +850,9 @@ void FileScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect& area) 
     r.text(kX, 112, name, Color::Text, Face::Display);
     r.text(kX, 190, "F1 LOADS A PROJECT, F2 SAVES IT, F3 SAVES IT UNDER A NEW NAME, F4 STARTS A NEW ONE", Color::TextDim, Face::Micro);
     r.text(kX, 210, "THE FILE HOLDS THE PATTERNS, THE CHAIN, THE ROUTE, THE CUTS, THE UNIT'S VALUES, TEMPO AND OCTAVE", Color::TextDim, Face::Micro);
-    r.text(kX, 230, "F5 SAVES THE SLOTS' WAVS INTO THE FOLDER: A LOAD READS THEM BACK, THEN THE CUTS GO ON THEM", Color::TextDim, Face::Micro);
+    r.text(kX, 230, "F5 SAVES THE SLOTS' WAVS INTO THE FOLDER: A LOAD READS THEM BACK, THEN THE CUTS, TRIM, SPEED, DIRECTION AND LEVEL GO ON THEM", Color::TextDim, Face::Micro);
+    r.text(kX, 276, "SLOTS", Color::TextDim, Face::Label);
+    slots_draw(r);
   }
   const char* strip = nullptr;
   if (g_fd.stage == kSaving) {

@@ -597,6 +597,13 @@ class MyApp final : public app::App {
       w.num(key, st.length);
       char ek[8] = {'e', 'd', 'i', 't', 'e', 'd', static_cast<char>('1' + i), '\0'};
       w.num(ek, sample_.edited(i) ? 1u : 0u);  // the slot's cuts are the hand's (or a project load's)
+      const char n = static_cast<char>('1' + i);
+      const char sk[8] = {'s', 'p', 'e', 'e', 'd', n, '\0', '\0'};  // 0 0.5X, 1 1X, 2 2X
+      const char rk[8] = {'r', 'e', 'v', n, '\0', '\0', '\0', '\0'};
+      const char lk[8] = {'l', 'v', 'l', n, '\0', '\0', '\0', '\0'};  // half-dB steps above -24 dB (0..72)
+      w.num(sk, st.speed);
+      w.num(rk, st.reverse ? 1u : 0u);
+      w.num(lk, static_cast<std::uint32_t>((st.level_db + 24.0f) * 2.0f + 0.5f));
     }
     return w.size();
   }

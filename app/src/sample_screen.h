@@ -61,6 +61,8 @@ class SampleScreen final : public o3sdk::app::Screen {
   void set_edited(unsigned slot, bool v) noexcept;
   unsigned even_code(unsigned slot) const noexcept;  // F1 CUT EVEN's value (sample_edit_logic.h)
   void set_even_code(unsigned slot, unsigned code) noexcept;
+  // FILE's load puts a slot's SPEED (0 0.5X, 1 1X, 2 2X), DIR and LEVEL back by the path the screen's own keys take (write): the unit's Loop n Speed, Dir and Level.
+  void set_values(o3sdk::app::Context& ctx, unsigned loop, unsigned speed, bool reverse, float level_db) noexcept;
   void cuts_changed() noexcept;  // after any edit of a table: the next service() pass publishes the SPEAKS slot's cuts again
   Vocoder::LoopStatus status(unsigned slot) const noexcept { return view(slot); }
   bool pad_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;  // a pad press or release; false when `in` is no pad
@@ -81,6 +83,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void write(o3sdk::app::Context& ctx, Vocoder::LoopField f, float v) noexcept;
+  void write_slot(o3sdk::app::Context& ctx, unsigned loop, Vocoder::LoopField f, float v) noexcept;
   void set_side(o3sdk::app::Context& ctx, int delta) noexcept;
   void trigger(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;

@@ -81,6 +81,9 @@ class FileScreen final : public o3sdk::app::Screen {
   bool wav_stage() const noexcept;
   void apply_route(o3sdk::app::Context& ctx) noexcept;
   void apply_slots(o3sdk::app::Context& ctx) noexcept;
+  void restore_values(o3sdk::app::Context& ctx, unsigned s, std::uint32_t len) noexcept;
+  void set_waiting(unsigned mask) noexcept;
+  void slots_draw(o3sdk::ui::Renderer& r) const noexcept;
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   SampleScreen* sample_ = nullptr;

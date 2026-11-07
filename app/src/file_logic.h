@@ -46,6 +46,52 @@ inline void merge_slot(ProjectSlot& out, const ProjectSlot& kept, const sample::
   out.cuts.length = live_length;
 }
 
+// What a slot holds live that a project keeps beyond the cuts: the SAMPLE screen's SPEED (0 0.5X, 1 1X, 2 2X), DIR and LEVEL (dB), and SAMPLE EDIT's trim brackets
+// (both 0: not moved).
+struct SlotValues {
+  unsigned speed = 1;
+  bool reverse = false;
+  float level_db = 0.0f;
+  std::uint32_t trim_start = 0;
+  std::uint32_t trim_end = 0;
+};
+
+// dB to the file's half-dB steps, rounded away from zero and held to -48..+24 (the unit's LEVEL is -24..+12 dB); NaN is 0 dB.
+constexpr std::int8_t level_to_half(float db) noexcept {
+  if (!(db == db)) {
+    return 0;
+  }
+  const float h = db * 2.0f;
+  const int r = h >= 0.0f ? static_cast<int>(h + 0.5f) : -static_cast<int>(0.5f - h);
+  return static_cast<std::int8_t>(r < -48 ? -48 : (r > 24 ? 24 : r));
+}
+constexpr float half_to_level(std::int8_t half) noexcept { return static_cast<float>(half) * 0.5f; }
+
+// Put the live values in the record of a slot that holds audio (merge_slot has set its cuts and length): speed, reverse, level, and the trim when it is a pair the
+// file accepts for this length; `values` says they were captured, so a load restores them.
+inline void capture_values(ProjectSlot& out, const SlotValues& v) noexcept {
+  out.speed = static_cast<std::int8_t>((v.speed > 2u ? 1u : v.speed) - 1u);
+  out.reverse = v.reverse ? 1u : 0u;
+  out.level_half = level_to_half(v.level_db);
+  const bool trim = v.trim_start < v.trim_end && v.trim_end <= out.cuts.length;
+  out.trim_start = trim ? v.trim_start : 0u;
+  out.trim_end = trim ? v.trim_end : 0u;
+  out.values = 1;
+}
+
+// The live values a record restores onto audio of `live_length` samples; false when the record has none (a file from before, or a slot that does not fit).
+inline bool restore_values(const ProjectSlot& rec, std::uint32_t live_length, SlotValues& v) noexcept {
+  if (rec.values == 0u || !slot_fits(rec, live_length)) {
+    return false;
+  }
+  v.speed = static_cast<unsigned>(rec.speed + 1);
+  v.reverse = rec.reverse != 0u;
+  v.level_db = half_to_level(rec.level_half);
+  v.trim_start = rec.trim_start;
+  v.trim_end = rec.trim_end;
+  return true;
+}
+
 // The STAT fields of a project that was just made: the first boot's tempo, pattern A, octave 0, the first chord kind, pads.
 inline void default_stat(Project& p) noexcept {
   p.stat = 1;
