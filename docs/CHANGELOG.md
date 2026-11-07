@@ -36,8 +36,9 @@ Read on a unit during development (`docs/PLAN.md`, sections 4 to 4l):
   presets' levels, the carrier's tone, the formant steps and the clicks at the source switch. A spoken sentence has to be checked for how
   well it can be understood, and the microphone source has had little use.
 - The radio's signal was not measured on a known station. Line and radio were reported as working by the maintainer, not by a reading.
-- Some readings pass the CPU limit at the peak in the heaviest settings (BANDS with every carrier control at its extreme, TALK at its
-  highest order). The maintainer accepted that for now.
+- The CPU rows were read in silence (nothing sent to the console during the window, which was found to add about 10k cycles to the peak)
+  for BANDS only. TALK, TUNE and QUALITY 24 were last read with console traffic, inside the limit by their means, and have not been read in
+  silence.
 - MIDI has been read over USB only; a DIN cable has not.
 - Many controls and screens were checked in the simulator and over the console, not by hand on the unit.
 - The manual and its pictures are new.
