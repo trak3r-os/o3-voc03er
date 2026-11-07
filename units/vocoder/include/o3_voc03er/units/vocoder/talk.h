@@ -65,6 +65,24 @@ class CarDrive {
   float x1_ = 0.0f, y1_ = 0.0f;
 };
 
+// S4, the tube: a damped feedback comb y = x + g LP(y[n-D]) at the low rate, scaled by sqrt(1 - g^2) (the broadband power is unchanged). g = 0 is a
+// bypass (process() returns at once, the input untouched). The delay D = round(2 L / c fs) is 58 at 11.025 kHz.
+class TubeComb {
+ public:
+  static constexpr std::uint32_t kRing = 64;  // a power of 2 above the delay
+  void prepare(float low_rate, float length_m, float damp_hz) noexcept;  // sets the delay and the loop's low-pass; clears the state
+  void reset() noexcept;
+  void set_gain(float g) noexcept;  // 0 (off) .. below 1
+  void process(float* x, std::uint32_t n) noexcept;
+  std::uint32_t delay() const noexcept { return d_; }
+
+ private:
+  alignas(8) float ring_[kRing] = {};
+  std::uint32_t pos_ = 0, d_ = 58;
+  float g_ = 0.0f, norm_ = 1.0f, lp_a_ = 0.0f, lp_y_ = 0.0f;
+};
+static_assert(alignof(TubeComb) >= 8u, "the ring is alignas(8)");
+
 class Talk {
  public:
   static constexpr std::uint32_t kMaxFrames = 64;
@@ -103,6 +121,11 @@ class Talk {
   float breath_open() const noexcept { return open_; }
   float duck_gain() const noexcept { return duck_; }  // the duck's gain at the last publish, 1 = not ducked (tests)
   float breath_level() const noexcept { return breath_; }  // the breath's gain now (tests; 0 for a gated, silent-ish modulator)
+
+  // S4 and S5 switches (tests): the tube's feedback g, the proximity shelf's gain k (out += k LP200(out)) and the leakage's gain, each 0 = off
+  // and bit-exact S3. Start at the constants in talk.cpp; the ring, the delay and the filter states are not touched. Audio context only.
+  void set_realism(float tube_g, float shelf_k, float leak) noexcept;
+  std::uint32_t tube_delay() const noexcept { return tube_.delay(); }  // the comb's delay in low-rate samples (tests)
 
  private:
   void slice(std::uint32_t units) noexcept;
@@ -160,6 +183,10 @@ class Talk {
   float unv_ = 0.0f;
   float duck_ = 1.0f;   // the last publish's gd, for the test accessor only
   float car_lp_a_ = 0.0f, car_lp_y_ = 0.0f;   // one-pole low-pass of the low-rate carrier: coefficient (1 - pole), state
+  TubeComb tube_;  // S4: the tube between the driver and the mouth, on the low-rate carrier after S2's pole
+  // S5: proximity shelf (one-pole split at 200 Hz, out += k LP(out)) and leakage (the pre-drive carrier through a 700 Hz one-pole, scaled), full rate.
+  float shelf_k_ = 0.0f, shelf_a_ = 0.0f, shelf_y_ = 0.0f;
+  float leak_g_ = 0.0f, leak_a_ = 0.0f, leak_y_ = 0.0f;
   float agc_ = 1.0f;     // the AGC's gain at the last publish
   float level_ = 0.1f;   // AGC: mean-abs follower of the decimated modulator
   float lvl_att_ = 0.0f, lvl_rel_ = 0.0f;

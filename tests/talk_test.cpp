@@ -237,6 +237,7 @@ TEST_CASE("talk: a 90 Hz vowel at order 24 for 5 s stays bounded, |k| <= 0.995, 
 
 TEST_CASE("talk: silence in the modulator gives silence, no NaN, no denormals") {
   Talk& t = *make_talk();
+  t.set_realism(0.0f, 0.0f, 0.0f);  // S5's leakage is the carrier through a mouth that is shut; this test is about the analysis (see the S4/S5 tests)
   Voice v(110.0f);
   v.set_vowel(kA, 2);
   Saw saw(100.0f);
@@ -1156,6 +1157,7 @@ TEST_CASE("talk: S1, a modulator below the level gate leaves the breath at 0 and
   const std::size_t blocks = 400;
   const auto run = [&](float amp, float* breath_level) {
     Talk& t = *make_talk();
+    t.set_realism(0.0f, 0.0f, 0.0f);  // the carrier floor is measured without S5's leakage
     t.set_thru(1.0f);
     Noise n;
     Saw saw(110.0f);
@@ -1348,4 +1350,178 @@ TEST_CASE("robot: S3, a 2:1 instance gives the square root of threshold over env
   }
   std::printf("robot: S3 default digest %08X\n", static_cast<unsigned>(h));
   CHECK(h == 0x49115C4Du);
+}
+
+// ---- S4 (the tube) and S5 (the microphone and the leakage) ---------------------------------------------------------------------------------
+
+namespace {
+
+// BEGIN digest: a fixed signal (a pulse train through a resonator with 1 % noise; a saw), 400 blocks, the FNV-1a of the output bits.
+std::uint32_t talk_digest(Talk& t) {
+  std::uint32_t h = 2166136261u, seed = 777u, since = 0u;
+  float y1 = 0.0f, y2 = 0.0f, phase = 0.0f;
+  float m[64], c[64], out[64];
+  for (int b = 0; b < 400; ++b) {
+    for (int i = 0; i < 64; ++i) {
+      seed = seed * 1664525u + 1013904223u;
+      const float nz = (static_cast<float>(seed >> 8) * (1.0f / 8388608.0f) - 1.0f) * 0.003f;
+      const float x = (++since >= 367u) ? (since = 0u, 0.2f) : 0.0f;
+      const float y = x + nz + 1.9503f * y1 - 0.9604f * y2;
+      y2 = y1;
+      y1 = y;
+      m[i] = y;
+      phase += 110.0f / 44100.0f;
+      phase -= phase >= 1.0f ? 1.0f : 0.0f;
+      c[i] = 0.5f * (2.0f * phase - 1.0f);
+    }
+    t.process(m, c, out, 64);
+    for (float v : out) {
+      std::uint32_t u;
+      std::memcpy(&u, &v, sizeof u);
+      h = (h ^ u) * 16777619u;
+    }
+  }
+  return h;
+}
+// END digest
+
+// |H(f)| of the comb's impulse response (host arithmetic, the test's own), in dB, on a grid.
+std::vector<float> comb_response_db(TubeComb& tc, float lo, float hi, float step, float fl) {
+  std::vector<float> h(2048, 0.0f);
+  h[0] = 1.0f;
+  tc.process(h.data(), static_cast<std::uint32_t>(h.size()));
+  std::vector<float> db;
+  for (float f = lo; f <= hi; f += step) {
+    double re = 0.0, im = 0.0;
+    for (std::size_t n = 0; n < h.size(); ++n) {
+      const double w = 6.283185307179586 * static_cast<double>(f) * static_cast<double>(n) / static_cast<double>(fl);
+      re += static_cast<double>(h[n]) * std::cos(w);
+      im -= static_cast<double>(h[n]) * std::sin(w);
+    }
+    db.push_back(20.0f * std::log10(static_cast<float>(std::sqrt(re * re + im * im))));
+  }
+  return db;
+}
+
+}  // namespace
+
+TEST_CASE("talk: S4, the tube comb has peaks about 190 Hz apart, peak-to-dip at most 6 dB, and level close to the input's") {
+  const float fl = kFs * 0.25f;
+  TubeComb tc;
+  tc.prepare(fl, 0.9f, 2000.0f);
+  tc.set_gain(0.33f);
+  CHECK(tc.delay() == 58u);  // round(2 x 0.9 / 343 x 11025)
+  // the g in Talk's constants, through Talk's own accessors: the delay
+  Talk& t = *make_talk();
+  CHECK(t.tube_delay() == 58u);
+  const float lo = 200.0f, hi = 4000.0f, step = 2.0f;
+  const auto db = comb_response_db(tc, lo, hi, step, fl);
+  std::vector<float> peaks;
+  float mx = -1000.0f, mn = 1000.0f;
+  for (std::size_t i = 1; i + 1 < db.size(); ++i) {
+    mx = std::max(mx, db[i]);
+    mn = std::min(mn, db[i]);
+    if (db[i] > db[i - 1] && db[i] >= db[i + 1]) peaks.push_back(lo + step * static_cast<float>(i));
+  }
+  REQUIRE(peaks.size() >= 8u);
+  const float spacing = (peaks.back() - peaks.front()) / static_cast<float>(peaks.size() - 1);
+  std::printf("talk: S4 peak spacing %.1f Hz, peak-to-dip %.2f dB over %zu peaks\n", static_cast<double>(spacing), static_cast<double>(mx - mn), peaks.size());
+  CHECK(spacing > 180.0f);
+  CHECK(spacing < 200.0f);
+  CHECK(mx - mn > 3.0f);  // it is a comb
+  CHECK(mx - mn <= 6.0f);
+  // broadband level: white noise in and out, within 1 dB
+  tc.reset();
+  std::vector<float> x(40000);
+  std::uint32_t seed = 99u;
+  for (auto& v : x) {
+    seed = seed * 1664525u + 1013904223u;
+    v = static_cast<float>(seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+  }
+  const float in_ms = mean_square(x, 1000, x.size());
+  tc.process(x.data(), static_cast<std::uint32_t>(x.size()));
+  const float db_lvl = 10.0f * std::log10(mean_square(x, 1000, x.size()) / in_ms);
+  CHECK(std::fabs(db_lvl) < 1.0f);
+  // g = 0 is a bypass
+  tc.set_gain(0.0f);
+  float imp[8] = {1.0f, 0.5f, -0.25f, 0.0f, 0.0f, 0.0f, 0.0f, 0.125f};
+  float ref[8];
+  std::memcpy(ref, imp, sizeof imp);
+  tc.process(imp, 8);
+  CHECK(std::memcmp(imp, ref, sizeof imp) == 0);
+}
+
+TEST_CASE("talk: S4 and S5 off give the S3 output bit-exact, and each one on changes it") {
+  Talk& t = *make_talk();
+  t.set_thru(0.0f);  // the harness' Talk starts at its defaults; the shared one keeps what earlier tests set
+  t.set_order(16);
+  t.set_freeze(false);
+  t.set_realism(0.0f, 0.0f, 0.0f);
+  const std::uint32_t off = talk_digest(t);
+  std::printf("talk: S3 digest %08X\n", static_cast<unsigned>(off));
+  CHECK(off == 0x59E8B1EBu);  // from main's talk.cpp (dbf63ee), the same signal, built alone
+  t.prepare(kFs);
+  const std::uint32_t on = talk_digest(t);
+  CHECK(on != off);
+  t.prepare(kFs);
+  t.set_realism(0.33f, 0.0f, 0.0f);
+  CHECK(talk_digest(t) != off);
+  t.prepare(kFs);
+  t.set_realism(0.0f, 0.4f, 0.0f);
+  CHECK(talk_digest(t) != off);
+  t.prepare(kFs);
+  t.set_realism(0.0f, 0.0f, 0.025f);
+  CHECK(talk_digest(t) != off);
+}
+
+TEST_CASE("talk: S5, the carrier alone leaks 28 to 36 dB under the voiced output, and nothing when the leak is off") {
+  const std::size_t blocks = 600, from = 300 * 64, to = blocks * 64;
+  // A silent modulator still lets the carrier through at the duck's floor (S1), so the leakage is the difference between a run with it and a
+  // run without: the two share every other state, and the leakage does not feed back into the analysis.
+  const auto run = [&](bool voiced, float leak) {
+    Talk& t = *make_talk();
+    t.set_thru(0.0f);
+    t.set_realism(0.0f, 0.0f, leak);
+    PulseVowel v(110.0f);
+    const float g = vowel_rms_gain(110.0f, 0.1f);
+    Saw saw(110.0f);
+    return run_talk(t, [&] { return voiced ? g * v.next() : 0.0f; }, [&] { return saw.next(); }, blocks, [](std::size_t) {});
+  };
+  const float def_leak = std::pow(10.0f, -32.0f / 20.0f) / 19.5f;  // Talk's kLeakDb and kOutScale
+  const auto voiced = run(true, 0.0f);
+  const auto shut_on = run(false, def_leak);
+  const auto shut_off = run(false, 0.0f);
+  const auto shut_off2 = run(false, 0.0f);
+  std::vector<float> diff(shut_on.size()), none(shut_on.size());
+  for (std::size_t i = 0; i < diff.size(); ++i) {
+    diff[i] = shut_on[i] - shut_off[i];
+    none[i] = shut_off2[i] - shut_off[i];
+  }
+  const float db = 10.0f * std::log10(mean_square(voiced, from, to) / mean_square(diff, from, to));
+  std::printf("talk: S5 leakage %.1f dB under the voiced output\n", static_cast<double>(db));
+  CHECK(db > 28.0f);
+  CHECK(db < 36.0f);
+  for (std::size_t b = 300; b < blocks; ++b) CHECK(mean_square(diff, b * 64, b * 64 + 64) > 0.0f);  // every block, the mouth shut
+  CHECK(mean_square(none, from, to) == 0.0f);
+}
+
+TEST_CASE("talk: S5, the proximity shelf lifts 110 Hz by about 2.5 dB and leaves 4.4 kHz within 0.3 dB") {
+  const std::size_t blocks = 600, from = 200 * 64, to = blocks * 64;
+  const auto run = [&](float k) {
+    Talk& t = *make_talk();
+    t.set_thru(0.0f);
+    t.set_realism(0.0f, k, 0.0f);
+    PulseVowel v(110.0f);
+    const float g = vowel_rms_gain(110.0f, 0.1f);
+    Saw saw(110.0f);
+    return run_talk(t, [&] { return g * v.next(); }, [&] { return saw.next(); }, blocks, [](std::size_t) {});
+  };
+  const float k = std::pow(10.0f, 3.0f / 20.0f) - 1.0f;
+  const auto flat = run(0.0f), shelf = run(k);
+  const auto gain_db = [&](float hz) { return 10.0f * std::log10(power_at(shelf, from, to, hz) / power_at(flat, from, to, hz)); };
+  const float g110 = gain_db(110.0f), g4k = gain_db(4400.0f);
+  std::printf("talk: S5 shelf at 110 Hz %.2f dB, at 4.4 kHz %.2f dB\n", static_cast<double>(g110), static_cast<double>(g4k));
+  CHECK(g110 > 2.0f);
+  CHECK(g110 < 3.0f);
+  CHECK(std::fabs(g4k) < 0.3f);
 }
