@@ -1,11 +1,11 @@
 # Open-source channel vocoders: what `Bands` could learn or reuse
 
-Researched 2026-11-06. Nothing cloned, built or run; every source was read on the web, mostly through a fetch tool that summarises the page, so details marked "as read" come from that summary and not from my own reading of the raw file. TALK (LPC, after mda Talkbox) and TUNE are covered by the cards in `/home/anortes/Code/o3-sdk/docs/ports/` and are not repeated.
+Researched 2026-11-06. Nothing cloned, built or run; every source was read on the web, mostly through a fetch tool that summarises the page, so details marked "as read" come from that summary and not from my own reading of the raw file. TALK (LPC, after mda Talkbox) and TUNE are covered by the cards in `../o3-sdk/docs/ports/` and are not repeated.
 
 ## 0. Where we stand (facts, from the repo)
 
-- `/home/anortes/Code/o3-voc03er/units/vocoder/src/bands.cpp`: 16 bands, centre 125 Hz x 2^(0.4 i) (125 Hz to 8 kHz), 0.4 octave apart. Per band, two cascaded RBJ bandpass sections (Q 2.3) on the modulator and two on the carrier, transposed direct form II, float. Rectified second-section output into a one-pole follower with separate attack and release, updated every second sample; release is slower for bands 0 to 2. Front end: 80 Hz high-pass, AGC with gate and knee, pre-emphasis 0.7. Unvoiced path: noise added to the carrier of bands 11 to 15 when the high-band ratio of the followers crosses 0.35 (closes at 0.28), faded over 5 ms.
-- Measured on the unit (`/home/anortes/Code/o3-voc03er/docs/PLAN.md` sections 4b to 4d): `bands` 97 cycles a band-sample and 38.2 % of a block on G0's parts; Bands plus the unit's shell about 80,500 cycles (79 a band-sample at most, about 31 % of a block) on V4's image; the bench's `biquad` 23.5 cycles a section-sample; the whole app peaks at 60.1 % with 8 notes after V2d. The FPU's `vfma` costs 3 cycles, which is why the code uses separate multiply and add (`mulb`).
+- `units/vocoder/src/bands.cpp`: 16 bands, centre 125 Hz x 2^(0.4 i) (125 Hz to 8 kHz), 0.4 octave apart. Per band, two cascaded RBJ bandpass sections (Q 2.3) on the modulator and two on the carrier, transposed direct form II, float. Rectified second-section output into a one-pole follower with separate attack and release, updated every second sample; release is slower for bands 0 to 2. Front end: 80 Hz high-pass, AGC with gate and knee, pre-emphasis 0.7. Unvoiced path: noise added to the carrier of bands 11 to 15 when the high-band ratio of the followers crosses 0.35 (closes at 0.28), faded over 5 ms.
+- Measured on the unit (`docs/PLAN.md` sections 4b to 4d): `bands` 97 cycles a band-sample and 38.2 % of a block on G0's parts; Bands plus the unit's shell about 80,500 cycles (79 a band-sample at most, about 31 % of a block) on V4's image; the bench's `biquad` 23.5 cycles a section-sample; the whole app peaks at 60.1 % with 8 notes after V2d. The FPU's `vfma` costs 3 cycles, which is why the code uses separate multiply and add (`mulb`).
 - Licence bar: MIT, BSD, Apache-2.0, GPL-2.0-or-later, GPL-3.0 usable; GPL-2.0-only not.
 
 ## 1. Cards
@@ -146,7 +146,7 @@ If the maintainer wants one change only: item 1.
 - https://github.com/pichenettes/stmlib (`dsp/filter.h`)
 - https://sourceforge.net/p/mda-vst/code/HEAD/tree/src/mdaVocoder.cpp
 - https://sourceforge.net/p/mda-vst/code/HEAD/tree/readme.license?format=raw
-- https://www.kvraudio.com/forum/viewtopic.php?p=3109032 (via `/home/anortes/Code/o3-sdk/docs/ports/mda-talkbox.md`)
+- https://www.kvraudio.com/forum/viewtopic.php?p=3109032 (via `../o3-sdk/docs/ports/mda-talkbox.md`)
 - https://github.com/surge-synthesizer/surge (`src/common/dsp/effects/VocoderEffect.cpp`, `VocoderEffect.h`, `LICENSE`)
 - https://github.com/calf-studio-gear/calf (`src/calf/modules_filter.h`, `src/modules_filter.cpp`)
 - https://raw.githubusercontent.com/grame-cncm/faustlibraries/master/vaeffects.lib
@@ -156,4 +156,4 @@ If the maintainer wants one change only: item 1.
 - https://sources.debian.org/src/lv2vocoder/1-3/vocoder.c
 - https://sources.debian.org/src/bespokesynth/1.3.0%2Bdfsg-2/Source/Vocoder.h
 - https://github.com/andeuxun/VocoGroot
-- `/home/anortes/Code/o3-voc03er/units/vocoder/src/bands.cpp`, `/home/anortes/Code/o3-voc03er/docs/PLAN.md`
+- `units/vocoder/src/bands.cpp`, `docs/PLAN.md`

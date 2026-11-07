@@ -1,8 +1,9 @@
 # O3-VOC03ER: an app on the o3-sdk framework
 
 A vocoder for the Tracker hardware (NXP MK66FX1M0, Cortex-M4F at 180 MHz with a single-precision FPU, 256 KiB SRAM, 16 MiB SDRAM, FT812
-display 800x480, SGTL5000 codec, 48 pads with monochrome LEDs, 33 buttons, one encoder): TALK (LPC talk box), BANDS (channel vocoder), TUNE
-(pitch correction) and voice loops that can be modulator or carrier. It is one app, a whole firmware image, built on the o3-sdk framework.
+display 800x480, SGTL5000 codec, 48 pads with monochrome LEDs, 33 buttons, one encoder): four modes (BANDS channel vocoder, TALK LPC talk box,
+TUNE pitch correction, ROBOT), sources that include the line, mic, USB audio, the radio and sample slots, an internal carrier synth with chord pads, and an
+eight-pattern step sequencer with song chains. It is one app, a whole firmware image, built on the o3-sdk framework.
 Licence GPL-3.0-or-later. Everything in this repository is written in English. The design is `../o3-sdk/docs/VOCODER-DESIGN.md`; the
 decisions and the order of work are `docs/PLAN.md`.
 

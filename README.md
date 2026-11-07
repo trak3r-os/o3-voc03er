@@ -1,34 +1,125 @@
-# O3-VOC03ER
+<h1 align="center">O3-VOC03ER</h1>
 
-An instrument for the Tracker hardware (NXP MK66FX1M0, 800x480 display, 48 pads with LEDs, 33 buttons, one encoder), built as an app on
-the [o3-sdk](https://github.com/trak3r-os/o3-sdk) framework. **Describe the instrument here**: what it sounds like, what the pads, the
-buttons and the encoder do, what is saved, what is planned. An app is a whole firmware image; o3-sdk, checked out next to this repository,
-is the library under it and is used as it is (never edited from here).
+<p align="center"><b>Turn the Tracker into a vocoder and talkbox: speak, sing or sample into it, and play the voice through chords from the 48 pads.</b></p>
 
-Unofficial; not affiliated with or endorsed by Polyend. "Tracker" is used only to describe the hardware it runs on.
+<p align="center">
+  <a href="https://github.com/trak3r-os/o3-voc03er/releases"><img src="https://img.shields.io/github/v/release/trak3r-os/o3-voc03er?include_prereleases" alt="Latest release"></a>
+  <a href="docs/MANUAL.md"><img src="https://img.shields.io/badge/manual-read%20it-e5533d.svg" alt="Player's manual"></a>
+  <a href="docs/CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-what%27s%20new-e5533d.svg" alt="Changelog"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License: GPL-3.0-or-later"></a>
+  <a href="https://github.com/trak3r-os/o3-sdk"><img src="https://img.shields.io/badge/built%20on-o3--sdk-555555.svg" alt="Built on o3-sdk"></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-17-00599C.svg" alt="C++17">
+  <img src="https://img.shields.io/badge/target-MK66%20Cortex--M4F-lightgrey.svg" alt="Target: MK66 Cortex-M4F">
+</p>
 
-## What is here
+<p align="center">
+  <a href="https://github.com/trak3r-os/o3-voc03er/releases"><b>Download</b></a> ·
+  <a href="docs/MANUAL.md"><b>Manual</b></a> ·
+  <a href="docs/MANUAL.md#3-the-first-five-minutes"><b>First five minutes</b></a> ·
+  <a href="docs/CHANGELOG.md"><b>What's new</b></a> ·
+  <a href="#build"><b>Build it</b></a>
+</p>
 
-A starter from o3-sdk's `templates/app`: one unit (`VOICE`, a small monophonic instrument), one screen (`PLAY`: the pads are a chromatic
-keyboard that also records a 16-step pattern, F1-F3 and the encoder edit the voice), the card (FILE saves the pattern, SAMPLE LOAD loads it,
-the pattern and the octave come back after a reboot: the file API, `../o3-sdk/kit/app/include/o3sdk/app/files.h`), HELP on Shift + Config (each screen has its own: what each control does, drawn by the kit), three scenarios, and tests.
-Replace the voice with your engine and keep the shape.
+<p align="center">
+  <img src="docs/manual/img/hero.png" alt="The vocoder screen while it plays: the voice on the left, the carrier on the right, the voiceprint between them, and the pads under the screen" width="720">
+</p>
 
-| Path | What |
-|---|---|
-| `app/` | the app: `src/app.cpp` (units and screens wired into the engine, the entry point), `src/*_screen.cpp` (the screens), `include/o3_voc03er/pad_map.h` (pure pad logic), `include/o3_voc03er/pattern.h` (the bytes kept on the card) |
-| `app/scenarios/` | simulator scenarios: screens as PNG, audio as WAV (commands: `../o3-sdk/sim/README.md`) |
-| `units/voice/` | the DSP unit: a parameter table and `process()`; one directory per unit, each with a `CMakeLists.txt` calling `o3sdk_unit()` |
-| `tests/` | host tests (doctest): the unit against the engine, the pad map, the file format, the app in the simulator (the card included) |
-| `tools/` | `ci.sh`, `remote_ci.sh` and `gate.py`, identical to o3-sdk's (`../o3-sdk/docs/ci.md`) |
-| `.claude/` | the agent harness (agents, skills, hooks), copied from o3-sdk |
+> **Unofficial.** O3-VOC03ER is not affiliated with or endorsed by Polyend. "Tracker" is used only to describe the hardware it runs on.
+> It is a whole firmware: it replaces the unit's own software while it is installed, so back up your card first.
 
-Start with `../o3-sdk/docs/NEW-APP.md` (the tutorial), then `CLAUDE.md` and `AGENTS.md` for the rules and the agents.
+## What is it?
+
+One instrument with one idea: a voice (SPEAKS) is turned into a voiceprint, and the voiceprint shapes a sound (SOUNDS). You keep the hardware
+you know, the pads, the buttons, the encoder and the screen, and they all become the vocoder.
+
+- **Four modes.** BANDS, a 16-band channel vocoder. TALK, an LPC talkbox. TUNE, pitch correction with a key and a scale to snap to.
+  ROBOT, the bands with a fast compressor.
+- **Sources.** The line input, the microphone, USB audio, the radio, and samples, on either side of the vocoder: a sample can speak, or
+  be the sound that is spoken through.
+- **A carrier synth inside.** Eight voices with SHAPE, SPREAD, SUB, TILT and NOISE. The 48 pads play chords: twelve roots, with triad,
+  seventh, open and power rows and four voicings (CLOSE, OPEN, WIDE, SMOOTH), or plain keys, and a bend row.
+- **Four sample slots** of 16 s each, with up to 24 slices per slot, edited on the unit.
+- **A step sequencer.** Eight patterns of 1 to 16 steps with NOTE, CARRIER, LEVEL and SLICE lanes, and a SONG that chains them.
+- **MIDI in.** Notes, pitch bend, program change (it picks the pattern) and clock.
+- **Projects** that you save to the card, with the samples as WAVs.
+
+## The screens
+
+<table>
+  <tr>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/perform-talk.png" alt="PERFORM in TALK mode: the voice, the voiceprint and the chord pads" width="400"></a></td>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/perform-tune.png" alt="PERFORM in TUNE mode: the detected note, the key and scale, and the snap" width="400"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>PERFORM, TALK</b>: the talkbox, played from the pads</td>
+    <td align="center"><b>PERFORM, TUNE</b>: pitch correction to a key and scale</td>
+  </tr>
+  <tr>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/robot.png" alt="ROBOT: the bands with the compressor and the carrier controls" width="400"></a></td>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/params.png" alt="PARAMS: the knobs of the voice, the carrier and the output" width="400"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>ROBOT</b>: the bands, compressed and flat</td>
+    <td align="center"><b>PARAMS</b>: the knobs of the voice and the carrier</td>
+  </tr>
+  <tr>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/sample.png" alt="SAMPLE: four slots with their waveforms and slices" width="400"></a></td>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/sample-edit.png" alt="SAMPLE EDIT: one waveform with its trim brackets and slice marks" width="400"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>SAMPLE</b>: four slots, with slices</td>
+    <td align="center"><b>SAMPLE EDIT</b>: trim, speed, direction and slices</td>
+  </tr>
+  <tr>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/pattern.png" alt="PATTERN: the step grid with the NOTE, CARRIER, LEVEL and SLICE lanes" width="400"></a></td>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/song.png" alt="SONG: a list of rows with pattern and repeats" width="400"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>PATTERN</b>: eight patterns, four lanes</td>
+    <td align="center"><b>SONG</b>: patterns in order, with repeats</td>
+  </tr>
+  <tr>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/master.png" alt="MASTER: the tempo and clock, the output meters, CPU and USB" width="400"></a></td>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/file.png" alt="FILE: projects on the card, with save, load and WAV export" width="400"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>MASTER</b>: tempo, clock and the meters</td>
+    <td align="center"><b>FILE</b>: projects and WAVs on the card</td>
+  </tr>
+</table>
+
+The pictures come from the simulator, which draws the same screens as the unit. Click one for the manual.
+
+## Get it on your Tracker
+
+1. **Download** `o3_voc03er-<version>.ptf` and `SHA256SUMS` from the [releases](https://github.com/trak3r-os/o3-voc03er/releases) page, and
+   check the download with `sha256sum -c SHA256SUMS`.
+2. **Back up** the whole SD card, and keep the firmware you run now on your computer: that is your way back.
+3. **Install** it from the card with the unit's hidden reset button, or over USB from a firmware with the console.
+   [Section 2 of the manual](docs/MANUAL.md#2-install-and-the-way-back) has every step, and how to go back.
+
+Then read [the first five minutes](docs/MANUAL.md#3-the-first-five-minutes). After that you can stop reading and play.
+
+## Status
+
+This is a pre-release (v0.1.0), and it needs more testing. What a unit has shown so far (`docs/PLAN.md`, sections 4 to 4l): the render
+stays under its CPU limit with no underruns on the readings taken, with BANDS, eight carrier notes and four loops running; a project saves
+and loads again on the unit, samples included; and MIDI over USB works. What has not been tried on a unit is listed in
+[the changelog](docs/CHANGELOG.md). A host test is not a test on the unit, and the sound is judged by ear on the unit.
 
 ## Build
 
-o3-sdk next to this directory (`export O3SDK_DIR=<path>` or `-DO3SDK_DIR=<path>` otherwise). The host build needs CMake 3.24 or newer and a
-C++17 compiler; the image needs the Arm GNU Toolchain 15.3.rel1.
+No unit is needed for the first part: the simulator runs the app on a computer, and writes the screens as PNG and the sound as WAV.
+
+The two repositories side by side (o3-sdk next to this directory, `-DO3SDK_DIR=<path>` or `$O3SDK_DIR` otherwise):
+
+```sh
+git clone https://github.com/trak3r-os/o3-sdk.git
+git clone https://github.com/trak3r-os/o3-voc03er.git
+cd o3-voc03er
+```
+
+The host build needs CMake 3.24 or newer and a C++17 compiler; the image needs the ARM GNU toolchain 15.3.rel1.
 
 ```sh
 cmake -S . -B build-host
@@ -38,21 +129,29 @@ ctest --test-dir build-host --output-on-failure
 # the app in the simulator: PNG snapshots of the screen and the pads, and the audio as a WAV
 mkdir -p /tmp/o3_voc03er
 build-host/app/o3_voc03er_sim --scenario app/scenarios/boot.txt --out /tmp/o3_voc03er
-```
 
-## Build the image
-
-```sh
+# the firmware image: build-mk66/app/o3_voc03er.ptf
 cmake -S . -B build-mk66 -DO3SDK_PLATFORM=mk66 -DARM_GNU_ROOT=<arm-gnu-toolchain-15.3.rel1 dir>
 cmake --build build-mk66 -j4
-ctest --test-dir build-mk66 -L mk66 --output-on-failure      # o3_voc03er_image, _flashconfig, _ramfunc, _usb
+ctest --test-dir build-mk66 -L mk66 --output-on-failure   # the image's static checks
+
+tools/ci.sh host          # a fresh build, warnings, ctest, sizes
+tools/ci.sh mk66          # the same for the image, and no software double helpers
+python3 -I tools/gate.py o3_voc03er --host-build build-host   # the release gate's mechanical half
 ```
 
-`build-mk66/app/o3_voc03er.ptf` is the image the bootloader takes. Or the whole check from a fresh directory: `tools/ci.sh host` and
-`tools/ci.sh mk66`. Before an image goes to a unit it passes the gate (`python3 -I tools/gate.py o3_voc03er --host-build build-host`: two fresh builds,
-identical HEX, the image checks, a manifest in `build-gate-a/CANDIDATE.md`; skill `fw-gate-check`, `../o3-sdk/docs/NEW-APP.md` section 10); it is
-installed over USB with `o3console.py` (section 11) or by card, with the maintainer's go. Commit first: the image carries the git state of both trees.
+The licence is GPL-3.0-or-later because the image links the GPL kit statically.
 
-## Licence
+## Layout
 
-GPL-3.0-or-later (`LICENSE`): the image links the GPL-3.0-or-later kit statically.
+`app/` the app, its screens, skins and scenarios · `units/vocoder/` the DSP unit (the bands, the talkbox, the pitch corrector, the carrier
+synth and the loops) · `tests/` host tests · `docs/` the manual, the screens' design, the plan and the research notes in `docs/ports/` ·
+`tools/` the CI and the release gate · `.claude/` the agent harness, from o3-sdk. Start with [CLAUDE.md](CLAUDE.md).
+
+## Credits and licence
+
+The talkbox follows the DSP steps of [mda Talkbox](https://sourceforge.net/p/mda-vst/code/HEAD/tree/) by Paul Kellett (MIT option), written
+here as a streaming design. The pitch detector is written from the YIN paper (de Cheveigne and Kawahara, 2002); the other engines are original
+code. [THIRD_PARTY.md](THIRD_PARTY.md) has the full list.
+
+O3-VOC03ER is GPL-3.0-or-later ([LICENSE](LICENSE)).
