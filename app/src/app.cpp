@@ -19,7 +19,7 @@
 // What the app keeps: the pattern (on the keys above) and the keyboard octave, saved by itself a moment after it changes and loaded at
 // start as soon as the card is ready. Two files, pattern.o3a and config.o3a, in the app's folder on the card (the CMake id names it).
 //
-// To grow it: more screens (a class like PlayScreen, ctx.show() to switch), a sequencer (a dsp::Clocked hook added to the engine;
+// To grow it: more screens (a class like PerformScreen, ctx.show() to switch), a sequencer (a dsp::Clocked hook added to the engine;
 // apps/hello/src/hello_app.cpp in o3-sdk has a riff), more units (attach, route to a slot, a send or an insert), console commands
 // (App::diag_commands). The Config button is the kit's system Config screen (the theme, MIDI, audio in): this app does not use it.
 //
@@ -29,7 +29,6 @@
 
 #include "pattern_screen.h"
 #include "perform_screen.h"
-#include "play_screen.h"
 #include "skin/ornoir_assets.h"
 #include "master_screen.h"
 #include "params_screen.h"
@@ -143,7 +142,6 @@ class MyApp final : public app::App {
     console_notes_ = 0;
     g_bank = o3_voc03er::Bank{};  // setup() can run again on this object (tests, `reboot`): the patterns start empty; no render runs yet
     g_chain = o3_voc03er::Chain{};
-    play_.init(voice, &meter_, &voc_, &g_bank.pattern[0]);
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     params_.init(voice, &perform_);
@@ -164,7 +162,7 @@ class MyApp final : public app::App {
     // setup() can run again on this object (a test starts a fresh simulator on it, the simulator's `reboot`): the file state starts over too.
     op_ = Op::None;
     boot_ = Boot::Pattern;
-    saved_octave_ = play_.octave();
+    saved_octave_ = perform_.octave();
     ctx.show(perform_);
   }
 
@@ -212,20 +210,18 @@ class MyApp final : public app::App {
       return;
     }
     // The setting saves itself when it changes (and the card is there): the file's bytes are made now and stay in g_cfg_buf until the job ends.
-    if (play_.octave() != saved_octave_) {
-      saved_octave_ = play_.octave();  // (even when refused: it is tried again at the next change, not every pass)
+    if (perform_.octave() != saved_octave_) {
+      saved_octave_ = perform_.octave();  // (even when refused: it is tried again at the next change, not every pass)
       const std::size_t n = o3_voc03er::write_config(saved_octave_, g_cfg_buf, sizeof g_cfg_buf);
       files.set_quiet(true);
       op_ = n != 0u && files.save("", o3_voc03er::kConfigFile, g_cfg_buf, n) ? Op::SaveConfig : Op::None;
     }
   }
 
-  // The keys the screen does not use: FILE saves the pattern, SAMPLE LOAD loads it. A key pressed while a job runs is ignored (busy()).
+  // The keys the screens do not use: the screen buttons and the transport. FILE saves and loads the project and the pattern.
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
-    if (in.press(app::Button::Params)) {  // PARAMS, and on it the next page; SHIFT + PARAMS: the old PLAY screen (pattern, carrier steps), kept reachable
-      if (in.shift) {
-        ctx.show(play_);
-      } else if (ctx.screen() == &params_) {
+    if (in.press(app::Button::Params)) {  // PARAMS, and on it the next page (SHIFT + PARAMS does the same)
+      if (ctx.screen() == &params_) {
         params_.next_page(ctx);
       } else {
         ctx.show(params_);
@@ -249,119 +245,85 @@ class MyApp final : public app::App {
       ctx.redraw();
       return true;
     }
-    // The other screen buttons open their screen (docs/UI-DESIGN.md section 3). The old PLAY
-    // screen keeps the buttons its own controls and the card jobs use until U4, so on it these do what they did.
-    if (ctx.screen() != &play_) {
-      if (in.press(app::Button::SampleRec)) {
-        if (ctx.screen() != &sample_rec_) {
-          ctx.show(sample_rec_);
-        }
-        ctx.redraw();
-        return true;
+    // The other screen buttons open their screen (docs/UI-DESIGN.md section 3).
+    if (in.press(app::Button::SampleRec)) {
+      if (ctx.screen() != &sample_rec_) {
+        ctx.show(sample_rec_);
       }
-      if (in.press(app::Button::SamplePlay)) {
-        if (ctx.screen() != &sample_) {
-          ctx.show(sample_);
-        }
-        ctx.redraw();
-        return true;
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::SamplePlay)) {
+      if (ctx.screen() != &sample_) {
+        ctx.show(sample_);
       }
-      if (in.press(app::Button::SampleEdit)) {
-        if (ctx.screen() != &sample_edit_) {
-          ctx.show(sample_edit_);
-        }
-        ctx.redraw();
-        return true;
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::SampleEdit)) {
+      if (ctx.screen() != &sample_edit_) {
+        ctx.show(sample_edit_);
       }
-      if (in.press(app::Button::SampleLoad)) {  // the WAV picker; F8 returns to the screen it was opened from
-        if (ctx.screen() != &sample_load_) {
-          sample_load_.set_back(ctx.screen());
-          ctx.show(sample_load_);
-        }
-        ctx.redraw();
-        return true;
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::SampleLoad)) {  // the WAV picker; F8 returns to the screen it was opened from
+      if (ctx.screen() != &sample_load_) {
+        sample_load_.set_back(ctx.screen());
+        ctx.show(sample_load_);
       }
-      if (in.press(app::Button::File)) {  // the project file; F8 returns to the screen it was opened from
-        if (ctx.screen() != &file_) {
-          file_.set_back(ctx.screen());
-          ctx.show(file_);
-        }
-        ctx.redraw();
-        return true;
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::File)) {  // the project file; F8 returns to the screen it was opened from
+      if (ctx.screen() != &file_) {
+        file_.set_back(ctx.screen());
+        ctx.show(file_);
       }
-      if (in.press(app::Button::Song)) {  // the chain
-        if (ctx.screen() != &song_) {
-          ctx.show(song_);
-        }
-        ctx.redraw();
-        return true;
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::Song)) {  // the chain
+      if (ctx.screen() != &song_) {
+        ctx.show(song_);
       }
-      if (in.press(app::Button::Master)) {  // the signal path: source, gain, monitor, dry, level, return
-        if (ctx.screen() != &master_) {
-          ctx.show(master_);
-        }
-        ctx.redraw();
-        return true;
+      ctx.redraw();
+      return true;
+    }
+    if (in.press(app::Button::Master)) {  // the signal path: source, gain, monitor, dry, level, return
+      if (ctx.screen() != &master_) {
+        ctx.show(master_);
       }
-      struct Lane {
-        app::Button button;
-        o3_voc03er::pattern::Lane lane;
-      };
-      static constexpr Lane kLanes[] = {
-          {app::Button::Note, o3_voc03er::pattern::Lane::Note},
-          {app::Button::Instr, o3_voc03er::pattern::Lane::Carrier},
-          {app::Button::Vol, o3_voc03er::pattern::Lane::Level},
-          {app::Button::Fx, o3_voc03er::pattern::Lane::Slice},
-      };
-      if (in.press(app::Button::Pattern)) {  // the 16 steps, on the lane it was left on
+      ctx.redraw();
+      return true;
+    }
+    struct Lane {
+      app::Button button;
+      o3_voc03er::pattern::Lane lane;
+    };
+    static constexpr Lane kLanes[] = {
+        {app::Button::Note, o3_voc03er::pattern::Lane::Note},
+        {app::Button::Instr, o3_voc03er::pattern::Lane::Carrier},
+        {app::Button::Vol, o3_voc03er::pattern::Lane::Level},
+        {app::Button::Fx, o3_voc03er::pattern::Lane::Slice},
+    };
+    if (in.press(app::Button::Pattern)) {  // the 16 steps, on the lane it was left on
+      if (ctx.screen() != &pattern_) {
+        ctx.show(pattern_);
+      }
+      ctx.redraw();
+      return true;
+    }
+    for (const Lane& l : kLanes) {  // NOTE, INSTR, VOL and FX open the same screen on their lane
+      if (in.press(l.button)) {
+        pattern_.set_lane(ctx, l.lane);
         if (ctx.screen() != &pattern_) {
           ctx.show(pattern_);
         }
-        ctx.redraw();
         return true;
       }
-      for (const Lane& l : kLanes) {  // NOTE, INSTR, VOL and FX open the same screen on their lane
-        if (in.press(l.button)) {
-          pattern_.set_lane(ctx, l.lane);
-          if (ctx.screen() != &pattern_) {
-            ctx.show(pattern_);
-          }
-          return true;
-        }
-      }
-    } else if (in.press(app::Button::Master)) {
-      ctx.show(master_);
-      ctx.redraw();
-      return true;
-    } else if (in.press(app::Button::Song)) {
-      ctx.show(song_);
-      ctx.redraw();
-      return true;
     }
-    if (in.press(app::Button::SamplePlay)) {  // the next source, at its own starting gain
-      if (ctx.audio_in().available()) {
-        const hal::capture::Source next = o3_voc03er::next_source(ctx.audio_in().source());
-        (void)select_source(next, o3_voc03er::default_gain(next));
-        ctx.redraw();
-      }
-      return true;
-    }
-    const bool save = in.press(app::Button::File);
-    if (!save && !in.press(app::Button::SampleLoad)) {
-      return false;
-    }
-    app::Files& files = ctx.files();
-    if (op_ == Op::None && !files.busy()) {
-      if (save) {
-        (void)save_bank(ctx);
-      } else {
-        files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
-        play_.set_note(nullptr);
-        op_ = files.load("", o3_voc03er::kPatternFile, g_load_buf, sizeof g_load_buf) ? Op::LoadPattern : Op::None;
-      }
-      ctx.redraw();
-    }
-    return true;
+    return false;
   }
 
   // FILE's save, and PATTERN's F8 (through save_bank_cb): the bank to the card; false when a file job is still running.
@@ -371,7 +333,6 @@ class MyApp final : public app::App {
       return false;
     }
     files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...
-    play_.set_note(nullptr);
     const std::size_t n = o3_voc03er::write_bank(g_bank, g_save_buf, sizeof g_save_buf);
     op_ = n != 0u && files.save("", o3_voc03er::kPatternFile, g_save_buf, n) ? Op::SavePattern : Op::None;
     ctx.redraw();
@@ -591,27 +552,18 @@ class MyApp final : public app::App {
   }
 
   // The console's `state` after the kit's pairs (`o3console.py state` over USB; the same line is in the simulator's tests): the keyboard
-  // octave, the key the encoder drives and its value as the knob strip shows it.
+  // octave (PERFORM's), pattern A's steps and carrier steps, PATTERN's cursor, the transport and the chain.
   std::size_t describe_state(const app::Context& ctx, char* out, std::size_t cap) const noexcept override {
     app::StateWriter w(out, cap);
-    const app::ParamKeys& keys = play_.keys();
-    const app::ParamPage* page = keys.page();
-    const unsigned focus = keys.focus();
-    char value[16] = {};
-    if (page != nullptr && focus < page->count) {
-      (void)ctx.engine().format_param(page->unit, page->ids[focus], value, sizeof value);
-    }
-    w.sint("octave", play_.octave());
-    w.num("steps", play_.pattern().used());
-    w.num("cursor", play_.pattern().cursor);
-    w.num("carriers", play_.pattern().carriers_used());
+    w.sint("octave", perform_.octave());
+    w.num("steps", o3_voc03er::notes_used(g_bank.pattern[0]));
+    w.num("cursor", pattern_.cursor());
+    w.num("carriers", o3_voc03er::carriers_used(g_bank.pattern[0]));
     w.num("playing", ctx.engine().playing() ? 1u : 0u);
     w.num("chain", g_chain.count);  // SONG: the entries, the row lit (kChainMax: none), the cursor, LOOP CHAIN
     w.num("chain_row", song_.playing_row());
     w.num("chain_cursor", song_.cursor());
     w.num("chain_loop", g_chain.loop);
-    w.num("focus", focus);
-    w.str("value", value);
     const app::AudioIn& in = ctx.audio_in();
     const bool have = in.available();
     w.str("in_src", have ? source_name(in.source()) : "none");
@@ -679,14 +631,12 @@ class MyApp final : public app::App {
   void settle(app::Context& ctx, bool done) noexcept {
     const std::size_t got = ctx.files().loaded();
     if (done && op_ == Op::LoadPattern) {
-      if (!o3_voc03er::read_bank(g_load_buf, got, g_bank)) {
-        play_.set_note("BAD FILE");
-      }
+      (void)o3_voc03er::read_bank(g_load_buf, got, g_bank);  // a file that is not a pattern is refused whole: the bank stays
     } else if (done && op_ == Op::LoadConfig) {
       int octave = 0;
       if (o3_voc03er::read_config(g_load_buf, got, octave)) {
-        play_.set_octave(octave);
-        saved_octave_ = play_.octave();  // what the card holds: nothing to save
+        perform_.set_octave(octave);
+        saved_octave_ = perform_.octave();  // what the card holds: nothing to save
       }
     }
     op_ = Op::None;
@@ -694,7 +644,6 @@ class MyApp final : public app::App {
   }
 
   o3_voc03er::Vocoder voc_;
-  o3_voc03er::PlayScreen play_;
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::ParamsScreen params_;

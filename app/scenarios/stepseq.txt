@@ -1,30 +1,28 @@
-# U6a: pattern A of the bank, played by the step sequencer hook (stepseq.h). Five notes recorded on the PLAY screen, a carrier on two
-# steps (PATTERN cycles none, SY, NZ, L1..L4), the transport started with SHIFT + PLAY, then stopped: the Stop must leave the user's
+# U6a: pattern A of the bank, played by the step sequencer hook (stepseq.h). Five notes written on the PATTERN screen, a carrier on two
+# steps (its CARRIER lane: SY, NZ, L1..L4), the transport started with SHIFT + PLAY, then stopped: the Stop must leave the user's
 # CARRIER where it was (CarSrc is restored once, only because a step changed it). The simulator's input is synthetic: the WAV shows the
 # notes follow the steps; how each carrier sounds is the unit's to say.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/stepseq.txt --out <dir>   (the dir must exist)
 input tone 220 -12  # a modulator at the line jack, so the notes can be heard
-press shift  # PERFORM is home; the pattern is the PLAY screen's (SHIFT + PARAMS)
-tap params
-release shift
 record on
 wait 200
-pad 36
-pad 40
-pad 43
-pad 45
-pad 46
+tap pattern  # the PATTERN screen: palette pads write the cursor's step and move it on
+wait 100
+pad 0
+pad 3
+pad 7
+pad 12
+pad 15
 expect state steps=5
-tap pattern
-press shift
 tap left
 tap left
 tap left
 tap left
 tap left
-release shift
-tap pattern
-tap pattern
+tap instr  # the CARRIER lane: SYNTH on step 1, NOISE on step 3
+pad 1
+tap right
+pad 2
 snap 01_recorded
 expect state carriers=2
 press shift

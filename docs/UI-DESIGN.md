@@ -184,7 +184,7 @@ the cursor there (SHIFT + step pad: a rest in the lane).
 
 Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cpp`): a step is one 32-bit word (note, kind, voicing, carrier, level,
 slice), the bank of eight patterns is `O3SDK_BIG`, and the hook reads one word per step with a relaxed atomic, so an edit is heard whole at the
-step's next visit. A chord step stores its root as the note, so the old PLAY screen keeps working on pattern A. Settled where the spec was open:
+step's next visit. A chord step stores its root as the note, so a pattern of single notes stays valid. Settled where the spec was open:
 the gate is 75 % of a sixteenth, notes also end at Stop; carrier 0 (FOLLOW) emits nothing, and a Stop restores the carrier the user picked only
 if a step changed it (LIVE is never a lane value); LEVEL 0 means 100 and is sent as the NoteOn velocity: the last note sets the synth's level, 100 and up being full, so a level above 100 sounds as 100 and the
 lane only turns a step down; a soft note also lowers what is still held, because it is one gain and not one a voice. It acts on the SYNTH and NOISE carriers, not on a slot or LIVE; a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the
@@ -242,8 +242,7 @@ SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's fr
 (Trig 0, once). A slice above the slot's cut count stays silent, and LEVEL does not touch a slice. The palette's two upper rows are slices 1 to 24, lit up to
 the count; with no slices a palette pad or the encoder says SPEAKS HAS NO SLICES and writes nothing. No new unit parameter.
 
-Built in U9a (`params_logic.h`, `params_screen.cpp`, `tests/params_test.cpp`, `app/scenarios/params.txt`): PARAMS opens on this screen (the old PLAY stays on
-SHIFT + PARAMS until U9 retires it). The F row holds the page's eight keys, the voiceprint is PERFORM's (the same follow rule, `follow_bands`), a tap on a live
+Built in U9a (`params_logic.h`, `params_screen.cpp`, `tests/params_test.cpp`, `app/scenarios/params.txt`): PARAMS opens on this screen (SHIFT + PARAMS does the same). The F row holds the page's eight keys, the voiceprint is PERFORM's (the same follow rule, `follow_bands`), a tap on a live
 key points the encoder at it and a second tap steps it (a tap at an end goes to the other end), SHIFT + the encoder is coarse, and every value goes through the
 engine parameter PERFORM writes, in PERFORM's units. SHAPE is `Wave` and SPREAD `Detune` until U10 rebuilds them; SUB, TILT and VOICING are dim with no value and a tap says COMES LATER, since the unit has no
 parameter for them until then. QUALITY 24 draws no warning: section 4k of `docs/PLAN.md` measured it at 150.3k by its mean, inside the budget. No new unit parameter. Unit check owed: that the frame with the page's eight
@@ -262,6 +261,8 @@ LINE AND RADIO SHARE THE ADC; USB IS STEREO") → the mode → OUTPUT (DRY, LEVE
 with F7 / F8 seeking. F1 SOURCE · F2 GAIN · F3 MONITOR · F4 DRY · F5 LEVEL · F6 RETURN · F7 SEEK DOWN · F8 SEEK UP (dimmed unless RADIO).
 
 Built in U9b1 (`app/src/master_screen.{h,cpp}`, logic in `master_logic.h`, `tests/master_test.cpp`, `app/scenarios/master.txt`). Every key has a kit API, so none says COMES LATER: a dim key says why when tapped. SOURCE goes through the app's one source path (PERFORM's callback: `AudioIn::select`, the meter's reset, the USB channel), so the settling gate holds; GAIN is `AudioIn::set_gain` (dim on USB), MONITOR is `AudioIn::monitor` (a second tap toggles off / 70), RETURN is `UsbAudio::set_return_level` (live whenever the board has a USB audio device, whatever the source), DRY and LEVEL are the unit's parameters as PARAMS writes them; F7 / F8 are `Radio::seek` (live with RADIO as the source and a receiver that answered). The two tall meters are drawn in the screen with PERFORM's ladder rule (whole 6 px rows, held peak), not its masked dots. No pads, no UP / DOWN: MASTER has no pages. The screen object is about 40 bytes of SRAM_U (`__bss_end` 0x2001F8A8).
+
+Built in U9e (the old PLAY screen retired: `app/src/play_screen.{h,cpp}` deleted): PERFORM is home and every screen button opens its screen on every screen; SHIFT + PARAMS is PARAMS. The octave is PERFORM's (the state line's `octave` and `config.o3a` follow it); `steps`, `carriers` (pattern A of the bank) and `cursor` (PATTERN's) keep their names in the state line, `focus` and `value` are gone. The pattern's save on the card is PATTERN's F8 (`pattern.o3a`) and its load is the start; the old keys that loaded it (SAMPLE LOAD) and cycled the source (SAMPLE PLAY) are the WAV picker and SAMPLE now, and the source is picked on MASTER. `carrier_steps.txt`, `stepseq.txt` and `files.txt` write their steps with the PATTERN screen's palette. Unit check owed: SHIFT + PARAMS and PATTERN F8 by hand.
 
 Built in U9b2 (`app/src/voiceprint_logic.h`, `tests/voiceprint_test.cpp`, `perform_talk.txt`, `perform_tune.txt`): TALK draws the LPC envelope and TUNE the ladder, on PERFORM and on PARAMS' strip,
 from values `View` publishes. The lattice runs at a quarter of the rate, so the envelope is held flat above 5.5 kHz. Unit check owed: the frame cost with either on screen.
@@ -429,7 +430,7 @@ voice-leading for free, the default). The chord's notes become `note_on`s to the
 kinds of the same root `kLedLow` while it is held (the column lights up: "this root"), the pattern's chord `kLedMid` on its step. Monochrome
 LEDs cannot name a chord: the screen does, in Display type, with the notes as tiles.
 
-**Keys** (PADS = KEYS) are a piano on PERFORM (PLAY keeps its chromatic map). Row 2 (from the top, 0) holds the white keys, C D E F G A B C D E F G of the octave LEFT / RIGHT chose; row 1 the black keys on the column of the white key to their right (C# D# F# G# A# C# D# F#: columns 1, 2, 4, 5, 6, 8, 9, 11); row 0 the controls, below; row 3 is dark and silent, or the strip when BEND ROW is on. LEDs: the key's root `kLedLow`, the scale `kLedDim`, outside the scale off, held `kLedOn`.
+**Keys** (PADS = KEYS) are a piano on PERFORM (a piano; the chromatic map of the old PLAY screen is gone). Row 2 (from the top, 0) holds the white keys, C D E F G A B C D E F G of the octave LEFT / RIGHT chose; row 1 the black keys on the column of the white key to their right (C# D# F# G# A# C# D# F#: columns 1, 2, 4, 5, 6, 8, 9, 11); row 0 the controls, below; row 3 is dark and silent, or the strip when BEND ROW is on. LEDs: the key's root `kLedLow`, the scale `kLedDim`, outside the scale off, held `kLedOn`.
 
 Row 0 by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; columns 2, 5 and 8 are dark and silent. No control plays a note, and a note held when the octave moves ends with the note it began with. OCT steps the octave. VOL steps the unit's `Level` (PLAY's OUTPUT LEVEL) by its coarse step, 6 dB, held to -48..6. ROOT steps `Key` round the twelve. The hint line shows the new OCT, VOL or ROOT for a moment. A VOL or OCT pad at the end of its range is off; ROOT, BND and MOD stay `kLedDim`; a held control `kLedOn`. BND- and BND+ and MOD act while held (section 7b). F7 PADS has two values, CHORDS and KEYS; BEND ROW is independent of them, SHIFT + F7 toggles it and F7's value shows "+B".
 

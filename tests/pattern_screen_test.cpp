@@ -141,7 +141,7 @@ struct Rig {
     h = std::make_unique<sim::Harness>(::o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
     REQUIRE(h->start());
     h->run_ms(100);
-    tap(*h, app::Button::Performance);  // the old PLAY screen takes these buttons for itself
+    tap(*h, app::Button::Performance);  // PERFORM first, as from home
     tap(*h, app::Button::Pattern);
     h->run_ms(60);
   }

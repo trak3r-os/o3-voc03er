@@ -1,4 +1,4 @@
-# The four voice loops on the PLAY screen: a tone at the line is recorded into loop 1 (REC, transport stopped so it starts at once),
+# The four voice loops: a tone at the line is recorded into loop 1 (REC, transport stopped so it starts at once),
 # stopped, played as the modulator (UP) with the carrier chord held on the pads, the role swapped (DOWN), a second loop picked (NOTE).
 # The simulator's input is synthetic: this shows the screen and that the loop path runs; it says nothing about how a loop sounds on a
 # real source or what a playing loop costs on the unit.
