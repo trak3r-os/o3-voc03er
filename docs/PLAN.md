@@ -319,29 +319,31 @@ Candidate 37fa85f, kit ef6b1a0, SRAM_U margin 10,408 B. The figures are in `docs
 
 ## 4l. The carrier's stack on the unit, 2026-11-07
 
-Three candidates in one day, kit ef6b1a0, `render last` mean / worst peak over three reads, percent of the 261,224-cycle block, BANDS, 8 notes and 4 loops unless stated. No underrun and no shed in any read.
+Four candidates in one day, kit ef6b1a0, `render last` mean / worst peak over three reads, percent of the 261,224-cycle block, BANDS, 8 notes and 4 loops unless stated. No underrun and no shed in any read.
 
-| Row | 4ce71cd | ca80241 | d9f1f73 |
-|-----|---------|---------|---------|
-| Defaults (limit 69 % at the peak) | 189k / 75.7 | 181k / 73.7 | 163k / 67.5 |
-| 6 notes, defaults | 200k / 82.8 | 173k / 71.4 | 156k / 65.3 |
-| SPREAD 0 | 165k / 67.2 | 157k / 65.2 | 156k / 65.2 |
-| SUB 100 | | 182k / 74.4 | 173k / 70.2 |
-| TILT +6 | | 180k / 73.8 | 170k / 69.9 |
-| SHAPE 0.50 | | 198k / 80.8 | 190k / 77.4 |
-| SHAPE 1.00, the pulse | | | 197k / 81.8 |
-| SPREAD 30, SUB 100, TILT +6, SHAPE 0.50 | 237k / 94.2 | 208k / 85.5 | 197k / 79.6 |
-| ROBOT | 193k / 80.0 | 185k / 76.7 | 170k / 70.2 |
-| TALK Q24 | 183k / 74.4 | 176k / 70.8 | 158k / 66.6 |
-| TALK with SYNTH | 173k / 70.6 | | 146k / 62.0 |
-| TUNE with VOICE | about 190k / 75.9 | 104k / 73.4 | 141k / 57.8 |
+| Row | 4ce71cd | ca80241 | d9f1f73 | 39401f1 |
+|-----|---------|---------|---------| ---------|
+| Defaults (limit 69 % at the peak) | 189k / 75.7 | 181k / 73.7 | 163k / 67.5 | 169k / 68.7 |
+| 6 notes, defaults | 200k / 82.8 | 173k / 71.4 | 156k / 65.3 | |
+| SPREAD 0 | 165k / 67.2 | 157k / 65.2 | 156k / 65.2 | |
+| SUB 100 | | 182k / 74.4 | 173k / 70.2 | 173k / 71.4 |
+| TILT +6 | | 180k / 73.8 | 170k / 69.9 | 170k / 70.1 |
+| SHAPE 0.50 | | 198k / 80.8 | 190k / 77.4 | 174k / 72.2 |
+| SHAPE 1.00, the pulse | | | 197k / 81.8 | 178k / 73.3 |
+| SPREAD 30, SUB 100, TILT +6, SHAPE 0.50 | 237k / 94.2 | 208k / 85.5 | 197k / 79.6 | 181k / 74.2 |
+| ROBOT | 193k / 80.0 | 185k / 76.7 | 170k / 70.2 | 173k / 71.9 |
+| TALK Q24 | 183k / 74.4 | 176k / 70.8 | 158k / 66.6 | |
+| TALK with SYNTH | 173k / 70.6 | | 146k / 62.0 | |
+| TUNE with VOICE | about 190k / 75.9 | 104k / 73.4 | 141k / 57.8 | |
 
-The modulator differs between rounds (a slot on ca80241, USB noise on d9f1f73), and a silent input read 6k less, so a difference of a few thousand between columns means little.
+The modulator differs between rounds (a slot on ca80241, USB noise on d9f1f73 and 39401f1), and a silent input read 6k less, so a difference of a few thousand between columns means little.
 
 - **The estimates were wrong by a factor of five.** U10a's plan said +4,352 cycles at eight notes; the unit read about +24,000. A voice on the generic `run_ext` cost about 11,200 a block against about 5,000 on a specialised path.
 - **-Os was the larger cost.** It left the rare BLEP branches inside the sample loops, and a store to `out[]` forced the edges to be reloaded each sample. Local copies, `__restrict` and -O2 on the five sample-loop files took the two-oscillator loop from 55 instructions to 24 on the common path, and every engine gained from it (TALK Q24 by about 18k).
-- **A cost is measured on the unit before a plan is built on it.** The plan's constants are still estimates, and a third oscillator now reads far cheaper than `kThird` says: defaults are only 7k over SPREAD 0.
+- **A cost is measured on the unit before a plan is built on it.** The plan's constants are still estimates, and they now agree with the unit within a round's scatter: three thirds at 6,000 against 7k read (d9f1f73), four SUB voices at 5,200 against 4k, two morphs at 4,400 against 5k, TILT at 770 against 1.5k (39401f1). They stay as they are.
 - **On 4ce71cd these rows also passed:** SAMPLE EDIT, the card (SAVE WAVS about 2 s a slot, LOAD restores WAVs and cuts), SONG's stop, MASTER and the radio, PATTERN F8. The landing step of a SONG change could not be measured.
+- **39401f1, the pulse's fast path, took 8.5 points off the pulse and 5 off SHAPE 0.50 and the row with all four.** 21 reads, no underrun, no shed. Defaults stay inside the limit by 768 cycles (179,472 against 180,240). The other rows pass it at the peak: TILT +6 by 2,891 cycles (1.1 points), SUB 100 by 6,362 (2.4), ROBOT by 7,634 (2.9), SHAPE 0.50 by 8,315 (3.2), the pulse by 11,108 (4.3), all four by 13,520 (5.2).
+- **The defaults' mean rose 5.5k from d9f1f73 (163k to 169k), more than the 2k between reads of one round, and this is not explained.** The code between the two images touches only the pulse, which defaults do not use. SUB and TILT read the same means as on d9f1f73, and the four loops were longer this round (188.7k samples against 176k), so it may be the round and not the code; that was not separated.
 
 ## 5. How the work runs
 
