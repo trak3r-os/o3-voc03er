@@ -1,0 +1,320 @@
+# The manual's pictures (docs/MANUAL.md, docs/manual/img/): one run that leaves every screen doing something. A tone in for the voice
+# (a pure tone lights few bands; the simulator cannot say what a voice looks like), a chord held, a 1 BAR take cut into eight slices, a
+# pattern and a song, a project saved. The pictures are the `m_*` ones; docs/manual/img/ holds them under the names the manual uses.
+# The simulator shows the screens; it cannot say how it sounds. For SAMPLE LOAD to list files, write the WAVs first with
+# `python3 -I app/scenarios/sample_load_wavs.py <card>/Apps/o3_voc03er` (the picture is then not empty); an empty card runs just as clean.
+# Run: mkdir <card> <dir> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/manual_screens.txt --card <card> --out <dir>
+input tone 220 -8
+wait 400
+# ---- PERFORM: BANDS with a chord held (hero), then TALK, TUNE and ROBOT
+paddown 38
+wait 300
+input tone 440 -8
+wait 120
+input tone 220 -8
+wait 500
+snap m_hero
+padup 38
+wait 200
+tap f1
+tap f1
+wait 300
+paddown 43
+wait 500
+snap m_perform_talk
+padup 43
+input tone 230 -8
+tap f1
+wait 700
+snap m_perform_tune
+tap f1
+wait 100
+paddown 36
+paddown 40
+paddown 43
+input tone 220 -12
+wait 700
+snap m_robot
+padup 36
+padup 40
+padup 43
+tap f1
+turn -3
+wait 300
+# ---- the keys: PADS = KEYS, two keys held
+tap f7
+turn 1
+paddown 28
+paddown 18
+wait 300
+snap m_perform_keys
+padup 28
+padup 18
+tap f7
+turn -1
+wait 200
+# ---- PARAMS: its three pages with a chord held
+tap params
+wait 300
+paddown 38
+wait 400
+snap m_params
+tap params
+wait 300
+snap m_params_shape
+tap params
+wait 300
+snap m_params_tune
+padup 38
+# ---- MASTER, the monitor on
+tap master
+wait 300
+tap f3
+tap f3
+paddown 36
+wait 500
+snap m_master
+padup 36
+# ---- SAMPLE REC: the take, seen while it runs
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 1800
+snap m_sample_rec
+wait 700
+input tone 220 -8
+wait 450
+input tone 330 -14
+wait 300
+input tone 150 -9
+wait 450
+input tone 262 -22
+wait 300
+input tone 196 -8
+wait 450
+input tone 392 -16
+wait 300
+input tone 165 -10
+wait 450
+input tone 247 -28
+wait 300
+input tone 220 -8
+wait 450
+input tone 294 -12
+wait 300
+input tone 220 -8
+wait 450
+input tone 330 -14
+wait 300
+input tone 150 -9
+wait 450
+input tone 262 -22
+wait 300
+input tone 196 -8
+wait 450
+input tone 392 -16
+wait 300
+input tone 165 -10
+wait 450
+input tone 247 -28
+wait 300
+input tone 220 -8
+wait 450
+input tone 294 -12
+wait 300
+input tone 220 -8
+wait 450
+input tone 330 -14
+wait 300
+input tone 150 -9
+wait 450
+input tone 262 -22
+wait 300
+wait 300
+snap m_sample_rec_done
+# the transport ran for the take: stop it, so PATTERN and SONG start it themselves
+tap play
+wait 600
+# ---- SAMPLE: the slices on the pads, one sounding over a latched chord
+tap sampleplay
+wait 200
+tap f2
+tap f2
+wait 100
+tap f2
+wait 100
+paddown 38
+wait 100
+tap shift
+padup 38
+wait 600
+paddown 0
+wait 250
+padup 0
+wait 150
+paddown 2
+wait 250
+snap m_sample
+padup 2
+wait 150
+# ---- SAMPLE EDIT: the cuts
+tap sampleedit
+wait 300
+tap f1
+turn 1
+turn 1
+wait 150
+turn 40
+wait 200
+snap m_sample_edit
+# ---- PATTERN: eight chords, a rest, carriers, levels, then played with FOLLOW
+tap performance
+wait 100
+tap pattern
+wait 150
+paddown 0
+wait 40
+padup 0
+wait 40
+paddown 3
+wait 40
+padup 3
+wait 40
+paddown 7
+wait 40
+padup 7
+wait 40
+paddown 12
+wait 40
+padup 12
+wait 40
+paddown 15
+wait 40
+padup 15
+wait 40
+paddown 19
+wait 40
+padup 19
+wait 40
+paddown 14
+wait 40
+padup 14
+wait 40
+paddown 5
+wait 40
+padup 5
+wait 40
+tap instr
+paddown 1
+wait 40
+padup 1
+wait 40
+paddown 2
+wait 40
+padup 2
+wait 100
+tap vol
+paddown 24
+wait 40
+padup 24
+wait 40
+paddown 10
+wait 40
+padup 10
+wait 100
+tap note
+# patterns B and C get a few chords too, so the song has something to play
+paddown 33
+wait 60
+padup 33
+wait 100
+paddown 7
+wait 40
+padup 7
+wait 40
+paddown 12
+wait 40
+padup 12
+wait 40
+paddown 19
+wait 40
+padup 19
+wait 40
+paddown 34
+wait 60
+padup 34
+wait 100
+paddown 5
+wait 40
+padup 5
+wait 40
+paddown 14
+wait 40
+padup 14
+wait 40
+paddown 32
+wait 60
+padup 32
+wait 100
+tap f7
+tap play
+wait 1700
+snap m_pattern
+tap play
+wait 600
+tap f7
+# ---- SONG: three entries, the first row playing
+tap song
+wait 300
+tap insert
+tap insert
+turn 1
+tap insert
+turn 1
+wait 200
+tap f2
+turn 2
+tap f2
+tap up
+tap up
+tap play
+wait 1000
+snap m_song
+tap play
+wait 200
+# ---- FILE: SAVE AS, then the project listed
+tap file
+wait 40
+tap f2
+wait 20
+snap m_file_name
+tap f7
+wait 120
+tap file
+wait 40
+tap f1
+tap f1
+wait 120
+snap m_file
+tap f8
+wait 100
+# ---- SAMPLE LOAD and HELP
+tap sampleload
+wait 300
+snap m_sample_load
+tap performance
+wait 100
+press shift
+tap config
+release shift
+wait 150
+snap m_help
+tap f8
+wait 100
