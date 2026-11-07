@@ -345,6 +345,9 @@ The modulator differs between rounds (a slot on ca80241, USB noise on d9f1f73 an
 - **39401f1, the pulse's fast path, took 8.5 points off the pulse and 5 off SHAPE 0.50 and the row with all four.** 21 reads, no underrun, no shed. Defaults stay inside the limit by 768 cycles (179,472 against 180,240). The other rows pass it at the peak: TILT +6 by 2,891 cycles (1.1 points), SUB 100 by 6,362 (2.4), ROBOT by 7,634 (2.9), SHAPE 0.50 by 8,315 (3.2), the pulse by 11,108 (4.3), all four by 13,520 (5.2).
 - **The defaults' mean rose 5.5k from d9f1f73 (163k to 169k), more than the 2k between reads of one round, and this is not explained.** The code between the two images touches only the pulse, which defaults do not use. SUB and TILT read the same means as on d9f1f73, and the four loops were longer this round (188.7k samples against 176k), so it may be the round and not the code; that was not separated.
 
+- **c3016ef read the defaults over the limit.** Two sets a minute apart: 169k mean both times, worst peak 71.1 % and 69.1 % (185,821 and 180,592), no underrun, no shed. The peak moved 5k between sets, so 68.7 % on 39401f1 was a short window and not a margin. Two rounds at 169k rule out the round; both images carry the pulse change and both rounds the longer loops, so image or loops is still not separated.
+- **So the third oscillator holds back at 8 notes (`kThirdHold`).** None at 8 notes, 2 at 7, 5 at 6, all voices at 5 or fewer, which is the most a chord asks. SUB and the morph keep what they had. The limit and the default SPREAD stay. Expected to take about 7k off the row, as SPREAD 0 read on d9f1f73 [est]; the unit has to read it, with a longer window than three reads.
+
 ## 5. How the work runs
 
 Lanes of one or two subagents, Sonnet for code and review, Haiku for mechanical checks. A brief names the files; agents use LSP and targeted reads

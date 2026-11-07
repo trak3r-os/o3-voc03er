@@ -181,8 +181,10 @@ TEST_CASE("carrier plan: the table, the budget and the stated rows") {
       }
     }
   }
-  // The stated rows: SPREAD only, 8 notes: 3 third oscillators; 5 notes or fewer: all voices. SUB only at 8 notes: 4 voices.
-  CHECK(plan_oscillators(8, true, false, false, false).third == 3);
+  // The stated rows: SPREAD only: no third oscillator at 8 notes, 2 at 7, 5 at 6; 5 notes or fewer: all voices. SUB only at 8 notes: 4 voices.
+  CHECK(plan_oscillators(8, true, false, false, false).third == 0);
+  CHECK(plan_oscillators(7, true, false, false, false).third == 2);
+  CHECK(plan_oscillators(6, true, false, false, false).third == 5);
   for (unsigned n = 1; n <= 5; ++n) {
     CHECK(plan_oscillators(n, true, false, false, false).third == n);
   }
