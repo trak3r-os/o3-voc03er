@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.2.0 (pre-release)
+
+A sound release: TALK is reworked to behave like a talkbox, and BANDS is darker. It is a pre-release and needs more testing.
+
+### Changed
+
+- TALK as a talkbox (`docs/ENGINE-REALISM.md`, "TALK as a talkbox"):
+  - On consonants the carrier ducks (down to -26 dB) and the voice's own air, low-passed, comes through instead, as when the
+    mouth closes on a real tube. Vowels keep the carrier; a level gate keeps the breath shut in the pauses.
+  - The carrier's top is rolled off (a one-pole at 3.5 kHz, a smaller first difference), like a driver and a tube.
+  - A damped comb on the carrier, as a 0.9 m tube between the driver and the mouth.
+  - A gentle 2:1 compressor on TALK's output (5 ms attack, 120 ms release).
+  - A microphone's proximity lift (+3 dB below 200 Hz) and the carrier's leak from the box at -32 dB, heard even with the mouth shut.
+- BANDS: less noise injected in the top bands on consonants, and a one-pole low-pass after the bands, so the sum is less bright.
+  THRU and DRY are not dulled by it.
+- Every new value is a starting point for the ear. Measured on the host against a read voice and five dry/processed vocoder pairs
+  (measurements only; no audio is in the repository).
+
+### Fixed
+
+- `app_test` passes again: the presentation video's scenarios moved to `tools/video/scenarios/`.
+- The CHANGELOG's CPU line for v0.1.0 now gives the silent readings.
+
+### Added
+
+- A GitHub Actions workflow that runs `tools/ci.sh host` and `mk66` only when a release tag is pushed, against the o3-sdk commit in
+  `tools/o3sdk.ref`.
+- `tools/video/`: the scripts that rebuild the presentation video from the simulator.
+
+### What a unit has shown
+
+Read on a unit on the release candidate (`v0.1.0-17-g2de46c7`, the same code as the tag), each row a silent read (`cpu reset`, 60 s with
+nothing sent, one `cpu` read); the render's limit is 180,240 cycles at the peak (69 % of the block):
+
+- BANDS, eight notes: peak 143,521 (54.9 %); with four loops playing: 170,596 (65.3 %, as in v0.1.0).
+- TALK at Quality 16, a held chord: 132,863 (50.8 %); at Quality 24: 143,499 (54.9 %); at Quality 24 with four loops playing:
+  173,741 (66.5 %, about 7k over v0.1.0's 166,762, inside the limit).
+- ROBOT, a held chord: 144,404 (55.2 %).
+- No underrun, mute, late block, hardware fault or shed in any row; no crash record.
+
+Not tried on a unit: how the new TALK and BANDS sound (the values are starting points for the ear), DIN MIDI, an outside hardware
+sequencer. The app still swaps `system.o3s` and its `.bak` on the card at boot (known since v0.1.0).
+
 ## v0.1.0 (pre-release)
 
 The first public release. It is a pre-release and needs more testing.
