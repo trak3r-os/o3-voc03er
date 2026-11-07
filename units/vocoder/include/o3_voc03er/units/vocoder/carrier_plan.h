@@ -11,7 +11,7 @@
 // features in the loop) costs more than twice that, so the plan keeps voices off run_ext whenever it can.
 //
 // The rules, in this order, each taking what is left (`rem`) of the budget after the n voices and TILT: SUB, then the morph on oscillator 1, then
-// the third oscillator, which also leaves kThirdHold untouched. `full`: when the morph is on and every voice could run on the generic path inside the budget (n x kExt + TILT), every
+// the third oscillator. `full`: when the morph is on and every voice could run on the generic path inside the budget (n x kExt + TILT), every
 // voice does, with all its oscillators morphing; the SUB and third of the plan stay as they are. Who gets what is decided by the caller:
 // SUB goes to the lowest notes, the morph and the third to the newest voices.
 
@@ -27,8 +27,6 @@ inline constexpr unsigned kMorph1 = 2200;  // the morph on oscillator 1 of a spe
 inline constexpr unsigned kExt = 11500;    // a voice on the generic path [measured: about 11,200 on top of nothing at 4 to 8 notes]
 inline constexpr unsigned kTilt = 770;     // TILT, once on the sum, 12 a sample [est]
 inline constexpr unsigned kRoom = 6000;    // what stays free for the rest of the unit: the limit 69 % peak is 180,200 and BANDS at SPREAD 0 reads 164.8k
-inline constexpr unsigned kThirdHold = 6000;  // of what is left, what the third oscillator may not take: at 8 notes it read 7k over SPREAD 0, and the row's
-                                              // peak, 71.1 % on c3016ef, is over the 69 %. So none at 8 notes, 2 at 7, 5 at 6; all voices at 5 or fewer, a chord's most
 inline constexpr unsigned kMaxVoices = 8;
 inline constexpr unsigned kBudget = kMaxVoices * kVoice + kRoom;  // 46,000
 }  // namespace carrier_cost
@@ -67,7 +65,7 @@ constexpr CarrierPlan plan_oscillators(unsigned n, bool spread, bool morph, bool
     cost += k * kMorph1;
   }
   if (spread) {
-    unsigned k = rem > kThirdHold ? (rem - kThirdHold) / kThird : 0u;
+    unsigned k = rem / kThird;
     k = k > n ? n : k;
     p.third = static_cast<std::uint8_t>(k);
     rem -= k * kThird;

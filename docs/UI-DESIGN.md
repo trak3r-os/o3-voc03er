@@ -508,7 +508,7 @@ Built in U5b. Pads 0 to 23 are slices 1 to 24 of the selected slot (even cuts, 8
 **Polyphony and cost.** A slice voice is a loop reader: 3,000 to 8,000 cycles a block from the unit reads (1x to 2x, `docs/PLAN.md` 4f), so four at
 once are 1.1 to 3 % each, the 4.6 to 12 % the four loops already cost; past four the oldest is stolen. BANDS with eight notes and four readers at
 2x is the 72.9 % peak already measured (4g): slices add no new worst case, and SAMPLE's defaults (CHOKE ON, a four-note chord) keep the ordinary
-case near 55 %. A fifth reader is not planned; SPREAD's third oscillator was read on the unit and is not kept at eight notes (`kThirdHold`, `docs/PLAN.md` 4l).
+case near 55 %. A fifth reader is not planned; SPREAD's third oscillator was read on the unit and three of them stay at eight notes (`docs/PLAN.md` 4l).
 
 **The app:** the two pickers and the capture gesture (the routing as pure state, host-tested: every pair and what the screen says of it); the chord
 engine (root, kind, scale quality, voicing, SMOOTH's nearest inversion: pure, host-tested); the slice tables and their edits; the onset detector
