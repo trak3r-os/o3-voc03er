@@ -96,7 +96,7 @@ The pictures come from the simulator, which draws the same screens as the unit. 
    check the download with `sha256sum -c SHA256SUMS`.
 2. **Back up** the whole SD card, and keep the firmware you run now on your computer: that is your way back.
 3. **Install** it from the card with the unit's hidden reset button, or over USB from a firmware with the console.
-   [Section 2 of the manual](docs/MANUAL.md#2-install-and-the-way-back) has every step, and how to go back.
+   [Section 2 of the manual](docs/MANUAL.md#2-install-it-and-go-back-to-the-stock-firmware) has every step, and how to go back.
 
 Then read [the first five minutes](docs/MANUAL.md#3-the-first-five-minutes). After that you can stop reading and play.
 
