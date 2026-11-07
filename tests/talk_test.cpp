@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
 
 using namespace o3_voc03er;
@@ -1069,11 +1070,11 @@ class PulseVowel {
   float phase_ = 0.0f, tilt_ = 0.0f;
 };
 
-// White noise through two 2nd-order Butterworth high-passes at 4 kHz: "sss".
+// White noise through two 2nd-order Butterworth high-passes at 4 kHz ("sss"; 2.5 kHz for "sh").
 class Sss {
  public:
-  Sss() {
-    const float w0 = kPi2 * 4000.0f / kFs;
+  explicit Sss(float hz = 4000.0f) {
+    const float w0 = kPi2 * hz / kFs;
     const float cw = std::cos(w0), al = std::sin(w0) * 0.70710678f, a0 = 1.0f + al;
     b0_ = 0.5f * (1.0f + cw) / a0;
     b1_ = -(1.0f + cw) / a0;
@@ -1176,4 +1177,115 @@ TEST_CASE("talk: S1, a modulator below the level gate leaves the breath at 0 and
   CHECK(bl_loud > 0.0f);
   CHECK(finite(quiet));
   CHECK(mean_square(quiet, from, to) < mean_square(loud, from, to) * 1.0e-6f);
+}
+
+namespace {
+
+// A glottal pulse train (the leaky integral of PulseVowel) through up to three resonators in parallel: a vowel at any f0 and formants.
+class FormantVowel {
+ public:
+  FormantVowel(float f0, const Formant* f, unsigned n) : f0_(f0), n_(n) {
+    for (unsigned k = 0; k < n; ++k) {
+      const float r = std::exp(-3.1415927f * f[k].bw / kFs);
+      c1_[k] = 2.0f * r * std::cos(kPi2 * f[k].hz / kFs);
+      c2_[k] = -r * r;
+      g_[k] = f[k].gain * (1.0f - r);
+    }
+  }
+  float next() {
+    phase_ += f0_ / kFs;
+    float x = 0.0f;
+    if (phase_ >= 1.0f) {
+      phase_ -= 1.0f;
+      x = 1.0f;
+    }
+    tilt_ = x + 0.98f * tilt_;
+    float y = 0.0f;
+    for (unsigned k = 0; k < n_; ++k) {
+      const float s = g_[k] * tilt_ + c1_[k] * y1_[k] + c2_[k] * y2_[k];
+      y2_[k] = y1_[k];
+      y1_[k] = s;
+      y += s;
+    }
+    return y;
+  }
+
+ private:
+  float f0_;
+  unsigned n_;
+  float c1_[3] = {}, c2_[3] = {}, g_[3] = {}, y1_[3] = {}, y2_[3] = {};
+  float phase_ = 0.0f, tilt_ = 0.0f;
+};
+
+// The generator's gain for a given rms, measured on a copy over a second (its first 0.1 s left out).
+template <class G>
+float gain_for_rms(G g, float rms) {
+  std::vector<float> x(static_cast<std::size_t>(kFs));
+  for (auto& e : x) e = g.next();
+  return rms / std::sqrt(mean_square(x, 4410, x.size()));
+}
+
+// A vowel with white noise at `rel` of its rms added at the output: aspiration and the room, as in a breathy voice or a recording. At 10 %
+// the noise is 1 % of the power, and about 0.8 % of the power lies above 5 kHz: the level real voiced speech has there (hf/ms median 0.009).
+class Breathy {
+ public:
+  Breathy(FormantVowel v, float rel) : v_(v), noise_gain_(rel * gain_for_rms(Noise(), 1.0f) * vowel_rms(v)) {}
+  float next() { return v_.next() + noise_gain_ * nz_.next(); }
+
+ private:
+  static float vowel_rms(FormantVowel v) { return 1.0f / gain_for_rms(v, 1.0f); }
+  FormantVowel v_;
+  float noise_gain_;
+  Noise nz_;
+};
+
+// Runs a modulator through Talk with a saw carrier; returns the smallest and the largest duck gain the publishes took after the first
+// `settle` blocks (the window is 16 blocks, the hf hop under 2).
+template <class G>
+void duck_range(G gen, float rms, float* lo, float* hi) {
+  const float gain = gain_for_rms(gen, rms);
+  Talk& t = *make_talk();
+  t.set_thru(0.0f);
+  Saw saw(110.0f);
+  float mn = 1.0f, mx = 0.0f;
+  const std::size_t blocks = 500, settle = 120;
+  run_talk(t, [&] { return gain * gen.next(); }, [&] { return 2.0f * saw.next(); }, blocks, [&](std::size_t b) {
+    if (b < settle) return;
+    mn = std::min(mn, t.duck_gain());
+    mx = std::max(mx, t.duck_gain());
+  });
+  *lo = mn;
+  *hi = mx;
+}
+
+}  // namespace
+
+TEST_CASE("talk: S1b, vowels at f0 100-250 Hz keep the carrier within 1 dB of the no-duck level, ee and breathy ones included") {
+  const Formant kAh[] = {{700.0f, 90.0f, 1.0f}, {1220.0f, 110.0f, 0.5f}, {2600.0f, 160.0f, 0.25f}};
+  const Formant kEe[] = {{280.0f, 60.0f, 1.0f}, {2250.0f, 120.0f, 0.5f}, {2900.0f, 150.0f, 0.35f}};
+  const Formant kOo[] = {{300.0f, 60.0f, 1.0f}, {870.0f, 90.0f, 0.5f}, {2240.0f, 150.0f, 0.2f}};
+  const struct {
+    const char* name;
+    const Formant* f;
+  } vowels[] = {{"ah", kAh}, {"ee", kEe}, {"oo", kOo}};
+  const float one_db = std::pow(10.0f, -1.0f / 20.0f);
+  for (const auto& v : vowels) {
+    for (const float f0 : {100.0f, 150.0f, 200.0f, 250.0f}) {
+      for (const float noise : {0.0f, 0.1f}) {
+        float lo = 0.0f, hi = 0.0f;
+        duck_range(Breathy(FormantVowel(f0, v.f, 3), noise), 0.3f, &lo, &hi);
+        MESSAGE(std::string(v.name) << " f0 " << f0 << " noise " << noise << ": duck gain min " << lo << " max " << hi);
+        CHECK(lo >= one_db);
+      }
+    }
+  }
+}
+
+TEST_CASE("talk: S1b, sss (noise above 4 kHz) and sh (above 2.5 kHz) take the duck to its floor") {
+  for (const float hz : {4000.0f, 2500.0f}) {
+    float lo = 0.0f, hi = 0.0f;
+    duck_range(Sss(hz), 0.3f, &lo, &hi);
+    MESSAGE("noise above " << hz << " Hz: duck gain min " << lo << " max " << hi);
+    CHECK(hi <= 0.06f);
+  }
 }

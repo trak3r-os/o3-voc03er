@@ -34,10 +34,12 @@ constexpr float kPi2 = 6.2831853f;
 constexpr float kWinRise = 0.8f;        // the window rises over this part (sin^2) and falls over the rest (cos^2)
 constexpr float kGainK = 2.307f;          // the lattice's level against the breath: fixes their balance (docs/ENGINE-REALISM.md)
 constexpr float kBreath = 0.5f;         // the breath's level against the modulator's high band (was 0.3; a starting value, S1)
-// S1, the voiced/unvoiced duck. ratio = (mean h^2 of the 5 kHz high-pass, per full-rate frame) / (mean power of the window, r0 / sumw2).
-// Every constant below is a starting value for the maintainer's ear to move.
-constexpr float kDuckT0 = 0.03f;        // at or below this ratio the carrier is not ducked
-constexpr float kDuckT1 = 0.3f;         // at or above it the carrier is ducked to the floor
+// S1/S1b, the voiced/unvoiced duck. ratio = (mean h^2 of the 5 kHz high-pass) / (mean x^2 of the un-emphasised modulator), both per full-rate
+// frame over the same 128-frame hop: the same scale, so a vowel reads a small ratio and breath or sss a large one (S1 divided by the
+// pre-emphasised window's power, which shrinks the lows and read high on vowels). Every constant below is a starting value, set between the
+// distributions on 8 s of real speech (docs/ENGINE-REALISM.md), for the maintainer's ear to move.
+constexpr float kDuckT0 = 0.28f;        // at or below this ratio the carrier is not ducked
+constexpr float kDuckT1 = 0.45f;        // at or above it the carrier is ducked to the floor
 constexpr float kDuckFloor = 0.05f;     // -26 dB: the gain a hop of fricative-like content keeps (a starting value: ear and unit read)
 constexpr float kDuckSlope = 1.0f / (kDuckT1 - kDuckT0);
 constexpr float kBreathVoiced = 0.25f;  // the breath's share while voiced; it rises to 1 as the duck closes
@@ -133,7 +135,8 @@ void Talk::reset() noexcept {
   for (auto& v : acc_) v = 0.0f;
   emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
   hp_s1_ = hp_s2_ = 0.0f;
-  hf_acc_ = hf_done_ = unv_ = car_lp_y_ = 0.0f;
+  hf_acc_ = hf_done_ = ms_acc_ = ms_done_ = unv_ = car_lp_y_ = 0.0f;
+  duck_ = 1.0f;
   open_ = breath_ = breath_step_ = 0.0f;
   breath_pos_ = 0;
   agc_ = agc_gain(level_);  // level_ stays: its estimate of the input beats unity gain after a pause, as in Bands::restart
@@ -265,11 +268,12 @@ void Talk::publish() noexcept {
   unv_ = 0.0f;
   const float hf = hf_done_ * (1.0f / kHopFrames);
   if (!silent && power + hf > kUnvGate) {
-    const float ratio = hf / (power + kRatioEps);  // the hop's one divide
+    const float ratio = hf / (ms_done_ * (1.0f / kHopFrames) + kRatioEps);  // the hop's one divide
     gd = (kDuckT1 - ratio) * kDuckSlope;
     gd = gd > 1.0f ? 1.0f : (gd < kDuckFloor ? kDuckFloor : gd);
     unv_ = kBreathVoiced + (1.0f - kBreathVoiced) * (1.0f - gd);
   }
+  duck_ = gd;
   if (!silent) {
     gain_t_ = gd * kGainK * agc_ * std::sqrt((err > 0.0f ? err : 0.0f) / sumw2_);
   } else {
@@ -406,14 +410,15 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   // most 64 of the hop's 128), so the output does not depend on how the frames are split into calls.
   float breath = breath_, breath_step = breath_step_;
   std::uint32_t breath_pos = breath_pos_;
-  float s1 = hp_s1_, s2 = hp_s2_, open = open_, hf = hf_acc_;
+  float s1 = hp_s1_, s2 = hp_s2_, open = open_, hf = hf_acc_, ms = ms_acc_;
   const float b0 = hp_b0_, b1 = hp_b1_, b2 = hp_b2_, a1 = hp_a1_, a2 = hp_a2_;  // in locals: a store to out must not reload them
   const float ostep = open_step_;
   for (std::uint32_t i = 0; i < n;) {
     constexpr std::uint32_t kGrid = kHop * 4u;
     if (breath_pos == 0u) {
-      hf_done_ = hf;  // the hop that just ended; the next publish, at this hop's end, reads it
-      hf = 0.0f;
+      hf_done_ = hf;  // the hop that just ended; the next publish, at this hop's end, reads it (and ms_done_, over the same frames)
+      ms_done_ = ms;
+      hf = ms = 0.0f;
       breath_step = (kBreath * unv_ * (0.5f + 0.5f * thru_) * agc_ - breath) * (1.0f / static_cast<float>(kGrid));
     }
     const std::uint32_t left = kGrid - breath_pos;
@@ -427,6 +432,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         s1 = mulb(b1, x) - mulb(a1, h) + s2;
         s2 = mulb(b2, x) - mulb(a2, h);
         hf += mulb(h, h);
+        ms += mulb(x, x);
         breath += breath_step;
         out[i] += mulb(breath * open, h);
       }
@@ -438,6 +444,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         s2 = mulb(b2, x) - mulb(a2, h);
         open = open < target ? (open + ostep < target ? open + ostep : target) : (open - ostep > target ? open - ostep : target);
         hf += mulb(h, h);
+        ms += mulb(x, x);
         breath += breath_step;
         out[i] += mulb(breath * open, h);
       }
@@ -450,7 +457,8 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   hp_s2_ = flush(s2);
   open_ = open;
   hf_acc_ = hf;
-  macs_last_ += n * 13u;
+  ms_acc_ = ms;
+  macs_last_ += n * 14u;
 
   // Denormals: states decay to zero under silence; flush them once a block.
   for (std::uint32_t i = 0; i <= run_; ++i) b_[i] = flush(b_[i]);
