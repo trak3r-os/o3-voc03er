@@ -29,21 +29,30 @@ inline float allpass(float a, float& x1, float& y1, float x) noexcept {
   return y;
 }
 
+// The loops below keep the four section states in locals and write them back at the end: `out` is a float store the compiler cannot prove
+// distinct from `h`, so through the struct every sample reloaded and stored all four from memory. The arithmetic is the same operations in
+// the same order.
+
 // Returns the number of outputs (one for each even-indexed input, `odd` says whether in[0] is odd-indexed).
 inline std::uint32_t decimate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept {
   std::uint32_t i = 0, k = 0;
   float pend = h.pend;
+  float x0 = h.x0, y0 = h.y0, x1 = h.x1, y1 = h.y1;
   if (odd && n > 0) {  // in[0] is the earlier sample of a pair: it goes through the z^-1 branch
-    pend = allpass(kHbC1, h.x1, h.y1, in[0]);
+    pend = allpass(kHbC1, x1, y1, in[0]);
     i = 1;
   }
   for (; i + 1 < n; i += 2) {
-    out[k++] = 0.5f * (allpass(kHbC0, h.x0, h.y0, in[i]) + pend);
-    pend = allpass(kHbC1, h.x1, h.y1, in[i + 1]);
+    out[k++] = 0.5f * (allpass(kHbC0, x0, y0, in[i]) + pend);
+    pend = allpass(kHbC1, x1, y1, in[i + 1]);
   }
   if (i < n) {  // a last even sample: its pair completes in the next call
-    out[k++] = 0.5f * (allpass(kHbC0, h.x0, h.y0, in[i]) + pend);
+    out[k++] = 0.5f * (allpass(kHbC0, x0, y0, in[i]) + pend);
   }
+  h.x0 = x0;
+  h.y0 = y0;
+  h.x1 = x1;
+  h.y1 = y1;
   h.pend = pend;
   return k;
 }
@@ -51,19 +60,26 @@ inline std::uint32_t decimate(Halfband& h, const float* in, std::uint32_t n, boo
 // Adds the interpolated samples into out[0..n) (the first output at an even-indexed sample; `in` holds one value for each pair).
 inline void interpolate(Halfband& h, const float* in, std::uint32_t n, bool odd, float* out) noexcept {
   std::uint32_t i = 0;
+  float pend = h.pend;
+  float x0 = h.x0, y0 = h.y0, x1 = h.x1, y1 = h.y1;
   if (odd && n > 0) {  // the second output of the last call's last pair
-    out[0] += h.pend;
+    out[0] += pend;
     i = 1;
   }
   for (std::uint32_t m = 0; i < n; ++m, i += 2) {
-    out[i] += allpass(kHbC0, h.x0, h.y0, in[m]);
-    const float o1 = allpass(kHbC1, h.x1, h.y1, in[m]);
+    out[i] += allpass(kHbC0, x0, y0, in[m]);
+    const float o1 = allpass(kHbC1, x1, y1, in[m]);
     if (i + 1 < n) {
       out[i + 1] += o1;
     } else {
-      h.pend = o1;
+      pend = o1;
     }
   }
+  h.x0 = x0;
+  h.y0 = y0;
+  h.x1 = x1;
+  h.y1 = y1;
+  h.pend = pend;
 }
 
 inline void settle(Halfband& h) noexcept {
