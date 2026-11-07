@@ -482,11 +482,8 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   const dsp::Engine& e = ctx.engine();
   const app::AudioIn& ain = ctx.audio_in();
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
-  const float cv = e.param(voice_, Vocoder::CarSrc) + 0.5f;
-  const unsigned car = cv > 0.0f ? static_cast<unsigned>(cv) : 0u;
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
   const unsigned tempo = e.stats().tempo_mbpm;
-  const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   const PatternData& p = pattern_now();
   const unsigned len = length_of(p);
   const bool playing = seq_ != nullptr && e.playing() && seq_->playing_pattern() == shown_;
@@ -494,9 +491,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   const Step cur = get_step(p, cursor_);
 
   ornoir::HeaderState h;
-  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (src != nullptr ? src->label : "NONE");
-  h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
-                                                                              : pl::kCarrierNames[car < 9u ? car : 0u];
+  header_route(e, voice_, src != nullptr ? src->label : "NONE", src != nullptr && src->source == hal::capture::Source::Usb, h);
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = tempo / 100u;

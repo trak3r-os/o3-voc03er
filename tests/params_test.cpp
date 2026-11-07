@@ -11,6 +11,7 @@
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include "../app/src/params_logic.h"
+#include "../app/src/perform_screen.h"
 
 #include <cmath>
 #include <cstring>
@@ -265,4 +266,25 @@ TEST_CASE("params: the screen moves a value through the engine, a key that comes
     CHECK(has_row(help, b));
   }
   CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("header: a slot that speaks is named the same on every screen, not the live source") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  o3sdk::dsp::UnitId voice = o3sdk::dsp::kNoUnit;
+  for (unsigned u = 0; u < 8 && voice == o3sdk::dsp::kNoUnit; ++u) {
+    const auto id = static_cast<o3sdk::dsp::UnitId>(u);
+    (void)h.engine().set_param(id, Vocoder::ModSrc, static_cast<float>(o3_voc03er::route::kFirstSlot));
+    h.run_ms(20);
+    voice = h.engine().param(id, Vocoder::ModSrc) == static_cast<float>(o3_voc03er::route::kFirstSlot) ? id : voice;
+  }
+  REQUIRE(voice != o3sdk::dsp::kNoUnit);
+  o3_voc03er::ornoir::HeaderState hs;
+  o3_voc03er::header_route(h.engine(), voice, "USB", true, hs);
+  CHECK(std::strcmp(hs.speaks, "SLOT 1") == 0);
+  (void)h.engine().set_param(voice, Vocoder::ModSrc, static_cast<float>(o3_voc03er::route::kSpeaksLive));
+  h.run_ms(20);
+  o3_voc03er::header_route(h.engine(), voice, "LINE", false, hs);
+  CHECK(std::strcmp(hs.speaks, "LINE") == 0);
 }

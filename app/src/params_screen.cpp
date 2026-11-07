@@ -175,8 +175,6 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const dsp::Engine& e = ctx.engine();
   const app::AudioIn& ain = ctx.audio_in();
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
-  const int car_v = pr::to_display(pr::Fmt::Int, e.param(voice_, Vocoder::CarSrc));
-  const unsigned car = car_v > 0 ? static_cast<unsigned>(car_v) : 0u;
   const unsigned mode = perform::mode_index(e.param(voice_, Vocoder::Mode));
   const unsigned tempo = e.stats().tempo_mbpm;
 
@@ -190,8 +188,7 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   }
 
   ornoir::HeaderState h;
-  h.speaks = src != nullptr ? src->label : "NONE";
-  h.sounds = perform::kCarrierNames[car < 9u ? car : 0u];
+  header_route(e, voice_, src != nullptr ? src->label : "NONE", src != nullptr && src->source == hal::capture::Source::Usb, h);
   h.mode = perform::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = tempo / 100u;

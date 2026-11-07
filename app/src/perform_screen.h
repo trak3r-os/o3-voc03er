@@ -40,6 +40,10 @@
 
 namespace o3_voc03er {
 
+// The header's pair, as every screen shows it: the slot or the live source that speaks, and the slot, the live source or the carrier that sounds.
+// `live` is the live source's label and `usb` whether it is the USB in.
+void header_route(const o3sdk::dsp::Engine& e, o3sdk::dsp::UnitId voice, const char* live, bool usb, ornoir::HeaderState& h) noexcept;
+
 class PerformScreen final : public o3sdk::app::Screen {
  public:
   // The app switches the audio input for the screen (a pick in the SPEAKS or SOUNDS list, the end of a capture): it owns the input and its meter

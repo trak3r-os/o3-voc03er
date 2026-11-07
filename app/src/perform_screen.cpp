@@ -684,6 +684,14 @@ void PerformScreen::step_octave(app::Context& ctx, int delta) noexcept {
 
 route::Route PerformScreen::route_now(const app::Context& ctx) const noexcept { return route_of(ctx.engine(), voice_); }
 
+void header_route(const dsp::Engine& e, dsp::UnitId voice, const char* live, bool usb, ornoir::HeaderState& h) noexcept {
+  const route::Route rt = route_of(e, voice);
+  const unsigned car = round_param(e, voice, Vocoder::CarSrc);
+  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (rt.speaks == route::kSpeaksLive ? route::live_name(live, usb, route::Side::Speaks) : "NONE");
+  h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
+                                                                              : (rt.sounds == route::kSoundsLive ? route::live_name(live, usb, route::Side::Sounds) : pl::kCarrierNames[car < 9u ? car : 0u]);
+}
+
 // The cursor's row is taken. A dimmed LIVE source arms a capture (REC does it, the source follows); another dimmed row says why it cannot.
 void PerformScreen::take_choice(app::Context& ctx) noexcept {
   const route::Side side = pick_ == 1u ? route::Side::Speaks : route::Side::Sounds;
@@ -1144,7 +1152,6 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
   const unsigned key = round_param(e, voice_, Vocoder::Key);
   const unsigned scale = round_param(e, voice_, Vocoder::Scale);
-  const unsigned car = round_param(e, voice_, Vocoder::CarSrc);
   const app::AudioIn& ain = ctx.audio_in();
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
   const dsp::EngineStats st = e.stats();
@@ -1165,11 +1172,8 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
 
   const route::Route rt = route_of(e, voice_);
   const char* live = src != nullptr ? src->label : "NONE";
-  const bool usb = src != nullptr && src->source == hal::capture::Source::Usb;
   ornoir::HeaderState h;
-  h.speaks = rt.speaks >= route::kFirstSlot ? kSlotNames[(rt.speaks - route::kFirstSlot) & 3u] : (rt.speaks == route::kSpeaksLive ? route::live_name(live, usb, route::Side::Speaks) : "NONE");
-  h.sounds = rt.sounds >= route::kFirstSlot && rt.sounds < route::kSoundsLive ? kSlotNames[(rt.sounds - route::kFirstSlot) & 3u]
-                                                                              : (rt.sounds == route::kSoundsLive ? route::live_name(live, usb, route::Side::Sounds) : pl::kCarrierNames[car < 9u ? car : 0u]);
+  header_route(e, voice_, live, src != nullptr && src->source == hal::capture::Source::Usb, h);
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = st.tempo_mbpm / 100u;

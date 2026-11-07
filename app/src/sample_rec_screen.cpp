@@ -65,11 +65,6 @@ void cat_tenths(char* dst, std::size_t cap, unsigned tenths) noexcept {
 
 int centred(ui::Renderer& r, const char* s, Face f, int cx) noexcept { return cx - r.text_width(s, f) / 2; }
 
-unsigned round_param(const dsp::Engine& e, dsp::UnitId id, std::uint16_t p) noexcept {
-  const float v = e.param(id, p) + 0.5f;
-  return v > 0.0f ? static_cast<unsigned>(v) : 0u;
-}
-
 // What the screen shows of the slot.
 enum class View : std::uint8_t { Empty, Armed, Recording, Stopping, Take };
 
@@ -478,7 +473,6 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   const app::AudioIn& ain = ctx.audio_in();
   const bool have = ain.available();
   const SourceName* src = have ? find_source(ain.source()) : nullptr;
-  const unsigned car = round_param(e, voice_, Vocoder::CarSrc);
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
   const unsigned tempo = e.stats().tempo_mbpm;
   const float bar = pl::bar_samples(tempo);
@@ -510,8 +504,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   const bool clip = have && meter_ != nullptr && meter_->clipping();
 
   ornoir::HeaderState h;
-  h.speaks = src != nullptr ? src->label : "NONE";
-  h.sounds = pl::kCarrierNames[car < 9u ? car : 0u];
+  header_route(e, voice_, src != nullptr ? src->label : "NONE", src != nullptr && src->source == hal::capture::Source::Usb, h);
   h.mode = pl::kModeNames[mode];
   h.playing = e.playing();
   h.tempo_x10 = tempo / 100u;
