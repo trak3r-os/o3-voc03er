@@ -1,0 +1,37 @@
+# MIDI PATTERNS (M3): a program change picks the pattern at the pattern's end, and MIDI notes record into the PATTERN screen's lanes. Stopped, a
+# note is step entry at the cursor (the cursor moves on); playing, it lands on the nearest sixteenth of the pattern that plays. A program above 7 is
+# ignored. The PNGs show it; the unit check owed is an outside sequencer with FOLLOW on.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/midi_pattern.txt --card <fresh dir> --out <dir>   (the dirs must exist)
+input tone 220 -8
+wait 300
+tap pattern
+wait 100
+snap 01_pattern_a
+# stopped: three notes are three steps from the cursor, the velocity is the level
+midi usb 90 3c 7f
+wait 100
+midi usb 90 3e 40
+wait 100
+midi usb 90 40 20
+wait 200
+snap 02_stopped_entry
+# program change 5 (F) while stopped: the PATTERN screen shows pattern F, which lands at Play
+midi usb c0 05
+wait 200
+snap 03_program_f
+# a program above 7 is ignored
+midi usb c0 20
+wait 200
+snap 04_program_ignored
+tap play
+wait 1200
+# playing: a note lands on the step nearest to it in pattern F
+midi usb 90 43 70
+wait 1000
+snap 05_recorded_playing
+# program change 1 (B) at the pattern's end
+midi usb c0 01
+wait 3000
+snap 06_program_b
+tap play
+wait 200

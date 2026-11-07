@@ -152,6 +152,47 @@ class Vocoder final : public o3sdk::dsp::Unit {
   static constexpr o3sdk::dsp::Event note_off_local(std::uint8_t note, std::uint16_t frame = 0) noexcept {
     return o3sdk::dsp::Event{frame, o3sdk::dsp::EventKind::NoteOff, note, 0u, kNoteLocal, 0u, 0.0f};
   }
+  // MIDI notes in, for PATTERN's recording (M3, docs/UI-DESIGN.md 7c). The kit's route takes the user's channel to the unit and never to
+  // App::midi(), so the unit keeps what the app needs of the carrier's own notes (unmarked NoteOns that are not slices): a small ring the render
+  // context writes and the main loop drains. One word an entry: note (bits 0..6), velocity (7..13), whether the transport played (14), the
+  // nearest sixteenth of the grid (16..31, a wrapping count: the hook's step index k, from Play). The tick is the end of the block the note falls in, so
+  // a note is stamped at most one block (1.5 ms) off. A reader that lags by more than kNoteInDepth entries loses the oldest (the word is whole either way).
+  static constexpr unsigned kNoteInDepth = 8;
+  struct NoteIn {
+    std::uint8_t note = 0;
+    std::uint8_t velocity = 0;
+    bool playing = false;
+    std::uint16_t sixteenth = 0;
+  };
+  // The sixteenth edge nearest to a position in ticks (240 a sixteenth; the hook's steps start at k * 240).
+  static constexpr std::uint16_t nearest_sixteenth(std::uint64_t ticks) noexcept {
+    return static_cast<std::uint16_t>((ticks + o3sdk::dsp::kTicksPerSixteenth / 2u) / o3sdk::dsp::kTicksPerSixteenth);
+  }
+  static constexpr std::uint32_t note_in_pack(const NoteIn& n) noexcept {
+    return static_cast<std::uint32_t>(n.note & 0x7Fu) | (static_cast<std::uint32_t>(n.velocity & 0x7Fu) << 7) | (n.playing ? 1u << 14 : 0u) |
+           (static_cast<std::uint32_t>(n.sixteenth) << 16);
+  }
+  static constexpr NoteIn note_in_unpack(std::uint32_t w) noexcept {
+    NoteIn n;
+    n.note = static_cast<std::uint8_t>(w & 0x7Fu);
+    n.velocity = static_cast<std::uint8_t>((w >> 7) & 0x7Fu);
+    n.playing = (w & (1u << 14)) != 0u;
+    n.sixteenth = static_cast<std::uint16_t>(w >> 16);
+    return n;
+  }
+  // Main loop only: the oldest note in not yet taken; false when there is none.
+  bool take_note_in(NoteIn& out) noexcept {
+    const std::uint32_t w = notein_w_.load(std::memory_order_acquire);
+    if (w - notein_r_ > kNoteInDepth) {
+      notein_r_ = w - kNoteInDepth;
+    }
+    if (notein_r_ == w) {
+      return false;
+    }
+    out = note_in_unpack(notein_[notein_r_ % kNoteInDepth].load(std::memory_order_relaxed));
+    ++notein_r_;
+    return true;
+  }
   // Main loop, before the engine starts: the map the unit reads `source` of (its address never moves); null: no MIDI slices.
   void bind_slices(const SliceMap* map) noexcept { slices_ = map; }
 
@@ -312,6 +353,11 @@ class Vocoder final : public o3sdk::dsp::Unit {
   unsigned npend_ = 0;
   Slot slot_[Loop::kCount];
   const SliceMap* slices_ = nullptr;  // bound once; `source` is read with acquire (see SliceMap)
+  std::atomic<std::uint32_t> notein_[kNoteInDepth] = {};  // the notes-in ring (see NoteIn): single writer (the render context)
+  std::atomic<std::uint32_t> notein_w_ = 0;               // entries written, wrapping: release by the writer, acquire by the reader
+  std::uint32_t notein_r_ = 0;                            // entries taken: main loop only
+  std::uint64_t grid_ticks_ = 0;                          // render context: the transport's position at the end of this block, whole ticks
+  bool grid_playing_ = false;                             // render context: whether it plays in this block
   std::uint32_t midi_fired_ = 0;      // render context only: bit (note - kSliceNoteLow) of the MIDI notes that fired a slice (their NoteOff is theirs)
   std::atomic<std::uint32_t> opts_[Loop::kCount] = {};    // packed speed | reverse << 2 | (level in half dB + 64) << 8, same protocol
   std::atomic<std::uint32_t> status_[Loop::kCount] = {};  // packed LoopStatus: single writer (the render context), word-sized reads

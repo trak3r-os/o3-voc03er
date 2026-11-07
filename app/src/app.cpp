@@ -36,6 +36,7 @@
 #include "sample_edit_screen.h"
 #include "file_screen.h"
 #include "sample_load_screen.h"
+#include "midi_pattern_logic.h"
 #include "sample_screen.h"
 #include "song_screen.h"
 #include <cmath>
@@ -176,6 +177,14 @@ class MyApp final : public app::App {
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
     sample_.service(ctx);  // slice voices end and tables follow lengths whichever screen is up
+    {  // M3: the carrier's MIDI notes (the unit's ring) record on PATTERN only, as the pads write there; on any other screen they are dropped
+      o3_voc03er::Vocoder::NoteIn in;
+      while (voc_.take_note_in(in)) {
+        if (ctx.screen() == &pattern_) {
+          pattern_.record_midi(ctx, in);
+        }
+      }
+    }
     {  // what the hook needs of the main side: the carrier the user picked (restored on Stop), and the key and scale the chords are spelled in
       const dsp::Engine& e = ctx.engine();
       carriers_.set_picked(static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::CarSrc))));
@@ -345,12 +354,18 @@ class MyApp final : public app::App {
   // from the MOD pad (the larger wins). A controller the user bound by MIDI learn never reaches here (midi_learned_moved takes it). Main loop.
   bool midi(app::Context& ctx, const core::MidiMessage& m) noexcept override {
     const unsigned kind = core::midi_kind(m.status);
-    if (kind != 0xE0u && !(kind == 0xB0u && m.data1 == 1u)) {
+    if (kind != 0xC0u && kind != 0xE0u && !(kind == 0xB0u && m.data1 == 1u)) {
       return false;
     }
-    const std::uint8_t ch = ctx.midi().config().channel;
-    if (ch != 0u && core::midi_channel(m.status) != ch) {
+    if (!o3_voc03er::midipat::channel_ok(ctx.midi().config().channel, core::midi_channel(m.status))) {
       return false;
+    }
+    if (kind == 0xC0u) {  // M3: a program change picks pattern A..H at the step sequencer's landing (midi_pattern_logic.h)
+      // The SONG chain owns the pattern while it plays (the program change is ignored then), and a program above 7 has no pattern.
+      if (o3_voc03er::midipat::program_action(m.data1, song_.playing_chain()) == o3_voc03er::midipat::Program::Request) {
+        pattern_.show(ctx, static_cast<unsigned>(o3_voc03er::midipat::pattern_of_program(m.data1)));  // the screen follows and asks the landing
+      }
+      return true;
     }
     if (kind == 0xE0u) {
       perform_.set_wheel(ctx, m.data1, m.data2);
