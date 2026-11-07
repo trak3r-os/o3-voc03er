@@ -153,46 +153,54 @@ double nonharmonic_db(const std::vector<float>& x, double f0) {
 
 }  // namespace
 
-TEST_CASE("carrier plan: the table, the budget and the card's check") {
-  using carrier_cost::kBudget;
+TEST_CASE("carrier plan: the table, the budget and the stated rows") {
+  using namespace carrier_cost;
   for (unsigned n = 0; n <= 9; ++n) {
     for (unsigned f = 0; f < 16; ++f) {
       const bool spread = (f & 1u) != 0, morph = (f & 2u) != 0, sub = (f & 4u) != 0, tilt = (f & 8u) != 0;
       const CarrierPlan p = plan_oscillators(n, spread, morph, sub, tilt);
       const unsigned nn = n > 8 ? 8 : n;
+      const unsigned t = tilt ? kTilt : 0u;
       CHECK(p.third <= nn);
       CHECK(p.morph1 <= nn);
-      CHECK(p.morph2 <= nn);
+      CHECK(p.sub <= nn);
       CHECK((spread ? true : p.third == 0));
-      CHECK((morph ? true : p.morphed() == 0));
-      CHECK(p.morph3 == (morph ? p.third : 0));
+      CHECK((morph ? true : (p.morph1 == 0 && !p.full)));
+      CHECK((sub ? true : p.sub == 0));
       const unsigned expect = nn == 0 ? 0u
-                                      : 2u * nn * carrier_cost::kOsc + (sub ? nn * carrier_cost::kSub : 0u) + (tilt ? carrier_cost::kTilt : 0u) +
-                                            (p.morph1 + p.morph2) * carrier_cost::kMorph +
-                                            p.third * (carrier_cost::kOsc + (morph ? carrier_cost::kMorph : 0u));
+                              : p.full ? nn * kExt + t
+                                       : nn * kVoice + t + p.sub * kSub + p.morph1 * kMorph1 + p.third * kThird;
       CHECK(p.cycles == expect);
-      CHECK(p.cycles <= kBudget);  // the base itself fits (8 voices, SUB and TILT: 38,146), so the plan never goes past the budget
+      CHECK(p.cycles <= kBudget);  // the plan never goes past the budget
+      if (p.full) {
+        CHECK(nn * kExt + t <= kBudget);
+      }
       if (n > 0 && n < 8 && spread && !morph) {
         const CarrierPlan q = plan_oscillators(n + 1, spread, morph, sub, tilt);
         CHECK(n - p.third <= n + 1 - q.third);  // a voice more never serves more of the older ones
       }
     }
   }
-  // The card's check: SPREAD and SUB on, no morph: the third oscillator on 2 voices at 8 notes, on all of them at 6 or fewer.
-  CHECK(plan_oscillators(8, true, false, true, false).third == 2);
-  CHECK(plan_oscillators(8, true, false, true, true).third == 2);
-  CHECK(plan_oscillators(7, true, false, true, false).third == 4);
-  for (unsigned n = 1; n <= 6; ++n) {
-    CHECK(plan_oscillators(n, true, false, true, false).third == n);
+  // The stated rows: SPREAD only, 8 notes: 3 third oscillators; 5 notes or fewer: all voices. SUB only at 8 notes: 4 voices.
+  CHECK(plan_oscillators(8, true, false, false, false).third == 3);
+  for (unsigned n = 1; n <= 5; ++n) {
+    CHECK(plan_oscillators(n, true, false, false, false).third == n);
   }
+  CHECK(plan_oscillators(8, false, false, true, false).sub == 4);
+  CHECK(plan_oscillators(8, false, true, false, false).morph1 == 2);
+  CHECK(!plan_oscillators(8, false, true, false, false).full);
+  CHECK(plan_oscillators(3, false, true, false, true).full);   // 3 x 11,500 + 770 fits
+  CHECK(!plan_oscillators(4, false, true, false, true).full);  // 4 x 11,500 + 770 does not
+  CHECK(plan_oscillators(4, false, true, false, false).full);  // 46,000 does
+  CHECK(!plan_oscillators(3, true, false, true, true).full);   // no morph, never full
   for (unsigned n = 6; n <= 8; ++n) {
-    const struct { const char* name; bool s, m, u, t; } rows[] = {{"spread", true, false, false, false}, {"spread+sub", true, false, true, false},
-                                                                  {"spread+sub+tilt", true, false, true, true}, {"morph", false, true, false, false},
-                                                                  {"morph+spread", true, true, false, false}, {"all", true, true, true, true}};
+    const struct { const char* name; bool s, m, u, t; } rows[] = {{"spread", true, false, false, false}, {"sub", false, false, true, false},
+                                                                  {"morph", false, true, false, false}, {"tilt", false, false, false, true},
+                                                                  {"spread+sub", true, false, true, false}, {"all", true, true, true, true}};
     for (const auto& r : rows) {
       const CarrierPlan p = plan_oscillators(n, r.s, r.m, r.u, r.t);
-      std::printf("plan n=%u %-16s third=%u morph1=%u morph2=%u morph3=%u cycles=%u\n", n, r.name, unsigned{p.third}, unsigned{p.morph1},
-                  unsigned{p.morph2}, unsigned{p.morph3}, p.cycles);
+      std::printf("plan n=%u %-11s sub=%u morph1=%u third=%u full=%d cycles=%u\n", n, r.name, unsigned{p.sub}, unsigned{p.morph1}, unsigned{p.third},
+                  p.full ? 1 : 0, p.cycles);
     }
   }
 }
@@ -314,11 +322,117 @@ TEST_CASE("carrier stack: a change of plan (a voice starts) steps the output by 
     if (b >= 4 && b < 20) {
       steady = std::max(steady, m);
     }
-    if (b >= 20 && b < 50) {
+    if (b >= 20 && b < 40) {
       change = std::max(change, m);
+    }
+    if (b >= 40) {
+      steady = std::max(steady, m);  // the eight-voice steady state too: eight voices step more than six by chance alone, plan or no plan
     }
   }
   std::printf("plan change: steady max step %.4f, max step around the changes %.4f\n", steady, change);
   CHECK(change < 1.5);  // the output is within about +-2 before the soft clip; the step of the plan's switch stays under this
-  CHECK(change <= 1.1 * steady + 0.05);  // measured: 0.45 around the changes against 0.57 in the steady state
+  CHECK(change <= 1.1 * steady + 0.05);  // measured (U10c): 0.77 around the changes against 0.72 in the eight-voice steady state
+}
+
+TEST_CASE("carrier stack: the specialised paths (third, SUB, morph on oscillator 1) match the generic path within 1e-5") {
+  struct Row { Cfg g; std::vector<int> notes; };
+  Cfg a;  // a steady third
+  a.spread = 8.0f;
+  Cfg b;  // a third and SUB on four voices
+  b.spread = 30.0f;
+  b.sub = 0.6f;
+  Cfg c;  // the morph on oscillator 1 (3 of 6 voices), SUB on all of them, TILT
+  c.shape = 0.5f;
+  c.sub = 1.0f;
+  c.tilt = 3.0f;
+  Cfg d;  // the narrow-pulse side of the morph with a third
+  d.shape = 1.5f;
+  d.spread = 20.0f;
+  d.sub = 0.3f;
+  const Row rows[] = {{a, {48, 55, 64, 71}}, {b, {45, 52, 57, 64}}, {c, {40, 44, 47, 52, 56, 59}}, {d, {43, 50, 55, 62, 67, 74}}};
+  int k = 0;
+  for (const Row& r : rows) {
+    Carrier fast, ext;
+    setup(fast, r.g);
+    setup(ext, r.g);
+    ext.set_force_ext(true);
+    fast.set_attack_ms(3.0f);
+    ext.set_attack_ms(3.0f);
+    for (int n : r.notes) {
+      fast.note_on(static_cast<std::uint8_t>(n));
+      ext.note_on(static_cast<std::uint8_t>(n));
+    }
+    double worst = 0.0, peak = 0.0;
+    float x[64], y[64];
+    for (int blk = 0; blk < 60; ++blk) {
+      if (blk == 40) {
+        fast.note_off(static_cast<std::uint8_t>(r.notes[0]));
+        ext.note_off(static_cast<std::uint8_t>(r.notes[0]));
+      }
+      fast.render(x, 64);
+      ext.render(y, 64);
+      for (int i = 0; i < 64; ++i) {
+        worst = std::max(worst, static_cast<double>(std::fabs(x[i] - y[i])));
+        peak = std::max(peak, static_cast<double>(std::fabs(x[i])));
+      }
+    }
+    std::printf("specialised vs generic, row %d: worst difference %.2e of a peak %.3f\n", k, worst, peak);
+    CHECK(peak > 0.1);
+    CHECK(worst < 1.0e-5);
+    ++k;
+  }
+}
+
+TEST_CASE("carrier stack: SUB moving between voices (a ninth note arrives and leaves) steps no more than the bound") {
+  Carrier c;
+  Cfg g;
+  g.sub = 1.0f;
+  g.spread = 0.0f;
+  setup(c, g);
+  c.set_attack_ms(4.0f);
+  const int chord[] = {48, 50, 53, 55, 60, 62, 65, 67};
+  for (int n : chord) {
+    c.note_on(static_cast<std::uint8_t>(n));
+  }
+  float prev = 0.0f, buf[64];
+  double steady = 0.0, change = 0.0;
+  for (int b = 0; b < 90; ++b) {
+    if (b == 30) {
+      c.note_on(36);  // the lowest note: it steals the oldest voice, and SUB moves to it
+    }
+    if (b == 45) {
+      c.note_off(36);  // and leaves: when its release ends there are seven voices, and SUB moves again
+    }
+    c.render(buf, 64);
+    double m = 0.0;
+    for (int i = 0; i < 64; ++i) {
+      m = std::max(m, static_cast<double>(std::fabs(buf[i] - prev)));
+      prev = buf[i];
+    }
+    if (b >= 8 && b < 30) {
+      steady = std::max(steady, m);
+    }
+    if (b >= 30) {
+      change = std::max(change, m);
+    }
+  }
+  std::printf("SUB between voices: steady max step %.4f, around the changes %.4f\n", steady, change);
+  CHECK(change < 1.5);
+  CHECK(change <= 1.1 * steady + 0.05);
+}
+
+TEST_CASE("carrier stack: SUB goes to the lowest notes of a held chord") {
+  Cfg off, on;
+  on.sub = 1.0f;
+  const std::vector<int> chord{45, 48, 52, 55, 59, 63, 67, 91};  // 8 voices: the plan gives SUB to 4, the lowest
+  const auto p0 = spectrum(render_notes(off, chord, 12, 8192));
+  const auto p1 = spectrum(render_notes(on, chord, 12, 8192));
+  const double bins = 8192.0 / static_cast<double>(kFs);
+  const double low = hz(45) * 0.5 * bins;   // an octave below the lowest note
+  const double top = hz(91) * 0.5 * bins;   // an octave below the top note
+  const double r_low = peak_near(p1, low, 2) / peak_near(p0, low, 2);
+  const double r_top = peak_near(p1, top, 2) / peak_near(p0, top, 2);
+  std::printf("SUB on the lowest notes: the octave below the lowest note x%.1f, below the top note x%.2f\n", r_low, r_top);
+  CHECK(r_low > 1000.0);
+  CHECK(r_top < 1.5);
 }

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3_voc03er/units/vocoder/carrier.h>
 
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <utility>
 
 #include <o3_voc03er/units/vocoder/carrier_plan.h>
 
@@ -49,100 +52,6 @@ __attribute__((always_inline)) inline float osc(float phase, const Edge& e) noex
   }
 }
 
-enum class Seg { Attack, Hold, Release };
-
-struct VoiceRun {
-  float phase, phase2, env;
-  Edge e1, e2;
-  float attack_step, release_coef;
-};
-
-// Samples i..n of one voice in one envelope segment; Gate: accumulate the held-notes gate. Returns the index it stopped at. Attack stops
-// after the sample that reaches 1 (`done`), Release after the sample that falls under kIdle (`done`), Hold runs to n.
-template <bool Two, bool Saw, bool Gate, Seg S>
-inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint32_t i, std::uint32_t n, float g1, bool& done) noexcept {
-  float phase = v.phase;
-  float phase2 = v.phase2;
-  float env = v.env;
-  done = false;
-  if constexpr (S == Seg::Hold) {
-    const float eg = env * g1;
-    for (; i < n; ++i) {
-      float x = osc<Saw>(phase, v.e1);
-      phase += v.e1.dt;
-      phase -= phase >= 1.0f ? 1.0f : 0.0f;
-      if constexpr (Two) {
-        x += osc<Saw>(phase2, v.e2);
-        phase2 += v.e2.dt;
-        phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
-      }
-      out[i] += mulb(x, eg);
-      if constexpr (Gate) {
-        gate[i] += env;
-      }
-    }
-  } else {
-    for (; i < n;) {
-      float x = osc<Saw>(phase, v.e1);
-      phase += v.e1.dt;
-      phase -= phase >= 1.0f ? 1.0f : 0.0f;
-      if constexpr (Two) {
-        x += osc<Saw>(phase2, v.e2);
-        phase2 += v.e2.dt;
-        phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
-      }
-      out[i] += mulb(x * env, g1);
-      if constexpr (Gate) {
-        gate[i] += env;
-      }
-      ++i;
-      if constexpr (S == Seg::Attack) {
-        env += v.attack_step;
-        if (env >= 1.0f) {
-          env = 1.0f;
-          done = true;
-          break;
-        }
-      } else {
-        env *= v.release_coef;
-        if (env < kIdle) {
-          env = 0.0f;
-          done = true;
-          break;
-        }
-      }
-    }
-  }
-  v.phase = phase;
-  v.phase2 = phase2;
-  v.env = env;
-  return i;
-}
-
-template <bool Two, bool Saw, bool Gate>
-inline void run_voice(VoiceRun& v, std::uint8_t& stage_in, float* out, float* gate, std::uint32_t n, float g1) noexcept {
-  // stage_in: 1 Attack, 2 Hold, 3 Release (the Stage values); written back as the stage the voice ends in
-  std::uint32_t i = 0;
-  bool done = false;
-  if (stage_in == 1) {
-    i = run_segment<Two, Saw, Gate, Seg::Attack>(v, out, gate, i, n, g1, done);
-    if (!done) {
-      return;
-    }
-    stage_in = 2;
-  }
-  if (stage_in == 2) {
-    run_segment<Two, Saw, Gate, Seg::Hold>(v, out, gate, i, n, g1, done);
-    return;
-  }
-  run_segment<Two, Saw, Gate, Seg::Release>(v, out, gate, i, n, g1, done);
-  if (done) {
-    stage_in = 0;
-  }
-}
-
-// ---- The extended path (U10a): a voice with SUB, a third oscillator or a morphing oscillator. The loop above is the fast path and is left as it was.
-
 // x = a * saw(p) + b * saw(p + c): between saw (SHAPE 0) and the 50 % pulse (1) a = 1 - 2m, b = m, c = 0.5 (a crossfade, which is a phase-shifted saw
 // of half the size at m = 0.5, so it is normalised); between the pulse and the narrow one (2) a = -b, c grows from 0.5 to 0.9 (duty 0.5 to 0.1).
 struct Morph {
@@ -182,6 +91,161 @@ __attribute__((always_inline)) inline float sub_osc(float s, float phase, const 
   return s;
 }
 
+enum class Seg { Attack, Hold, Release };
+
+constexpr float kThirdGain = 0.1835f;  // 2 -> 3 oscillators at equal power: 1/sqrt(6) = 0.5 x (1 - 0.1835)
+
+// One voice for one block on a specialised path (the features are template parameters, so the sample loops hold no branch on them).
+struct VoiceRun {
+  float phase, phase2, env;
+  Edge e1, e2;
+  float attack_step, release_coef;
+  float phase3 = 0.0f;  // Third only
+  Edge e3 = {};
+  float sub_sign = 1.0f;  // Sub only: the square's level, flipped at oscillator 1's wrap
+  float sub_g = 0.0f;     // Sub only: the level a sample (voice gain included) at the start of the block, ramped by sub_dg a sample
+  float sub_dg = 0.0f;
+  Morph mo = {};          // M only: oscillator 1 runs the morph (oscillators 2 and 3 run the nearer end)
+};
+
+// One sample's oscillators: x (the sum of the oscillators), s (the sub square, before its level) and the phases advanced.
+template <bool Two, bool Saw, bool Third, bool Sub, bool M>
+__attribute__((always_inline)) inline void voice_step(const VoiceRun& v, float& phase, float& phase2, float& phase3, float& sub_sign, float& sub_g,
+                                                      float& x, float& s) noexcept {
+  const float p = phase;
+  if constexpr (M) {
+    x = morph_osc(p, v.e1, v.mo);
+  } else {
+    x = osc<Saw>(p, v.e1);
+  }
+  phase += v.e1.dt;
+  const bool wrapped = phase >= 1.0f;
+  phase -= wrapped ? 1.0f : 0.0f;
+  if constexpr (Two) {
+    x += osc<Saw>(phase2, v.e2);
+    phase2 += v.e2.dt;
+    phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
+  }
+  if constexpr (Third) {
+    x += osc<Saw>(phase3, v.e3);
+    phase3 += v.e3.dt;
+    phase3 -= phase3 >= 1.0f ? 1.0f : 0.0f;
+  }
+  if constexpr (Sub) {
+    sub_g += v.sub_dg;
+    s = sub_osc(sub_sign, p, v.e1);
+    sub_sign = wrapped ? -sub_sign : sub_sign;
+  } else {
+    (void)sub_sign;
+    (void)sub_g;
+    s = 0.0f;
+  }
+}
+
+// Samples i..n of one voice in one envelope segment; Gate: accumulate the held-notes gate. Returns the index it stopped at. Attack stops
+// after the sample that reaches 1 (`done`), Release after the sample that falls under kIdle (`done`), Hold runs to n.
+template <bool Two, bool Saw, bool Gate, Seg S, bool Third = false, bool Sub = false, bool M = false>
+inline std::uint32_t run_segment(VoiceRun& v, float* out, float* gate, std::uint32_t i, std::uint32_t n, float g1, bool& done) noexcept {
+  float phase = v.phase;
+  float phase2 = v.phase2;
+  float phase3 = v.phase3;
+  float sub_sign = v.sub_sign;
+  float sub_g = v.sub_g;
+  float env = v.env;
+  done = false;
+  if constexpr (S == Seg::Hold) {
+    const float eg = env * g1;
+    for (; i < n; ++i) {
+      float x, s;
+      voice_step<Two, Saw, Third, Sub, M>(v, phase, phase2, phase3, sub_sign, sub_g, x, s);
+      out[i] += mulb(x, eg);
+      if constexpr (Sub) {
+        out[i] += mulb(s, sub_g * env);
+      }
+      if constexpr (Gate) {
+        gate[i] += env;
+      }
+    }
+  } else {
+    for (; i < n;) {
+      float x, s;
+      voice_step<Two, Saw, Third, Sub, M>(v, phase, phase2, phase3, sub_sign, sub_g, x, s);
+      out[i] += mulb(x * env, g1);
+      if constexpr (Sub) {
+        out[i] += mulb(s, sub_g * env);
+      }
+      if constexpr (Gate) {
+        gate[i] += env;
+      }
+      ++i;
+      if constexpr (S == Seg::Attack) {
+        env += v.attack_step;
+        if (env >= 1.0f) {
+          env = 1.0f;
+          done = true;
+          break;
+        }
+      } else {
+        env *= v.release_coef;
+        if (env < kIdle) {
+          env = 0.0f;
+          done = true;
+          break;
+        }
+      }
+    }
+  }
+  v.phase = phase;
+  v.phase2 = phase2;
+  v.phase3 = phase3;
+  v.sub_sign = sub_sign;
+  v.sub_g = sub_g;
+  v.env = env;
+  return i;
+}
+
+template <bool Two, bool Saw, bool Gate, bool Third = false, bool Sub = false, bool M = false>
+inline void run_voice(VoiceRun& v, std::uint8_t& stage_in, float* out, float* gate, std::uint32_t n, float g1) noexcept {
+  // stage_in: 1 Attack, 2 Hold, 3 Release (the Stage values); written back as the stage the voice ends in
+  std::uint32_t i = 0;
+  bool done = false;
+  if (stage_in == 1) {
+    i = run_segment<Two, Saw, Gate, Seg::Attack, Third, Sub, M>(v, out, gate, i, n, g1, done);
+    if (!done) {
+      return;
+    }
+    stage_in = 2;
+  }
+  if (stage_in == 2) {
+    run_segment<Two, Saw, Gate, Seg::Hold, Third, Sub, M>(v, out, gate, i, n, g1, done);
+    return;
+  }
+  run_segment<Two, Saw, Gate, Seg::Release, Third, Sub, M>(v, out, gate, i, n, g1, done);
+  if (done) {
+    stage_in = 0;
+  }
+}
+
+// The table of the specialised paths with the gate: one indirect call a voice a block, none in a sample loop. Index = Two | Saw << 1 | Third << 2 |
+// Sub << 3 | M << 4; a Third without Two is not a voice (it aliases the one without).
+using VoiceFn = void (*)(VoiceRun&, std::uint8_t&, float*, float*, std::uint32_t, float);
+
+template <unsigned I>
+constexpr VoiceFn voice_fn() noexcept {
+  constexpr bool two = (I & 1u) != 0;
+  return &run_voice<two, (I & 2u) != 0, true, two && (I & 4u) != 0, (I & 8u) != 0, (I & 16u) != 0>;
+}
+
+template <std::size_t... Is>
+constexpr std::array<VoiceFn, sizeof...(Is)> make_voice_table(std::index_sequence<Is...>) noexcept {
+  return {{voice_fn<static_cast<unsigned>(Is)>()...}};
+}
+
+constexpr std::array<VoiceFn, 32> kVoiceTable = make_voice_table(std::make_index_sequence<32>{});
+
+// ---- The generic path (run_ext): what cannot be specialised, a third oscillator in its gain ramp and the plan's `full` morph. It has branches on
+// the features in the sample loop: about 11,500 cycles a block a voice against about 5,000 on a specialised one (measured on the unit, U10b).
+
 struct ExtRun {
   float phase, phase2, phase3, r3, sub_sign, env;
   Edge e1, e2, e3;
@@ -191,8 +255,6 @@ struct ExtRun {
   Morph mo;
   bool m1, m2, m3, two, third, sub, saw;
 };
-
-constexpr float kThirdGain = 0.1835f;  // 2 -> 3 oscillators at equal power: 1/sqrt(6) = 0.5 x (1 - 0.1835)
 
 void run_ext(ExtRun& v, std::uint8_t& stage, float* out, float* gate, std::uint32_t n) noexcept {
   float phase = v.phase;
@@ -331,6 +393,7 @@ void Carrier::note_on(std::uint8_t note) noexcept {
     pick->phase3 = 0.0f;
     pick->r3 = 0.0f;
     pick->sub_sign = 1.0f;
+    pick->rs = 0.0f;
     pick->env = 0.0f;
   }
   pick->note = note;
@@ -422,31 +485,74 @@ void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
   const bool want_gate = gate_out != nullptr || noise_ > 0.0f;
   const float osc_gain = kVoiceGain * (1.0f - noise_);
   const float g1 = two ? 0.5f * osc_gain : osc_gain;  // two oscillators keep the voice's level
-  // The plan, once a block, from the sounding voices (it changes when a voice starts or ends): the newest voices are served first.
+  // The plan, once a block, from the sounding voices (it changes when a voice starts or ends): the morph and the third go to the newest voices,
+  // SUB to the lowest notes.
   const CarrierPlan plan = plan_oscillators(sounding_voices(), two, morph, sub_on, tilt_on);
   const Morph mo = morph ? make_morph(shape_) : Morph{};
   const float rn = n > 0 ? 1.0f / static_cast<float>(n) : 0.0f;
   const float sub_goal = sub_ * osc_gain * 0.5f;
   const float sub_from = sub_cur_ * osc_gain * 0.5f;
+  const float rs_step = static_cast<float>(n) * ramp_step_;  // a voice's SUB level moves 0..1 in about 3 ms
   for (Voice& v : voices_) {
     if (v.stage == Stage::Idle) {
       continue;
     }
-    unsigned rank = 0;  // 0 is the newest sounding voice
+    unsigned rank = 0;   // 0 is the newest sounding voice
+    unsigned lower = 0;  // 0 is the lowest note (a tie: the lower voice slot)
     for (const Voice& o : voices_) {
-      rank += o.stage != Stage::Idle && o.age > v.age ? 1u : 0u;
+      if (o.stage != Stage::Idle) {
+        rank += o.age > v.age ? 1u : 0u;
+        lower += (o.note < v.note || (o.note == v.note && &o < &v)) ? 1u : 0u;
+      }
     }
-    const bool m1 = morph && rank < plan.morph1;
-    const bool m2 = morph && rank < plan.morph2;
+    const bool m1 = morph && (plan.full || rank < plan.morph1);
     const bool want3 = two && rank < plan.third;
+    if (!two) {
+      v.r3 = 0.0f;  // no third oscillator without a second
+    }
+    // SUB: this voice's level steps toward its goal once a block; a voice that is not on SUB starts it from level 0 and the sign +1.
+    float rs = v.rs;
+    if (sub_on) {
+      const float goal = lower < plan.sub ? 1.0f : 0.0f;
+      rs = rs < goal ? (rs + rs_step < goal ? rs + rs_step : goal) : (rs - rs_step > goal ? rs - rs_step : goal);
+    } else {
+      rs = 0.0f;
+    }
+    if (v.rs <= 0.0f) {
+      v.sub_sign = 1.0f;
+    }
+    const bool sub_v = rs > 0.0f || v.rs > 0.0f;
+    const float sg0 = v.rs * sub_from;
+    const float sg1 = rs * sub_goal;
+    const float sub_dg = (sg1 - sg0) * rn;
+    v.rs = rs;
     const float base = glide_ > 0.0f ? v.cur : v.inc;
     const float dt1 = base * bend_ratio_ > 0.45f ? 0.45f : base * bend_ratio_;  // x 1.0f is exact: Bend 0 is the unbent path
     float dt2 = dt1 * detune_ratio_;
     dt2 = dt2 > 0.45f ? 0.45f : dt2;
+    float dt3 = dt1 * detune_down_;
+    dt3 = dt3 > 0.45f ? 0.45f : dt3;
     std::uint8_t stage = static_cast<std::uint8_t>(v.stage);
     static_assert(static_cast<unsigned>(Stage::Attack) == 1 && static_cast<unsigned>(Stage::Hold) == 2 &&
                       static_cast<unsigned>(Stage::Release) == 3, "run_voice reads the Stage values");
-    if (!sub_on && !want3 && v.r3 == 0.0f && !m1 && !m2) {  // the fast path: the loop of before
+    const bool third_steady = want3 && v.r3 == 1.0f;  // a settled third oscillator: a specialised path with one more, no ramp in the loop
+    const bool third_off = !want3 && v.r3 == 0.0f;
+    if (force_ext_ || plan.full || !(third_steady || third_off)) {  // the generic path: a third in its ramp, or every oscillator morphing
+      if (want3 && v.r3 == 0.0f) {  // the third enters at an offset phase, from level 0
+        v.phase3 = v.phase2 + 0.37f;
+        v.phase3 -= v.phase3 >= 1.0f ? 1.0f : 0.0f;
+      }
+      ExtRun r{v.phase, two ? v.phase2 : v.phase, v.phase3, v.r3, v.sub_sign, v.env, make_edge(dt1), make_edge(dt2), make_edge(dt3),
+               attack_step_, release_coef_, osc_gain, sg0, sub_dg, want3 ? 1.0f : 0.0f, ramp_step_, mo,
+               m1, morph && plan.full, morph && plan.full, two, want3 || v.r3 > 0.0f, sub_v, saw};
+      run_ext(r, stage, out, gate, n);
+      v.phase = r.phase;
+      v.phase2 = two ? r.phase2 : r.phase;
+      v.phase3 = r.phase3;
+      v.r3 = r.r3;
+      v.sub_sign = r.sub_sign;
+      v.env = r.env;
+    } else if (!third_steady && !sub_v && !m1) {  // the plain path: the loop of before
       VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(dt1), make_edge(dt2), attack_step_, release_coef_};
       if (want_gate) {
         if (two) {
@@ -464,21 +570,14 @@ void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
       v.phase = r.phase;
       v.phase2 = two ? r.phase2 : r.phase;  // as before: one oscillator keeps the second in step
       v.env = r.env;
-    } else {
-      float dt3 = dt1 * detune_down_;
-      dt3 = dt3 > 0.45f ? 0.45f : dt3;
-      if (want3 && v.r3 == 0.0f) {  // the third enters at an offset phase, from level 0
-        v.phase3 = v.phase2 + 0.37f;
-        v.phase3 -= v.phase3 >= 1.0f ? 1.0f : 0.0f;
-      }
-      ExtRun r{v.phase, two ? v.phase2 : v.phase, v.phase3, v.r3, v.sub_sign, v.env, make_edge(dt1), make_edge(dt2), make_edge(dt3),
-               attack_step_, release_coef_, osc_gain, sub_from, (sub_goal - sub_from) * rn, want3 ? 1.0f : 0.0f, ramp_step_, mo,
-               m1, m2, morph && want3, two, want3 || v.r3 > 0.0f, sub_on, saw};
-      run_ext(r, stage, out, gate, n);
+    } else {  // a specialised path with a third, SUB and/or the morph on oscillator 1: one indirect call, with the gate
+      VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(dt1), make_edge(dt2), attack_step_, release_coef_,
+                 v.phase3, third_steady ? make_edge(dt3) : Edge{}, v.sub_sign, sg0, sub_dg, mo};
+      const unsigned idx = (two ? 1u : 0u) | (saw ? 2u : 0u) | (third_steady ? 4u : 0u) | (sub_v ? 8u : 0u) | (m1 ? 16u : 0u);
+      kVoiceTable[idx](r, stage, out, gate, n, third_steady ? g1 * (1.0f - kThirdGain) : g1);
       v.phase = r.phase;
       v.phase2 = two ? r.phase2 : r.phase;
       v.phase3 = r.phase3;
-      v.r3 = r.r3;
       v.sub_sign = r.sub_sign;
       v.env = r.env;
     }

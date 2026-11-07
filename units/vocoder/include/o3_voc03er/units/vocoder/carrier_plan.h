@@ -1,68 +1,79 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// The carrier's oscillator plan (U10a): how many of the sounding voices get the third (unison) oscillator and how many oscillators run
-// the SHAPE morph, for the number of sounding voices and the features that are on. A pure function with its costs in one place
-// (carrier_cost), so a measurement on the unit replaces the constants and nothing else.
+// The carrier's feature plan (U10c): how many of the sounding voices get SUB, the SHAPE morph on oscillator 1 and the third (unison)
+// oscillator, for the number of sounding voices and the features that are on. A pure function with its costs in one place (carrier_cost), so a
+// measurement on the unit replaces the constants and nothing else. Recomputed once a block, never per sample.
 //
-// Every figure is an estimate [est] in cycles a 64-frame block: only the unit measures them (U11). The budget is what 16 oscillators cost
-// today (2 on each of 8 voices) plus a room of 8,000 (the 3.5 % of the BANDS row's headroom is 9,143, which leaves about 1,100 for ROBOT).
+// Figures are cycles a 64-frame block. [measured] ones were read on the unit (candidate 4ce71cd, BANDS, 8 notes + 4 loops, `render last`); [est]
+// ones are estimates that the unit has yet to confirm (the check owed after U10c: each feature's cost at 8 and at 6 notes). A voice on a
+// specialised path (run_voice, features as template parameters) costs a few thousand; a voice on the generic path (run_ext, branches on the
+// features in the loop) costs more than twice that, so the plan keeps voices off run_ext whenever it can.
 //
-// The rules, in priority order: every voice has oscillators 1 and 2; then SUB and TILT when on; then the morph on oscillator 1 of each voice;
-// then the morph on oscillator 2; then third oscillators (each costs its morph too when the morph is on). What does not fit is left out,
-// the newest voices served first: voice rank 0 is the newest. The plan is recomputed when a voice starts or ends, never per sample.
+// The rules, in this order, each taking what is left (`rem`) of the budget after the n voices and TILT: SUB, then the morph on oscillator 1, then
+// the third oscillator. `full`: when the morph is on and every voice could run on the generic path inside the budget (n x kExt + TILT), every
+// voice does, with all its oscillators morphing; the SUB and third of the plan stay as they are. Who gets what is decided by the caller:
+// SUB goes to the lowest notes, the morph and the third to the newest voices.
 
 #include <cstdint>
 
 namespace o3_voc03er {
 
 namespace carrier_cost {
-inline constexpr unsigned kOsc = 2176;    // an oscillator, 34 cycles a sample x 64 (measured at 34 on the unit, 2026-11)
-inline constexpr unsigned kMorph = 576;   // the morph's second BLEP and shifts on an oscillator, 9 a sample [est]
-inline constexpr unsigned kSub = 320;     // SUB, a voice, 5 a sample [est]
-inline constexpr unsigned kTilt = 770;    // TILT, once on the sum, 12 a sample [est]
+inline constexpr unsigned kVoice = 5000;   // a voice on the specialised path, two oscillators [measured, about: BANDS at SPREAD 0, 164.8k with 8 notes]
+inline constexpr unsigned kThird = 2000;   // a third oscillator on the specialised path [est]
+inline constexpr unsigned kSub = 1300;     // SUB on a specialised voice [est]
+inline constexpr unsigned kMorph1 = 2200;  // the morph on oscillator 1 of a specialised voice [est]
+inline constexpr unsigned kExt = 11500;    // a voice on the generic path [measured: about 11,200 on top of nothing at 4 to 8 notes]
+inline constexpr unsigned kTilt = 770;     // TILT, once on the sum, 12 a sample [est]
+inline constexpr unsigned kRoom = 6000;    // what stays free for the rest of the unit: the limit 69 % peak is 180,200 and BANDS at SPREAD 0 reads 164.8k
 inline constexpr unsigned kMaxVoices = 8;
-inline constexpr unsigned kRoom = 8000;
-inline constexpr unsigned kBudget = 2u * kMaxVoices * kOsc + kRoom;  // 16 oscillators today + the room: 42,816
+inline constexpr unsigned kBudget = kMaxVoices * kVoice + kRoom;  // 46,000
 }  // namespace carrier_cost
 
 struct CarrierPlan {
+  std::uint8_t sub;     // voices (the lowest notes) that sound the SUB
+  std::uint8_t morph1;  // voices (the newest) whose oscillator 1 runs the morph
   std::uint8_t third;   // voices (the newest) that have the third oscillator
-  std::uint8_t morph1;  // voices whose oscillator 1 runs the morph
-  std::uint8_t morph2;  // voices whose oscillator 2 runs the morph
-  std::uint8_t morph3;  // voices whose third oscillator runs the morph (the same as `third` when the morph is on, else 0)
+  bool full;            // every voice runs the generic path with all its oscillators morphing
   unsigned cycles;      // the estimated cost of the whole carrier with this plan
-  constexpr unsigned morphed() const noexcept { return unsigned{morph1} + morph2 + morph3; }  // oscillators that morph
 };
 
 // n sounding voices (clamped to 8); `spread`: a third oscillator is asked for; `morph`: SHAPE is strictly between its ends; `sub`, `tilt`: on.
 constexpr CarrierPlan plan_oscillators(unsigned n, bool spread, bool morph, bool sub, bool tilt) noexcept {
   using namespace carrier_cost;
-  CarrierPlan p{0, 0, 0, 0, 0};
+  CarrierPlan p{0, 0, 0, false, 0};
   n = n > kMaxVoices ? kMaxVoices : n;
   if (n == 0) {
     return p;
   }
-  unsigned cost = 2u * n * kOsc + (sub ? n * kSub : 0u) + (tilt ? kTilt : 0u);
-  unsigned rem = cost < kBudget ? kBudget - cost : 0u;
+  const unsigned base = n * kVoice + (tilt ? kTilt : 0u);
+  unsigned rem = base < kBudget ? kBudget - base : 0u;
+  unsigned cost = base;
+  if (sub) {
+    unsigned k = rem / kSub;
+    k = k > n ? n : k;
+    p.sub = static_cast<std::uint8_t>(k);
+    rem -= k * kSub;
+    cost += k * kSub;
+  }
   if (morph) {
-    unsigned m1 = rem / kMorph;
-    m1 = m1 > n ? n : m1;
-    rem -= m1 * kMorph;
-    unsigned m2 = rem / kMorph;
-    m2 = m2 > n ? n : m2;
-    rem -= m2 * kMorph;
-    p.morph1 = static_cast<std::uint8_t>(m1);
-    p.morph2 = static_cast<std::uint8_t>(m2);
-    cost += (m1 + m2) * kMorph;
+    unsigned k = rem / kMorph1;
+    k = k > n ? n : k;
+    p.morph1 = static_cast<std::uint8_t>(k);
+    rem -= k * kMorph1;
+    cost += k * kMorph1;
   }
   if (spread) {
-    const unsigned each = kOsc + (morph ? kMorph : 0u);
-    unsigned t = rem / each;
-    t = t > n ? n : t;
-    p.third = static_cast<std::uint8_t>(t);
-    p.morph3 = morph ? p.third : std::uint8_t{0};
-    cost += t * each;
+    unsigned k = rem / kThird;
+    k = k > n ? n : k;
+    p.third = static_cast<std::uint8_t>(k);
+    rem -= k * kThird;
+    cost += k * kThird;
+  }
+  if (morph && n * kExt + (tilt ? kTilt : 0u) <= kBudget) {
+    p.full = true;
+    cost = n * kExt + (tilt ? kTilt : 0u);  // the generic path does it all: its cost replaces the specialised ones
   }
   p.cycles = cost;
   return p;

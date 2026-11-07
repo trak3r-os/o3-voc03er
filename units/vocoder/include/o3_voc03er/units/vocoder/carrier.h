@@ -73,6 +73,7 @@ class Carrier {
   // For tests and screens.
   unsigned sounding_voices() const noexcept;   // voices not idle (held or releasing)
   bool holds(std::uint8_t note) const noexcept;  // a voice is held (key down) on this note
+  void set_force_ext(bool on) noexcept { force_ext_ = on; }  // test hook: every voice on the generic path (run_ext), to compare it with the specialised ones
 
  private:
   enum class Stage : std::uint8_t { Idle, Attack, Hold, Release };
@@ -83,7 +84,8 @@ class Carrier {
     float phase2 = 0.0f;
     float phase3 = 0.0f;  // the third oscillator, started at an offset phase when its level leaves 0
     float r3 = 0.0f;      // the third oscillator's level, 0..1, ramped (the block's plan sets its target)
-    float sub_sign = 1.0f;  // the SUB square's level, flipped at oscillator 1's wrap
+    float sub_sign = 1.0f;  // the SUB square's level, flipped at oscillator 1's wrap (only while the voice runs SUB; it starts at +1)
+    float rs = 0.0f;        // this voice's SUB level, 0..1, stepped once a block toward its goal (the plan gives SUB to the lowest notes)
     float env = 0.0f;
     std::uint32_t age = 0;  // note-on counter: the smallest is the oldest
     Stage stage = Stage::Idle;
@@ -112,6 +114,7 @@ class Carrier {
   NoiseSource own_noise_;
   NoiseSource* noise_src_ = nullptr;
   std::uint32_t counter_ = 0;
+  bool force_ext_ = false;
 };
 
 }  // namespace o3_voc03er
