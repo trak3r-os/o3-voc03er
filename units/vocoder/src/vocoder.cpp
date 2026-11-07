@@ -112,8 +112,8 @@ constexpr float kModeFadeMs = 10.0f;  // crossfade between the modes
 constexpr float kTuneGain = 1.0f;     // Tune returns the voice itself: unity
 // S3, TALK's output compression (the RobotComp of ROBOT with other constants): starting values, a bench's, by ear on the unit.
 constexpr float kTalkCompAttackMs = 5.0f;
-constexpr float kTalkCompReleaseMs = 20.0f;
-constexpr float kTalkCompMakeup = 1.5f;
+constexpr float kTalkCompReleaseMs = 120.0f;
+constexpr float kTalkCompMakeup = 2.0f;
 constexpr float kTalkGain = 28.0f;    // speech on a one-note saw has the rms in TALK that it has in BANDS, so a change of MODE keeps the level (bench, docs/ENGINE-REALISM.md); by ear on the unit
 constexpr float kTalkCompThreshold = 0.125893f / kTalkGain;  // -18 dBFS (peak) of the TALK wet sum after kTalkGain, in TALK's own units; 2:1 above it
 constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC holds at a mean-abs of 0.1, and each band passes a slice of the carrier: a vowel on a three-note saw chord peaks at about 0.9 at LEVEL 0 dB (0.47 at the default -6)
