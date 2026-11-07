@@ -151,7 +151,7 @@ class MyApp final : public app::App {
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);
     sample_load_.init(&sample_, g_loop_mem);
-    file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain);
+    file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain, &sample_load_, g_loop_mem);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     song_.init(voice, &g_chain, &carriers_, &perform_);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
@@ -626,6 +626,8 @@ class MyApp final : public app::App {
       const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);
       char key[8] = {'l', 'o', 'o', 'p', static_cast<char>('1' + i), '\0'};
       w.num(key, st.length);
+      char ek[8] = {'e', 'd', 'i', 't', 'e', 'd', static_cast<char>('1' + i), '\0'};
+      w.num(ek, sample_.edited(i) ? 1u : 0u);  // the slot's cuts are the hand's (or a project load's)
     }
     return w.size();
   }

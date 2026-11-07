@@ -50,6 +50,17 @@ class SampleLoadScreen final : public o3sdk::app::Screen {
   // True while a file is being read or written into a slot (the tests).
   bool loading() const noexcept;
 
+  // FILE's entry (U9c3): the same read, clear, copy and wait for the unit, without this screen being up, of `name` in the project folder `folder` into `slot`. The driver
+  // calls tick_external() once a pass and reads external(); Done and Failed stay until the next begin_external() or this screen's enter(). The slot must be stopped (no
+  // take, no play); a slot that holds a sample is replaced without asking (a project load is the ask). Main loop only.
+  enum class External : std::uint8_t { Idle, Running, Done, Failed };
+  bool begin_external(o3sdk::app::Context& ctx, unsigned slot, const char* folder, const char* name) noexcept;
+  void tick_external(o3sdk::app::Context& ctx) noexcept;
+  External external() const noexcept;
+  const char* external_text() const noexcept;  // why it failed (upper case, static or this screen's own buffer); "" otherwise
+  // Gives the job up as leave() does: a read is cancelled, a copy in hand is finished and sent. Leaves external() Failed "CANCELLED".
+  void abort_external(o3sdk::app::Context& ctx) noexcept;
+
  private:
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void open_picker(o3sdk::app::Context& ctx) noexcept;

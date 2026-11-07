@@ -1,5 +1,5 @@
 # FILE (docs/UI-DESIGN.md, "FILE"): SAVE AS names a project folder, SAVE writes over it, a reboot forgets the live state, LOAD brings the mode back, a name that exists
-# is refused, and F5 says it comes later. Start from an empty card directory (tests/app_test.cpp gives each scenario a fresh one):
+# is refused, and F5 (SAVE WAVS) is refused while there is no project. Start from an empty card directory (tests/app_test.cpp gives each scenario a fresh one):
 #
 #   mkdir <dir> <card> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/file.txt --card <card> --out <dir>
 input tone 220 -8
@@ -18,8 +18,8 @@ wait 40
 tap file
 wait 40
 snap 00_file
-tap f5
-snap 01_wavs_later
+tap f5            # SAVE WAVS needs a project: it is refused (file_wavs.txt saves the WAVs)
+snap 01_wavs_needs_project
 tap f2            # no project yet: SAVE is SAVE AS (the name starts as PROJECT)
 wait 20
 snap 02_name

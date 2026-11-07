@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// FILE (docs/UI-DESIGN.md, "FILE"), slice U9c2, in the OR NOIR skin: the project file (`project.o3a` of a project folder of Apps/o3_voc03er/), without the WAVs.
+// FILE (docs/UI-DESIGN.md, "FILE"), slice U9c2, in the OR NOIR skin: the project file (`project.o3a` of a project folder of Apps/o3_voc03er/), with the slots' WAVs on F5.
 //
 //   F1 LOAD (asks, then the kit's picker lists the project folders), F2 SAVE (the current project's folder, the old file kept as .bak; with no project it is
-//   SAVE AS), F3 SAVE AS (the kit's NameEntry, a new folder: a name that exists is refused, never overwritten), F4 NEW (asks), F5 SAVE WAVS (dim: COMES LATER),
+//   SAVE AS), F3 SAVE AS (the kit's NameEntry, a new folder: a name that exists is refused, never overwritten), F4 NEW (asks), F5 SAVE WAVS (needs a current project: the WAV of every slot that holds audio, one job a slot, as slotN_NNN.wav in the project folder, then the
+//   project file again so that it names them),
 //   F8 BACK. Refused while a card job or a take runs. A project is explicit: the screen never saves by itself (pattern.o3a and config.o3a keep their own paths).
 //
 //   LOAD reads the file whole and decodes it into a copy: a damaged file changes nothing. Then it sends the unit's values a few a frame through the normal
@@ -15,6 +16,7 @@
 
 #include "pattern_screen.h"
 #include "perform_screen.h"
+#include "sample_load_screen.h"
 #include "sample_screen.h"
 
 #include <o3_voc03er/project.h>
@@ -32,7 +34,9 @@ class FileScreen final : public o3sdk::app::Screen {
  public:
   FileScreen() noexcept;
 
-  void init(o3sdk::dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain) noexcept;
+  // `load` and `mem` (the loop bank, slot n at n * Loop::kMaxSamples): F5 writes the slots out of `mem`, and LOAD reads the WAVs back through `load`'s external entry.
+  void init(o3sdk::dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain, SampleLoadScreen* load,
+            std::int16_t* mem) noexcept;
   // The screen F8 returns to (the one that opened this); nullptr (and the default) is PERFORM.
   void set_back(o3sdk::app::Screen* back) noexcept { back_ = back; }
 
@@ -63,7 +67,18 @@ class FileScreen final : public o3sdk::app::Screen {
   void start_new(o3sdk::app::Context& ctx) noexcept;
   void capture(o3sdk::app::Context& ctx) noexcept;
   void tick(o3sdk::app::Context& ctx) noexcept;
-  void apply(o3sdk::app::Context& ctx) noexcept;
+  void apply(o3sdk::app::Context& ctx, bool wavs) noexcept;
+  void start_wavs(o3sdk::app::Context& ctx) noexcept;
+  void tick_wav_list(o3sdk::app::Context& ctx) noexcept;
+  void begin_wav_save(o3sdk::app::Context& ctx) noexcept;
+  void tick_wav_save(o3sdk::app::Context& ctx) noexcept;
+  void begin_wav_loads(o3sdk::app::Context& ctx) noexcept;
+  void next_wav_load(o3sdk::app::Context& ctx) noexcept;
+  void tick_wav_load(o3sdk::app::Context& ctx) noexcept;
+  void skip_wav(const char* why) noexcept;
+  void end_wav_loads(o3sdk::app::Context& ctx) noexcept;
+  void abort_wavs(o3sdk::app::Context& ctx) noexcept;
+  bool wav_stage() const noexcept;
   void apply_route(o3sdk::app::Context& ctx) noexcept;
   void apply_slots(o3sdk::app::Context& ctx) noexcept;
 
@@ -73,6 +88,8 @@ class FileScreen final : public o3sdk::app::Screen {
   PatternScreen* pattern_ = nullptr;
   Bank* bank_ = nullptr;
   Chain* chain_ = nullptr;
+  SampleLoadScreen* load_ = nullptr;
+  std::int16_t* mem_ = nullptr;
   o3sdk::app::Screen* back_ = nullptr;
   o3sdk::app::FilePicker picker_;
   o3sdk::app::NameEntry names_;

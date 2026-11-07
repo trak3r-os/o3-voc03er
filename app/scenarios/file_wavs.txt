@@ -1,0 +1,60 @@
+# FILE (U9c3): F5 SAVE WAVS writes the WAV of every slot that holds audio into the project's folder (slotN_NNN.wav, one card job after another) and saves the project again so
+# that its records name them; after a reboot (empty slots) LOAD reads the .o3a and then the WAVs it names, and the record's cuts go back on the landed audio. A take of 1 BAR
+# in slot 1, one cut added by hand, SAVE AS, F5, a second F5 (the next free number), reboot, LOAD: the slot is back with its length and its hand-made cuts. The simulator shows the
+# screens and that the card jobs run in order; it says nothing about the time per slot on a real card. Start from an empty card directory:
+#
+#   mkdir <dir> <card> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/file_wavs.txt --card <card> --out <dir>
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleedit
+wait 300
+turn 40
+wait 100
+press shift
+turn 3
+release shift
+wait 100
+tap insert         # a cut by hand: the record keeps it
+wait 150
+expect state edited1=1
+tap file
+wait 40
+tap f5              # no project yet
+snap 00_needs_project
+tap f2              # SAVE AS (the name starts as PROJECT)
+wait 20
+tap f7
+wait 200
+expect file Apps/o3_voc03er/PROJECT/project.o3a
+tap f5              # SAVE WAVS: the WAV, then the project again
+snap 01_saving
+wait 600
+snap 02_saved
+expect file Apps/o3_voc03er/PROJECT/slot1_001.wav
+tap f5              # again: the next free number
+wait 800
+expect file Apps/o3_voc03er/PROJECT/slot1_002.wav
+reboot
+wait 100
+expect state loop1=0
+tap file
+wait 40
+tap f1              # LOAD asks
+tap f1              # the picker lists the project folders
+wait 80
+tap f1              # OPEN
+snap 03_loading
+wait 1500
+snap 04_loaded
+expect state edited1=1

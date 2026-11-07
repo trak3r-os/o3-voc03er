@@ -10,6 +10,7 @@
 #include <o3sdk/sim/harness.h>
 
 #include <filesystem>
+#include <cstring>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -95,6 +96,102 @@ std::string state(sim::Harness& h) {
   return std::string(line, n);
 }
 }  // namespace
+
+TEST_CASE("file: the slots a SAVE WAVS and a LOAD visit, in order") {
+  std::uint32_t lens[fl::kWavSlots] = {0, 100, 0, 7};
+  CHECK(fl::next_save_slot(lens, 0) == 1u);
+  CHECK(fl::next_save_slot(lens, 2) == 3u);
+  CHECK(fl::next_save_slot(lens, 4) == fl::kWavSlots);
+  const std::uint32_t none[fl::kWavSlots] = {};
+  CHECK(fl::next_save_slot(none, 0) == fl::kWavSlots);
+
+  Project p = {};
+  CHECK(fl::next_load_slot(p, 0) == fl::kWavSlots);
+  CHECK(fl::set_wav_name(p.slot[2], "slot3_001.wav"));
+  CHECK(fl::set_wav_name(p.slot[0], "slot1_004.wav"));
+  CHECK(fl::next_load_slot(p, 0) == 0u);
+  CHECK(fl::next_load_slot(p, 1) == 2u);
+  CHECK(fl::next_load_slot(p, 3) == fl::kWavSlots);
+}
+
+TEST_CASE("file: the number the kit's save_wav picks, from the folder's listing") {
+  const char* names[] = {"slot1_001.wav", "SLOT1_002.WAV", "slot1_004.wav", "slot2_003.wav", "slot1_00x.wav", "slot1_5.wav", "project.o3a", "slot1_003.wav.bak"};
+  auto at = [&](std::size_t i) { return names[i]; };
+  CHECK(fl::wav_number("slot1", "slot1_007.wav") == 7u);
+  CHECK(fl::wav_number("slot1", "SLOT1_012.WAV") == 12u);
+  CHECK(fl::wav_number("slot1", "slot2_007.wav") == 0u);
+  CHECK(fl::wav_number("slot1", "slot1_007.mp3") == 0u);
+  CHECK(fl::wav_number("slot1", "slot1-007.wav") == 0u);
+  CHECK(fl::wav_number("slot1", "") == 0u);
+  CHECK(fl::first_free_wav_number("slot1", 0, at) == 1u);
+  CHECK(fl::first_free_wav_number("slot1", 3, at) == 3u);  // 001 and 002 taken (any case): 003 is free, a gap below 004 is filled
+  CHECK(fl::first_free_wav_number("slot1", 8, at) == 3u);  // slot1_003.wav.bak is not a WAV of the stem
+  CHECK(fl::first_free_wav_number("slot2", 8, at) == 1u);
+  CHECK(fl::first_free_wav_number("slot3", 8, at) == 1u);
+
+  // All 999 taken: 0, never a number past 999.
+  static char full[999][16];
+  for (unsigned i = 0; i < 999u; ++i) {
+    char n[o3_voc03er::kWavNameMax + 1];
+    fl::wav_file_name(n, "slot1", i + 1u);
+    std::strcpy(full[i], n);
+  }
+  CHECK(fl::first_free_wav_number("slot1", 999, [&](std::size_t i) { return static_cast<const char*>(full[i]); }) == 0u);
+  CHECK(fl::first_free_wav_number("slot1", 998, [&](std::size_t i) { return static_cast<const char*>(full[i]); }) == 999u);
+}
+
+TEST_CASE("file: a WAV's stem, its name and the record that keeps it") {
+  char stem[6];
+  fl::wav_stem(stem, 0);
+  CHECK(std::string(stem) == "slot1");
+  fl::wav_stem(stem, 3);
+  CHECK(std::string(stem) == "slot4");
+  char name[o3_voc03er::kWavNameMax + 1];
+  fl::wav_file_name(name, "slot2", 7);
+  CHECK(std::string(name) == "slot2_007.wav");
+  fl::wav_file_name(name, "slot2", 123);
+  CHECK(std::string(name) == "slot2_123.wav");
+  CHECK(fl::wav_number("slot2", name) == 123u);
+
+  ProjectSlot rec = {};
+  CHECK_FALSE(fl::wav_missing_keeps_record(rec));
+  CHECK_FALSE(fl::set_wav_name(rec, ""));
+  CHECK(rec.name_len == 0u);
+  const std::string too_long(o3_voc03er::kWavNameMax + 1u, 'a');
+  CHECK_FALSE(fl::set_wav_name(rec, too_long.c_str()));
+  CHECK(rec.name_len == 0u);
+  CHECK(fl::set_wav_name(rec, "slot2_007.wav"));
+  CHECK(rec.name_len == 13u);
+  CHECK(std::string(rec.name) == "slot2_007.wav");
+  CHECK(fl::wav_missing_keeps_record(rec));
+  const std::string longest(o3_voc03er::kWavNameMax, 'b');
+  CHECK(fl::set_wav_name(rec, longest.c_str()));
+  CHECK(rec.name_len == o3_voc03er::kWavNameMax);
+}
+
+TEST_CASE("file: the lines the strip says during a WAV run") {
+  char line[64];
+  fl::wav_job_line(line, sizeof line, "SAVING", 1, 0, 3);
+  CHECK(std::string(line) == "SAVING WAV: SLOT 2 (1 OF 3)");
+  fl::wav_job_line(line, sizeof line, "LOADING", 3, 2, 3);
+  CHECK(std::string(line) == "LOADING WAV: SLOT 4 (3 OF 3)");
+  fl::wavs_saved_note(line, sizeof line, 1);
+  CHECK(std::string(line) == "SAVED. 1 WAV AND THE PROJECT");
+  fl::wavs_saved_note(line, sizeof line, 3);
+  CHECK(std::string(line) == "SAVED. 3 WAVS AND THE PROJECT");
+  fl::wavs_loaded_note(line, sizeof line, 2, 0, 0, "");
+  CHECK(std::string(line) == "LOADED. 2 WAVS");
+  fl::wavs_loaded_note(line, sizeof line, 1, 0, 0, "");
+  CHECK(std::string(line) == "LOADED. 1 WAV");
+  fl::wavs_loaded_note(line, sizeof line, 2, 1, 2, "FILE NOT FOUND");
+  CHECK(std::string(line) == "LOADED. 2 WAVS, 1 SKIPPED: SLOT 3 FILE NOT FOUND");
+  fl::wav_wait_line(line, sizeof line, 0);
+  CHECK(std::string(line) == "SLOT 1 IS GREY UNTIL ITS WAV HAS LANDED");
+  // A small buffer never overruns: the line is cut and stays terminated.
+  char small[8];
+  fl::wav_wait_line(small, sizeof small, 2);
+  CHECK(std::strlen(small) < sizeof small);
+}
 
 TEST_CASE("file: a damaged project is refused and the unit keeps its values") {
   platform::host::ScratchDir card_dir("o3_voc03er-file");

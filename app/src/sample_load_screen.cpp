@@ -47,6 +47,11 @@ struct LoadData {
   sl::Write w;
   sl::Info info;
   app::Files::Entry entry;      // the file asked for
+  char folder[40];              // its folder ("" for the app's own, the picker's case; a project folder for FILE's entry)
+  bool ext;                     // FILE drives this job (begin_external): no picker, no strip line of this screen, the end is told by ext_state
+  bool ext_ok;                  // the job in hand has reached its good end
+  std::uint8_t ext_state;       // External
+  const char* ext_text;
   std::uint64_t deadline, resend;
   const char* note;             // a moment's line (a static string or note_buf), until note_until
   std::uint64_t note_until;
@@ -127,6 +132,10 @@ const ui::Theme* SampleLoadScreen::theme(const app::Context&) const noexcept { r
 bool SampleLoadScreen::loading() const noexcept { return g_sl.stage != kBrowse; }
 
 void SampleLoadScreen::say(app::Context& ctx, const char* text) noexcept {
+  if (g_sl.ext) {  // FILE's job: the reason goes to the driver (a success line has no reader)
+    g_sl.ext_text = g_sl.ext_ok ? "" : text;
+    return;
+  }
   g_sl.note = text;
   g_sl.note_until = ctx.uptime_ms() + kNoteMs;
   ctx.redraw();
@@ -144,6 +153,9 @@ void SampleLoadScreen::go_back(app::Context& ctx) noexcept {
 }
 
 void SampleLoadScreen::enter(app::Context& ctx) noexcept {
+  g_sl.ext = false;  // an ended job of FILE's is forgotten; one in hand is never here (FILE gives it up when it is left)
+  g_sl.ext_state = 0;
+  g_sl.folder[0] = '\0';
   g_sl.stage = kBrowse;
   g_sl.asking = false;
   g_sl.note = nullptr;
@@ -246,7 +258,7 @@ void SampleLoadScreen::begin(app::Context& ctx) noexcept {
   files.set_quiet(true);  // the screen has its own strip
   sink_.bind(g_stage, sl::kStageBytes);
   g_sl.note = nullptr;
-  if (!files.load("", g_sl.entry.name, sink_)) {
+  if (!files.load(g_sl.folder, g_sl.entry.name, sink_)) {
     const char* why = files.status().text;
     end_job(ctx);
     say(ctx, why != nullptr && why[0] != '\0' ? why : "CARD BUSY");
@@ -261,7 +273,67 @@ void SampleLoadScreen::end_job(app::Context& ctx) noexcept {
   g_sl.stage = kBrowse;
   g_sl.asking = false;
   ctx.files().set_quiet(false);
+  if (g_sl.ext) {  // FILE's job: no picker; the driver reads the end
+    g_sl.ext_state = static_cast<std::uint8_t>(g_sl.ext_ok ? External::Done : External::Failed);
+    return;
+  }
   open_picker(ctx);
+}
+
+bool SampleLoadScreen::begin_external(app::Context& ctx, unsigned slot, const char* folder, const char* name) noexcept {
+  g_sl.ext = true;
+  g_sl.ext_ok = false;
+  g_sl.ext_text = "";
+  g_sl.ext_state = static_cast<std::uint8_t>(External::Failed);
+  if (sample_ == nullptr || mem_ == nullptr || slot >= 4u || folder == nullptr || name == nullptr || std::strlen(folder) >= sizeof g_sl.folder ||
+      std::strlen(name) >= sizeof g_sl.entry.name) {
+    g_sl.ext_text = "NO LOOP MEMORY";
+    return false;
+  }
+  if (!slot_stopped(slot)) {
+    g_sl.ext_text = "STOP THE SLOT FIRST";
+    return false;
+  }
+  std::strcpy(g_sl.folder, folder);
+  std::strcpy(g_sl.entry.name, name);
+  g_sl.entry.size = 0;
+  g_sl.entry.folder = false;
+  g_sl.slot = static_cast<std::uint8_t>(slot);
+  g_sl.asking = false;
+  g_sl.ext_state = static_cast<std::uint8_t>(External::Idle);
+  begin(ctx);  // a refusal ends the job through end_job() and say(): Failed with the kit's reason
+  return g_sl.stage != kBrowse;
+}
+
+void SampleLoadScreen::tick_external(app::Context& ctx) noexcept {
+  if (g_sl.ext && g_sl.stage != kBrowse) {
+    tick(ctx);
+  }
+}
+
+SampleLoadScreen::External SampleLoadScreen::external() const noexcept {
+  if (!g_sl.ext) {
+    return External::Idle;
+  }
+  return g_sl.stage != kBrowse ? External::Running : static_cast<External>(g_sl.ext_state);
+}
+
+const char* SampleLoadScreen::external_text() const noexcept { return g_sl.ext && g_sl.ext_text != nullptr ? g_sl.ext_text : ""; }
+
+void SampleLoadScreen::abort_external(app::Context& ctx) noexcept {
+  if (!g_sl.ext || g_sl.stage == kBrowse) {
+    return;
+  }
+  switch (g_sl.stage) {
+    case kReading: ctx.files().cancel(); break;
+    case kCopying: finish_copy(ctx); break;
+    default: break;
+  }
+  g_sl.ext_ok = false;
+  g_sl.ext_text = "CANCELLED";
+  g_sl.ext_state = static_cast<std::uint8_t>(External::Failed);
+  g_sl.stage = kBrowse;
+  ctx.files().set_quiet(false);
 }
 
 void SampleLoadScreen::update(app::Context& ctx) noexcept {
@@ -404,6 +476,7 @@ void SampleLoadScreen::tick_wait(app::Context& ctx) noexcept {
       cat(g_sl.note_buf, sizeof g_sl.note_buf, "LOADED ");
       cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
     }
+    g_sl.ext_ok = true;
     end_job(ctx);
     say(ctx, g_sl.note_buf);
   } else if (now >= g_sl.deadline) {
