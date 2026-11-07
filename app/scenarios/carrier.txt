@@ -1,0 +1,58 @@
+# The carrier's stack (slice U10b): a held note through each control of PARAMS' CARRIER page, SHAPE from SAW through PULSE to NARROW, SPREAD, SUB, TILT
+# both ways, then a walk up the pads for a sweep. Check the WAV: the tone changes at each step with no click, the sub an octave down, the sweep clean.
+# The simulator cannot say how it sounds or what it costs: the cycles of the plan at eight notes and SHAPE and TILT by ear are the unit's.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/carrier.txt --out <dir>   (the dir must exist)
+input tone 220 -12
+record on
+wait 300
+tap params
+wait 200
+paddown 26
+wait 300
+snap 01_saw
+turn 10
+wait 300
+snap 02_morph
+turn 10
+wait 300
+snap 03_pulse
+turn 20
+wait 300
+snap 04_narrow
+turn -40
+wait 200
+tap f2
+wait 100
+turn 30
+wait 400
+snap 05_spread
+tap f3
+wait 100
+turn 50
+wait 400
+snap 06_sub
+tap f4
+wait 100
+turn 24
+wait 400
+snap 07_tilt_up
+turn -48
+wait 400
+snap 08_tilt_down
+turn 24
+wait 200
+padup 26
+wait 200
+paddown 12
+wait 300
+padup 12
+paddown 28
+wait 300
+padup 28
+paddown 36
+wait 300
+padup 36
+wait 400
+input off
+wait 300
+wav carrier

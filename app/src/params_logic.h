@@ -24,12 +24,12 @@ enum class Kind : std::uint8_t { None, Later, Value };
 // How a live key reads and steps.
 enum class Fmt : std::uint8_t {
   Pct,      // a 0..1 parameter as 0..100 %
-  Wave,     // the carrier's two waves, by name
+  Wave,     // SHAPE, in hundredths of Wave's 0..2: SAW, PULSE and NARROW by name, the morph between them as a number
   MsLog,    // milliseconds on a log curve: a step is a tenth of the value (a third coarse), at least 1
   MsLin,    // milliseconds, a fixed step
   Db,       // tenths of a dB
   Int,      // the parameter itself, clamped
-  Mode,     // 0..2 (BANDS, TALK, TUNE), clamped
+  Mode,     // 0..3 (BANDS, TALK, TUNE, ROBOT), clamped
   Key,      // 0..11, round
   Scale,    // 0..kScaleTableCount - 1, round
   OnOff,    // 0 / 1
@@ -49,11 +49,12 @@ inline constexpr KeyDef later(const char* name) noexcept { return KeyDef{name, K
 
 inline constexpr const char* kPageNames[kPages] = {"CARRIER", "SHAPE", "TUNE"};
 
-// The pages (docs/UI-DESIGN.md, "PARAMS"). SUB, TILT and VOICING come with the carrier's rebuild (U10); the unit has no parameter for them. SHAPE is the wave and SPREAD the detune until then.
+// The pages (docs/UI-DESIGN.md, "PARAMS"). SHAPE is Wave as a morph, SPREAD is Detune, SUB and TILT the carrier's (U10). VOICING comes later.
 inline constexpr KeyDef kTable[kPages][kKeys] = {
-    {{"SHAPE", Kind::Value, Vocoder::Wave, Fmt::Wave, 0, 1, 1, 1},
-     {"SPREAD", Kind::Value, Vocoder::Detune, Fmt::Int, 0, 20, 1, 5},
-     later("SUB"), later("TILT"),
+    {{"SHAPE", Kind::Value, Vocoder::Wave, Fmt::Wave, 0, 200, 5, 25},
+     {"SPREAD", Kind::Value, Vocoder::Detune, Fmt::Int, 0, 100, 1, 10},
+     {"SUB", Kind::Value, Vocoder::Sub, Fmt::Pct, 0, 100, 2, 10},
+     {"TILT", Kind::Value, Vocoder::Tilt, Fmt::Db, -120, 120, 5, 20},
      {"NOISE", Kind::Value, Vocoder::Noise, Fmt::Pct, 0, 100, 2, 10},
      {"ATTACK", Kind::Value, Vocoder::Attack, Fmt::MsLog, 1, 500, 1, 1},
      {"RELEASE", Kind::Value, Vocoder::Release, Fmt::MsLog, 5, 2000, 1, 1},
@@ -93,6 +94,7 @@ inline constexpr unsigned first_focus(unsigned page) noexcept {
 inline int to_display(Fmt f, float v) noexcept {
   switch (f) {
     case Fmt::Pct:
+    case Fmt::Wave:
       return static_cast<int>(v * 100.0f + (v < 0.0f ? -0.5f : 0.5f));
     case Fmt::Db:
       return static_cast<int>(v * 10.0f + (v < 0.0f ? -0.5f : 0.5f));
@@ -104,6 +106,7 @@ inline int to_display(Fmt f, float v) noexcept {
 inline float to_param(Fmt f, int d) noexcept {
   switch (f) {
     case Fmt::Pct:
+    case Fmt::Wave:
       return static_cast<float>(d) * 0.01f;
     case Fmt::Db:
       return static_cast<float>(d) * 0.1f;
@@ -119,7 +122,7 @@ inline int step_display(const KeyDef& k, int cur, int delta, bool coarse, bool w
     return cur;
   }
   const int n = k.hi - k.lo + 1;
-  if (k.fmt == Fmt::Wave || k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff) {
+  if (k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff) {
     int v = (cur - k.lo + delta) % n;
     return k.lo + (v < 0 ? v + n : v);
   }
@@ -176,7 +179,16 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
       put(num);
       break;
     case Fmt::Wave:
-      put(u == 1u ? "PULSE" : "SAW");
+      if (u % 100u == 0u) {
+        put(u == 0u ? "SAW" : (u == 100u ? "PULSE" : "NARROW"));
+      } else {
+        num[0] = static_cast<char>('0' + u / 100u);
+        num[1] = '.';
+        num[2] = static_cast<char>('0' + u / 10u % 10u);
+        num[3] = static_cast<char>('0' + u % 10u);
+        num[4] = '\0';
+        put(num);
+      }
       break;
     case Fmt::Mode:
       put(perform::kModeNames[u < 4u ? u : 0u]);
@@ -197,6 +209,7 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
 inline int bar_of(const KeyDef& k, int d) noexcept {
   switch (k.fmt) {
     case Fmt::Pct:
+    case Fmt::Wave:
     case Fmt::MsLin:
     case Fmt::Db:
     case Fmt::Int:

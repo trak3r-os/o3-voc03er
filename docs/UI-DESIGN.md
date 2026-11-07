@@ -244,8 +244,8 @@ the count; with no slices a palette pad or the encoder says SPEAKS HAS NO SLICES
 
 Built in U9a (`params_logic.h`, `params_screen.cpp`, `tests/params_test.cpp`, `app/scenarios/params.txt`): PARAMS opens on this screen (SHIFT + PARAMS does the same). The F row holds the page's eight keys, the voiceprint is PERFORM's (the same follow rule, `follow_bands`), a tap on a live
 key points the encoder at it and a second tap steps it (a tap at an end goes to the other end), SHIFT + the encoder is coarse, and every value goes through the
-engine parameter PERFORM writes, in PERFORM's units. SHAPE is `Wave` and SPREAD `Detune` until U10 rebuilds them; SUB, TILT and VOICING are dim with no value and a tap says COMES LATER, since the unit has no
-parameter for them until then. QUALITY 24 draws no warning: section 4k of `docs/PLAN.md` measured it at 150.3k by its mean, inside the budget. No new unit parameter. Unit check owed: that the frame with the page's eight
+engine parameter PERFORM writes, in PERFORM's units. SHAPE is `Wave` and SPREAD `Detune`, SUB and TILT the unit's ids 62 and 63 (U10b); VOICING is dim with no value and a tap says COMES LATER: the unit's table is full at 64, so it will be the app's.
+ QUALITY 24 draws no warning: section 4k of `docs/PLAN.md` measured it at 150.3k by its mean, inside the budget. No new unit parameter. Unit check owed: that the frame with the page's eight
 values and the voiceprint stays under the budget on the Tracker.
 
 ### PARAMS
@@ -585,7 +585,7 @@ screen it touches. The unit checks owed are named, not run here.
 | U8b | SAVE WAV: the writer on SAMPLE EDIT's F7 (built) | `sample_load.txt` (it needs the same card) |
 | U9a | PARAMS: three pages of eight values, the voiceprint small above them, COMES LATER for the keys of U10, QUALITY 24 over budget (built) | `params.txt` |
 | U9b | TALK and TUNE voiceprints and MASTER with the radio's keys (both built, U9b1 and U9b2); FILE projects; SONG | `perform_talk.txt`, `perform_tune.txt`, `master.txt`, `file.txt` (save, reboot, load, `expect file`), `song.txt` |
-| U10 | The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
+| U10 | Built in U10a and U10b (`carrier_plan.h`, `carrier.txt`). The carrier synth: `dsp-scout` card and licence gate, the port or the original stack behind the `Carrier` API, SHAPE, SPREAD, SUB, TILT; a host oracle test; WAVs byte-identical with SPREAD 0 and SUB 0 and TILT 0 is not required, a sweep per band is | `carrier.txt` (each control, a sweep's WAV); the cycles a sample read in U11 |
 | M1 | MIDI in, first step (section 7c): notes to the SYNTH carrier and to NOTES-IN, right after U1; then pitch bend to `Bend`, after U2b; learn and FOLLOW checked on this app | `midi.txt` (notes and a bend in, a WAV of each); on the unit, USB notes and a bend at the 72.9 % load |
 | M2 | Slices by MIDI note, velocity as level, after U5 | `midi_slices.txt` (notes over a latched chord, a WAV); timing on the unit against the pads |
 | M3 | Patterns by program change at the bar line, MIDI recorded into PATTERN, after U6 | `midi_pattern.txt`; on the unit, an outside sequencer with FOLLOW on |

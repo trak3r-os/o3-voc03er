@@ -27,7 +27,11 @@ TEST_CASE("params: three pages of eight, the live keys name a parameter the unit
   CHECK(std::strcmp(pm::key_def(0, 0).name, "SHAPE") == 0);
   CHECK(pm::key_def(0, 0).kind == pm::Kind::Value);
   CHECK(std::strcmp(pm::key_def(0, 2).name, "SUB") == 0);
-  CHECK(pm::key_def(0, 2).kind == pm::Kind::Later);
+  CHECK(pm::key_def(0, 2).kind == pm::Kind::Value);
+  CHECK(pm::key_def(0, 2).param == Vocoder::Sub);
+  CHECK(pm::key_def(0, 3).param == Vocoder::Tilt);
+  CHECK(std::strcmp(pm::key_def(1, 4).name, "VOICING") == 0);
+  CHECK(pm::key_def(1, 4).kind == pm::Kind::Later);
   CHECK(std::strcmp(pm::key_def(1, 1).name, "QUALITY") == 0);
   CHECK(pm::key_def(1, 1).param == Vocoder::Quality);
   CHECK(pm::key_def(2, 4).param == Vocoder::NotesIn);
@@ -212,12 +216,13 @@ TEST_CASE("params: the screen moves a value through the engine, a key that comes
   h.run_ms(60);
   CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise0 + 0.10f).epsilon(0.02));
 
-  // SUB is a key that comes later: a tap moves nothing in the unit
+  // SUB is live, a detent a step of 2 %; the encoder has left NOISE
   const float noise1 = param(h, Vocoder::Noise);
   tap(h, app::Button::F3);
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise1).epsilon(0.02));
+  CHECK(param(h, Vocoder::Sub) == doctest::Approx(0.02f).epsilon(0.02));
 
   // DOWN pages to SHAPE (MODE under the encoder), PARAMS pages on to TUNE (KEY), UP goes back
   tap(h, app::Button::Down);
@@ -226,6 +231,11 @@ TEST_CASE("params: the screen moves a value through the engine, a key that comes
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Mode) != doctest::Approx(mode0));
+  // VOICING is a key that comes later: a tap moves nothing in the unit, and the encoder stays on MODE
+  const float mode1 = param(h, Vocoder::Mode);
+  tap(h, app::Button::F5);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Mode) == doctest::Approx(mode1));
   tap(h, app::Button::Params);
   h.run_ms(60);
   const float key0 = param(h, Vocoder::Key);

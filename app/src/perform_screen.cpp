@@ -937,7 +937,7 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
     default:
       if (pl::mode_page(mode) == 0u) {  // SPREAD: the detune, cents (BANDS and ROBOT)
         (void)e.set_param(voice_, Vocoder::Detune,
-                          static_cast<float>(pl::step_clamped(static_cast<int>(round_param(e, voice_, Vocoder::Detune)), delta * (coarse ? 5 : 1), 0, 20)));
+                          static_cast<float>(pl::step_clamped(static_cast<int>(round_param(e, voice_, Vocoder::Detune)), delta * (coarse ? 10 : 1), 0, 100)));
       } else if (mode == 1u) {  // QUALITY: the LPC order
         (void)e.set_param(voice_, Vocoder::Quality,
                           static_cast<float>(pl::step_clamped(static_cast<int>(round_param(e, voice_, Vocoder::Quality)), delta * (coarse ? 4 : 1), 8, 24)));
@@ -1196,7 +1196,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
       const unsigned ct = round_param(e, voice_, Vocoder::Detune);
       (void)pl::format_uint(ct, num);
       append(keys[7].value, num);
-      keys[7].pct = pl::bar_percent(static_cast<float>(ct), 0.0f, 20.0f);
+      keys[7].pct = pl::bar_percent(static_cast<float>(ct), 0.0f, 100.0f);
     } else if (mode == 1u) {
       const unsigned q = round_param(e, voice_, Vocoder::Quality);
       (void)pl::format_uint(q, num);
