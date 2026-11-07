@@ -305,6 +305,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   o3sdk::dsp::Ramp tune_mix_;
   o3sdk::dsp::Ramp robot_mix_;  // ROBOT: the BANDS wet sum through comp_; bands_ runs for it (one engine for both ramps)
   RobotComp comp_;
+  RobotComp talk_comp_;  // TALK's wet output through the same compressor with other constants (S3)
   Loop loops_;
   // The carrier switch (render context only). sel_ is the CarSrc value; the ramps are 5 ms. pend_: the carrier-side loop gains each
   // event of this block set, in order, so run_loops can start the ramp at the same frame (the oldest are overwritten past 8).
