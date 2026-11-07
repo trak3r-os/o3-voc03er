@@ -822,7 +822,8 @@ TEST_CASE("talk: a hot carrier through the driver stays bounded and finite") {
 
 // BANDS must come out of the unit exactly as it did before ROBOT existed: an FNV-1a digest of the bit patterns of the BANDS stretches of a run
 // that goes to TALK and back (so the crossfade's mixing path is in it too). The value before U10a was E55118E5, from the build before ROBOT was added;
-// the third oscillator, on by default with Detune at 8, moved it, and with that oscillator forced off the digest was E55118E5 again.
+// the third oscillator, on by default with Detune at 8, moved it, and with that oscillator forced off the digest was E55118E5 again (checked again
+// in U10c, when the third moved to the specialised paths: still E55118E5; the value below is the one with the third on).
 TEST_CASE("vocoder: the BANDS output is bit-identical to what it was before ROBOT") {
   static Vocoder vo;
   vo.prepare(kFs);
@@ -838,7 +839,7 @@ TEST_CASE("vocoder: the BANDS output is bit-identical to what it was before ROBO
   eat(0, 690 * 64);
   eat(1300 * 64, 1500 * 64);
   std::printf("vocoder: BANDS digest %08X\n", d);
-  CHECK(d == 0x8485CCAAu);
+  CHECK(d == 0xD6E1515Du);
 }
 
 // ---- ROBOT: BANDS followed by a fast compressor on the wet sum ------------------------------------------------------------------------
