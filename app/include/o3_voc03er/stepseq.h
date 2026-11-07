@@ -393,6 +393,24 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   // The pattern playing now and the step that played last (UI and tests; relaxed, may be a block old).
   unsigned playing_pattern() const noexcept { return cur_.load(std::memory_order_relaxed); }
   unsigned playing_step() const noexcept { return step_.load(std::memory_order_relaxed); }
+  // Main loop (M3, MIDI notes recorded into PATTERN): where the hook is, in ONE word so that the three fields belong together: the edge (the
+  // step's index k on the transport's sixteenth grid from Play, a wrapping 16 bits), the step that played last and the pattern it is in.
+  // `playing` is false before the first step of a run and after a Stop. Relaxed; may be a block old.
+  struct Position {
+    bool playing = false;
+    std::uint16_t edge = 0;
+    std::uint8_t step = 0;
+    std::uint8_t pattern = 0;
+  };
+  Position position() const noexcept {
+    const std::uint32_t w = pos_word_.load(std::memory_order_relaxed);
+    Position p;
+    p.playing = (w & kPosValid) != 0u;
+    p.edge = static_cast<std::uint16_t>(w & 0xFFFFu);
+    p.step = static_cast<std::uint8_t>((w >> 16) & 0xFFu);
+    p.pattern = static_cast<std::uint8_t>((w >> 24) & 7u);
+    return p;
+  }
   // Main loop: the CARRIER the user picked (every write of CarSrc from the main side, mirrored by the app each pass), the key and scale the
   // chords are spelled in.
   void set_picked(std::uint8_t v) noexcept { picked_.store(v, std::memory_order_relaxed); }
@@ -414,6 +432,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
         fired_ = kNoReader;
       }
       playing_slice_.store(0, std::memory_order_relaxed);
+      pos_word_.store(0u, std::memory_order_relaxed);
       if (changed_) {  // only what a lane step did is undone, to the user's pick (never FOLLOW: LIVE and slots survive a Stop)
         (void)ctx.emit(unit_, dsp::param_change(Vocoder::CarSrc, static_cast<float>(picked_.load(std::memory_order_relaxed)), 0));
         changed_ = false;
@@ -425,12 +444,15 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       note_lap();
     }
     int on_frame = -1;
-    dsp::for_each_step(t, dsp::kTicksPerSixteenth, 0, 0, [&](std::uint32_t frame, std::uint64_t) {
+    dsp::for_each_step(t, dsp::kTicksPerSixteenth, 0, 0, [&](std::uint32_t frame, std::uint64_t k) {
       const PatternData& p = bank_->pattern[cur_.load(std::memory_order_relaxed) % kBankPatterns];
       const unsigned len = length_of(p);
       const unsigned i = pos_ < len ? pos_ : 0u;
       const Step s = get_step(p, i);
       step_.store(static_cast<std::uint8_t>(i), std::memory_order_relaxed);
+      pos_word_.store(kPosValid | static_cast<std::uint32_t>(k & 0xFFFFu) | (static_cast<std::uint32_t>(i) << 16) |
+                          (static_cast<std::uint32_t>(cur_.load(std::memory_order_relaxed) & 7u) << 24),
+                      std::memory_order_relaxed);
       pos_ = static_cast<std::uint8_t>(i + 1u);
       if (pos_ >= len) {  // the pattern's end: the next step is the top of this or of the requested pattern
         pos_ = 0;
@@ -518,6 +540,8 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   // Shared with the main loop (relaxed, single writer each): next_ and key_ / scale_ / picked_ are written by the main loop, cur_ and step_ by
   // the render context.
   std::atomic<std::uint8_t> next_{kNoPattern};
+  static constexpr std::uint32_t kPosValid = 1u << 31;
+  std::atomic<std::uint32_t> pos_word_{0};  // position(): the render context writes it, the main loop reads it
   std::atomic<std::uint8_t> cur_{0};
   std::atomic<std::uint8_t> step_{0};
   std::atomic<std::uint8_t> laps_{0};  // render context only writes it (note_lap)

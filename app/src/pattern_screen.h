@@ -54,6 +54,9 @@ class PatternScreen final : public o3sdk::app::Screen {
   unsigned shown() const noexcept { return shown_; }
   void show(o3sdk::app::Context& ctx, unsigned p) noexcept { show_pattern(ctx, p); }  // FILE (U9c2): the pattern a loaded project was on
   bool follow() const noexcept { return follow_; }
+  // M3 (main loop): a MIDI note of the carrier, recorded as the pads do (the note and its velocity as LEVEL, a single note). While the transport plays it
+  // lands on the quantised step of the pattern that plays; stopped it is the cursor's step and the cursor moves on (midi_pattern_logic.h).
+  void record_midi(o3sdk::app::Context& ctx, const Vocoder::NoteIn& n) noexcept;
 
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;

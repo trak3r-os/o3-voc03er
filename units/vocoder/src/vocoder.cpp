@@ -381,6 +381,16 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       if (midi_slice_on(e)) {
         break;
       }
+      if ((e.flags & kNoteLocal) == 0u) {  // a MIDI note of the carrier: PATTERN may record it (take_note_in)
+        const std::uint32_t w = notein_w_.load(std::memory_order_relaxed);
+        NoteIn n;
+        n.note = e.note;
+        n.velocity = e.velocity;
+        n.playing = grid_playing_;
+        n.sixteenth = nearest_sixteenth(grid_ticks_);
+        notein_[w % kNoteInDepth].store(note_in_pack(n), std::memory_order_relaxed);
+        notein_w_.store(w + 1u, std::memory_order_release);
+      }
       // The last note sets the synth's level (one gain: a chord step shares its velocity). 100 and up is the full level, so pads and
       // old patterns are unchanged, and it costs nothing a sample: the gain is the synth_gain_ ramp that is there anyway.
       const float vg = e.velocity >= 100u ? 1.0f : static_cast<float>(e.velocity) * 0.01f;
@@ -1085,6 +1095,8 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   float gain[Bands::kMaxFrames];  // GATE's gain per frame, set only when a gate ran (gated)
   bool gated = false;
   playing_ = args.transport->playing;
+  grid_playing_ = args.transport->playing;  // the notes-in stamp (apply() reads it for this block's events): where this block ends
+  grid_ticks_ = args.transport->playing ? args.transport->end() >> 32 : 0u;
   for (std::uint32_t i = 0; i < n; ++i) {
     mod[i] = args.in_l != nullptr ? Bands::clean(args.in_l[i]) : 0.0f;
   }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "pattern_screen.h"
 
+#include "midi_pattern_logic.h"
 #include "perform_logic.h"
 #include "skin/ornoir.h"
 
@@ -155,6 +156,25 @@ void PatternScreen::show_pattern(app::Context& ctx, unsigned p) noexcept {
   }
   if (cursor_ >= length_of(pattern_now())) {
     cursor_ = 0;
+  }
+  ctx.redraw();
+}
+
+void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noexcept {
+  if (bank_ == nullptr || n.note < 1u || n.note > 127u) {
+    return;
+  }
+  const StepSeq::Position now = seq_ != nullptr ? seq_->position() : StepSeq::Position{};
+  const midipat::Target t = midipat::target_of(n.playing, n.sixteenth, now, length_of(bank_->pattern[now.pattern & 7u]));
+  PatternData& p = t.at_cursor ? pattern_now() : bank_->pattern[t.pattern & 7u];
+  const unsigned at = t.at_cursor ? (cursor_ < length_of(p) ? cursor_ : 0u) : t.step;
+  if (!set_note(p, at, n.note) || !set_level(p, at, midipat::level_of_velocity(n.velocity))) {
+    return;
+  }
+  if (t.at_cursor) {
+    cursor_ = static_cast<std::uint8_t>(pt::next_cursor(at, length_of(p)));
+  } else if ((t.pattern & 7u) == shown_) {
+    cursor_ = static_cast<std::uint8_t>(at);  // the cursor follows what the take writes
   }
   ctx.redraw();
 }
