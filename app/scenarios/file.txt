@@ -8,6 +8,13 @@ tap f1            # PERFORM is home: F1 is the mode key, two taps BANDS to TALK
 tap f1
 wait 600
 expect state voc_mode=talk
+tap song          # one entry in the chain, so the project holds it
+wait 40
+tap f1
+wait 40
+expect state chain=1
+tap performance
+wait 40
 tap file
 wait 40
 snap 00_file
@@ -36,6 +43,7 @@ snap 05_picker
 tap f1            # OPEN the folder under the cursor
 wait 200
 expect state voc_mode=talk
+expect state chain=1
 snap 06_loaded
 tap f3            # SAVE AS the same name: refused, nothing overwritten
 wait 20

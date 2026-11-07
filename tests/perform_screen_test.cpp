@@ -44,7 +44,7 @@ bool has_row(const app::Help& help, app::Button b) {
   return false;
 }
 
-// The buttons app.cpp's input() answers on PERFORM and on a stub. A button with no row in HELP draws as a hollow cap, which says it does nothing.
+// The buttons app.cpp's input() answers on PERFORM. A button with no row in HELP draws as a hollow cap, which says it does nothing.
 constexpr app::Button kAnswered[] = {app::Button::Params,     app::Button::Performance, app::Button::Play,       app::Button::Master,
                                      app::Button::File,       app::Button::SampleLoad,  app::Button::SamplePlay, app::Button::SampleEdit,
                                      app::Button::SampleRec,  app::Button::Song,        app::Button::Pattern,    app::Button::Note,
@@ -305,21 +305,6 @@ TEST_CASE("perform: the formant strip sets Formant, stays lit, and SHIFT + F5 sh
   CHECK(unit_param(*h, kFormant) == doctest::Approx(5.0f));  // the same value; 5 has no pad: all dim
   CHECK(h->leds().level(36 + 8) == 24);
   CHECK(h->runtime().frame_failures() == 0u);
-}
-
-TEST_CASE("stub: HELP gives a row to every button the stub answers") {
-  auto h = std::make_unique<sim::Harness>(::o3sdk_app());
-  REQUIRE(h->start());
-  h->run_ms(100);
-  tap(*h, app::Button::Song);
-  h->run_ms(100);
-  open_help(*h);
-  const app::Help& help = h->runtime().help_overlay().help();
-  for (const app::Button b : kAnswered) {
-    INFO(std::string(app::button_name(b)));
-    CHECK(has_row(help, b));
-  }
-  tap(*h, app::Button::Config);
 }
 
 // ---- the F2 SPEAKS and F3 SOUNDS pickers, and the REC capture (slice U3b) ----------------------------------------------------------------

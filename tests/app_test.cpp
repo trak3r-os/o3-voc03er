@@ -362,7 +362,7 @@ TEST_CASE("app: PLAY is the transport and leaves MODE alone; every screen button
                                  app::Button::SampleLoad,  app::Button::SamplePlay, app::Button::SampleEdit, app::Button::SampleRec,
                                  app::Button::Pattern,     app::Button::Note, app::Button::Instr, app::Button::Vol, app::Button::Fx};
   for (const app::Button b : screens) {
-    tap(*h, app::Button::Performance);  // from PERFORM the stubs open (the old PLAY screen keeps its own buttons)
+    tap(*h, app::Button::Performance);  // from PERFORM the screens open (the old PLAY screen keeps its own buttons)
     h->run_ms(50);
     tap(*h, b);
     h->run_ms(100);

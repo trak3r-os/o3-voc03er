@@ -359,7 +359,7 @@ void PlayScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Params, "THIS SCREEN", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Master, "MASTER (NOT DRAWN YET)", nullptr},
-      {Button::Song, "SONG (SLICE U9)", nullptr},
+      {Button::Song, "SONG", nullptr},
       {Button::SamplePlay, "THE NEXT AUDIO SOURCE", nullptr},
       {Button::File, "SAVE THE PATTERN", nullptr},
       {Button::SampleLoad, "LOAD THE PATTERN", nullptr},

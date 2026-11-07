@@ -76,7 +76,8 @@ static O3SDK_BIG app::Files::Entry g_pick[kPickEntries] = {};  // the picker's r
 
 FileScreen::FileScreen() noexcept : picker_(g_pick, kPickEntries) {}
 
-void FileScreen::init(dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank) noexcept {
+void FileScreen::init(dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain) noexcept {
+  chain_ = chain;
   voice_ = voice;
   sample_ = sample;
   perform_ = perform;
@@ -221,6 +222,7 @@ void FileScreen::input(app::Context& ctx, const app::Input& in) noexcept {
 void FileScreen::capture(app::Context& ctx) noexcept {
   Project& p = g_proj;
   p.bank = *bank_;
+  p.chain = *chain_;
   set_project_route(p, perform_->route_now(ctx));
   for (unsigned id = 0; id < Vocoder::kParamCount && id < kEngineIds; ++id) {
     if (engine_id_known(id)) {
@@ -399,6 +401,7 @@ void FileScreen::apply_slots(app::Context& ctx) noexcept {
 // The values are in: the patterns, then the route, the slots, and STAT's fields.
 void FileScreen::apply(app::Context& ctx) noexcept {
   *bank_ = g_proj.bank;
+  *chain_ = g_proj.chain;
   pattern_->show(ctx, g_proj.stat != 0u ? g_proj.pattern : pattern_->shown());
   apply_route(ctx);
   apply_slots(ctx);

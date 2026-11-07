@@ -38,7 +38,7 @@
 #include "file_screen.h"
 #include "sample_load_screen.h"
 #include "sample_screen.h"
-#include "stub_screen.h"
+#include "song_screen.h"
 #include <cmath>
 
 #include <o3_voc03er/stepseq.h>
@@ -71,17 +71,12 @@ static_assert(sizeof g_loop_mem == o3_voc03er::Loop::kBankSamples * sizeof(std::
 // unchanged until its job ends, so each file has its own; one load at a time shares one (the files service runs one job at a time).
 // The eight patterns A-H (stepseq.h): SDRAM, zero at boot (every step a rest, every length 16). The step sequencer hook reads it.
 alignas(4) O3SDK_BIG o3_voc03er::Bank g_bank;
+// SONG's chain (project.h): SDRAM, all-zero at boot (no entries, no loop). SongScreen edits it; FILE will save it.
+alignas(4) O3SDK_BIG o3_voc03er::Chain g_chain;
 alignas(4) O3SDK_BIG std::uint8_t g_save_buf[o3_voc03er::kPatternFileMax] = {};
 alignas(4) O3SDK_BIG std::uint8_t g_cfg_buf[o3_voc03er::kConfigFileMax] = {};
 alignas(4) O3SDK_BIG std::uint8_t g_load_buf[o3_voc03er::kPatternFileMax] = {};
 static_assert(sizeof g_save_buf % 4 == 0 && sizeof g_cfg_buf % 4 == 0 && sizeof g_load_buf % 4 == 0, "word-aligned buffers are whole words");
-
-// The screens a later slice draws (docs/UI-DESIGN.md section 12), one row each: name, lane, the slice, a line of its own, HELP's summary.
-// The order is the one input() indexes.
-constexpr o3_voc03er::StubInfo kStubs[] = {
-    {"SONG", nullptr, "BUILT IN SLICE U9", nullptr, "SONG: A CHAIN OF PATTERNS. NOT DRAWN YET: SLICE U9."},
-    {"FILE", nullptr, "BUILT IN SLICE U9", nullptr, "FILE: THE PROJECTS ON THE CARD. NOT DRAWN YET: SLICE U9."},
-};
 
 class MyApp;
 MyApp& instance() noexcept;
@@ -147,17 +142,18 @@ class MyApp final : public app::App {
     meter_.reset(0, 0);
     console_notes_ = 0;
     g_bank = o3_voc03er::Bank{};  // setup() can run again on this object (tests, `reboot`): the patterns start empty; no render runs yet
+    g_chain = o3_voc03er::Chain{};
     play_.init(voice, &meter_, &voc_, &g_bank.pattern[0]);
     perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
-    stub_.init(voice);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     params_.init(voice, &perform_);
     master_.init(voice, &meter_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);
     sample_load_.init(&sample_, g_loop_mem);
-    file_.init(voice, &sample_, &perform_, &pattern_, &g_bank);
+    file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
+    song_.init(voice, &g_chain, &carriers_, &perform_);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
     (void)ctx.midi().route(voice, 0);
@@ -246,11 +242,14 @@ class MyApp final : public app::App {
     }
     if (in.press(app::Button::Play)) {  // the transport, on every screen (the per-step carriers and the loops' bar lines run on it); MODE is F1 on PERFORM
       dsp::Engine& e = ctx.engine();
+      if (ctx.screen() == &song_ && song_.start(ctx)) {  // SONG: the chain plays from the cursor (an empty chain: PLAY as everywhere)
+        return true;
+      }
       (void)(e.playing() ? e.stop() : e.play());
       ctx.redraw();
       return true;
     }
-    // The other screen buttons open their screen (docs/UI-DESIGN.md section 3); the ones not yet drawn open the one StubScreen. The old PLAY
+    // The other screen buttons open their screen (docs/UI-DESIGN.md section 3). The old PLAY
     // screen keeps the buttons its own controls and the card jobs use until U4, so on it these do what they did.
     if (ctx.screen() != &play_) {
       if (in.press(app::Button::SampleRec)) {
@@ -290,13 +289,13 @@ class MyApp final : public app::App {
         ctx.redraw();
         return true;
       }
-      struct Open {
-        app::Button button;
-        const o3_voc03er::StubInfo* info;
-      };
-      static constexpr Open kOpen[] = {
-          {app::Button::Song, &kStubs[0]},
-      };
+      if (in.press(app::Button::Song)) {  // the chain
+        if (ctx.screen() != &song_) {
+          ctx.show(song_);
+        }
+        ctx.redraw();
+        return true;
+      }
       if (in.press(app::Button::Master)) {  // the signal path: source, gain, monitor, dry, level, return
         if (ctx.screen() != &master_) {
           ctx.show(master_);
@@ -330,21 +329,12 @@ class MyApp final : public app::App {
           return true;
         }
       }
-      for (const Open& o : kOpen) {
-        if (in.press(o.button)) {
-          stub_.set(o.info);
-          ctx.show(stub_);
-          ctx.redraw();
-          return true;
-        }
-      }
     } else if (in.press(app::Button::Master)) {
       ctx.show(master_);
       ctx.redraw();
       return true;
     } else if (in.press(app::Button::Song)) {
-      stub_.set(&kStubs[0]);
-      ctx.show(stub_);
+      ctx.show(song_);
       ctx.redraw();
       return true;
     }
@@ -616,6 +606,10 @@ class MyApp final : public app::App {
     w.num("cursor", play_.pattern().cursor);
     w.num("carriers", play_.pattern().carriers_used());
     w.num("playing", ctx.engine().playing() ? 1u : 0u);
+    w.num("chain", g_chain.count);  // SONG: the entries, the row lit (kChainMax: none), the cursor, LOOP CHAIN
+    w.num("chain_row", song_.playing_row());
+    w.num("chain_cursor", song_.cursor());
+    w.num("chain_loop", g_chain.loop);
     w.num("focus", focus);
     w.str("value", value);
     const app::AudioIn& in = ctx.audio_in();
@@ -702,13 +696,13 @@ class MyApp final : public app::App {
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::ParamsScreen params_;
+  o3_voc03er::SongScreen song_;
   o3_voc03er::MasterScreen master_;
   o3_voc03er::SampleScreen sample_;
   o3_voc03er::SampleEditScreen sample_edit_;
   o3_voc03er::SampleLoadScreen sample_load_;
   o3_voc03er::FileScreen file_;
   o3_voc03er::PatternScreen pattern_;
-  o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::StepSeq carriers_;  // the step sequencer hook (stepseq.h)
 
   Op op_ = Op::None;

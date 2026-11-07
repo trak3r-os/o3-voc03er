@@ -385,11 +385,11 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
       {Button::File, "FILE", nullptr},
-      {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
+      {Button::SampleLoad, "SAMPLE LOAD", nullptr},
       {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},
       {Button::SampleRec, "SAMPLE REC: A TAKE", nullptr},
-      {Button::Song, "SONG (SLICE U9)", nullptr},
+      {Button::Song, "SONG", nullptr},
       {Button::Pattern, "THIS SCREEN", nullptr},
   };
   static constexpr app::HelpPadGroup kGroups[] = {

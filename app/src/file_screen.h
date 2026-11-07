@@ -17,6 +17,8 @@
 #include "perform_screen.h"
 #include "sample_screen.h"
 
+#include <o3_voc03er/project.h>
+
 #include <o3sdk/app/file_picker.h>
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/name_entry.h>
@@ -30,7 +32,7 @@ class FileScreen final : public o3sdk::app::Screen {
  public:
   FileScreen() noexcept;
 
-  void init(o3sdk::dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank) noexcept;
+  void init(o3sdk::dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain) noexcept;
   // The screen F8 returns to (the one that opened this); nullptr (and the default) is PERFORM.
   void set_back(o3sdk::app::Screen* back) noexcept { back_ = back; }
 
@@ -70,6 +72,7 @@ class FileScreen final : public o3sdk::app::Screen {
   PerformScreen* perform_ = nullptr;
   PatternScreen* pattern_ = nullptr;
   Bank* bank_ = nullptr;
+  Chain* chain_ = nullptr;
   o3sdk::app::Screen* back_ = nullptr;
   o3sdk::app::FilePicker picker_;
   o3sdk::app::NameEntry names_;
