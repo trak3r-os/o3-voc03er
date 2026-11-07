@@ -24,7 +24,7 @@ constexpr float kFs = 44100.0f;
 constexpr float kPi2 = 6.2831853f;
 using LF = Vocoder::LoopField;
 
-static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::CarSrc == 34 && Vocoder::NotesIn == 39 && Vocoder::Bend == 42 && Vocoder::Vib == 43 && Vocoder::Glide == 44 && Vocoder::Gate == 45 && Vocoder::Arp == 46 && Vocoder::ModSrc == 47 && Vocoder::kParamCount == 62, "ids are append-only: the first ten never move");
+static_assert(Vocoder::Freeze == 9 && Vocoder::Loop1Rec == 10 && Vocoder::Loop1Speed == 22 && Vocoder::CarSrc == 34 && Vocoder::NotesIn == 39 && Vocoder::Bend == 42 && Vocoder::Vib == 43 && Vocoder::Glide == 44 && Vocoder::Gate == 45 && Vocoder::Arp == 46 && Vocoder::ModSrc == 47 && Vocoder::kParamCount == 64, "ids are append-only: the first ten never move");
 static_assert(Vocoder::loop_param(3, LF::Level) == 33 && Vocoder::loop_param(1, LF::Dir) == 26 && Vocoder::loop_param(3, LF::Role) == 21, "four loops of three parameters from id 10");
 
 // A transport at 120 BPM, playing, `tick` ticks into the run (so the bar lines are at multiples of 3840).
@@ -786,7 +786,7 @@ TEST_CASE("loop: a length cut short by adopt ends at zero, so the wrap does not 
 }
 
 TEST_CASE("loop: adopt takes a length written into the memory, and refuses when it must") {
-  static_assert(Vocoder::Load == 61 && Vocoder::kParamCount == 62, "append only");
+  static_assert(Vocoder::Load == 61 && Vocoder::Sub == 62 && Vocoder::Tilt == 63 && Vocoder::kParamCount == 64, "append only");
   std::vector<std::int16_t> mem(Loop::kCount * 100u);
   Loop l;
   CHECK_FALSE(l.adopt(0, 10));  // unbound

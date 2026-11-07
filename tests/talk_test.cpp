@@ -353,7 +353,7 @@ float max_step(const std::vector<float>& x, std::size_t from, std::size_t to) {
 TEST_CASE("vocoder: MODE switches Bands and Talk during sound with no click, and Talk sounds") {
   static Vocoder vo;
   vo.prepare(kFs);
-  CHECK(Vocoder::kParamCount == 62);
+  CHECK(Vocoder::kParamCount == 64);
   const std::size_t sw_a = 700, sw_b = 1100;
   const auto out = run_unit(vo, 1500, sw_a, sw_b);
   CHECK(finite(out));
@@ -893,7 +893,7 @@ TEST_CASE("robot: MODE has four values, ROBOT is the fourth and takes no new par
   const auto& p = vo.info().params[Vocoder::Mode];
   CHECK(p.max == 3.0f);
   CHECK(p.def == 0.0f);
-  CHECK(Vocoder::kParamCount == 62);
+  CHECK(Vocoder::kParamCount == 64);
 }
 
 TEST_CASE("robot: the compressor flattens a level that alternates 12 dB, and BANDS does not as much") {

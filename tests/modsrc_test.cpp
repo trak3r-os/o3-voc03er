@@ -86,7 +86,7 @@ float energy(const std::vector<float>& v, float hz) {
 }  // namespace
 
 TEST_CASE("ModSrc: the ids and the table") {
-  static_assert(Vocoder::ModSrc == 47 && Vocoder::LiveCh == 48 && Vocoder::kParamCount == 62, "append only");
+  static_assert(Vocoder::ModSrc == 47 && Vocoder::LiveCh == 48 && Vocoder::kParamCount == 64, "append only");
   Vocoder u;
   const auto& info = u.info();
   CHECK(info.params[Vocoder::ModSrc].max == 6.0f);

@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include <o3_voc03er/units/vocoder/carrier_plan.h>
+
 #include <o3_voc03er/units/vocoder/nofma.h>
 
 namespace o3_voc03er {
@@ -139,11 +141,137 @@ inline void run_voice(VoiceRun& v, std::uint8_t& stage_in, float* out, float* ga
   }
 }
 
+// ---- The extended path (U10a): a voice with SUB, a third oscillator or a morphing oscillator. The loop above is the fast path and is left as it was.
+
+// x = a * saw(p) + b * saw(p + c): between saw (SHAPE 0) and the 50 % pulse (1) a = 1 - 2m, b = m, c = 0.5 (a crossfade, which is a phase-shifted saw
+// of half the size at m = 0.5, so it is normalised); between the pulse and the narrow one (2) a = -b, c grows from 0.5 to 0.9 (duty 0.5 to 0.1).
+struct Morph {
+  float a = 0.0f;
+  float b = 0.0f;
+  float c = 0.5f;
+};
+
+Morph make_morph(float s) noexcept {
+  constexpr float kSawRms = 0.57735027f;
+  if (s < 1.0f) {
+    const float r2 = (1.0f - 5.0f * s + 7.0f * s * s) * (1.0f / 3.0f);  // the mean square of a x saw(p) + b x saw(p + 0.5), always > 0
+    const float g = (kSawRms + (1.0f - kSawRms) * s) / std::sqrt(r2);   // the level runs from the saw's to the pulse's: no jump at either end
+    return Morph{(1.0f - 2.0f * s) * g, s * g, 0.5f};
+  }
+  const float c = 0.5f + 0.4f * (s - 1.0f);
+  const float d = 1.0f - c;
+  const float g = 0.5f / std::sqrt(d * (1.0f - d));  // the zero-mean pulse of duty d has the mean square 4 d (1 - d): rms 1 at every width
+  return Morph{-g, g, c};
+}
+
+__attribute__((always_inline)) inline float morph_osc(float phase, const Edge& e, const Morph& m) noexcept {
+  float q = phase + m.c;
+  q -= q >= 1.0f ? 1.0f : 0.0f;
+  return m.a * osc<true>(phase, e) + m.b * osc<true>(q, e);
+}
+
+// The SUB square (level s = +-1, flipped at oscillator 1's wrap) with its edge smoothed by the BLEP residual: the step is to -s before the wrap
+// (the sign has not flipped yet) and to +s after it.
+__attribute__((always_inline)) inline float sub_osc(float s, float phase, const Edge& e) noexcept {
+  if (phase < e.dt) {
+    return s * (1.0f + blep(phase, e));
+  }
+  if (phase > e.hi) {
+    return s * (1.0f - blep(phase, e));
+  }
+  return s;
+}
+
+struct ExtRun {
+  float phase, phase2, phase3, r3, sub_sign, env;
+  Edge e1, e2, e3;
+  float attack_step, release_coef, osc_gain;
+  float sub_g, sub_dg;     // SUB's level a sample (including the voice gain), ramped over the block
+  float r3_target, ramp;   // the third oscillator's level goal and its step a sample
+  Morph mo;
+  bool m1, m2, m3, two, third, sub, saw;
+};
+
+constexpr float kThirdGain = 0.1835f;  // 2 -> 3 oscillators at equal power: 1/sqrt(6) = 0.5 x (1 - 0.1835)
+
+void run_ext(ExtRun& v, std::uint8_t& stage, float* out, float* gate, std::uint32_t n) noexcept {
+  float phase = v.phase;
+  float phase2 = v.phase2;
+  float phase3 = v.phase3;
+  float r3 = v.r3;
+  float sub_sign = v.sub_sign;
+  float sub_g = v.sub_g;
+  float env = v.env;
+  for (std::uint32_t i = 0; i < n && stage != 0; ++i) {
+    const float p = phase;
+    float x = v.m1 ? morph_osc(p, v.e1, v.mo) : (v.saw ? osc<true>(p, v.e1) : osc<false>(p, v.e1));
+    phase += v.e1.dt;
+    const bool wrapped = phase >= 1.0f;
+    phase -= wrapped ? 1.0f : 0.0f;
+    float g = v.osc_gain;
+    if (v.two) {
+      x += v.m2 ? morph_osc(phase2, v.e2, v.mo) : (v.saw ? osc<true>(phase2, v.e2) : osc<false>(phase2, v.e2));
+      phase2 += v.e2.dt;
+      phase2 -= phase2 >= 1.0f ? 1.0f : 0.0f;
+      g *= 0.5f;
+      if (v.third) {
+        if (r3 < v.r3_target) {
+          r3 += v.ramp;
+          r3 = r3 > v.r3_target ? v.r3_target : r3;
+        } else if (r3 > v.r3_target) {
+          r3 -= v.ramp;
+          r3 = r3 < v.r3_target ? v.r3_target : r3;
+        }
+        if (r3 > 0.0f) {
+          x += r3 * (v.m3 ? morph_osc(phase3, v.e3, v.mo) : (v.saw ? osc<true>(phase3, v.e3) : osc<false>(phase3, v.e3)));
+          phase3 += v.e3.dt;
+          phase3 -= phase3 >= 1.0f ? 1.0f : 0.0f;
+          g *= 1.0f - kThirdGain * r3;
+        }
+      }
+    }
+    float y = x * g;
+    if (v.sub) {
+      sub_g += v.sub_dg;
+      y += sub_osc(sub_sign, p, v.e1) * sub_g;
+      sub_sign = wrapped ? -sub_sign : sub_sign;
+    }
+    out[i] += y * env;
+    gate[i] += env;
+    if (stage == 1) {
+      env += v.attack_step;
+      if (env >= 1.0f) {
+        env = 1.0f;
+        stage = 2;
+      }
+    } else if (stage == 3) {
+      env *= v.release_coef;
+      if (env < kIdle) {
+        env = 0.0f;
+        stage = 0;
+      }
+    }
+  }
+  v.phase = phase;
+  v.phase2 = phase2;
+  v.phase3 = phase3;
+  v.r3 = r3;
+  v.sub_sign = sub_sign;
+  v.env = env;
+}
+
 }  // namespace
 
 void Carrier::set_detune_cents(float cents) noexcept {
-  cents = cents < 0.0f ? 0.0f : (cents > 20.0f ? 20.0f : cents);
+  cents = cents < 0.0f ? 0.0f : (cents > 100.0f ? 100.0f : cents);
   detune_ratio_ = cents > 0.0f ? std::exp2(cents * (1.0f / 1200.0f)) : 1.0f;
+  detune_down_ = cents > 0.0f ? std::exp2(cents * (-1.0f / 1200.0f)) : 1.0f;
+}
+
+void Carrier::set_tilt_db(float db) noexcept {
+  db = db < -12.0f ? -12.0f : (db > 12.0f ? 12.0f : db);
+  tilt_target_hi_ = db != 0.0f ? std::exp2(db * 0.0955054f) : 1.0f;   // asymptotes 1.15 x 10^(db / 40): about +db / 2 on the high side at 10 kHz (a one-pole shelf leaks)
+  tilt_target_lo_ = db != 0.0f ? std::exp2(db * -0.0955054f) : 1.0f;  // and -db / 2 on the low side
 }
 
 void Carrier::prepare(float sample_rate) noexcept {
@@ -152,6 +280,12 @@ void Carrier::prepare(float sample_rate) noexcept {
     v = Voice{};
   }
   counter_ = 0;
+  sub_cur_ = 0.0f;
+  tilt_lo_ = tilt_target_lo_;
+  tilt_hi_ = tilt_target_hi_;
+  tilt_lp_ = 0.0f;
+  tilt_a_ = 1.0f - std::exp(-6.2831853f * 700.0f / fs_);
+  ramp_step_ = 1.0f / (0.003f * fs_);
   set_attack_ms(5.0f);
   set_release_ms(80.0f);
 }
@@ -194,6 +328,9 @@ void Carrier::note_on(std::uint8_t note) noexcept {
   if (pick->stage == Stage::Idle) {
     pick->phase = 0.0f;
     pick->phase2 = 0.0f;
+    pick->phase3 = 0.0f;
+    pick->r3 = 0.0f;
+    pick->sub_sign = 1.0f;
     pick->env = 0.0f;
   }
   pick->note = note;
@@ -277,45 +414,97 @@ void Carrier::render(float* out, std::uint32_t n, float* gate_out) noexcept {
     out[i] = 0.0f;
     gate[i] = 0.0f;
   }
-  const bool two = detune_ratio_ != 1.0f;
-  const bool saw = wave_ == Wave::Saw;
+  const bool two = detune_ratio_ != 1.0f;  // SPREAD > 0: oscillators 2 and 3 exist
+  const bool morph = shape_ != 0.0f && shape_ != 1.0f;
+  const bool saw = shape_ < 0.5f;  // the oscillator a voice runs when the plan has no morph for it: the nearer end
+  const bool sub_on = sub_ > 0.0f || sub_cur_ > 0.0f;
+  const bool tilt_on = tilt_target_hi_ != 1.0f || tilt_hi_ != 1.0f;
   const bool want_gate = gate_out != nullptr || noise_ > 0.0f;
   const float osc_gain = kVoiceGain * (1.0f - noise_);
   const float g1 = two ? 0.5f * osc_gain : osc_gain;  // two oscillators keep the voice's level
+  // The plan, once a block, from the sounding voices (it changes when a voice starts or ends): the newest voices are served first.
+  const CarrierPlan plan = plan_oscillators(sounding_voices(), two, morph, sub_on, tilt_on);
+  const Morph mo = morph ? make_morph(shape_) : Morph{};
+  const float rn = n > 0 ? 1.0f / static_cast<float>(n) : 0.0f;
+  const float sub_goal = sub_ * osc_gain * 0.5f;
+  const float sub_from = sub_cur_ * osc_gain * 0.5f;
   for (Voice& v : voices_) {
     if (v.stage == Stage::Idle) {
       continue;
     }
+    unsigned rank = 0;  // 0 is the newest sounding voice
+    for (const Voice& o : voices_) {
+      rank += o.stage != Stage::Idle && o.age > v.age ? 1u : 0u;
+    }
+    const bool m1 = morph && rank < plan.morph1;
+    const bool m2 = morph && rank < plan.morph2;
+    const bool want3 = two && rank < plan.third;
     const float base = glide_ > 0.0f ? v.cur : v.inc;
     const float dt1 = base * bend_ratio_ > 0.45f ? 0.45f : base * bend_ratio_;  // x 1.0f is exact: Bend 0 is the unbent path
     float dt2 = dt1 * detune_ratio_;
     dt2 = dt2 > 0.45f ? 0.45f : dt2;
-    VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(dt1), make_edge(dt2), attack_step_, release_coef_};
     std::uint8_t stage = static_cast<std::uint8_t>(v.stage);
     static_assert(static_cast<unsigned>(Stage::Attack) == 1 && static_cast<unsigned>(Stage::Hold) == 2 &&
                       static_cast<unsigned>(Stage::Release) == 3, "run_voice reads the Stage values");
-    if (want_gate) {
-      if (two) {
-        saw ? run_voice<true, true, true>(r, stage, out, gate, n, g1) : run_voice<true, false, true>(r, stage, out, gate, n, g1);
+    if (!sub_on && !want3 && v.r3 == 0.0f && !m1 && !m2) {  // the fast path: the loop of before
+      VoiceRun r{v.phase, two ? v.phase2 : v.phase, v.env, make_edge(dt1), make_edge(dt2), attack_step_, release_coef_};
+      if (want_gate) {
+        if (two) {
+          saw ? run_voice<true, true, true>(r, stage, out, gate, n, g1) : run_voice<true, false, true>(r, stage, out, gate, n, g1);
+        } else {
+          saw ? run_voice<false, true, true>(r, stage, out, gate, n, g1) : run_voice<false, false, true>(r, stage, out, gate, n, g1);
+        }
       } else {
-        saw ? run_voice<false, true, true>(r, stage, out, gate, n, g1) : run_voice<false, false, true>(r, stage, out, gate, n, g1);
+        if (two) {
+          saw ? run_voice<true, true, false>(r, stage, out, gate, n, g1) : run_voice<true, false, false>(r, stage, out, gate, n, g1);
+        } else {
+          saw ? run_voice<false, true, false>(r, stage, out, gate, n, g1) : run_voice<false, false, false>(r, stage, out, gate, n, g1);
+        }
       }
+      v.phase = r.phase;
+      v.phase2 = two ? r.phase2 : r.phase;  // as before: one oscillator keeps the second in step
+      v.env = r.env;
     } else {
-      if (two) {
-        saw ? run_voice<true, true, false>(r, stage, out, gate, n, g1) : run_voice<true, false, false>(r, stage, out, gate, n, g1);
-      } else {
-        saw ? run_voice<false, true, false>(r, stage, out, gate, n, g1) : run_voice<false, false, false>(r, stage, out, gate, n, g1);
+      float dt3 = dt1 * detune_down_;
+      dt3 = dt3 > 0.45f ? 0.45f : dt3;
+      if (want3 && v.r3 == 0.0f) {  // the third enters at an offset phase, from level 0
+        v.phase3 = v.phase2 + 0.37f;
+        v.phase3 -= v.phase3 >= 1.0f ? 1.0f : 0.0f;
       }
+      ExtRun r{v.phase, two ? v.phase2 : v.phase, v.phase3, v.r3, v.sub_sign, v.env, make_edge(dt1), make_edge(dt2), make_edge(dt3),
+               attack_step_, release_coef_, osc_gain, sub_from, (sub_goal - sub_from) * rn, want3 ? 1.0f : 0.0f, ramp_step_, mo,
+               m1, m2, morph && want3, two, want3 || v.r3 > 0.0f, sub_on, saw};
+      run_ext(r, stage, out, gate, n);
+      v.phase = r.phase;
+      v.phase2 = two ? r.phase2 : r.phase;
+      v.phase3 = r.phase3;
+      v.r3 = r.r3;
+      v.sub_sign = r.sub_sign;
+      v.env = r.env;
     }
-    v.phase = r.phase;
-    v.phase2 = two ? r.phase2 : r.phase;  // as before: one oscillator keeps the second in step
-    v.env = r.env;
     v.stage = static_cast<Stage>(stage);
   }
+  sub_cur_ = sub_;
   if (gate_out != nullptr) {
     for (std::uint32_t i = 0; i < n; ++i) {
       gate_out[i] = gate[i] < 1.0f ? gate[i] : 1.0f;
     }
+  }
+  if (tilt_on) {  // the shelf on the voice sum, before the noise: lp + (x - lp) with the two sides' gains, smoothed a block at a time
+    tilt_lo_ += (tilt_target_lo_ - tilt_lo_) * 0.35f;
+    tilt_hi_ += (tilt_target_hi_ - tilt_hi_) * 0.35f;
+    if (tilt_hi_ - tilt_target_hi_ < 1.0e-4f && tilt_target_hi_ - tilt_hi_ < 1.0e-4f) {
+      tilt_lo_ = tilt_target_lo_;
+      tilt_hi_ = tilt_target_hi_;
+    }
+    float lp = tilt_lp_;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      lp += tilt_a_ * (out[i] - lp);
+      out[i] = tilt_lo_ * lp + tilt_hi_ * (out[i] - lp);
+    }
+    tilt_lp_ = lp;
+  } else {
+    tilt_lp_ = 0.0f;
   }
   if (noise_ > 0.0f) {
     float nz[kMaxBlock];

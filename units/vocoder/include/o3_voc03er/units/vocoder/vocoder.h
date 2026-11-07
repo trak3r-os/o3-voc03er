@@ -5,13 +5,14 @@
 // result (plus the dry modulator, when asked) leaves mono on both planes through a soft clip whose peak is below 1.0.
 //
 // Parameters (the id is the index in the table: append, never insert):
-//   0 Wave     0 SAW, 1 PULSE
+//   0 Wave     0..2, continuous (default 0): 0 SAW, 1 PULSE (50 %), 2 NARROW (10 %), a morph between (carrier.h)
 //   1 Noise    0..1: the carrier's oscillators fade to white noise (gated by the held notes)
 //   2 Attack   ms, 1..500: the carrier voices' attack
 //   3 Release  ms, 5..2000: the carrier voices' release
 //   4 Dry      0..1: the dry modulator mixed into the output (default 0)
 //   5 Level    dB, -48..+6
-//   6 Detune   cents, 0..20 (default 8): the second oscillator of each carrier voice, sharp of the first
+//   6 Detune   cents, 0..100 (default 8), the SPREAD: oscillator 2 of each carrier voice at +cents, oscillator 3 at -cents (a plan,
+//              carrier_plan.h, decides which voices get the third under a cycle budget); 0 is one oscillator
 //   7 Mode     0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT (default BANDS): the Carrier goes through Bands or through Talk (LPC talkbox); TUNE is the voice
 //              itself, pitch-corrected (autotune.h): the carrier, Bands and Talk do not run (the notes still count: they are the
 //              target of NOTES-IN). ROBOT is BANDS (the same engine, not a second one) followed by a fast compressor on its wet sum
@@ -82,6 +83,10 @@
 //                     source: pads, MIDI, console) are sounded one at a time on the step clock, GATE's rate or 1/16 with GATE off. With none held the
 //                     voice releases. Off with notes held sounds them all again. The clock comes from the transport's tempo, runs with the transport
 //                     stopped (its own grid), restarts at the bar when the transport starts, and splits a run at each half step.
+//  62..63    CARRIER STACK (U10a; with Wave 0 and Detune 6; this reaches the kit's limit of 64 parameters):
+//            62 Sub     0..1 (default 0): a square an octave below each voice (carrier.h), 63 Tilt  dB, -12..+12 (default 0): a one-pole shelf at
+//                     about 1 kHz on the voice sum, before the noise (-Tilt/2 below, +Tilt/2 above). At Wave 0 or 1, Sub 0, Tilt 0, Detune 0 the
+//                     carrier is the one of before, bit for bit; Load (61) sits between because ids are appended, never inserted.
 // The bands' followers are fixed: 1 ms attack and 15 ms release in the middle of the range, graded geometrically (Bands::set_envelope).
 //
 // Cost [est]: Bands 58,400 a 64-frame block (front end and unvoiced path included) + Carrier up to 30,720 + mixing 1,300: 90,400 a
@@ -121,7 +126,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
                             Loop1Rec, Loop1Play, Loop1Role, Loop2Rec, Loop2Play, Loop2Role, Loop3Rec, Loop3Play, Loop3Role, Loop4Rec, Loop4Play, Loop4Role,
                             Loop1Speed, Loop1Dir, Loop1Level, Loop2Speed, Loop2Dir, Loop2Level, Loop3Speed, Loop3Dir, Loop3Level, Loop4Speed, Loop4Dir, Loop4Level,
                             CarSrc, Key, Scale, Speed, Amount, NotesIn, Formant, Thru, Bend, Vib, Glide, Gate, Arp, ModSrc, LiveCh,
-                            R1Start, R1Len, R1Trig, R2Start, R2Len, R2Trig, R3Start, R3Len, R3Trig, R4Start, R4Len, R4Trig, Load, kParamCount };
+                            R1Start, R1Len, R1Trig, R2Start, R2Len, R2Trig, R3Start, R3Len, R3Trig, R4Start, R4Len, R4Trig, Load, Sub, Tilt, kParamCount };  // 64 parameters: the kit's limit
   enum class LoopField : std::uint16_t { Rec, Play, Role, Speed, Dir, Level };
   static constexpr std::uint16_t loop_param(unsigned loop, LoopField f) noexcept {
     const unsigned k = static_cast<unsigned>(f);
