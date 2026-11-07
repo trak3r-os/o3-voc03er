@@ -1,0 +1,44 @@
+# FILE (docs/UI-DESIGN.md, "FILE"): SAVE AS names a project folder, SAVE writes over it, a reboot forgets the live state, LOAD brings the mode back, a name that exists
+# is refused, and F5 says it comes later. Start from an empty card directory (tests/app_test.cpp gives each scenario a fresh one):
+#
+#   mkdir <dir> <card> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/file.txt --card <card> --out <dir>
+input tone 220 -8
+wait 400
+tap f1            # PERFORM is home: F1 is the mode key, two taps BANDS to TALK
+tap f1
+wait 600
+expect state voc_mode=talk
+tap file
+wait 40
+snap 00_file
+tap f5
+snap 01_wavs_later
+tap f2            # no project yet: SAVE is SAVE AS (the name starts as PROJECT)
+wait 20
+snap 02_name
+tap f7
+wait 80
+expect file Apps/o3_voc03er/PROJECT/project.o3a
+snap 03_saved
+tap f8
+tap f1            # the mode is TUNE now, and the file holds TALK
+wait 600
+expect state voc_mode=tune
+reboot
+wait 100
+tap file
+wait 40
+tap f1            # LOAD asks
+snap 04_ask
+tap f1            # the picker lists the project folders
+wait 80
+snap 05_picker
+tap f1            # OPEN the folder under the cursor
+wait 200
+expect state voc_mode=talk
+snap 06_loaded
+tap f3            # SAVE AS the same name: refused, nothing overwritten
+wait 20
+tap f7
+wait 80
+snap 07_name_exists

@@ -514,7 +514,7 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
-      {Button::File, "FILE (SLICE U9)", nullptr},
+      {Button::File, "FILE", nullptr},
       {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
       {Button::SamplePlay, "THIS SCREEN", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},

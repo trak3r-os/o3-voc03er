@@ -93,6 +93,10 @@ class PerformScreen final : public o3sdk::app::Screen {
   void follow_print(o3sdk::app::Context& ctx, ornoir::Voiceprint& vp) noexcept;
 
   int octave() const noexcept { return octave_; }
+  // FILE (U9c2) restores these: the octave is clamped as the keys clamp it, the chord kind is the bottom row's (0..3), `keys` the pads mode.
+  void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
+  void set_chord_kind(unsigned k) noexcept { bottom_ = static_cast<decltype(bottom_)>(k & 3u); }
+  void set_keys(bool on) noexcept { keys_ = on; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }
   bool strip_mode() const noexcept { return strip_; }

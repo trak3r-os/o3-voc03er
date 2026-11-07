@@ -586,3 +586,14 @@ screen it touches. The unit checks owed are named, not run here.
 | M2 | Slices by MIDI note, velocity as level, after U5 | `midi_slices.txt` (notes over a latched chord, a WAV); timing on the unit against the pads |
 | M3 | Patterns by program change at the bar line, MIDI recorded into PATTERN, after U6 | `midi_pattern.txt`; on the unit, an outside sequencer with FOLLOW on |
 | U11 | The unit round: the skin's frame time against the audio at the 72.9 % case and the 15 Hz policy, the LEDs' levels by eye, HELP's caps legible, the microphone, a capture through a real source, the slices heard, the synth's cost at eight notes with SPREAD | `hw-session` checklist; not a slice of code |
+
+### Built in U9c2
+
+FILE saves and loads the project file (`project.o3a` in a folder of `Apps/o3_voc03er/`), without the WAVs. F1 LOAD asks, then the kit's picker lists the project folders; F2 SAVE writes
+over the current project (the old file kept as `.bak`; with no project it is SAVE AS); F3 SAVE AS asks a name and makes a new folder (an existing name is refused, never overwritten);
+F4 NEW asks, then restores the defaults and leaves no current project; F5 SAVE WAVS is dim and says COMES LATER. All are refused while a card job or a take runs. A new STAT chunk
+(1.0) holds tempo, swing, the pattern shown, octave, chord kind and pads mode; a file without it keeps the defaults. LOAD decodes the whole file into a copy first (a damaged file changes
+nothing), then sends the unit's values 16 a frame, then the patterns, the route, the slots and STAT. A slot's cuts come back only onto a slot that already holds audio of the same length;
+the other records are kept for the next save and the next slice. NEW leaves the slots' audio (the cuts go back to even). Swing is written as 0 (the app has no swing control yet).
+Unit check owed: the restore on the unit (the frames it spans, the route change while a bar sounds).
+

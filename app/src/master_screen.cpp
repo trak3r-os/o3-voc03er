@@ -209,7 +209,7 @@ void MasterScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Params, "PARAMS: THE VALUES", nullptr},
       {Button::Master, "MASTER: THIS SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
-      {Button::File, "FILE (SLICE U9)", nullptr},
+      {Button::File, "FILE", nullptr},
       {Button::Song, "SONG (SLICE U9)", nullptr},
       {Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
       {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},

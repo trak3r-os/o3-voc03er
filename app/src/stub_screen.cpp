@@ -76,7 +76,7 @@ void StubScreen::help(const app::Context&, app::Help& h) const noexcept {
       {app::Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
       {app::Button::Play, "START OR STOP THE BAR", nullptr},
       {app::Button::Master, "MASTER", nullptr},
-      {app::Button::File, "FILE (SLICE U9)", nullptr},
+      {app::Button::File, "FILE", nullptr},
       {app::Button::SampleLoad, "SAMPLE LOAD (SLICE U8)", nullptr},
       {app::Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {app::Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},

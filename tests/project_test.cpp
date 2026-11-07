@@ -466,3 +466,44 @@ TEST_CASE("project: which ids are state") {
   CHECK(engine_id_is_state(Vocoder::LiveCh));
   CHECK(known >= 22u);
 }
+
+TEST_CASE("project: STAT (U9c2) round trip, a file without it, a tempo out of range") {
+  Project p = full();
+  p.stat = 1;
+  p.tempo_mbpm = 133500;
+  p.swing = 3;
+  p.pattern = 5;
+  p.octave = -2;
+  p.chord = 2;
+  p.keys = 1;
+  const Bytes b = write(p);
+  REQUIRE(!b.empty());
+  Project q = {};
+  REQUIRE(read(b, q));
+  CHECK(q.stat == 1);
+  CHECK(q.tempo_mbpm == 133500u);
+  CHECK(q.swing == 3);
+  CHECK(q.pattern == 5);
+  CHECK(q.octave == -2);
+  CHECK(q.chord == 2);
+  CHECK(q.keys == 1);
+
+  // Without STAT (an older file, or a project that never had one): the fields stay at their zero defaults and `stat` says there was none.
+  Project old = full();
+  old.stat = 0;
+  const Bytes ob = write(old);
+  Project r = {};
+  REQUIRE(read(ob, r));
+  CHECK(r.stat == 0);
+  CHECK(r.tempo_mbpm == 0u);
+  CHECK(r.octave == 0);
+
+  // A tempo out of range or a pattern past the bank is refused at write, so a file never holds one.
+  Project bad = p;
+  bad.tempo_mbpm = 1000;
+  alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
+  CHECK(write_project(bad, buf.data(), buf.size()) == 0u);
+  bad = p;
+  bad.pattern = static_cast<std::uint8_t>(kBankPatterns);
+  CHECK(write_project(bad, buf.data(), buf.size()) == 0u);
+}

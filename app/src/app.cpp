@@ -35,6 +35,7 @@
 #include "params_screen.h"
 #include "sample_rec_screen.h"
 #include "sample_edit_screen.h"
+#include "file_screen.h"
 #include "sample_load_screen.h"
 #include "sample_screen.h"
 #include "stub_screen.h"
@@ -155,6 +156,7 @@ class MyApp final : public app::App {
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);
     sample_load_.init(&sample_, g_loop_mem);
+    file_.init(voice, &sample_, &perform_, &pattern_, &g_bank);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
@@ -280,13 +282,20 @@ class MyApp final : public app::App {
         ctx.redraw();
         return true;
       }
+      if (in.press(app::Button::File)) {  // the project file; F8 returns to the screen it was opened from
+        if (ctx.screen() != &file_) {
+          file_.set_back(ctx.screen());
+          ctx.show(file_);
+        }
+        ctx.redraw();
+        return true;
+      }
       struct Open {
         app::Button button;
         const o3_voc03er::StubInfo* info;
       };
       static constexpr Open kOpen[] = {
           {app::Button::Song, &kStubs[0]},
-          {app::Button::File, &kStubs[1]},
       };
       if (in.press(app::Button::Master)) {  // the signal path: source, gain, monitor, dry, level, return
         if (ctx.screen() != &master_) {
@@ -697,6 +706,7 @@ class MyApp final : public app::App {
   o3_voc03er::SampleScreen sample_;
   o3_voc03er::SampleEditScreen sample_edit_;
   o3_voc03er::SampleLoadScreen sample_load_;
+  o3_voc03er::FileScreen file_;
   o3_voc03er::PatternScreen pattern_;
   o3_voc03er::StubScreen stub_;  // one object for every screen not yet drawn (stub_screen.h)
   o3_voc03er::StepSeq carriers_;  // the step sequencer hook (stepseq.h)

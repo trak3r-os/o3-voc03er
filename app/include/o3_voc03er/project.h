@@ -15,6 +15,7 @@
 //   SLOT 1.0  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
 //             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL)
 //   VALU 1.0  u16 count, then count x (u16 parameter id, f32 value): the engine's state, by id
+//   STAT 1.0  u32 tempo (milli-BPM), u8 swing (0: none yet), u8 current pattern 0..7, i8 octave, u8 chord kind 0..3, u8 pads mode (0 pads, 1 keys). Absent: those stay as they are
 //
 // Records inside PTNS and SLOT carry their own length, so a later minor appends fields to a record (read only when the record is long enough) and a later app
 // may hold more patterns or slots than this one reads. The WAV data is not in this file; the slot's `name` says which WAV of the project folder it came from.
@@ -89,6 +90,13 @@ struct Project {
   ProjectSlot slot[route::kSlots];
   float engine[kEngineIds] = {};                   // the engine's state by parameter id, valid where `engine_set` has the bit
   std::uint64_t engine_set = 0;
+  std::uint8_t stat = 0;                           // 1 when the file has STAT (the fields below are then valid), else they are zero and not used
+  std::uint32_t tempo_mbpm = 0;
+  std::uint8_t swing = 0;
+  std::uint8_t pattern = 0;                        // the pattern shown
+  std::int8_t octave = 0;
+  std::uint8_t chord = 0;
+  std::uint8_t keys = 0;
 };
 
 // The route a project holds (the default route when none is stored).
@@ -147,8 +155,9 @@ inline constexpr std::size_t kChaiMax = 2 + 2 + 2 * kChainMax;
 inline constexpr std::size_t kRoutMax = 2 + 3;
 inline constexpr std::size_t kSlotMax = 2 + 1 + route::kSlots * (2 + kSlotRecMax);
 inline constexpr std::size_t kValuMax = 2 + 2 + 6 * kEngineIds;
+inline constexpr std::size_t kStatMax = 2 + 4 + 5;
 inline constexpr std::size_t kWorst = o3sdk::formats::chunk::kHeaderBytes + o3sdk::formats::chunk::kCrcChunkBytes + chunk_bytes(kPtnsMax) + chunk_bytes(kChaiMax) +
-                                      chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax);
+                                      chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax) + chunk_bytes(kStatMax);
 
 }  // namespace project_detail
 
@@ -158,7 +167,7 @@ inline constexpr std::size_t kProjectFileMax = 2560;
 static_assert(project_detail::kWorst <= kProjectFileMax, "the worst-case project file must fit its buffer");
 static_assert(kProjectFileMax % 4 == 0, "a word-aligned buffer of this size is whole words");
 static_assert(sizeof(Project) <= 2560, "read_project stages a Project on the stack");
-static_assert(Project{}.chain.count == 0u && Project{}.engine_set == 0u && Project{}.sounds == 0u && Project{}.slot[0].cuts.length == 0u && Project{}.bank.pattern[0].length == 0u,
+static_assert(Project{}.chain.count == 0u && Project{}.engine_set == 0u && Project{}.stat == 0u && Project{}.tempo_mbpm == 0u && Project{}.sounds == 0u && Project{}.slot[0].cuts.length == 0u && Project{}.bank.pattern[0].length == 0u,
               "every default of a Project is zero, so it can sit in the SDRAM's bss (O3SDK_BIG)");
 inline constexpr const char* kProjectFile = "project.o3a";
 
@@ -221,8 +230,16 @@ inline bool pattern_valid(const PatternData& p) noexcept {
   return true;
 }
 
+// STAT's fields: the tempo the engine takes (20 to 400 BPM), a pattern of the bank, an octave PERFORM can hold (clamped there), a chord kind and a mode flag.
+inline constexpr std::uint32_t kStatTempoMin = 20000u;
+inline constexpr std::uint32_t kStatTempoMax = 400000u;
+inline bool stat_valid(const Project& p) noexcept {
+  return p.stat == 1u && p.tempo_mbpm >= kStatTempoMin && p.tempo_mbpm <= kStatTempoMax && p.pattern < kBankPatterns && p.octave >= -8 && p.octave <= 8 && p.chord < 4u &&
+         p.keys < 2u;
+}
+
 inline bool project_valid(const Project& p) noexcept {
-  if (!chain_valid(p.chain) || !project_route_valid(p)) {
+  if (!chain_valid(p.chain) || !project_route_valid(p) || (p.stat != 0u && !stat_valid(p))) {
     return false;
   }
   for (const PatternData& pd : p.bank.pattern) {
@@ -379,6 +396,21 @@ inline bool read_slot(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
   return f.ok();
 }
 
+inline bool read_stat(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
+  o3sdk::formats::chunk::Fields f(c);
+  if (!open_chunk(c, f)) {
+    return false;
+  }
+  got.tempo_mbpm = f.u32();
+  got.swing = static_cast<std::uint8_t>(f.u8());
+  got.pattern = static_cast<std::uint8_t>(f.u8());
+  got.octave = static_cast<std::int8_t>(f.u8());
+  got.chord = static_cast<std::uint8_t>(f.u8());
+  got.keys = static_cast<std::uint8_t>(f.u8());
+  got.stat = 1;
+  return f.ok() && stat_valid(got);
+}
+
 inline bool read_valu(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
   o3sdk::formats::chunk::Fields f(c);
   if (!open_chunk(c, f)) {
@@ -468,7 +500,16 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
       return 0;
     }
   }
-  return w.end() ? w.finish() : 0;
+  if (!w.end()) {
+    return 0;
+  }
+  if (p.stat != 0u) {
+    if (!w.begin("STAT") || !w.u16(ver) || !w.u32(p.tempo_mbpm) || !w.u8(p.swing) || !w.u8(p.pattern) || !w.u8(static_cast<std::uint8_t>(p.octave)) || !w.u8(p.chord) ||
+        !w.u8(p.keys) || !w.end()) {
+      return 0;
+    }
+  }
+  return w.finish();
 }
 
 // `dst` is replaced only when the whole file is good (the file is decoded into a copy on the stack): then every part the file lacks is at its default (zero).
@@ -488,7 +529,7 @@ inline bool read_project(const std::uint8_t* data, std::size_t n, Project& dst) 
       bool (*read)(const chunk::Chunk&, Project&) noexcept;
     };
     static constexpr Known kKnown[] = {{"PTNS", project_detail::read_ptns}, {"CHAI", project_detail::read_chai}, {"ROUT", project_detail::read_rout},
-                                       {"SLOT", project_detail::read_slot}, {"VALU", project_detail::read_valu}};
+                                       {"SLOT", project_detail::read_slot}, {"VALU", project_detail::read_valu}, {"STAT", project_detail::read_stat}};
     for (unsigned i = 0; i < sizeof kKnown / sizeof kKnown[0]; ++i) {
       if (c.id[0] != kKnown[i].id[0] || c.id[1] != kKnown[i].id[1] || c.id[2] != kKnown[i].id[2] || c.id[3] != kKnown[i].id[3]) {
         continue;

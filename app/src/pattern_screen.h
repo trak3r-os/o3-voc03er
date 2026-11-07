@@ -52,6 +52,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   pattern::Lane lane() const noexcept { return static_cast<pattern::Lane>(lane_); }
   unsigned cursor() const noexcept { return cursor_; }
   unsigned shown() const noexcept { return shown_; }
+  void show(o3sdk::app::Context& ctx, unsigned p) noexcept { show_pattern(ctx, p); }  // FILE (U9c2): the pattern a loaded project was on
   bool follow() const noexcept { return follow_; }
 
  private:
