@@ -260,7 +260,7 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   } else {
     const Chord prev = chord_from(g_pd.last_notes, g_pd.last_count);
     const Chord c = make_chord(pl::row_kind(app::pad_row(pad), static_cast<ChordKind>(bottom_), strip_), app::pad_col(pad), octave_,
-                               round_param(e, voice_, Vocoder::Key), round_param(e, voice_, Vocoder::Scale), Voicing::Smooth,
+                               round_param(e, voice_, Vocoder::Key), round_param(e, voice_, Vocoder::Scale), static_cast<Voicing>(voicing_),
                                g_pd.last_count != 0u ? &prev : nullptr);
     g_pd.count[pad] = c.count;
     for (unsigned i = 0; i < kChordMaxNotes; ++i) {
@@ -1308,7 +1308,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   ornoir::SoundsState so;
   so.carrier = h.sounds;
   so.spread = round_param(e, voice_, Vocoder::Detune);
-  so.voicing = "SMOOTH";
+  so.voicing = pl::kVoicingNames[voicing_ & 3u];
   so.out = {g_pd.out_level, g_pd.out_peak};
   so.out_db = static_cast<int>(g_pd.out_level) * 60 / 255 - 60;
   if (shown >= 0) {

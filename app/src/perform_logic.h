@@ -21,6 +21,8 @@ inline constexpr const char* kScaleNames[kScaleTableCount] = {"CHROM", "MAJOR", 
 inline constexpr const char* kCarrierNames[9] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE", "VOICE"};  // Vocoder::CarSrc 0..8
 inline constexpr const char* kKindNames[4] = {"TRIAD", "7TH", "OPEN", "POWER"};                                    // ChordKind
 inline constexpr const char* kModeNames[4] = {"BANDS", "TALK", "TUNE", "ROBOT"};
+// The Voicing enum's order (chords.h): the setting is its index (PARAMS' VOICING, the Sounds readout).
+inline constexpr const char* kVoicingNames[4] = {"CLOSE", "OPEN", "WIDE", "SMOOTH"};
 inline constexpr const char* kRowNames[4] = {"POWER", "OPEN", "7TH", ""};  // the bottom row's name is the kind's
 
 inline constexpr unsigned kLabelChars = 11;  // a pad's label: a chord's name fits kChordNameMax (12) with its terminator

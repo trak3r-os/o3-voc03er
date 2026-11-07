@@ -27,6 +27,11 @@ int centred(ui::Renderer& r, const char* s, Face f, int cx) noexcept { return cx
 
 int read(const dsp::Engine& e, dsp::UnitId id, const pr::KeyDef& k) noexcept { return pr::to_display(k.fmt, e.param(id, k.param)); }
 
+// An App key's value is PerformScreen's (SMOOTH, the default, when the screen has none).
+int read_app(const PerformScreen* perform, const pr::KeyDef& k) noexcept {
+  return k.fmt == pr::Fmt::Voicing && perform != nullptr ? static_cast<int>(perform->voicing()) : 3;
+}
+
 }  // namespace
 
 void ParamsScreen::init(dsp::UnitId voice, PerformScreen* perform) noexcept {
@@ -79,6 +84,13 @@ void ParamsScreen::step(app::Context& ctx, unsigned key, int delta, bool coarse,
   }
   const pr::KeyDef& k = pr::key_def(page_, key);
   dsp::Engine& e = ctx.engine();
+  if (k.kind == pr::Kind::App) {
+    if (perform_ != nullptr && k.fmt == pr::Fmt::Voicing) {
+      perform_->set_voicing(static_cast<unsigned>(pr::step_display(k, read_app(perform_, k), delta, coarse, tap)));
+    }
+    ctx.redraw();
+    return;
+  }
   const int next = pr::step_display(k, read(e, voice_, k), delta, coarse, tap);
   (void)e.set_param(voice_, k.param, pr::to_param(k.fmt, next));
   ctx.redraw();
@@ -93,7 +105,7 @@ void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     const pr::KeyDef& def = pr::key_def(page_, k);
     if (def.kind == pr::Kind::Later) {
       say(ctx, "COMES LATER");
-    } else if (def.kind == pr::Kind::Value) {
+    } else if (def.kind == pr::Kind::Value || def.kind == pr::Kind::App) {
       if (k == focus_) {  // a second tap steps the value on
         step(ctx, k, 1, true, true);
       } else {
@@ -201,8 +213,8 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     keys[i].name = k.name;
     if (k.kind == pr::Kind::Later) {
       keys[i].dim = true;
-    } else if (k.kind == pr::Kind::Value) {
-      const int v = read(e, voice_, k);
+    } else if (k.kind == pr::Kind::Value || k.kind == pr::Kind::App) {
+      const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, voice_, k);
       char txt[12];
       pr::format_value(k, v, txt);
       std::memcpy(keys[i].value, txt, sizeof txt < sizeof keys[i].value ? sizeof txt : sizeof keys[i].value);

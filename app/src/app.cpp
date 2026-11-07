@@ -164,6 +164,7 @@ class MyApp final : public app::App {
     op_ = Op::None;
     boot_ = Boot::Pattern;
     saved_octave_ = perform_.octave();
+    saved_voicing_ = perform_.voicing();
     ctx.show(perform_);
   }
 
@@ -219,9 +220,10 @@ class MyApp final : public app::App {
       return;
     }
     // The setting saves itself when it changes (and the card is there): the file's bytes are made now and stay in g_cfg_buf until the job ends.
-    if (perform_.octave() != saved_octave_) {
-      saved_octave_ = perform_.octave();  // (even when refused: it is tried again at the next change, not every pass)
-      const std::size_t n = o3_voc03er::write_config(saved_octave_, g_cfg_buf, sizeof g_cfg_buf);
+    if (perform_.octave() != saved_octave_ || perform_.voicing() != saved_voicing_) {
+      saved_octave_ = perform_.octave();
+      saved_voicing_ = perform_.voicing();  // (even when refused: it is tried again at the next change, not every pass)
+      const std::size_t n = o3_voc03er::write_config(saved_octave_, g_cfg_buf, sizeof g_cfg_buf, saved_voicing_);
       files.set_quiet(true);
       op_ = n != 0u && files.save("", o3_voc03er::kConfigFile, g_cfg_buf, n) ? Op::SaveConfig : Op::None;
     }
@@ -649,9 +651,12 @@ class MyApp final : public app::App {
       (void)o3_voc03er::read_bank(g_load_buf, got, g_bank);  // a file that is not a pattern is refused whole: the bank stays
     } else if (done && op_ == Op::LoadConfig) {
       int octave = 0;
-      if (o3_voc03er::read_config(g_load_buf, got, octave)) {
+      unsigned voicing = o3_voc03er::kDefaultVoicing;
+      if (o3_voc03er::read_config(g_load_buf, got, octave, voicing)) {
         perform_.set_octave(octave);
+        perform_.set_voicing(voicing);
         saved_octave_ = perform_.octave();  // what the card holds: nothing to save
+        saved_voicing_ = perform_.voicing();
       }
     }
     op_ = Op::None;
@@ -674,6 +679,7 @@ class MyApp final : public app::App {
   Op op_ = Op::None;
   Boot boot_ = Boot::Pattern;
   int saved_octave_ = 0;  // the octave the card holds (or was last asked to)
+  unsigned saved_voicing_ = o3_voc03er::kDefaultVoicing;  // the same for the voicing
 };
 
 MyApp& instance() noexcept {

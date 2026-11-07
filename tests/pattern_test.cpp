@@ -145,7 +145,7 @@ TEST_CASE("config: the octave round trips for every octave, and a bad file is re
     std::uint8_t buf[kConfigFileMax] = {};
     const std::size_t n = write_config(octave, buf, sizeof buf);
     REQUIRE(n != 0u);
-    CHECK(n == 38u);
+    CHECK(n == 50u);
     int back = 99;
     REQUIRE(read_config(buf, n, back));
     CHECK(back == octave);
@@ -154,7 +154,7 @@ TEST_CASE("config: the octave round trips for every octave, and a bad file is re
   const std::size_t n = write_config(-1, buf, sizeof buf);
   int keep = 5;
   CHECK_FALSE(read_config(buf, n - 1u, keep));  // short
-  buf[n - 16] = static_cast<std::uint8_t>(buf[n - 16] ^ 0x01u);  // the octave byte
+  buf[22] = static_cast<std::uint8_t>(buf[22] ^ 0x01u);  // the octave byte
   CHECK_FALSE(read_config(buf, n, keep));       // damaged
   CHECK(keep == 5);
   // The octave is clamped when written, and a stored value past the range is refused when read.
@@ -169,4 +169,56 @@ TEST_CASE("config: the octave round trips for every octave, and a bad file is re
   REQUIRE(w.end());
   const std::size_t m = w.finish();
   CHECK_FALSE(read_config(buf, m, keep));
+}
+
+TEST_CASE("config: the voicing round trips, a file from before it reads as SMOOTH, a bad one is refused") {
+  for (unsigned voicing = 0; voicing <= 3; ++voicing) {
+    std::uint8_t buf[kConfigFileMax] = {};
+    const std::size_t n = write_config(1, buf, sizeof buf, voicing);
+    REQUIRE(n != 0u);
+    int octave = 99;
+    unsigned back = 99;
+    REQUIRE(read_config(buf, n, octave, back));
+    CHECK(octave == 1);
+    CHECK(back == voicing);
+  }
+  namespace chunk = o3sdk::formats::chunk;
+  std::uint8_t buf[kConfigFileMax] = {};
+  int octave = 99;
+  unsigned voicing = 0;
+  // The file the first version wrote: OCTV only. It still loads, and the voicing is SMOOTH.
+  {
+    chunk::Writer w(buf, sizeof buf, "CONF");
+    REQUIRE(w.begin("OCTV"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(static_cast<std::uint8_t>(2 - kMinOctave)));
+    REQUIRE(w.end());
+    const std::size_t n = w.finish();
+    REQUIRE(n == 38u);
+    REQUIRE(read_config(buf, n, octave, voicing));
+    CHECK(octave == 2);
+    CHECK(voicing == 3u);
+  }
+  // A voicing past SMOOTH refuses the file whole, and both stay as they were.
+  {
+    chunk::Writer w(buf, sizeof buf, "CONF");
+    REQUIRE(w.begin("OCTV"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(static_cast<std::uint8_t>(0 - kMinOctave)));
+    REQUIRE(w.end());
+    REQUIRE(w.begin("VOIC"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(4));
+    REQUIRE(w.end());
+    const std::size_t n = w.finish();
+    octave = 99;
+    voicing = 1;
+    CHECK_FALSE(read_config(buf, n, octave, voicing));
+    CHECK(octave == 99);
+    CHECK(voicing == 1u);
+  }
+  // A voicing asked past the range is written as SMOOTH.
+  const std::size_t n = write_config(0, buf, sizeof buf, 9);
+  REQUIRE(read_config(buf, n, octave, voicing));
+  CHECK(voicing == 3u);
 }

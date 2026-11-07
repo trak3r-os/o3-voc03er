@@ -30,7 +30,7 @@ inline constexpr unsigned kPatternSteps = 16;
 inline constexpr std::uint8_t kCarrierMax = 6;  // a step's carrier: 0 none, 1 synth, 2 noise, 3..6 loop 1..4
 inline constexpr const char* kPatternFile = "pattern.o3a";  // in the app's folder on the card, Apps/<id>/ (the CMake id)
 inline constexpr const char* kConfigFile = "config.o3a";
-// The largest file each makes (about 80 and 38 bytes) with room to spare; the buffers that hold them are word aligned (Files::save reads them).
+// The largest file each makes (about 80 and 50 bytes) with room to spare; the buffers that hold them are word aligned (Files::save reads them).
 inline constexpr std::size_t kPatternFileMax = 768;  // the V2 file with eight patterns is about 600 bytes (stepseq.h)
 inline constexpr std::size_t kConfigFileMax = 64;
 
@@ -153,38 +153,68 @@ inline bool read_pattern(const std::uint8_t* data, std::size_t n, Pattern& p) no
   return true;
 }
 
-// The setting as a file.
-inline std::size_t write_config(int octave, std::uint8_t* out, std::size_t cap) noexcept {
+// The settings as a file: the octave (OCTV) and the chords' voicing (VOIC, 0..3, the Voicing enum). A file from before VOIC existed has no such chunk
+// and reads as SMOOTH, the default.
+inline constexpr unsigned kDefaultVoicing = 3;
+
+inline std::size_t write_config(int octave, std::uint8_t* out, std::size_t cap, unsigned voicing = kDefaultVoicing) noexcept {
   namespace chunk = o3sdk::formats::chunk;
   chunk::Writer w(out, cap, "CONF");
   if (!w.begin("OCTV") || !w.u16(0x0100) || !w.u8(static_cast<std::uint8_t>(clamp_octave(octave) - kMinOctave)) || !w.end()) {
     return 0;
   }
+  if (!w.begin("VOIC") || !w.u16(0x0100) || !w.u8(static_cast<std::uint8_t>(voicing > 3u ? 3u : voicing)) || !w.end()) {
+    return 0;
+  }
   return w.finish();
 }
 
-// The octave from a file's bytes: false, `octave` untouched, when it is damaged or out of range.
-inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave) noexcept {
+// The octave and the voicing from a file's bytes: false, both untouched, when it is damaged or either is out of range. No VOIC chunk: SMOOTH.
+inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, unsigned& voicing) noexcept {
   namespace chunk = o3sdk::formats::chunk;
   chunk::Reader r;
   chunk::Chunk c{};
   if (r.open(data, n, "CONF") != chunk::Error::None) {
     return false;
   }
+  bool have_octave = false;
+  int got_octave = 0;
+  unsigned got_voicing = kDefaultVoicing;
   while (r.next(c)) {
-    if (!chunk::id_is(c, "OCTV")) {
+    const bool is_octave = chunk::id_is(c, "OCTV");
+    if (!is_octave && !chunk::id_is(c, "VOIC")) {
       continue;
     }
     chunk::Fields f(c);
     const std::uint16_t version = f.u16();
     const unsigned v = f.u8();
-    if (!f.ok() || (version >> 8) != 1u || v > static_cast<unsigned>(kMaxOctave - kMinOctave)) {
+    if (!f.ok() || (version >> 8) != 1u) {
       return false;
     }
-    octave = static_cast<int>(v) + kMinOctave;
-    return true;
+    if (is_octave) {
+      if (v > static_cast<unsigned>(kMaxOctave - kMinOctave)) {
+        return false;
+      }
+      got_octave = static_cast<int>(v) + kMinOctave;
+      have_octave = true;
+    } else {
+      if (v > 3u) {
+        return false;
+      }
+      got_voicing = v;
+    }
   }
-  return false;
+  if (!have_octave) {
+    return false;
+  }
+  octave = got_octave;
+  voicing = got_voicing;
+  return true;
+}
+
+inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave) noexcept {
+  unsigned voicing = kDefaultVoicing;
+  return read_config(data, n, octave, voicing);
 }
 
 }  // namespace o3_voc03er

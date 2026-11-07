@@ -1,10 +1,12 @@
 # PARAMS: the unit's values in three pages of eight (CARRIER, SHAPE, TUNE) on the F row, PERFORM's voiceprint small above them. Each page, a value
-# changed and seen (NOISE under the encoder, a bigger voiceprint noise floor is not what is checked: the number and its bar are), VOICING, the key that comes
-# later (a tap says COMES LATER), QUALITY at 24, PARAMS pressed again paging on, SHIFT + PARAMS the same as PARAMS.
+# changed and seen (NOISE under the encoder, a bigger voiceprint noise floor is not what is checked: the number and its bar are), VOICING (the app's own
+# key, SMOOTH by default, stepped to CLOSE and WIDE with the same chord pad held each time: the WAV carries the three chords), QUALITY at 24, PARAMS
+# pressed again paging on, SHIFT + PARAMS the same as PARAMS.
 # The simulator shows the screen and that the engine takes the values; it cannot say what the frame costs or how it sounds.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/params.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
+record on
 tap params
 wait 300
 snap 01_carrier
@@ -20,7 +22,28 @@ wait 300
 snap 04_shape
 tap f5
 wait 150
-snap 04b_comes_later
+snap 04b_voicing_smooth
+paddown 26
+wait 600
+padup 26
+wait 400
+turn -3
+wait 150
+snap 04c_voicing_close
+paddown 26
+wait 600
+padup 26
+wait 400
+turn 2
+wait 150
+snap 04d_voicing_wide
+paddown 26
+wait 600
+padup 26
+wait 400
+turn 5
+wait 150
+snap 04e_voicing_clamped_at_smooth
 tap f2
 turn 20
 wait 200
@@ -46,3 +69,4 @@ tap params
 release shift
 wait 300
 snap 10_shift_params_pages
+wav params

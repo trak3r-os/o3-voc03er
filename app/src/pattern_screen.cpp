@@ -189,7 +189,8 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad) noexcept {
       const int oct = perform_ != nullptr ? perform_->octave() : 0;
       const ChordKind bottom = static_cast<ChordKind>(perform_ != nullptr ? perform_->chord_kind() : 0u);
       const unsigned note = pt::note_of_pad(pad, oct, keys);
-      ok = keys ? set_note(p, cursor_, note) : set_chord(p, cursor_, note, pt::kind_of_pad(pad, bottom), Voicing::Close);
+      ok = keys ? set_note(p, cursor_, note) : set_chord(p, cursor_, note, pt::kind_of_pad(pad, bottom),
+                                static_cast<Voicing>(perform_ != nullptr ? perform_->voicing() : 3u));
       break;
     }
     case pt::Lane::Carrier:

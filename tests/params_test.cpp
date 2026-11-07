@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // PARAMS: the pure logic (pages, focus, stepping, text, bars, the over-budget test) and the screen on the engine (a page opens, the encoder moves a
-// value through the engine's parameter, a key that comes later changes nothing, PARAMS / DOWN page it, HELP).
+// value through the engine's parameter, VOICING is the app's own key, PARAMS / DOWN page it, HELP).
 #include <doctest/doctest.h>
 
 #include <o3sdk/app/app.h>
@@ -32,7 +32,8 @@ TEST_CASE("params: three pages of eight, the live keys name a parameter the unit
   CHECK(pm::key_def(0, 2).param == Vocoder::Sub);
   CHECK(pm::key_def(0, 3).param == Vocoder::Tilt);
   CHECK(std::strcmp(pm::key_def(1, 4).name, "VOICING") == 0);
-  CHECK(pm::key_def(1, 4).kind == pm::Kind::Later);
+  CHECK(pm::key_def(1, 4).kind == pm::Kind::App);
+  CHECK(pm::key_def(1, 4).fmt == pm::Fmt::Voicing);
   CHECK(std::strcmp(pm::key_def(1, 1).name, "QUALITY") == 0);
   CHECK(pm::key_def(1, 1).param == Vocoder::Quality);
   CHECK(pm::key_def(2, 4).param == Vocoder::NotesIn);
@@ -40,7 +41,7 @@ TEST_CASE("params: three pages of eight, the live keys name a parameter the unit
   for (unsigned p = 0; p < pm::kPages; ++p) {
     for (unsigned k = 0; k < pm::kKeys; ++k) {
       const pm::KeyDef& d = pm::key_def(p, k);
-      CHECK(pm::focusable(p, k) == (d.kind == pm::Kind::Value));
+      CHECK(pm::focusable(p, k) == (d.kind == pm::Kind::Value || d.kind == pm::Kind::App));
       if (d.kind == pm::Kind::Value) {
         CHECK(d.lo < d.hi);
         CHECK(d.step > 0);
@@ -59,6 +60,39 @@ TEST_CASE("params: a page change is round, and a page opens on its first live ke
   CHECK(pm::first_focus(0) == 0u);
   CHECK(pm::first_focus(1) == 0u);
   CHECK(pm::first_focus(2) == 0u);
+}
+
+TEST_CASE("params: VOICING is an app key, 0..3 by name, clamped at its ends") {
+  const pm::KeyDef& v = pm::key_def(1, 4);
+  CHECK(v.kind == pm::Kind::App);
+  CHECK(pm::focusable(1, 4));
+  CHECK(v.lo == 0);
+  CHECK(v.hi == 3);
+  CHECK(static_cast<int>(o3_voc03er::Voicing::Smooth) == v.hi);  // the default is the last: SMOOTH
+  const char* const names[4] = {"CLOSE", "OPEN", "WIDE", "SMOOTH"};
+  for (int d = v.lo; d <= v.hi; ++d) {
+    char txt[12];
+    pm::format_value(v, d, txt);
+    CHECK(std::strcmp(txt, names[d]) == 0);
+    CHECK(std::strcmp(o3_voc03er::perform::kVoicingNames[d], names[d]) == 0);
+    CHECK(pm::bar_of(v, d) == -1);  // a word, no bar
+  }
+  CHECK(pm::step_display(v, 0, 1, false) == 1);
+  CHECK(pm::step_display(v, 1, 1, false) == 2);
+  CHECK(pm::step_display(v, 2, 1, false) == 3);
+  CHECK(pm::step_display(v, 3, 1, false) == 3);    // no wrap at the top
+  CHECK(pm::step_display(v, 0, -1, false) == 0);   // nor at the bottom
+  CHECK(pm::step_display(v, 3, -2, false) == 1);
+  CHECK(pm::step_display(v, 1, 9, true) == 3);     // SHIFT (coarse) is the same step
+  CHECK(pm::step_display(v, 2, 0, false) == 2);
+  CHECK(pm::step_display(v, 3, 1, false, true) == 0);  // a tap at the end goes round, as on the other keys
+  // PerformScreen holds it: SMOOTH until set, and a value past the range stops at SMOOTH
+  o3_voc03er::PerformScreen ps;
+  CHECK(ps.voicing() == 3u);
+  ps.set_voicing(1);
+  CHECK(ps.voicing() == 1u);
+  ps.set_voicing(9);
+  CHECK(ps.voicing() == 3u);
 }
 
 TEST_CASE("params: display values and parameter values convert both ways") {
@@ -203,7 +237,7 @@ bool has_row(const app::Help& help, app::Button b) {
 }
 }  // namespace
 
-TEST_CASE("params: the screen moves a value through the engine, a key that comes later changes nothing, PARAMS and DOWN page it, HELP is valid") {
+TEST_CASE("params: the screen moves a value through the engine, VOICING takes the encoder, PARAMS and DOWN page it, HELP is valid") {
   sim::Harness h(::o3sdk_app());
   REQUIRE(h.start());
   h.run_ms(100);
@@ -232,9 +266,10 @@ TEST_CASE("params: the screen moves a value through the engine, a key that comes
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Mode) != doctest::Approx(mode0));
-  // VOICING is a key that comes later: a tap moves nothing in the unit, and the encoder stays on MODE
+  // VOICING is the app's key: a tap points the encoder at it, so a turn moves nothing in the unit (the value is PerformScreen's)
   const float mode1 = param(h, Vocoder::Mode);
   tap(h, app::Button::F5);
+  h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Mode) == doctest::Approx(mode1));
   tap(h, app::Button::Params);

@@ -244,7 +244,7 @@ the count; with no slices a palette pad or the encoder says SPEAKS HAS NO SLICES
 
 Built in U9a (`params_logic.h`, `params_screen.cpp`, `tests/params_test.cpp`, `app/scenarios/params.txt`): PARAMS opens on this screen (SHIFT + PARAMS does the same). The F row holds the page's eight keys, the voiceprint is PERFORM's (the same follow rule, `follow_bands`), a tap on a live
 key points the encoder at it and a second tap steps it (a tap at an end goes to the other end), SHIFT + the encoder is coarse, and every value goes through the
-engine parameter PERFORM writes, in PERFORM's units. SHAPE is `Wave` and SPREAD `Detune`, SUB and TILT the unit's ids 62 and 63 (U10b); VOICING is dim with no value and a tap says COMES LATER: the unit's table is full at 64, so it will be the app's.
+engine parameter PERFORM writes, in PERFORM's units. SHAPE is `Wave` and SPREAD `Detune`, SUB and TILT the unit's ids 62 and 63 (U10b); VOICING is the app's own setting, not a unit parameter (the unit's table is full at 64): `Kind::App` in `params_logic.h`, CLOSE, OPEN, WIDE or SMOOTH by name, the encoder steps it 0..3 and stops at the ends, and it lives in `PerformScreen` (`voicing()`, `set_voicing()`). The chord pads play it, the Sounds readout names it, the PATTERN screen records it in the step it writes (steps already stored keep theirs), and it is saved with the octave in the config file (a `VOIC` chunk; a file without one loads as SMOOTH).
  QUALITY 24 draws no warning: section 4k of `docs/PLAN.md` measured it at 150.3k by its mean, inside the budget. No new unit parameter. Unit check owed: that the frame with the page's eight
 values and the voiceprint stays under the budget on the Tracker.
 
@@ -252,7 +252,7 @@ values and the voiceprint stays under the budget on the Tracker.
 
 Three pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,
 SUB, TILT, NOISE, ATTACK, RELEASE, LEVEL). SHAPE: MODE, QUALITY, FREEZE,
-DRY, VOICING, then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. PARAMS again or UP / DOWN page.
+DRY, VOICING (the app's own: CLOSE, OPEN, WIDE, SMOOTH, default SMOOTH), then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. PARAMS again or UP / DOWN page.
 
 ### MASTER
 
