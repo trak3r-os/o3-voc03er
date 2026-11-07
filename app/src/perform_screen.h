@@ -97,6 +97,10 @@ class PerformScreen final : public o3sdk::app::Screen {
   void follow_print(o3sdk::app::Context& ctx, ornoir::Voiceprint& vp) noexcept;
 
   int octave() const noexcept { return octave_; }
+  // The chords' voicing (0..3, the Voicing enum; SMOOTH by default): PARAMS' VOICING key sets it, the chord pads play it and the pattern records it.
+  // Main loop only. Saved with the octave (the config file).
+  unsigned voicing() const noexcept { return voicing_; }
+  void set_voicing(unsigned v) noexcept { voicing_ = v > 3u ? 3u : v; }
   // FILE (U9c2) restores these: the octave is clamped as the keys clamp it, the chord kind is the bottom row's (0..3), `keys` the pads mode.
   void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
   void set_chord_kind(unsigned k) noexcept { bottom_ = static_cast<decltype(bottom_)>(k & 3u); }
@@ -145,6 +149,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (1 GATE, 2 ARP, 3 GLIDE, 4 FORMANT, 5 THRU, 7 PRESET), or kNoShiftFocus; the row stays shown while set
   unsigned focus_ = 5;       // the F key the encoder drives (default F6, CHORD); perform::kBendFocus (8): none, the encoder bends
   int octave_ = 0;
+  unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
   unsigned bottom_ = 0;      // ChordKind of the bottom row
   bool keys_ = false;        // F7 PADS: false CHORDS, true KEYS
   bool strip_ = false;       // BEND ROW (SHIFT + F7): the bottom row is the bend strip

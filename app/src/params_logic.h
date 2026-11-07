@@ -5,7 +5,8 @@
 // reads, and the over-budget test of QUALITY. Apart from the screen so a host test (tests/params_test.cpp) holds it. Nothing here allocates or
 // reads the engine; values go through the unit's own parameter ids, in the units PERFORM writes them (so the two screens never disagree).
 //
-// A key is blank (None), drawn dim with no value (Later: a parameter the unit does not have yet; a tap says COMES LATER), or live (Value). A live
+// A key is blank (None), drawn dim with no value (Later: a key whose setting does not exist yet; a tap says COMES LATER; no row uses it now), or
+// live: Value (an engine parameter) or App (a setting the app holds, because the unit's table is full: VOICING, kept by PerformScreen). A live
 // key has a "display value", an int: a percent for a 0..1 parameter, tenths of a dB for the level, otherwise the parameter itself.
 
 #include "perform_logic.h"
@@ -20,7 +21,7 @@ namespace o3_voc03er::params {
 inline constexpr unsigned kPages = 3;
 inline constexpr unsigned kKeys = 8;
 
-enum class Kind : std::uint8_t { None, Later, Value };
+enum class Kind : std::uint8_t { None, Later, Value, App };
 // How a live key reads and steps.
 enum class Fmt : std::uint8_t {
   Pct,      // a 0..1 parameter as 0..100 %
@@ -33,23 +34,25 @@ enum class Fmt : std::uint8_t {
   Key,      // 0..11, round
   Scale,    // 0..kScaleTableCount - 1, round
   OnOff,    // 0 / 1
+  Voicing,  // 0..3 (CLOSE, OPEN, WIDE, SMOOTH: the chords' Voicing), clamped
 };
 
 struct KeyDef {
   const char* name;
   Kind kind;
-  std::uint16_t param;  // Vocoder::Param (Value only)
+  std::uint16_t param;  // Vocoder::Param (Value only; an App key has no parameter)
   Fmt fmt;
   int lo, hi;           // display values
   int step, coarse;     // per detent, and per detent with SHIFT (and a second tap on the key)
 };
 
 inline constexpr KeyDef kBlank{"", Kind::None, 0, Fmt::Int, 0, 0, 0, 0};
+inline constexpr KeyDef app_key(const char* name, Fmt fmt, int lo, int hi) noexcept { return KeyDef{name, Kind::App, 0, fmt, lo, hi, 1, 1}; }
 inline constexpr KeyDef later(const char* name) noexcept { return KeyDef{name, Kind::Later, 0, Fmt::Int, 0, 0, 0, 0}; }
 
 inline constexpr const char* kPageNames[kPages] = {"CARRIER", "SHAPE", "TUNE"};
 
-// The pages (docs/UI-DESIGN.md, "PARAMS"). SHAPE is Wave as a morph, SPREAD is Detune, SUB and TILT the carrier's (U10). VOICING comes later.
+// The pages (docs/UI-DESIGN.md, "PARAMS"). SHAPE is Wave as a morph, SPREAD is Detune, SUB and TILT the carrier's (U10). VOICING is the app's own (Kind::App).
 inline constexpr KeyDef kTable[kPages][kKeys] = {
     {{"SHAPE", Kind::Value, Vocoder::Wave, Fmt::Wave, 0, 200, 5, 25},
      {"SPREAD", Kind::Value, Vocoder::Detune, Fmt::Int, 0, 100, 1, 10},
@@ -63,7 +66,7 @@ inline constexpr KeyDef kTable[kPages][kKeys] = {
      {"QUALITY", Kind::Value, Vocoder::Quality, Fmt::Int, 8, 24, 1, 4},
      {"FREEZE", Kind::Value, Vocoder::Freeze, Fmt::OnOff, 0, 1, 1, 1},
      {"DRY", Kind::Value, Vocoder::Dry, Fmt::Pct, 0, 100, 2, 10},
-     later("VOICING"), kBlank, kBlank, kBlank},
+     app_key("VOICING", Fmt::Voicing, 0, 3), kBlank, kBlank, kBlank},
     {{"KEY", Kind::Value, Vocoder::Key, Fmt::Key, 0, 11, 1, 1},
      {"SCALE", Kind::Value, Vocoder::Scale, Fmt::Scale, 0, static_cast<int>(kScaleTableCount) - 1, 1, 1},
      {"SPEED", Kind::Value, Vocoder::Speed, Fmt::MsLin, 0, 500, 5, 25},
@@ -76,7 +79,7 @@ inline constexpr const KeyDef& key_def(unsigned page, unsigned key) noexcept { r
 // PARAMS pressed again, or DOWN: the next page; UP: the one before. Round.
 inline constexpr unsigned next_page(unsigned page, int delta = 1) noexcept { return perform::step_wrapped(page % kPages, delta, kPages); }
 
-inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && key_def(page, key).kind == Kind::Value; }
+inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && (key_def(page, key).kind == Kind::Value || key_def(page, key).kind == Kind::App); }
 
 // The key the encoder points at when a page opens: its first live one.
 inline constexpr unsigned first_focus(unsigned page) noexcept {
@@ -118,7 +121,7 @@ inline float to_param(Fmt f, int d) noexcept {
 // `cur` stepped by `delta` detents (SHIFT or a second tap: `coarse`). Round keys wrap; the rest stop at their ends, unless `wrap` (a tap) is set
 // and the value already stands at the end it moves towards, which sends it to the other end.
 inline int step_display(const KeyDef& k, int cur, int delta, bool coarse, bool wrap = false) noexcept {
-  if (delta == 0 || k.kind != Kind::Value) {
+  if (delta == 0 || (k.kind != Kind::Value && k.kind != Kind::App)) {
     return cur;
   }
   const int n = k.hi - k.lo + 1;
@@ -201,6 +204,9 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
       break;
     case Fmt::OnOff:
       put(d != 0 ? "ON" : "OFF");
+      break;
+    case Fmt::Voicing:
+      put(perform::kVoicingNames[u < 4u ? u : 3u]);
       break;
   }
 }
