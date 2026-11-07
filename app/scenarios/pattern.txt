@@ -99,7 +99,15 @@ wait 100
 snap 09_lane_key
 tap f6
 wait 100
-snap 10_cleared
+snap 10a_clear_asks
+tap f2
+wait 100
+snap 10b_not_cleared
+tap f6
+wait 100
+tap f1
+wait 100
+snap 10c_cleared
 tap play
 wait 200
 wav pattern

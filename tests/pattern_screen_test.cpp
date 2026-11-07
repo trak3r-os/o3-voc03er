@@ -250,10 +250,22 @@ TEST_CASE("pattern: LENGTH cuts the steps, CLEAR LANE empties the lane") {
   CHECK(rig.led(24 + 7) != app::kLedOff);  // step 8 is still in
   CHECK(rig.led(36) == app::kLedOff);      // step 9 is out
   CHECK(rig.led(43) == app::kLedOff);
-  tap(*rig.h, app::Button::F6);  // CLEAR LANE
+  tap(*rig.h, app::Button::F6);  // CLEAR LANE asks first
+  CHECK(rig.led(25) != app::kLedOff);  // nothing cleared yet
+  tap(*rig.h, app::Button::F2);        // any other key cancels
+  CHECK(rig.led(25) != app::kLedOff);
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F1);  // F1 confirms
   CHECK(rig.led(25) == app::kLedOff);  // the lane is empty
   CHECK(rig.led(24) == app::kLedMid);  // the cursor stays
   CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: CLEAR LANE's question names the lane as the screen does") {
+  for (unsigned l = 0; l < pt::kLanes; ++l) {
+    const std::string q = pt::kClearPrompt[l];
+    CHECK(q == std::string("CLEAR ") + pt::kLaneNames[l] + " LANE: F1 CONFIRMS");
+  }
 }
 
 TEST_CASE("pattern: pattern pads show the pattern and the one playing; FOLLOW rides the playhead") {

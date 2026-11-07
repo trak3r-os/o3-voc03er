@@ -1323,7 +1323,9 @@ TEST_CASE("sample edit: F3 steps 0 to 100, a detent stops at the ends, a tap goe
   CHECK(se::step_hits(0u, -3, false) == 0u);
   CHECK(se::step_hits(99u, 5, false) == 100u);
   CHECK(se::step_hits(100u, 1, false) == 100u);
-  CHECK(se::step_hits(0u, 1, true) == 10u);
+  CHECK(se::step_hits(0u, 1, true) == 50u);  // the first tap from OFF lands at 50
+  CHECK(se::step_hits(50u, 1, true) == 60u);
+  CHECK(se::step_hits(5u, 1, true) == 10u);
   CHECK(se::step_hits(37u, 1, true) == 40u);
   CHECK(se::step_hits(95u, 1, true) == 100u);
   CHECK(se::step_hits(100u, 1, true) == 0u);
