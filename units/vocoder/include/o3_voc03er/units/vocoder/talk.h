@@ -101,6 +101,7 @@ class Talk {
   bool freeze() const noexcept { return freeze_; }
   std::uint32_t lattice_order() const noexcept { return run_; }
   float breath_open() const noexcept { return open_; }
+  float breath_level() const noexcept { return breath_; }  // the breath's gain now (tests; 0 for a gated, silent-ish modulator)
 
  private:
   void slice(std::uint32_t units) noexcept;
@@ -150,6 +151,12 @@ class Talk {
   float thru_ = 0.0f;
   float breath_ = 0.0f, breath_step_ = 0.0f;  // the breath's level and its ramp over a hop
   std::uint32_t breath_pos_ = 0;              // frames into that ramp
+  // Voiced/unvoiced cue, all in the one audio context. hf_acc_ sums the breath high-pass's h^2 over the hop being run (process, full rate);
+  // at each hop's start hf_done_ takes it, and the publish at the end of the next hop reads hf_done_ (a hop-and-a-bit old, whatever the
+  // call sizes). The publish writes unv_, the breath's share (0 below the level gate), read at the start of each hop of the breath loop.
+  float hf_acc_ = 0.0f, hf_done_ = 0.0f;
+  float unv_ = 0.0f;
+  float car_lp_a_ = 0.0f, car_lp_y_ = 0.0f;   // one-pole low-pass of the low-rate carrier: coefficient (1 - pole), state
   float agc_ = 1.0f;     // the AGC's gain at the last publish
   float level_ = 0.1f;   // AGC: mean-abs follower of the decimated modulator
   float lvl_att_ = 0.0f, lvl_rel_ = 0.0f;

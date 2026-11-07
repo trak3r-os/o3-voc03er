@@ -1029,3 +1029,151 @@ TEST_CASE("robot: the whole run is deterministic, two runs give the same bits") 
   const auto b = run_mode(vo, 400, 3.0f, 1000000, 0.0f, alt);
   CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
 }
+
+namespace {
+
+// A glottal pulse train at f0 (one 1.0 sample per period, with a leaky integral for the glottal tilt) through three resonators: a vowel.
+class PulseVowel {
+ public:
+  explicit PulseVowel(float f0) : f0_(f0) {
+    const Formant f[3] = {{500.0f, 80.0f, 1.0f}, {1500.0f, 100.0f, 1.0f}, {2500.0f, 150.0f, 1.0f}};
+    for (int k = 0; k < 3; ++k) {
+      const float r = std::exp(-3.1415927f * f[k].bw / kFs);
+      c1_[k] = 2.0f * r * std::cos(kPi2 * f[k].hz / kFs);
+      c2_[k] = -r * r;
+      g_[k] = (1.0f - r);
+    }
+  }
+  float next() {
+    phase_ += f0_ / kFs;
+    float x = 0.0f;
+    if (phase_ >= 1.0f) {
+      phase_ -= 1.0f;
+      x = 1.0f;
+    }
+    tilt_ = x + 0.98f * tilt_;  // the glottal pulse's own tilt: a leaky integral, about a saw
+    x = tilt_ * 0.05f;  // the output is scaled by the caller (rms_gain)
+    float y = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+      const float s = g_[k] * x + c1_[k] * y1_[k] + c2_[k] * y2_[k];
+      y2_[k] = y1_[k];
+      y1_[k] = s;
+      y += s;
+    }
+    return y;
+  }
+
+ private:
+  float f0_;
+  float c1_[3] = {}, c2_[3] = {}, g_[3] = {}, y1_[3] = {}, y2_[3] = {};
+  float phase_ = 0.0f, tilt_ = 0.0f;
+};
+
+// White noise through two 2nd-order Butterworth high-passes at 4 kHz: "sss".
+class Sss {
+ public:
+  Sss() {
+    const float w0 = kPi2 * 4000.0f / kFs;
+    const float cw = std::cos(w0), al = std::sin(w0) * 0.70710678f, a0 = 1.0f + al;
+    b0_ = 0.5f * (1.0f + cw) / a0;
+    b1_ = -(1.0f + cw) / a0;
+    a1_ = -2.0f * cw / a0;
+    a2_ = (1.0f - al) / a0;
+  }
+  float next() {
+    float x = n_.next();
+    for (int k = 0; k < 2; ++k) {
+      const float y = b0_ * x + s1_[k];
+      s1_[k] = b1_ * x - a1_ * y + s2_[k];
+      s2_[k] = b0_ * x - a2_ * y;
+      x = y;
+    }
+    return x;
+  }
+
+ private:
+  Noise n_;
+  float b0_ = 0.0f, b1_ = 0.0f, a1_ = 0.0f, a2_ = 0.0f;
+  float s1_[2] = {}, s2_[2] = {};
+};
+
+float mean_square(const std::vector<float>& x, std::size_t from, std::size_t to);
+
+// The gain that brings a PulseVowel to `rms`, measured on a second of it.
+float vowel_rms_gain(float f0, float rms) {
+  PulseVowel v(f0);
+  std::vector<float> x(static_cast<std::size_t>(kFs));
+  for (auto& e : x) e = v.next();
+  return rms / std::sqrt(mean_square(x, 4410, x.size()));
+}
+
+float mean_square(const std::vector<float>& x, std::size_t from, std::size_t to) {
+  double s = 0.0;  // the test's own arithmetic, host only
+  for (std::size_t i = from; i < to; ++i) s += static_cast<double>(x[i]) * static_cast<double>(x[i]);
+  return static_cast<float>(s / static_cast<double>(to - from));
+}
+
+}  // namespace
+
+TEST_CASE("talk: S1, the carrier is ducked under a held sss and the breath is most of the output") {
+  const std::size_t blocks = 500;
+  const std::size_t from = 300 * 64, to = blocks * 64;
+  // The breath depends on the modulator and on the carrier only being open (peak > 1e-3), the carrier path on both. The same modulator with a
+  // saw of 0.5 and with a constant 0.005 (open; the driver's high-pass removes it, so almost nothing of it reaches the lattice) therefore
+  // differs by the carrier path alone, and the constant's output is the breath.
+  const auto run = [&](bool vowel, float car_amp) {
+    Talk& t = *make_talk();
+    t.set_thru(0.0f);
+    PulseVowel v(110.0f);
+    Sss s;
+    Saw saw(110.0f);
+    const float vg = vowel_rms_gain(110.0f, 0.3f);
+    // both modulators sit near the AGC target (mean abs 0.1 after the decimators), clear of its 0.05 and 20 clamps
+    return run_talk(t, [&] { return vowel ? vg * v.next() : 2.0f * s.next(); }, [&] { return car_amp > 0.0f ? car_amp * 2.0f * saw.next() : 0.005f; }, blocks,
+                    [](std::size_t) {});
+  };
+  const auto split = [&](bool vowel, float* breath_ms, float* carrier_ms) {
+    const auto big = run(vowel, 0.5f);
+    const auto small = run(vowel, 0.0f);
+    CHECK(finite(big));
+    std::vector<float> d(big.size());
+    for (std::size_t i = 0; i < d.size(); ++i) d[i] = big[i] - small[i];
+    *breath_ms = mean_square(small, from, to);
+    *carrier_ms = mean_square(d, from, to);
+  };
+  float bv = 0.0f, cv = 0.0f, bs = 0.0f, cs = 0.0f;
+  split(true, &bv, &cv);
+  split(false, &bs, &cs);
+  const float db = 10.0f * std::log10(cs / cv);
+  MESSAGE("carrier under sss vs vowel " << db << " dB (mean squares " << cs << " and " << cv << "); breath mean square under sss " << bs
+          << " against the carrier's " << cs << "; under the vowel " << bv << " against " << cv);
+  CHECK(db < -20.0f);
+  CHECK(bs > cs);  // under sss the breath is the larger part of the output
+}
+
+TEST_CASE("talk: S1, a modulator below the level gate leaves the breath at 0 and the carrier at the floor") {
+  const std::size_t blocks = 400;
+  const auto run = [&](float amp, float* breath_level) {
+    Talk& t = *make_talk();
+    t.set_thru(1.0f);
+    Noise n;
+    Saw saw(110.0f);
+    float bl = 0.0f;
+    auto out = run_talk(t, [&] { return amp * n.next(); }, [&] { return saw.next(); }, blocks,
+                        [&](std::size_t) { bl = std::max(bl, t.breath_level()); });
+    *breath_level = bl;
+    return out;
+  };
+  float bl_quiet = 0.0f, bl_loud = 0.0f, bl_mid = 0.0f;
+  // Noise of +-0.3 uniform is 0.173 rms; at 1e-4 it is 1.7e-5 rms, a mean power near 1e-9 against the gate's 2.5e-9: below it.
+  const auto quiet = run(1.0e-4f, &bl_quiet);
+  const auto mid = run(0.0058f, &bl_mid);  // -60 dBFS rms (0.173 x 0.0058 = 1e-3): above the gate, a consonant-like hop
+  const auto loud = run(1.0f, &bl_loud);
+  const std::size_t from = 200 * 64, to = blocks * 64;
+  MESSAGE("breath level max: quiet " << bl_quiet << ", -60 dBFS " << bl_mid << ", loud noise " << bl_loud);
+  MESSAGE("output peak: quiet " << peak(quiet, from) << ", -60 dBFS " << peak(mid, from) << ", loud " << peak(loud, from));
+  CHECK(bl_quiet == 0.0f);
+  CHECK(bl_loud > 0.0f);
+  CHECK(finite(quiet));
+  CHECK(mean_square(quiet, from, to) < mean_square(loud, from, to) * 1.0e-6f);
+}
