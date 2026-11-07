@@ -248,6 +248,25 @@ Metrics (renders of `ours_talk_saw110` / `ours_talk_Am` from speech.wav, `metric
 
 Cost [estimate, not a measurement]: the second pole is one multiply-add per frame (64 per block, about 200 cycles with the loads); the compressor is the ROBOT's, per sample one abs, one compare, one multiply, per 16-frame segment two divides and two square roots (about 4 segments x 100 cycles + 64 x 4 cycles = 650 cycles a block); together under 1,000 cycles a block, about 0.7 % of the 138k read; to be measured on the unit. Owed: by ear (the release, and the air above 4 kHz the consonants lost), and the CPU and the level change on the unit.
 
+**S4, the tube resonance.** A damped feedback comb on the low-rate carrier (`c2`, after the S2 pole and before the lattice), `y = x + g * LP(y[n - D])`, in `TubeComb` (`talk.h`; ring of 64 floats, 256 B). D = round(2 L / c x 11,025) = 58 for L = 0.9 m and c = 343 m/s, so the peaks sit every 11,025 / 58 = 190 Hz; the loop's one-pole low-pass is at 2 kHz, so the peaks fade towards the top. The output is scaled by sqrt(1 - g^2), which keeps the level of white noise through it at 0 dB (the test checks +-1 dB); a steady tone at a peak still gains up to 1/(1 + g) x sqrt(1 - g^2) against its input, and one in a dip loses. `kTubeG` (0.33) is the switch: 0 bypasses the comb with no arithmetic. Deviation from the brief: g = 0.35 gives a peak-to-dip of (1 + g) / (1 - g) = 6.35 dB, above the 6 dB limit; 0.33 gives 5.87 dB measured by the test. Starting value, for the ear.
+
+**S5, the microphone and the leakage.** (a) A +3 dB low shelf below 200 Hz on TALK's output, as a one-pole split, `out += k * LP200(out)` with k = 10^(3/20) - 1 (`kMicShelfDb`, 0 turns it off): the test measures +2.47 dB at 110 Hz and +0.16 dB at 4.4 kHz (a one-pole shelf is under its nominal +3 dB at 110 Hz, and above it only a trace). (b) The leakage: the carrier before the driver (c0, the pre-drive signal) through a one-pole low-pass at 700 Hz, at -32 dB against the voiced output, summed into TALK's output whenever the carrier plays, the mouth shut or not (`kLeakDb`, `kLeakOn` 0 turns it off). The -32 dB is against what Talk outputs (the vocoder's `kTalkGain` follows Talk), so the carrier is scaled by `kOutScale` = 19.5, which the S5 test calibrates on a saw at 110 Hz and a vowel at 0.1 rms: with a silent modulator the leak is 31.7 dB under the voiced output (the test asserts 28-36). A first try with the leak against the raw carrier came out only 6.2 dB under the voice, and `kOutScale` 28 (the figure of `kTalkGain`) 35.1 dB, too near the limit. Two existing tests that expect exact silence from a silent modulator (`talk: silence in the modulator...`, `talk: S1, a modulator below the level gate...`) now switch the realism off with `set_realism(0, 0, 0)`; the test seam `Talk::set_realism(tube_g, shelf_k, leak)` replaces the constants and is what the S4/S5 tests use.
+
+Tests (`tests/talk_test.cpp`): comb peaks 189.9 Hz apart, peak-to-dip 5.87 dB, 20 peaks in the test's band; all three off give the S3 output bit-exact (an FNV-1a digest of a fixed signal, 59E8B1EB, equal to the one from main's `talk.cpp` built alone), and each one on changes it.
+
+Metrics, S3 (S3b renders) against S4 + S5 (`metrics2.py`, 8.4 s of `ours_talk_*` from speech.wav):
+
+| | tilt dB/oct | contrast dB | hfUV dB | >8k dB | >12k dB | mod_idx % | rms dBFS |
+|---|---|---|---|---|---|---|---|
+| S3 saw110 | -2.64 | 26.20 | 8.02 | -33.48 | -63.01 | 76.90 | -21.31 |
+| S4+S5 saw110 | -2.87 | 26.88 | 8.14 | -33.96 | -63.27 | 76.42 | -20.83 |
+| S3 Am | -3.04 | 25.82 | 8.49 | -36.50 | -66.04 | 73.38 | -18.91 |
+| S4+S5 Am | -3.24 | 26.51 | 8.99 | -37.51 | -66.73 | 69.72 | -18.08 |
+
+Contrast stays above 23 dB. The rms goes up 0.5-0.8 dB (the shelf and the leak add low-frequency energy; the comb is level-neutral for noise); the Am mod_idx loses 3.7 points, probably because the leak fills the pauses between words (not isolated by a render with the leak alone). Renders: `S45_talk_{saw110,Am}.wav` (both on), `S4_talk_saw110.wav`, `S5_talk_saw110.wav` in the clarity scratch folder.
+
+Cost [estimate, not a measurement]: the comb is about 12 cycles per low-rate frame x 16 = 200 cycles a block; the shelf about 6 cycles x 64 = 400; the leak's low-pass and sum about 8 cycles x 64 = 500; together about 1,100 cycles a block, under 1 % of the 138k read. Owed: by ear (all five constants are starting values: kTubeG, kMicShelfDb, kLeakDb, kLeakHz, the tube length), and the CPU and the level change on the unit; it needs more testing.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.

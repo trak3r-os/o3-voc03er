@@ -23,6 +23,22 @@ namespace {
 constexpr float kPreEmph = 0.9f;
 constexpr float kCarEmph = 0.1f;        // first difference of the carrier: c - 0.1 c[-1] (was 0.2; S2's low-pass takes the top, a starting value)
 constexpr float kCarLpHz = 3500.0f;     // S2: one-pole low-pass on the low-rate carrier, the tube's top (a starting value)
+// S4, the tube between the driver and the mouth: a damped feedback comb on the low-rate carrier. The delay is the round trip 2 L / c in low-rate
+// samples (58 at 11.025 kHz: peaks every fs/4 / 58 = 190 Hz). kTubeG 0 turns it off. All starting values for the maintainer's ear.
+constexpr float kTubeG = 0.33f;          // feedback gain; the peak-to-dip of the comb is (1 + g) / (1 - g) at most, 5.9 dB (0.35 would give 6.4 dB)
+constexpr float kTubeLengthM = 0.9f;     // L
+constexpr float kSoundSpeed = 343.0f;    // c, m/s
+constexpr float kTubeDampHz = 2000.0f;   // one-pole low-pass inside the loop
+// S5, the microphone. kMicShelfDb: low shelf below kMicShelfHz (proximity effect), 0 turns it off. kLeakDb: the carrier, before the driver, through a
+// one-pole low-pass at kLeakHz, summed into the output whenever the carrier plays, the mouth shut or not; kLeakOn 0 turns it off. kLeakDb is
+// against the voiced output of Talk, which is the carrier's level divided by kOutScale at the point where the leak is added (the vocoder's
+// kTalkGain follows Talk's output), so the leak's gain here is 10^(kLeakDb/20) / kOutScale.
+constexpr float kMicShelfDb = 3.0f;
+constexpr float kMicShelfHz = 200.0f;
+constexpr float kLeakDb = -32.0f;
+constexpr float kLeakHz = 700.0f;
+constexpr float kLeakOn = 1.0f;
+constexpr float kOutScale = 19.5f;      // the carrier over the voiced output of Talk, measured by the S5 test (saw 110, vowel at 0.1 rms)
 constexpr float kR0Boost = 1.0001f;
 constexpr float kLagHz = 60.0f;
 // Mean power of the pre-emphasised, decimated modulator below which the analysis calls it silence. The old gate was 1e-9 (-90 dB) at full
@@ -108,6 +124,12 @@ void Talk::prepare(float sample_rate) noexcept {
   open_step_ = 1.0f / (kOpenMs * 0.001f * sample_rate);
   br_lp_a_ = 1.0f - std::exp(-kPi2 * kBreathTopHz / sample_rate);  // both poles of the cascade take this one coefficient
   car_lp_a_ = 1.0f - std::exp(-kPi2 * kCarLpHz / fl);
+  {
+    tube_.prepare(fl, kTubeLengthM, kTubeDampHz);
+    shelf_a_ = 1.0f - std::exp(-kPi2 * kMicShelfHz / sample_rate);
+    leak_a_ = 1.0f - std::exp(-kPi2 * kLeakHz / sample_rate);
+    set_realism(kTubeG, std::pow(10.0f, kMicShelfDb / 20.0f) - 1.0f, kLeakOn * std::pow(10.0f, kLeakDb / 20.0f) / kOutScale);
+  }
   lvl_att_ = 1.0f - std::exp(-1000.0f / (kAgcAttackMs * fl));
   lvl_rel_ = 1.0f - std::exp(-1000.0f / (kAgcReleaseMs * fl));
   level_ = kAgcTarget;  // starts at the target: unity gain, no blast at the first loud sample
@@ -115,9 +137,52 @@ void Talk::prepare(float sample_rate) noexcept {
   reset();
 }
 
+void TubeComb::prepare(float low_rate, float length_m, float damp_hz) noexcept {
+  float d = std::floor(2.0f * length_m / kSoundSpeed * low_rate + 0.5f);
+  d = d < 1.0f ? 1.0f : (d > static_cast<float>(kRing - 1u) ? static_cast<float>(kRing - 1u) : d);
+  d_ = static_cast<std::uint32_t>(d);
+  lp_a_ = 1.0f - std::exp(-kPi2 * damp_hz / low_rate);
+  reset();
+}
+
+void TubeComb::reset() noexcept {
+  for (auto& v : ring_) v = 0.0f;
+  pos_ = 0;
+  lp_y_ = 0.0f;
+}
+
+void TubeComb::set_gain(float g) noexcept {
+  g_ = g;
+  norm_ = std::sqrt(1.0f - g * g);
+}
+
+void TubeComb::process(float* x, std::uint32_t n) noexcept {
+  if (g_ == 0.0f) return;
+  float lp = lp_y_;
+  std::uint32_t pos = pos_;
+  const float g = g_, nrm = norm_, la = lp_a_;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    lp += mulb(la, ring_[(pos - d_) & (kRing - 1u)] - lp);
+    const float y = flush(x[i] + mulb(g, lp));
+    ring_[pos & (kRing - 1u)] = y;
+    ++pos;
+    x[i] = mulb(nrm, y);
+  }
+  pos_ = pos & (kRing - 1u);
+  lp_y_ = flush(lp);
+}
+
+void Talk::set_realism(float tube_g, float shelf_k, float leak) noexcept {
+  tube_.set_gain(tube_g);
+  shelf_k_ = shelf_k;
+  leak_g_ = leak;
+}
+
 void Talk::reset() noexcept {
   for (auto& v : ring_) v = 0.0f;
   for (auto& v : win_) v = 0.0f;
+  tube_.reset();
+  shelf_y_ = leak_y_ = 0.0f;
   for (auto& v : r_) v = 0.0f;
   for (std::uint32_t m = 0; m < kMaxStages + 2; ++m) {
     k_[m] = 0.0f;
@@ -373,13 +438,21 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   float m0[kMaxFrames], c0[kMaxFrames];
   float m1[kMaxFrames / 2], c1[kMaxFrames / 2], m2[kMaxFrames / 4], c2[kMaxFrames / 4];
   float y2[kMaxFrames / 4], y1[kMaxFrames / 2];
+  float lk[kMaxFrames];  // S5: the leakage, the carrier before the driver through its low-pass
   float peak = 0.0f;
+  const bool leaking = leak_g_ != 0.0f;
+  float ly = leak_y_;
   for (std::uint32_t i = 0; i < n; ++i) {
     m0[i] = Bands::clean(mod[i]);
     c0[i] = Bands::clean(car[i]);
     const float a = c0[i] < 0.0f ? -c0[i] : c0[i];
     peak = a > peak ? a : peak;
+    if (leaking) {
+      ly += mulb(leak_a_, c0[i] - ly);
+      lk[i] = ly;
+    }
   }
+  leak_y_ = flush(ly);
   // The driver, at the full rate and before the halfbands: the carrier's peak above was read before it, so the breath's gate is unchanged.
   drive_.process(c0, n);
   const bool odd1 = odd1_, odd2 = odd2_;
@@ -399,6 +472,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
     }
     car_lp_y_ = y;
   }
+  tube_.process(c2, n2);  // S4
   for (std::uint32_t i = 0; i < n2; ++i) tick(m2[i], c2[i], y2[i]);
 
   for (std::uint32_t i = 0; i < n1; ++i) y1[i] = 0.0f;
@@ -456,6 +530,18 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         out[i] += mulb(breath * open, bl2);
       }
     }
+  }
+  if (shelf_k_ != 0.0f) {  // S5a: out += k LP(out), the lows below the corner up by 20 log(1 + k) dB
+    float sy = shelf_y_;
+    const float a = shelf_a_, k = shelf_k_;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      sy += mulb(a, out[i] - sy);
+      out[i] += mulb(k, sy);
+    }
+    shelf_y_ = flush(sy);
+  }
+  if (leaking) {  // S5b
+    for (std::uint32_t i = 0; i < n; ++i) out[i] += mulb(leak_g_, lk[i]);
   }
   breath_ = breath;
   breath_step_ = breath_step;
