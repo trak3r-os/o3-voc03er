@@ -12,7 +12,6 @@ using o3sdk::core::ParamCurve;
 using o3sdk::core::ParamUnit;
 using o3sdk::dsp::Ramp;
 
-constexpr const char* kWaveNames[] = {"SAW", "PULSE"};
 constexpr const char* kModeNames[] = {"BANDS", "TALK", "TUNE", "ROBOT"};
 constexpr const char* kFreezeNames[] = {"OFF", "ON"};
 constexpr const char* kKeyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -59,13 +58,13 @@ constexpr o3sdk::core::ParamDesc region_trig_row(const char* name) { return loop
 constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE", "VOICE"};
 
 constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
-    {"WAVE", "", kWaveNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"WAVE", "", nullptr, nullptr, 0.0f, 2.0f, 0.0f, 40, 4, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},  // 0 SAW, 1 PULSE, 2 NARROW; a morph between (names: the app)
     {"NOISE", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"ATTACK", "ms", nullptr, nullptr, 1.0f, 500.0f, 5.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Log, 0, 0},
     {"RELEASE", "ms", nullptr, nullptr, 5.0f, 2000.0f, 80.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Log, 0, 0},
     {"DRY", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"LEVEL", "dB", nullptr, nullptr, -48.0f, 6.0f, -6.0f, 108, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},
-    {"DETUNE", "ct", nullptr, nullptr, 0.0f, 20.0f, 8.0f, 20, 5, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"DETUNE", "ct", nullptr, nullptr, 0.0f, 100.0f, 8.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},  // SPREAD: oscillator 2 at +ct, 3 at -ct
     {"MODE", "", kModeNames, nullptr, 0.0f, 3.0f, 0.0f, 3, 1, 4, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"QUALITY", "", nullptr, nullptr, 8.0f, 24.0f, 16.0f, 16, 2, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"FREEZE", "", kFreezeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
@@ -97,6 +96,8 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     // Load: slot x Loop::kMaxSamples + length, length 1..kMaxSamples (see load_event). 0 does nothing: the default that prepare() and
     // Engine::start() replay is harmless.
     {"LOAD", "", nullptr, nullptr, 0.0f, kBankMax, 0.0f, 2048, 16, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"SUB", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
+    {"TILT", "dB", nullptr, nullptr, -12.0f, 12.0f, 0.0f, 48, 4, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"VOCODER", o3sdk::dsp::UnitKind::Instrument, kParams, Vocoder::kParamCount, nullptr, 0};
@@ -227,7 +228,7 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
     load_event(v);
     return;
   }
-  if (id >= R1Start) {
+  if (id >= R1Start && id < Sub) {
     region_param_event(id, v, 0);
     return;
   }
@@ -239,7 +240,13 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       live_r_ = v >= 0.5f;
       break;
     case Wave:
-      carrier_.set_wave(v >= 0.5f ? Carrier::Wave::Pulse : Carrier::Wave::Saw);
+      carrier_.set_shape(v);
+      break;
+    case Sub:
+      carrier_.set_sub(v);
+      break;
+    case Tilt:
+      carrier_.set_tilt_db(v);
       break;
     case Noise:
       noise_user_ = v;
