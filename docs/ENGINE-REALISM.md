@@ -185,6 +185,22 @@ Test: `tests/voice_carrier_test.cpp` (a sung sine outside the scale gives the sn
 
 Owed: by ear, CPU on the unit, onset lag and octave errors on a real microphone.
 
+## TALK as a talkbox, S1 and S2
+
+A real talkbox puts the carrier through the mouth, so a consonant that is air (s, f, sh) is never the carrier: the sound is the player's own breath. The LPC route gave the opposite, because the carrier's level follows the residual (`gain_t_` is sqrt of the prediction error), and noise is the least predictable input there is. Two changes, no new parameter:
+
+- S1, the duck. Per hop (128 frames) the 5 kHz breath high-pass's h^2 is summed (hf, per full-rate frame) and set against r0 of the analysis window (lf, mean power): `ratio = hf / (lf + eps)`, one divide per hop. `gd = clamp((kDuckT1 - ratio) / (kDuckT1 - kDuckT0), kDuckFloor, 1)` multiplies `gain_t_`, and the breath level becomes `kBreath x (kBreathVoiced + (1 - kBreathVoiced) x (1 - gd))` of the old rule, so the breath is the larger part of a fricative and a quarter of its old share under a vowel. The hf read at a publish is the one of the hop before the last one (a hop and a half old, the same for any call split, so the output stays independent of it).
+- The absolute gate (from the review). A hop counts as unvoiced only when `lf + hf` is above `kUnvGate` = 10 x `kGate`. A silent modulator's gap noise has a flat spectrum and would read as unvoiced; below the gate `gd = kDuckFloor` and the breath is 0 (`breath_level()`). The gate is a mean power (2.5e-9), about -86 dBFS rms for white noise; a -60 dBFS noise is above it, so it is judged by its spectrum, not gated.
+- S2. A one-pole low-pass at 3.5 kHz on the low-rate carrier before the lattice (coefficient at prepare, no libm per sample), and `kCarEmph` 0.2 to 0.1: the lattice's input is no longer rich in the highs that a consonant's noise should carry alone.
+
+Constants, all starting values that the maintainer's ear and a CPU read on the unit must confirm, not tuned against a recording: `kDuckT0` 0.03 and `kDuckT1` 0.3 (the ratio at which the carrier is fully on and at its floor; a held synthetic vowel reads about 0.001, held "sss" 3 to 5), `kDuckFloor` 0.05 (-26 dB), `kBreath` 0.5, `kBreathVoiced` 0.25, `kUnvGate`, `kCarLpHz` 3500, `kCarEmph` 0.1. The floor is the briefed 0.05: lowering it to 0.003 gave -54 dB in the test but that is a bench number, not a judgement of what sounds right.
+
+Tests (`tests/talk_test.cpp`): a pulse train through three formant resonators against white noise high-passed above 4 kHz, with the same carrier. The carrier part (the output with the saw minus the output with a constant carrier that opens the breath but is removed by the driver's high-pass, so the difference is the carrier path alone) is 30 dB under the vowel's with floor 0.05, and the breath is the larger part of the output under sss. A modulator below the gate leaves `breath_level()` at 0 and the output silent. The first draft of the sss test took a small saw as the breath reference; it was a different breath (the gate reads the carrier's peak), which hid the duck.
+
+Cost [estimate, not a measurement]: per 64-frame block one multiply-add more per frame in the breath loops (64 x about 3), the low-pass on 16 low-rate samples (about 50), one divide a hop; about 250 cycles a block, under 0.2 % of the 138k read in 37fa85f. To be read on the unit.
+
+Owed: by ear on a real microphone (fricatives, plosives, whisper, the hop-and-a-half lag of the duck on a fast "s" to vowel), and the CPU on the unit.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.

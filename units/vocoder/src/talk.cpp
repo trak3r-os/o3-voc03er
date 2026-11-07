@@ -21,7 +21,8 @@ static_assert(Talk::kWin % 4u == 0u && Talk::kHop % 4u == 0u, "the analysis goes
 
 namespace {
 constexpr float kPreEmph = 0.9f;
-constexpr float kCarEmph = 0.2f;        // first difference of the carrier: c - 0.2 c[-1]
+constexpr float kCarEmph = 0.1f;        // first difference of the carrier: c - 0.1 c[-1] (was 0.2; S2's low-pass takes the top, a starting value)
+constexpr float kCarLpHz = 3500.0f;     // S2: one-pole low-pass on the low-rate carrier, the tube's top (a starting value)
 constexpr float kR0Boost = 1.0001f;
 constexpr float kLagHz = 60.0f;
 // Mean power of the pre-emphasised, decimated modulator below which the analysis calls it silence. The old gate was 1e-9 (-90 dB) at full
@@ -32,7 +33,17 @@ constexpr float kErrFloor = 1.0e-7f;  // of r0: about float's resolution, below 
 constexpr float kPi2 = 6.2831853f;
 constexpr float kWinRise = 0.8f;        // the window rises over this part (sin^2) and falls over the rest (cos^2)
 constexpr float kGainK = 2.307f;          // the lattice's level against the breath: fixes their balance (docs/ENGINE-REALISM.md)
-constexpr float kBreath = 0.3f;         // the breath's level against the modulator's high band
+constexpr float kBreath = 0.5f;         // the breath's level against the modulator's high band (was 0.3; a starting value, S1)
+// S1, the voiced/unvoiced duck. ratio = (mean h^2 of the 5 kHz high-pass, per full-rate frame) / (mean power of the window, r0 / sumw2).
+// Every constant below is a starting value for the maintainer's ear to move.
+constexpr float kDuckT0 = 0.03f;        // at or below this ratio the carrier is not ducked
+constexpr float kDuckT1 = 0.3f;         // at or above it the carrier is ducked to the floor
+constexpr float kDuckFloor = 0.05f;     // -26 dB: the gain a hop of fricative-like content keeps (a starting value: ear and unit read)
+constexpr float kDuckSlope = 1.0f / (kDuckT1 - kDuckT0);
+constexpr float kBreathVoiced = 0.25f;  // the breath's share while voiced; it rises to 1 as the duck closes
+constexpr float kUnvGate = 10.0f * kGate;  // lf + hf (both as mean powers) at or below this: a gap, not a consonant: duck to the floor, breath 0
+constexpr float kRatioEps = kGate;      // keeps the divide finite when lf is 0
+constexpr float kHopFrames = 128.0f;    // the hf accumulator's hop, as Talk::kHop * 4
 constexpr float kBreathHz = 5000.0f;
 constexpr float kOpenPeak = 1.0e-3f;    // the carrier's peak over a call above which the breath is open
 constexpr float kOpenMs = 5.0f;
@@ -92,6 +103,7 @@ void Talk::prepare(float sample_rate) noexcept {
   hp_a1_ = -2.0f * cw / a0;
   hp_a2_ = (1.0f - al) / a0;
   open_step_ = 1.0f / (kOpenMs * 0.001f * sample_rate);
+  car_lp_a_ = 1.0f - std::exp(-kPi2 * kCarLpHz / fl);
   lvl_att_ = 1.0f - std::exp(-1000.0f / (kAgcAttackMs * fl));
   lvl_rel_ = 1.0f - std::exp(-1000.0f / (kAgcReleaseMs * fl));
   level_ = kAgcTarget;  // starts at the target: unity gain, no blast at the first loud sample
@@ -121,6 +133,7 @@ void Talk::reset() noexcept {
   for (auto& v : acc_) v = 0.0f;
   emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
   hp_s1_ = hp_s2_ = 0.0f;
+  hf_acc_ = hf_done_ = unv_ = car_lp_y_ = 0.0f;
   open_ = breath_ = breath_step_ = 0.0f;
   breath_pos_ = 0;
   agc_ = agc_gain(level_);  // level_ stays: its estimate of the input beats unity gain after a pause, as in Bands::restart
@@ -247,8 +260,18 @@ void Talk::publish() noexcept {
     for (std::uint32_t m = 1; m <= q; ++m) err *= 1.0f - kt_[m] * kt_[m];
   }
   agc_ = agc_gain(level_);
+  // S1: the carrier ducks when the modulator is breath-like (much high band against the window's power) and above the level gate.
+  float gd = kDuckFloor;
+  unv_ = 0.0f;
+  const float hf = hf_done_ * (1.0f / kHopFrames);
+  if (!silent && power + hf > kUnvGate) {
+    const float ratio = hf / (power + kRatioEps);  // the hop's one divide
+    gd = (kDuckT1 - ratio) * kDuckSlope;
+    gd = gd > 1.0f ? 1.0f : (gd < kDuckFloor ? kDuckFloor : gd);
+    unv_ = kBreathVoiced + (1.0f - kBreathVoiced) * (1.0f - gd);
+  }
   if (!silent) {
-    gain_t_ = kGainK * agc_ * std::sqrt((err > 0.0f ? err : 0.0f) / sumw2_);
+    gain_t_ = gd * kGainK * agc_ * std::sqrt((err > 0.0f ? err : 0.0f) / sumw2_);
   } else {
     gain_t_ = 0.0f;
   }
@@ -361,6 +384,15 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   odd1_ = ((static_cast<unsigned>(odd1) + n) & 1u) != 0u;
   odd2_ = ((static_cast<unsigned>(odd2) + n1) & 1u) != 0u;
 
+  {  // S2: the carrier's top, one pole at the low rate
+    float y = car_lp_y_;
+    const float g = car_lp_a_;
+    for (std::uint32_t i = 0; i < n2; ++i) {
+      y += mulb(g, c2[i] - y);
+      c2[i] = y;
+    }
+    car_lp_y_ = y;
+  }
   for (std::uint32_t i = 0; i < n2; ++i) tick(m2[i], c2[i], y2[i]);
 
   for (std::uint32_t i = 0; i < n1; ++i) y1[i] = 0.0f;
@@ -374,13 +406,15 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   // most 64 of the hop's 128), so the output does not depend on how the frames are split into calls.
   float breath = breath_, breath_step = breath_step_;
   std::uint32_t breath_pos = breath_pos_;
-  float s1 = hp_s1_, s2 = hp_s2_, open = open_;
+  float s1 = hp_s1_, s2 = hp_s2_, open = open_, hf = hf_acc_;
   const float b0 = hp_b0_, b1 = hp_b1_, b2 = hp_b2_, a1 = hp_a1_, a2 = hp_a2_;  // in locals: a store to out must not reload them
   const float ostep = open_step_;
   for (std::uint32_t i = 0; i < n;) {
     constexpr std::uint32_t kGrid = kHop * 4u;
     if (breath_pos == 0u) {
-      breath_step = (kBreath * (0.5f + 0.5f * thru_) * agc_ - breath) * (1.0f / static_cast<float>(kGrid));
+      hf_done_ = hf;  // the hop that just ended; the next publish, at this hop's end, reads it
+      hf = 0.0f;
+      breath_step = (kBreath * unv_ * (0.5f + 0.5f * thru_) * agc_ - breath) * (1.0f / static_cast<float>(kGrid));
     }
     const std::uint32_t left = kGrid - breath_pos;
     const std::uint32_t run = n - i < left ? n - i : left;
@@ -392,6 +426,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         const float h = mulb(b0, x) + s1;
         s1 = mulb(b1, x) - mulb(a1, h) + s2;
         s2 = mulb(b2, x) - mulb(a2, h);
+        hf += mulb(h, h);
         breath += breath_step;
         out[i] += mulb(breath * open, h);
       }
@@ -402,6 +437,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
         s1 = mulb(b1, x) - mulb(a1, h) + s2;
         s2 = mulb(b2, x) - mulb(a2, h);
         open = open < target ? (open + ostep < target ? open + ostep : target) : (open - ostep > target ? open - ostep : target);
+        hf += mulb(h, h);
         breath += breath_step;
         out[i] += mulb(breath * open, h);
       }
@@ -413,7 +449,8 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   hp_s1_ = flush(s1);
   hp_s2_ = flush(s2);
   open_ = open;
-  macs_last_ += n * 12u;
+  hf_acc_ = hf;
+  macs_last_ += n * 13u;
 
   // Denormals: states decay to zero under silence; flush them once a block.
   for (std::uint32_t i = 0; i <= run_; ++i) b_[i] = flush(b_[i]);
@@ -422,6 +459,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   for (auto& h : interp_) settle(h);
   emph_prev_ = flush(emph_prev_);
   car_prev_ = flush(car_prev_);
+  car_lp_y_ = flush(car_lp_y_);
   gain_ = flush(gain_);
   level_ = flush(level_);
 }
