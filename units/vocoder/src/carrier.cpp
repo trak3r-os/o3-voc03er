@@ -24,9 +24,10 @@ struct Edge {
   float dt;
   float rdt;  // 1 / dt
   float hi;   // 1 - dt
+  float clear;  // 0.25 - dt, less a margin: see osc<false>
 };
 
-__attribute__((always_inline)) inline Edge make_edge(float dt) noexcept { return Edge{dt, 1.0f / dt, 1.0f - dt}; }
+__attribute__((always_inline)) inline Edge make_edge(float dt) noexcept { return Edge{dt, 1.0f / dt, 1.0f - dt, 0.25f - dt - 1.0e-6f}; }
 
 // PolyBLEP residual for a unit step at phase 0 (t in [0, 1)); the edge windows are the rare path.
 __attribute__((always_inline)) inline float blep(float t, const Edge& e) noexcept {
@@ -46,9 +47,15 @@ __attribute__((always_inline)) inline float osc(float phase, const Edge& e) noex
   if constexpr (Saw) {
     return (phase + phase - 1.0f) - blep(phase, e);
   } else {
+    // One test for the common case: farther than dt from the edges at 0, 0.5 and 1, where both residuals are exactly 0. The margin keeps it inside the
+    // windows blep() tests, so the output is the same as without it; a dt of 0.25 or more never takes it.
+    const float square = phase < 0.5f ? 1.0f : -1.0f;
+    if (__builtin_expect(__builtin_fabsf(__builtin_fabsf(phase - 0.5f) - 0.25f) < e.clear, 1)) {
+      return square;
+    }
     float p2 = phase + 0.5f;
     p2 -= p2 >= 1.0f ? 1.0f : 0.0f;
-    return (phase < 0.5f ? 1.0f : -1.0f) + blep(phase, e) - blep(p2, e);
+    return square + blep(phase, e) - blep(p2, e);
   }
 }
 

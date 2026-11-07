@@ -317,6 +317,32 @@ Candidate 37fa85f, kit ef6b1a0, SRAM_U margin 10,408 B. The figures are in `docs
 - **`pat A 3 car synth`** sets the step and a wrong word prints the words.
 - **SAMPLE EDIT's picture was not read.** The tester stayed on the old PLAY screen, which keeps the Sample keys for itself until U9, and reported that the image had no such screen. It has: open PERFORM first. The chunked upload on the FT812 is still owed.
 
+## 4l. The carrier's stack on the unit, 2026-11-07
+
+Three candidates in one day, kit ef6b1a0, `render last` mean / worst peak over three reads, percent of the 261,224-cycle block, BANDS, 8 notes and 4 loops unless stated. No underrun and no shed in any read.
+
+| Row | 4ce71cd | ca80241 | d9f1f73 |
+|-----|---------|---------|---------|
+| Defaults (limit 69 % at the peak) | 189k / 75.7 | 181k / 73.7 | 163k / 67.5 |
+| 6 notes, defaults | 200k / 82.8 | 173k / 71.4 | 156k / 65.3 |
+| SPREAD 0 | 165k / 67.2 | 157k / 65.2 | 156k / 65.2 |
+| SUB 100 | | 182k / 74.4 | 173k / 70.2 |
+| TILT +6 | | 180k / 73.8 | 170k / 69.9 |
+| SHAPE 0.50 | | 198k / 80.8 | 190k / 77.4 |
+| SHAPE 1.00, the pulse | | | 197k / 81.8 |
+| SPREAD 30, SUB 100, TILT +6, SHAPE 0.50 | 237k / 94.2 | 208k / 85.5 | 197k / 79.6 |
+| ROBOT | 193k / 80.0 | 185k / 76.7 | 170k / 70.2 |
+| TALK Q24 | 183k / 74.4 | 176k / 70.8 | 158k / 66.6 |
+| TALK with SYNTH | 173k / 70.6 | | 146k / 62.0 |
+| TUNE with VOICE | about 190k / 75.9 | 104k / 73.4 | 141k / 57.8 |
+
+The modulator differs between rounds (a slot on ca80241, USB noise on d9f1f73), and a silent input read 6k less, so a difference of a few thousand between columns means little.
+
+- **The estimates were wrong by a factor of five.** U10a's plan said +4,352 cycles at eight notes; the unit read about +24,000. A voice on the generic `run_ext` cost about 11,200 a block against about 5,000 on a specialised path.
+- **-Os was the larger cost.** It left the rare BLEP branches inside the sample loops, and a store to `out[]` forced the edges to be reloaded each sample. Local copies, `__restrict` and -O2 on the five sample-loop files took the two-oscillator loop from 55 instructions to 24 on the common path, and every engine gained from it (TALK Q24 by about 18k).
+- **A cost is measured on the unit before a plan is built on it.** The plan's constants are still estimates, and a third oscillator now reads far cheaper than `kThird` says: defaults are only 7k over SPREAD 0.
+- **On 4ce71cd these rows also passed:** SAMPLE EDIT, the card (SAVE WAVS about 2 s a slot, LOAD restores WAVs and cuts), SONG's stop, MASTER and the radio, PATTERN F8. The landing step of a SONG change could not be measured.
+
 ## 5. How the work runs
 
 Lanes of one or two subagents, Sonnet for code and review, Haiku for mechanical checks. A brief names the files; agents use LSP and targeted reads
