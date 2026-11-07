@@ -7,7 +7,7 @@ Everything here is written in English.
 
 ## Read in this order
 
-1. `README.md`: what this instrument is and how to build it. Replace its description with the real one; a design document goes in `docs/`.
+1. `README.md`: what this instrument is and how to build it; `docs/MANUAL.md` is the user's manual and `docs/UI-DESIGN.md` the screens and controls.
 2. `../o3-sdk/docs/NEW-APP.md`: how to add a unit, a screen, controls, a scenario and a test, then build, gate and install the image.
 3. `../o3-sdk/docs/FRAMEWORK.md`: the reference; section 10 says which hardware capabilities exist and which are verified on the unit.
 4. The kit headers you use: their comments are the API reference (`../o3-sdk/kit/{dsp,app,ui,core}/include/o3sdk/...`).

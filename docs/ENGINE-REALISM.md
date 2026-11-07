@@ -19,9 +19,9 @@ The voice is synthetic and the metric is ours, so the numbers rank changes. They
 
 From the research, in the order it matters here:
 
-1. **A channel vocoder keeps the voice's dynamics.** Hardware passes the envelopes through; compression, where it exists, is a separate input stage with a stated range (20 dB on the EH-0300).
-2. **The edges are treated apart.** Hardware gives the top a separate path: a wide HF channel switched on sibilance (Bode 7702), noise-only top bands (VC-10, unverified), high-pass and low-pass edge filters (EMS, A-129).
-3. **Followers scale with the band.** The EMS smooths in proportion to centre frequency. BANDS already grades its followers that way.
+1. **A channel vocoder keeps the voice's dynamics.** Hardware passes the envelopes through; compression, where it exists, is a separate input stage with a stated range (20 dB on a 14-band pedal-format unit).
+2. **The edges are treated apart.** Hardware gives the top a separate path: a wide HF channel switched on sibilance (the 16-band modular unit), noise-only top bands (the 20-band unit, unverified), high-pass and low-pass edge filters (the 22-channel studio unit, the 15-filter modular unit).
+3. **Followers scale with the band.** The 22-channel studio unit smooths in proportion to centre frequency. BANDS already grades its followers that way.
 4. **Sixteen bands is for naturalness, not intelligibility.** Sentences survive on 4 to 8 bands; speech importance sits between 500 Hz and 4 kHz.
 5. **In a talkbox the mouth adds formants and lip radiation, not a voice's source.** The carrier's spectrum stays. Consonants that rely on breath cannot go down the tube: the microphone hears the player's own air. The tube is a mild comb, not a vowel filter. These are inferences from physics and from electrolarynx work: **no measured talkbox spectrum was found**.
 6. **LPC needs one pole pair per kHz of bandwidth.** Full rate at order 16 gives 8 pole pairs over 22 kHz. mda Talkbox analyses at fs/2 for this reason.
