@@ -15,6 +15,9 @@ namespace o3_voc03er::pattern {
 enum class Lane : std::uint8_t { Note, Carrier, Level, Slice };
 inline constexpr unsigned kLanes = 4;
 inline constexpr const char* kLaneNames[kLanes] = {"NOTE", "CARRIER", "LEVEL", "SLICE"};
+// F6's question, one line per lane (the strip shows it until a key answers).
+inline constexpr const char* kClearPrompt[kLanes] = {"CLEAR NOTE LANE: F1 CONFIRMS", "CLEAR CARRIER LANE: F1 CONFIRMS", "CLEAR LEVEL LANE: F1 CONFIRMS",
+                                                     "CLEAR SLICE LANE: F1 CONFIRMS"};
 
 inline constexpr unsigned kPalettePads = 24;  // pads 0..23: rows 0 and 1 (row 0 is the top)
 inline constexpr unsigned kFirstStepPad = 24;  // rows 2 and 3

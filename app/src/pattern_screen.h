@@ -79,6 +79,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint8_t focus_ = 4;   // the F key the encoder drives (F5, VALUE)
   std::uint8_t shown_ = 0;   // the pattern on the screen, 0..7
   bool follow_ = false;
+  bool armed_ = false;       // CLEAR LANE asked and waiting for F1 (main loop only)
   bool key_tap_ = false;     // turn() came from a second tap on an F key, not from the encoder
 };
 

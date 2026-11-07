@@ -454,11 +454,11 @@ inline HitCut hit_cuts(sm::SliceTable& t, const std::uint16_t* e, unsigned hops,
 }
 
 // F3's value `code` (0 off, 1..100) `delta` steps on: a detent moves one and stops at the ends, a second tap steps by 10 (to the next multiple of 10, 100 at
-// most) and wraps from 100 to 0.
+// most; from 0 it lands at 50, a useful start) and wraps from 100 to 0.
 constexpr unsigned step_hits(unsigned code, int delta, bool tap) noexcept {
   const unsigned c = code > kHitsMax ? kHitsMax : code;
   if (tap) {
-    return c >= kHitsMax ? 0u : (c / 10u + 1u) * 10u;
+    return c >= kHitsMax ? 0u : (c == 0u ? 50u : (c / 10u + 1u) * 10u);
   }
   const int v = static_cast<int>(c) + delta;
   return v < 0 ? 0u : (v > static_cast<int>(kHitsMax) ? kHitsMax : static_cast<unsigned>(v));

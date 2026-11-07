@@ -131,6 +131,7 @@ const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { retu
 
 void PatternScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
+  armed_ = false;
   ctx.redraw();
 }
 
@@ -278,16 +279,26 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
 
 void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
-  if (in.fkey_press(k)) {
-    if (in.shift) {
-      return;
-    }
-    if (k == 5u) {  // CLEAR LANE: at once, on the pattern shown
+  if (armed_ && in.type != app::Input::Type::Release) {  // CLEAR LANE asked: F1 clears, anything else cancels and is spent on that
+    armed_ = false;
+    if (in.fkey_press(k) && k == 0u && !in.shift) {
       PatternData& p = pattern_now();
       for (unsigned i = 0; i < kPatternSteps; ++i) {
         (void)pt::rest_lane(p, i, lane());
       }
       say(ctx, "LANE CLEARED");
+    } else {
+      say(ctx, "NOT CLEARED");
+    }
+    return;
+  }
+  if (in.fkey_press(k)) {
+    if (in.shift) {
+      return;
+    }
+    if (k == 5u) {  // CLEAR LANE: asks first (F1 confirms, any other key cancels), on the pattern shown
+      armed_ = true;
+      ctx.redraw();
       return;
     }
     if (k == 6u) {  // FOLLOW
@@ -429,7 +440,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[2] = "1 TO 16 STEPS";
   h.fkey[3] = "THE BAR'S BPM";
   h.fkey[4] = "THE CURSOR STEP'S VALUE";
-  h.fkey[5] = "EMPTIES THE LANE";
+  h.fkey[5] = "EMPTIES LANE: F1 CONFIRMS";
   h.fkey[6] = "CURSOR RIDES THE PLAYHEAD";
   h.fkey[7] = "SAVES THE PATTERNS";
   for (unsigned i = 0; i < pt::kPalettePads; ++i) {
@@ -584,7 +595,9 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
       }
     }
   }
-  if (note_ != nullptr) {
+  if (armed_) {
+    r.text(kGridX, kCellY + 4 * kLaneStep + 10, pt::kClearPrompt[lane_ & 3u], Color::Accent, Face::Label);
+  } else if (note_ != nullptr) {
     r.text(kGridX, kCellY + 4 * kLaneStep + 10, note_, Color::Accent, Face::Label);
   } else {
     r.text(kGridX, kCellY + 4 * kLaneStep + 14, "PADS: PALETTE ABOVE, STEPS AND PATTERNS BELOW. SHIFT + STEP: REST", Color::TextDim, Face::Micro);
