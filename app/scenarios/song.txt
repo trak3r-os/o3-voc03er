@@ -1,0 +1,50 @@
+# SONG: the chain of up to 16 entries (a pattern letter and its repeats, a row each). Open it, add three entries with INSERT (each takes the one
+# before's pattern, so the encoder gives them B and C), run the chain from the first row with PLAY: the lit row follows the laps, and the chain,
+# which does not loop, ends with the transport stopped. Then LOOP CHAIN on and the chain runs round. `expect state` reads chain_row (the lit row,
+# 16 = none) and playing. The simulator shows the screen and the sequencer's laps; it cannot say that the change lands on the step on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/song.txt --out <dir>   (the dir must exist)
+wait 300
+tap song
+wait 300
+snap 01_empty
+tap insert
+tap insert
+turn 1
+tap insert
+turn 1
+wait 200
+snap 02_three
+expect state chain=3
+expect state chain_row=16
+tap f2
+turn 1
+wait 200
+snap 03_repeats
+tap f2
+tap up
+tap up
+tap play
+wait 1000
+snap 04_first_row
+expect state chain_row=0
+expect state playing=1
+wait 2000
+snap 05_second_row
+expect state chain_row=1
+wait 2000
+expect state chain_row=2
+wait 4500
+snap 06_ended
+expect state playing=0
+expect state chain_row=16
+tap f3
+wait 100
+snap 07_loop_on
+expect state chain_loop=1
+tap play
+wait 9000
+expect state playing=1
+snap 08_looping
+tap play
+wait 200
+expect state playing=0

@@ -1418,7 +1418,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},
       {Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
-      {Button::Song, "SONG (SLICE U9)", nullptr},
+      {Button::Song, "SONG", nullptr},
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
       {Button::Note, "PATTERN: NOTE LANE", nullptr},
       {Button::Instr, "PATTERN: CARRIER LANE", nullptr},

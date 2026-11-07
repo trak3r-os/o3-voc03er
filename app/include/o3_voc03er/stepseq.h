@@ -387,6 +387,9 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   void request_pattern(unsigned p) noexcept {
     next_.store(p < kBankPatterns ? static_cast<std::uint8_t>(p) : kNoPattern, std::memory_order_relaxed);
   }
+  // Main loop: how many times the hook has taken its next pattern (at each Play and at each pattern end, a wrapping byte; relaxed). The SONG
+  // screen counts the differences to walk its chain one pattern ahead; nothing else reads it.
+  unsigned laps() const noexcept { return laps_.load(std::memory_order_relaxed); }
   // The pattern playing now and the step that played last (UI and tests; relaxed, may be a block old).
   unsigned playing_pattern() const noexcept { return cur_.load(std::memory_order_relaxed); }
   unsigned playing_step() const noexcept { return step_.load(std::memory_order_relaxed); }
@@ -419,6 +422,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     if (t.started) {
       pos_ = 0;
       take_next();
+      note_lap();
     }
     int on_frame = -1;
     dsp::for_each_step(t, dsp::kTicksPerSixteenth, 0, 0, [&](std::uint32_t frame, std::uint64_t) {
@@ -431,6 +435,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       if (pos_ >= len) {  // the pattern's end: the next step is the top of this or of the requested pattern
         pos_ = 0;
         take_next();
+        note_lap();
       }
       release(ctx, static_cast<std::uint16_t>(frame));  // a note never runs into the next step
       if (s.carrier != 0u && s.carrier <= kCarrierMax) {
@@ -484,6 +489,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   static constexpr std::uint32_t kGateTicks = 180;  // 75 % of a sixteenth (offset + swing < period)
 
   std::uint32_t source() const noexcept { return map_ != nullptr ? __atomic_load_n(&map_->source, __ATOMIC_ACQUIRE) : 0u; }
+  void note_lap() noexcept { laps_.store(static_cast<std::uint8_t>(laps_.load(std::memory_order_relaxed) + 1u), std::memory_order_relaxed); }
   void take_next() noexcept {
     const std::uint8_t n = next_.exchange(kNoPattern, std::memory_order_relaxed);
     if (n < kBankPatterns) {
@@ -514,6 +520,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   std::atomic<std::uint8_t> next_{kNoPattern};
   std::atomic<std::uint8_t> cur_{0};
   std::atomic<std::uint8_t> step_{0};
+  std::atomic<std::uint8_t> laps_{0};  // render context only writes it (note_lap)
   std::atomic<std::uint8_t> picked_{1};
   std::atomic<std::uint8_t> key_{0};
   std::atomic<std::uint8_t> scale_{0};

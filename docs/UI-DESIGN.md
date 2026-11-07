@@ -69,7 +69,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | SAMPLE PLAY | Opens SAMPLE: the slots and their slices on the pads | everywhere |
 | SAMPLE EDIT | Opens SAMPLE EDIT: trim and cut the selected slot (by hand, evenly, by beats, by hits) | everywhere |
 | SAMPLE REC | Opens SAMPLE REC: record the live source into the selected slot at the bar | everywhere |
-| SONG | Opens SONG: the chain of patterns A to H (slice U9). Until U9 it opens the stub, like every screen not yet drawn | everywhere |
+| SONG | Opens SONG: the chain of patterns A to H | everywhere |
 | NOTE | The pattern's NOTE lane: opens PATTERN with that lane selected (the pads write notes or chords into the step) | everywhere |
 | INSTR | The pattern's CARRIER lane (what sounds on that step: FOLLOW, SYNTH, NOISE, SLOT 1 to 4) | everywhere |
 | VOL | The pattern's LEVEL lane (the step's velocity) | everywhere |
@@ -294,6 +294,8 @@ Not in the file: the WAV data, the octave, tempo and swing, the current pattern 
 
 The chain: up to 16 entries of a pattern letter and a repeat count, a row each; F1 ADD, F2 REPEATS, F3 LOOP CHAIN, F8 BACK; PLAY plays the chain
 from the cursor while this screen is up. Before U9 the one-line screen of section 3.
+
+**Built in U9d** (`app/src/song_screen.{h,cpp}`, `song_logic.h`, `tests/song_test.cpp`, `app/scenarios/song.txt`). Two columns of eight rows; UP and DOWN move the cursor, the encoder the row's letter (after F2, its repeats 1 to 64), INSERT or F1 adds after the cursor with its pattern, DELETE removes. The one `g_chain` (SDRAM, all-zero at boot) is the app's, so FILE can save it. PLAY with SONG up and the transport stopped starts the cursor's row (an empty chain: PLAY as everywhere). Playback adds no timing path: the step sequencer counts the patterns it takes (`StepSeq::laps()`, one byte store at a pattern's end) and the screen, on the main loop, asks `request_pattern` for the pattern of the lap after the one in progress, so every change, an edit included, lands where a PATTERN change does, at the pattern's last step. The lit row is the lap in progress (it leads the audio by one step); the cursor is free. At the end of a chain that does not loop the screen stops the transport 7/8 of a step after the last lap's end is seen; leaving SONG ends the walking and leaves the transport playing the pattern it plays. Owed on the unit: the landing step of a chain change, the stop at the chain's end (the timer is the main loop's, a step can jitter), and a length-1 pattern at a boundary. The LOOP CHAIN label is a few pixels wider than its F key. The old stub row for SONG in `app.cpp` is dead data.
 
 ## 5. The skin
 

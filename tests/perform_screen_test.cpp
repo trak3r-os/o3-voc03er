@@ -311,7 +311,7 @@ TEST_CASE("stub: HELP gives a row to every button the stub answers") {
   auto h = std::make_unique<sim::Harness>(::o3sdk_app());
   REQUIRE(h->start());
   h->run_ms(100);
-  tap(*h, app::Button::Song);
+  tap(*h, app::Button::File);
   h->run_ms(100);
   open_help(*h);
   const app::Help& help = h->runtime().help_overlay().help();

@@ -960,7 +960,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::SamplePlay, "SAMPLE: THE FOUR SLOTS", nullptr},
       {Button::SampleEdit, "THIS SCREEN", nullptr},
       {Button::SampleRec, "SAMPLE REC: A TAKE", nullptr},
-      {Button::Song, "SONG (SLICE U9)", nullptr},
+      {Button::Song, "SONG", nullptr},
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
       {Button::Note, "PATTERN: NOTE LANE", nullptr},
       {Button::Instr, "PATTERN: CARRIER LANE", nullptr},

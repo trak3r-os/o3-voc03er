@@ -81,7 +81,7 @@ void StubScreen::help(const app::Context&, app::Help& h) const noexcept {
       {app::Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {app::Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},
       {app::Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
-      {app::Button::Song, "SONG (SLICE U9)", nullptr},
+      {app::Button::Song, "SONG", nullptr},
       {app::Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
       {app::Button::Note, "PATTERN: NOTE LANE", nullptr},
       {app::Button::Instr, "PATTERN: CARRIER LANE", nullptr},
