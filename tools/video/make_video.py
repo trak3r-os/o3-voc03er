@@ -4,7 +4,8 @@
 usage: make_video.py [--work DIR] [--out DIR] [--stage plan|voices|sim|mix|frames|encode|all]
 
 Stages: plan (scenarios and timeline.json), voices (modulator WAVs), sim (the simulator, one run per segment, in parallel), mix (beat and
-audio), frames and encode (picture and the three mp4 files). Nothing but the scenarios in app/scenarios/ is meant for git.
+audio), frames and encode (picture and the three mp4 files). Nothing but the scenarios in
+tools/video/scenarios/ is meant for git (not app/scenarios/: app_test runs those, and these need the generated mod/NN.wav).
 """
 import argparse
 import os
@@ -34,7 +35,7 @@ def sim_stage(work):
         os.makedirs(out, exist_ok=True)
         card = os.path.join(work, "card", nn)
         os.makedirs(card, exist_ok=True)
-        r = subprocess.run(["nice", "-n", "10", sim, "--scenario", os.path.join(ROOT, "app", "scenarios", sg["scenario"]),
+        r = subprocess.run(["nice", "-n", "10", sim, "--scenario", os.path.join(HERE, "scenarios", sg["scenario"]),
                             "--card", card, "--out", out], cwd=work, capture_output=True, text=True)
         tail = (r.stdout.strip().splitlines() or ["(no output)"])[-1]
         print(f"segment {nn}: exit {r.returncode}: {tail}", flush=True)
@@ -58,7 +59,7 @@ def main():
     st = a.stage
     py = [sys.executable]
     if st in ("plan", "all"):
-        run(py + [os.path.join(HERE, "plan.py"), work, os.path.join(ROOT, "app", "scenarios")])
+        run(py + [os.path.join(HERE, "plan.py"), work, os.path.join(HERE, "scenarios")])
     if st in ("voices", "all"):
         run(py + [os.path.join(HERE, "formant.py"), work])
     if st in ("sim", "all"):
