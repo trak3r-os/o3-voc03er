@@ -31,6 +31,9 @@ enum Stage : std::uint8_t {
   kSaving,     // the card job writes the file
   kLoading,    // the card job reads the file
   kRestoring,  // the values go to the engine a few a frame
+  kWavList,    // F5: the card job lists the project folder (the names the WAVs will get)
+  kWavSave,    // F5: the card job writes one slot's WAV
+  kWavLoad,    // LOAD: a slot's WAV is read into it (SampleLoadScreen's external job), then its cuts go back
 };
 enum Ask : std::uint8_t { kNone, kLoad, kNew };
 
@@ -48,6 +51,19 @@ struct FileData {
   const char* note;
   std::uint64_t note_until;
   char note_buf[72];
+  // SAVE WAVS and the WAVs of a LOAD (U9c3).
+  std::uint32_t lens[fl::kWavSlots];  // the length of each slot at F5 (0: no audio, no WAV)
+  unsigned wav_cur;                   // the slot of the job in hand (a save) or the next one to look at (a load)
+  unsigned wav_done, wav_total;       // jobs finished before this one, jobs of the run
+  unsigned wav_saved_mask;            // slots whose WAV is on the card in this run
+  unsigned wl_loaded, wl_skipped, wl_first;  // a load: WAVs landed, slots skipped, the first skipped slot
+  bool wav_end;                       // the project save in hand ends a SAVE WAVS run
+  bool wl_settle;                     // the WAV has landed: waiting for the slot's table to show its length
+  std::uint64_t wl_deadline;
+  char wavname[fl::kWavSlots][kWavNameMax + 1];
+  char why[40];
+  char line[56];                      // the strip while a WAV job runs
+  char wait[48];                      // a slot is grey until its WAV has landed
 };
 O3SDK_BIG FileData g_fd = {};
 O3SDK_BIG Project g_proj = {};  // what the last load read or save wrote: the records a slot without audio keeps wait here
@@ -73,10 +89,15 @@ void copy_name(char* dst, std::size_t cap, const char* s) noexcept {
 
 static constexpr std::size_t kPickEntries = 24;
 static O3SDK_BIG app::Files::Entry g_pick[kPickEntries] = {};  // the picker's rows, in the SDRAM
+static constexpr std::size_t kWlEntries = 64;                  // the project folder's listing for the names of the WAVs: a longer one is refused
+static O3SDK_BIG app::Files::Entry g_wl[kWlEntries] = {};
 
 FileScreen::FileScreen() noexcept : picker_(g_pick, kPickEntries) {}
 
-void FileScreen::init(dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain) noexcept {
+void FileScreen::init(dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain, SampleLoadScreen* load,
+                      std::int16_t* mem) noexcept {
+  load_ = load;
+  mem_ = mem;
   chain_ = chain;
   voice_ = voice;
   sample_ = sample;
@@ -111,7 +132,10 @@ void FileScreen::leave(app::Context& ctx) noexcept {
   }
   if (g_fd.stage == kRestoring) {
     g_fd.next = kEngineIds;  // the rest of a restore is done on the spot (a few dozen values; a full ring leaves the rest as it is)
-    apply(ctx);
+    apply(ctx, false);       // the slots' WAVs are not read after a screen that was left
+  }
+  if (wav_stage()) {
+    abort_wavs(ctx);
   }
   g_fd.stage = kMenu;
   g_fd.ask = kNone;
@@ -143,6 +167,13 @@ void FileScreen::open_picker(app::Context& ctx) noexcept {
 
 void FileScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   if (sample_ == nullptr || perform_ == nullptr || pattern_ == nullptr || bank_ == nullptr) {
+    return;
+  }
+  if (wav_stage()) {  // F8 gives the WAV run up; the rest waits
+    if (in.press(Button::F8)) {
+      abort_wavs(ctx);
+      ctx.redraw();
+    }
     return;
   }
   if (g_fd.stage >= kSaving) {  // a job in hand: its buffers stay as they are
@@ -210,8 +241,8 @@ void FileScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     g_fd.stage = kNaming;
   } else if (in.press(Button::F4) && !refuse(ctx)) {
     g_fd.ask = kNew;
-  } else if (in.press(Button::F5)) {
-    say(ctx, "SAVE WAVS COMES LATER");
+  } else if (in.press(Button::F5) && !refuse(ctx)) {
+    start_wavs(ctx);
   } else if (in.press(Button::F8)) {
     ctx.show(back_ != nullptr && back_ != this ? *back_ : static_cast<app::Screen&>(*perform_));
   }
@@ -306,6 +337,18 @@ void FileScreen::update(app::Context& ctx) noexcept {
 
 void FileScreen::tick(app::Context& ctx) noexcept {
   app::Files& files = ctx.files();
+  if (g_fd.stage == kWavList) {
+    tick_wav_list(ctx);
+    return;
+  }
+  if (g_fd.stage == kWavSave) {
+    tick_wav_save(ctx);
+    return;
+  }
+  if (g_fd.stage == kWavLoad) {
+    tick_wav_load(ctx);
+    return;
+  }
   if (g_fd.stage == kSaving || g_fd.stage == kLoading) {
     const app::Files::Status st = files.status();
     if (st.phase != app::Files::Status::Done && st.phase != app::Files::Status::Failed) {
@@ -314,13 +357,24 @@ void FileScreen::tick(app::Context& ctx) noexcept {
     const bool saving = g_fd.stage == kSaving;
     g_fd.stage = kMenu;
     if (st.phase == app::Files::Status::Failed) {
+      g_fd.wav_end = false;
       say(ctx, st.text);
       return;
     }
     if (saving) {
       copy_name(g_fd.name, sizeof g_fd.name, g_fd.pending);
       g_fd.has_name = g_fd.pending_has;
-      say(ctx, "SAVED");
+      if (g_fd.wav_end) {
+        g_fd.wav_end = false;
+        unsigned n = 0;
+        for (unsigned s = 0; s < fl::kWavSlots; ++s) {
+          n += (g_fd.wav_saved_mask >> s) & 1u;
+        }
+        fl::wavs_saved_note(g_fd.note_buf, sizeof g_fd.note_buf, n);
+        say(ctx, g_fd.note_buf);
+      } else {
+        say(ctx, "SAVED");
+      }
       return;
     }
     if (!read_project(g_fbuf, files.loaded(), g_proj)) {  // the file is decoded into a copy: g_proj is as it was
@@ -350,7 +404,7 @@ void FileScreen::tick(app::Context& ctx) noexcept {
     ++sent;
   }
   if (g_fd.next >= kEngineIds) {
-    apply(ctx);
+    apply(ctx, true);
   }
 }
 
@@ -399,7 +453,7 @@ void FileScreen::apply_slots(app::Context& ctx) noexcept {
 }
 
 // The values are in: the patterns, then the route, the slots, and STAT's fields.
-void FileScreen::apply(app::Context& ctx) noexcept {
+void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
   *bank_ = g_proj.bank;
   *chain_ = g_proj.chain;
   pattern_->show(ctx, g_proj.stat != 0u ? g_proj.pattern : pattern_->shown());
@@ -412,6 +466,10 @@ void FileScreen::apply(app::Context& ctx) noexcept {
     perform_->set_keys(g_proj.keys != 0u);
   }
   g_fd.stage = kMenu;
+  if (!g_fd.reset_slots && wavs && fl::next_load_slot(g_proj, 0) < fl::kWavSlots) {
+    begin_wav_loads(ctx);  // the strip tells the run; its end tells the result
+    return;
+  }
   if (g_fd.reset_slots) {
     say(ctx, "NEW PROJECT. THE SLOTS' AUDIO STAYS");
   } else {
@@ -419,6 +477,231 @@ void FileScreen::apply(app::Context& ctx) noexcept {
     say(ctx, g_fd.note_buf);
   }
   g_fd.reset_slots = false;
+}
+
+bool FileScreen::wav_stage() const noexcept { return g_fd.stage >= kWavList; }
+
+// F5: the WAV of every slot that holds audio goes into the project's folder, one card job after another (slotN_NNN.wav, the kit's first free number: the folder is listed
+// first because the kit does not tell the name it chose), then the project file is saved again so that its records name them. A project that was never saved has no folder.
+void FileScreen::start_wavs(app::Context& ctx) noexcept {
+  if (!g_fd.has_name) {
+    say(ctx, "SAVE THE PROJECT FIRST: F2");
+    return;
+  }
+  if (mem_ == nullptr || sample_ == nullptr) {
+    say(ctx, "NO LOOP MEMORY");
+    return;
+  }
+  unsigned total = 0;
+  for (unsigned s = 0; s < fl::kWavSlots; ++s) {
+    const std::uint32_t len = sample_->table(s).length != 0u ? sample_->table(s).length : sample_->status(s).length;
+    g_fd.lens[s] = len > Loop::kMaxSamples ? static_cast<std::uint32_t>(Loop::kMaxSamples) : len;
+    total += len != 0u ? 1u : 0u;
+  }
+  if (total == 0u) {
+    say(ctx, "NO SLOT HOLDS AUDIO");
+    return;
+  }
+  if (!ctx.files().list(g_fd.name, g_wl, kWlEntries)) {
+    say(ctx, ctx.files().status().text);
+    return;
+  }
+  g_fd.wav_total = total;
+  g_fd.wav_done = 0;
+  g_fd.wav_saved_mask = 0;
+  g_fd.wav_end = false;
+  g_fd.wav_cur = fl::next_save_slot(g_fd.lens, 0);
+  copy_name(g_fd.line, sizeof g_fd.line, "SAVING WAVS: READING THE FOLDER");
+  g_fd.stage = kWavList;
+}
+
+void FileScreen::tick_wav_list(app::Context& ctx) noexcept {
+  app::Files& files = ctx.files();
+  const app::Files::Status st = files.status();
+  if (st.phase != app::Files::Status::Done && st.phase != app::Files::Status::Failed) {
+    return;
+  }
+  g_fd.stage = kMenu;
+  if (st.phase == app::Files::Status::Failed) {
+    say(ctx, st.text);
+    return;
+  }
+  if (files.list_truncated()) {
+    say(ctx, "TOO MANY FILES IN THE FOLDER");
+    return;
+  }
+  const std::size_t n = files.listed() < kWlEntries ? files.listed() : kWlEntries;
+  for (unsigned s = 0; s < fl::kWavSlots; ++s) {
+    if (g_fd.lens[s] == 0u) {
+      continue;
+    }
+    char stem[6];
+    fl::wav_stem(stem, s);
+    const unsigned num = fl::first_free_wav_number(stem, n, [](std::size_t i) { return static_cast<const char*>(g_wl[i].name); });
+    if (num == 0u) {
+      say(ctx, "NO FREE NUMBER FOR A WAV");
+      return;
+    }
+    fl::wav_file_name(g_fd.wavname[s], stem, num);
+  }
+  begin_wav_save(ctx);
+}
+
+void FileScreen::begin_wav_save(app::Context& ctx) noexcept {
+  const unsigned s = g_fd.wav_cur;
+  char stem[6];
+  fl::wav_stem(stem, s);
+  fl::wav_job_line(g_fd.line, sizeof g_fd.line, "SAVING", s, g_fd.wav_done, g_fd.wav_total);
+  if (!ctx.files().save_wav(g_fd.name, mem_ + static_cast<std::size_t>(s) * Loop::kMaxSamples, g_fd.lens[s], 1u, 44100u, stem)) {
+    g_fd.stage = kMenu;
+    say(ctx, ctx.files().status().text);
+    return;
+  }
+  g_fd.stage = kWavSave;
+  ctx.redraw();
+}
+
+void FileScreen::tick_wav_save(app::Context& ctx) noexcept {
+  app::Files& files = ctx.files();
+  const app::Files::Status st = files.status();
+  if (st.phase != app::Files::Status::Done && st.phase != app::Files::Status::Failed) {
+    return;
+  }
+  if (st.phase == app::Files::Status::Failed) {  // the WAVs already written stay on the card; the project file is not touched
+    g_fd.stage = kMenu;
+    say(ctx, st.text);
+    return;
+  }
+  g_fd.wav_saved_mask |= 1u << g_fd.wav_cur;
+  ++g_fd.wav_done;
+  const unsigned next = fl::next_save_slot(g_fd.lens, g_fd.wav_cur + 1u);
+  if (next < fl::kWavSlots) {
+    g_fd.wav_cur = next;
+    begin_wav_save(ctx);
+    return;
+  }
+  // The last WAV is down: the project with the records naming them (capture first: it keeps a name only for audio the record already fits).
+  g_fd.stage = kMenu;
+  capture(ctx);
+  for (unsigned s = 0; s < fl::kWavSlots; ++s) {
+    if (((g_fd.wav_saved_mask >> s) & 1u) != 0u) {
+      (void)fl::set_wav_name(g_proj.slot[s], g_fd.wavname[s]);
+    }
+  }
+  const std::size_t n = write_project(g_proj, g_fbuf, sizeof g_fbuf);
+  if (n == 0u) {
+    say(ctx, "NOT SAVED: A VALUE IS OUT OF RANGE");
+    return;
+  }
+  if (!files.save(g_fd.name, kProjectFile, g_fbuf, n, app::Files::Mode::Replace)) {
+    say(ctx, files.status().text);
+    return;
+  }
+  copy_name(g_fd.pending, sizeof g_fd.pending, g_fd.name);
+  g_fd.pending_has = true;
+  g_fd.wav_end = true;
+  g_fd.stage = kSaving;
+}
+
+// After a project load: each record that names a WAV, in slot order, is read from the project folder into its slot (SampleLoadScreen's job), and its cuts go back when
+// it has landed. A file that is missing or refused skips that slot (the record stays for the next save); the others go on.
+void FileScreen::begin_wav_loads(app::Context& ctx) noexcept {
+  g_fd.wav_cur = 0;
+  g_fd.wav_done = 0;
+  g_fd.wav_total = 0;
+  for (unsigned s = 0; s < fl::kWavSlots; ++s) {
+    g_fd.wav_total += g_proj.slot[s].name_len != 0u ? 1u : 0u;
+  }
+  g_fd.wl_loaded = 0;
+  g_fd.wl_skipped = 0;
+  g_fd.wl_first = 0;
+  g_fd.why[0] = '\0';
+  g_fd.wl_settle = false;
+  next_wav_load(ctx);
+}
+
+void FileScreen::skip_wav(const char* why) noexcept {
+  if (g_fd.wl_skipped == 0u) {
+    g_fd.wl_first = g_fd.wav_cur;
+    copy_name(g_fd.why, sizeof g_fd.why, why != nullptr && why[0] != '\0' ? why : "NOT LOADED");
+  }
+  ++g_fd.wl_skipped;
+  ++g_fd.wav_done;
+  g_fd.wav_cur += 1u;
+  g_fd.wl_settle = false;
+}
+
+void FileScreen::next_wav_load(app::Context& ctx) noexcept {
+  for (unsigned guard = 0; guard <= fl::kWavSlots; ++guard) {
+    const unsigned s = fl::next_load_slot(g_proj, g_fd.wav_cur);
+    if (s >= fl::kWavSlots) {
+      break;
+    }
+    g_fd.wav_cur = s;
+    g_fd.wl_settle = false;
+    fl::wav_job_line(g_fd.line, sizeof g_fd.line, "LOADING", s, g_fd.wav_done, g_fd.wav_total);
+    fl::wav_wait_line(g_fd.wait, sizeof g_fd.wait, s);
+    if (load_ != nullptr && load_->begin_external(ctx, s, g_fd.name, g_proj.slot[s].name)) {
+      g_fd.stage = kWavLoad;
+      ctx.redraw();
+      return;
+    }
+    skip_wav(load_ != nullptr ? load_->external_text() : "NO LOADER");
+  }
+  end_wav_loads(ctx);
+}
+
+void FileScreen::tick_wav_load(app::Context& ctx) noexcept {
+  const unsigned s = g_fd.wav_cur;
+  if (!g_fd.wl_settle) {
+    load_->tick_external(ctx);
+    const SampleLoadScreen::External e = load_->external();
+    if (e == SampleLoadScreen::External::Running) {
+      return;
+    }
+    if (e != SampleLoadScreen::External::Done) {
+      skip_wav(load_->external_text());
+      next_wav_load(ctx);
+      return;
+    }
+    g_fd.wl_settle = true;
+    g_fd.wl_deadline = ctx.uptime_ms() + 500u;
+  }
+  // The slot shows its new length, and SAMPLE's service() has cut it evenly (it runs every pass): only then do the record's cuts go on it, and only if they fit.
+  const std::uint32_t len = sample_->status(s).length;
+  const bool seen = len != 0u && sample_->table(s).length == len;
+  if (!seen && ctx.uptime_ms() < g_fd.wl_deadline) {
+    return;
+  }
+  if (seen && fl::slot_fits(g_proj.slot[s], len)) {
+    sample_->table(s) = g_proj.slot[s].cuts;
+    sample_->set_edited(s, true);
+    sample_->cuts_changed();
+  }
+  ++g_fd.wl_loaded;
+  ++g_fd.wav_done;
+  g_fd.wav_cur = s + 1u;
+  g_fd.wl_settle = false;
+  next_wav_load(ctx);
+}
+
+void FileScreen::end_wav_loads(app::Context& ctx) noexcept {
+  g_fd.stage = kMenu;
+  fl::wavs_loaded_note(g_fd.note_buf, sizeof g_fd.note_buf, g_fd.wl_loaded, g_fd.wl_skipped, g_fd.wl_first, g_fd.why);
+  say(ctx, g_fd.note_buf);
+}
+
+// F8 or leaving the screen: the job in hand is given up (the kit removes a half WAV; a copy into a slot is finished and sent), the rest of the run is not started.
+void FileScreen::abort_wavs(app::Context& ctx) noexcept {
+  if (g_fd.stage == kWavList || g_fd.stage == kWavSave) {
+    ctx.files().cancel();
+  } else if (g_fd.stage == kWavLoad && !g_fd.wl_settle && load_ != nullptr) {
+    load_->abort_external(ctx);
+  }
+  g_fd.wav_end = false;
+  g_fd.wl_settle = false;
+  g_fd.stage = kMenu;
+  say(ctx, "CANCELLED");
 }
 
 void FileScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
@@ -437,15 +720,18 @@ void FileScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   out.label[2] = "SAVE AS";
   out.label[3] = "NEW";
   out.label[4] = "SAVE WAVS";
-  out.label[7] = "BACK";
+  out.label[7] = wav_stage() ? "CANCEL" : "BACK";
   out.hot = 0;
   const bool locked = g_fd.stage >= kSaving || g_fd.ask != kNone;
-  out.dim = static_cast<std::uint8_t>(0x60u | 0x10u | (locked ? 0x8Fu : 0u) | (g_fd.stage == kPicking ? 0x0Eu : 0u));
+  out.dim = static_cast<std::uint8_t>(0x60u | (locked ? 0x9Fu : 0u) | (g_fd.stage == kPicking ? 0x1Eu : 0u) | (!g_fd.has_name ? 0x10u : 0u));
   if (g_fd.stage == kPicking) {
     out.dim = static_cast<std::uint8_t>(out.dim & ~0x01u);
   }
-  if (g_fd.stage >= kSaving) {
+  if (g_fd.stage >= kSaving && !wav_stage()) {
     out.dim = static_cast<std::uint8_t>(out.dim | 0x80u);
+  }
+  if (wav_stage()) {
+    out.dim = static_cast<std::uint8_t>(out.dim & ~0x80u);  // F8 gives the run up
   }
 }
 
@@ -458,7 +744,7 @@ void FileScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   if (sample_ != nullptr) {
     sample_->help(ctx, h);
   }
-  h.summary = "THE PROJECT FILE: PATTERNS, CHAIN, ROUTE, CUTS, THE UNIT'S VALUES AND THE STATE, IN A FOLDER OF APPS/O3_VOC03ER. THE WAVS COME LATER.";
+  h.summary = "THE PROJECT FILE: PATTERNS, CHAIN, ROUTE, CUTS, THE UNIT'S VALUES AND THE STATE, IN A FOLDER OF APPS/O3_VOC03ER. F5 ADDS THE SLOTS' WAVS, AND A LOAD READS THEM BACK.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -467,7 +753,7 @@ void FileScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[1] = "SAVES THE PROJECT";
   h.fkey[2] = "SAVES UNDER A NEW NAME";
   h.fkey[3] = "STARTS A NEW PROJECT";
-  h.fkey[4] = "COMES LATER";
+  h.fkey[4] = "SAVES THE SLOTS' WAVS";
   h.fkey[7] = "BACK";
   h.pads = "NOT USED HERE.";
   h.buttons = kButtons;
@@ -508,7 +794,7 @@ void FileScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect& area) 
     r.text(kX, 112, name, Color::Text, Face::Display);
     r.text(kX, 190, "F1 LOADS A PROJECT, F2 SAVES IT, F3 SAVES IT UNDER A NEW NAME, F4 STARTS A NEW ONE", Color::TextDim, Face::Micro);
     r.text(kX, 210, "THE FILE HOLDS THE PATTERNS, THE CHAIN, THE ROUTE, THE CUTS, THE UNIT'S VALUES, TEMPO AND OCTAVE", Color::TextDim, Face::Micro);
-    r.text(kX, 230, "THE WAVS ARE NOT IN IT YET: A SLOT'S CUTS COME BACK ONLY ONTO A SAMPLE OF THE SAME LENGTH", Color::TextDim, Face::Micro);
+    r.text(kX, 230, "F5 SAVES THE SLOTS' WAVS INTO THE FOLDER: A LOAD READS THEM BACK, THEN THE CUTS GO ON THEM", Color::TextDim, Face::Micro);
   }
   const char* strip = nullptr;
   if (g_fd.stage == kSaving) {
@@ -517,6 +803,11 @@ void FileScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect& area) 
     strip = "LOADING";
   } else if (g_fd.stage == kRestoring) {
     strip = "RESTORING";
+  } else if (wav_stage()) {
+    strip = g_fd.line;
+    if (g_fd.stage == kWavLoad) {
+      r.text(kX, kNoteY - 26, g_fd.wait, Color::TextDim, Face::Label);
+    }
   } else if (g_fd.ask == kLoad) {
     strip = "LOAD REPLACES THE PROJECT: F1 CONFIRMS";
   } else if (g_fd.ask == kNew) {
