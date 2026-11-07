@@ -25,7 +25,8 @@ constexpr float kUvOpen = 0.35f;
 constexpr float kUvClose = 0.28f;        // hysteresis
 constexpr float kUvMinSum = 0.003f;      // followers' sum under which there is nothing to decide on
 constexpr float kUvFadeMs = 5.0f;
-constexpr float kUvNoiseGain = 0.18f;
+constexpr float kUvNoiseGain = 0.06f;    // V4: was 0.18 (the unvoiced hiss measured too bright on speech)
+constexpr float kTiltA = 0.30f;          // V4: one-pole low-pass on the bands' sum, about 2.5 kHz at 44.1 kHz [start value]
 
 constexpr unsigned kThruFirst = 13;      // THRU follows the followers of bands 13..15
 constexpr float kThruGain = 0.08f;       // [est] the output scales the wet sum by 128 (kWetGain), the followers of a loud sibilant sum to about 0.1: about unity at THRU 100 %
@@ -113,6 +114,11 @@ void Bands::restart() noexcept {
   fol_odd_ = false;
   shifted_last_ = false;
   thru_s_ = 0.0f;
+  thru_hold_ = false;
+  for (float& d : th_dly_) {
+    d = 0.0f;
+  }
+  tilt_lp_ = 0.0f;
 }
 
 void Bands::adopt_level(float level) noexcept {
@@ -476,21 +482,46 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
     env_[b] = flush(env);
     gain_prev_[b] = env_[b];
   }
-  if (thru_ > 0.0f || thru_s_ > 0.0f) {
-    // THRU: the pre-emphasised modulator, scaled by the followers of bands 13..15 and the level, ramped across the block; before the delay,
-    // so it stays aligned with the bands. The ramp ends at 0 when THRU goes to 0, so it does not click.
+  // THRU: the pre-emphasised modulator, scaled by the followers of bands 13..15 and the level, ramped across the block; delayed like the
+  // full-rate sum so it stays aligned with the bands, but kept out of it: the tilt below dulls the bands only. The ramp ends at 0 when THRU
+  // goes to 0, so it does not click. th_dly_ is read until it has run out after the last live block.
+  const bool thru_live = thru_ > 0.0f || thru_s_ > 0.0f;
+  float th[kMaxFrames];
+  if (thru_live) {
     const float t = thru_ > 0.0f ? (env_[kThruFirst] + env_[kThruFirst + 1] + env_[kThruFirst + 2]) * (thru_ * kThruGain) : 0.0f;
     float s = thru_s_;
     const float step = (t - s) / static_cast<float>(n);
     for (std::uint32_t i = 0; i < n; ++i) {
       s += step;
-      fr[i] += mulb(pre[i], s);
+      th[i] = mulb(pre[i], s);
     }
     thru_s_ = t;
   }
-  for (std::uint32_t i = 0; i < n; ++i) {
-    out[i] += i < kFullDelay ? fr_dly_[i] : fr[i - kFullDelay];
+  // output: the bands' sum (half-rate group plus the delayed full-rate sum) through the V4 low-pass, one multiply-add a sample; THRU after it
+  float lp = tilt_lp_;
+  const float ta = tilt_a_;
+  if (thru_live || thru_hold_) {
+    if (!thru_live) {
+      for (std::uint32_t i = 0; i < n; ++i) {
+        th[i] = 0.0f;
+      }
+    }
+    for (std::uint32_t i = 0; i < n; ++i) {
+      lp += mulb(out[i] + (i < kFullDelay ? fr_dly_[i] : fr[i - kFullDelay]) - lp, ta);
+      out[i] = lp + (i < kFullDelay ? th_dly_[i] : th[i - kFullDelay]);
+    }
+    for (unsigned k = 0; k < kFullDelay; ++k) {
+      th_dly_[k] = flush(k + n < kFullDelay ? th_dly_[k + n] : th[k + n - kFullDelay]);
+    }
+    thru_hold_ = thru_live || th_dly_[0] != 0.0f || th_dly_[1] != 0.0f || th_dly_[2] != 0.0f;
+  } else {
+    for (std::uint32_t i = 0; i < n; ++i) {
+      lp += mulb(out[i] + (i < kFullDelay ? fr_dly_[i] : fr[i - kFullDelay]) - lp, ta);
+      out[i] = lp;
+    }
+    thru_hold_ = false;
   }
+  tilt_lp_ = flush(lp);
   for (unsigned k = 0; k < kFullDelay; ++k) {  // the last kFullDelay samples of (history, fr)
     fr_dly_[k] = flush(k + n < kFullDelay ? fr_dly_[k + n] : fr[k + n - kFullDelay]);
   }

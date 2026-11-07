@@ -840,7 +840,7 @@ TEST_CASE("vocoder: the BANDS output is bit-identical to what it was before ROBO
   eat(0, 690 * 64);
   eat(1300 * 64, 1500 * 64);
   std::printf("vocoder: BANDS digest %08X\n", d);
-  CHECK(d == 0xD6E1515Du);
+  CHECK(d == 0xC0BAB330u);  // V4: the BANDS tilt and the unvoiced noise gain changed the output (was D6E1515D)
 }
 
 // ---- ROBOT: BANDS followed by a fast compressor on the wet sum ------------------------------------------------------------------------

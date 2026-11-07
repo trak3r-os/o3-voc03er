@@ -255,3 +255,29 @@ Cost [estimate, not a measurement]: the second pole is one multiply-add per fram
 - Levels by ear, since a slower AGC lets a phrase's dynamics through to the soft clip, and `kTalkGain` is a bench figure.
 - By ear: follower speed, breath level against a real microphone, hop-rate zipper noise on fast vowels.
 - A real talkbox recording, if one can be had for measuring. It would settle the driver, the tube and the top of the spectrum.
+
+## BANDS brightness, V4
+
+BANDS measured too bright on real speech: a tilt of +0.5 dB/octave against the voice's -1.6, and above 8 kHz -12 dB and above 12 kHz -30 dB against the dry voice's -29.5 and -56 (five dry/vocoded reference pairs show a vocoder lowering above 8 kHz by 5-7 dB and above 12 kHz by 5-11 dB against the dry voice). Two changes, both starting values taken from an A/B called "V4":
+
+- `kUvNoiseGain` 0.18 to 0.06 (`bands.cpp`): the unvoiced hiss that goes into the carrier of bands 11..15.
+- A one-pole low-pass on the bands' sum, `lp += mulb(x - lp, kTiltA)` with `kTiltA = 0.30` (about 2.5 kHz at 44.1 kHz), state `tilt_lp_`, flushed once a block. `Bands::set_tilt_for_test(1.0f)` turns it off (a pass-through) for the tests that compare against the output without it.
+
+Where THRU and DRY sit. DRY is summed in `Vocoder::process` after `Bands::process`, so the tilt never touches it. THRU was summed into `fr`, the full-rate sum, before its 3-sample delay, which is inside the point where the low-pass runs; a low-pass after the final sum would have dulled it. THRU now has its own buffer and 3-sample delay (`th_dly_`) and is added after the low-pass, so it keeps its aligned timing and its top end. The delay line is read only while THRU is live and until it has run out; with THRU at 0 the loop is the single multiply-add path.
+
+Measured with the `ours_bands_{saw110,Am}` scenarios against `speech.wav` (`metrics2.py`), V0 = main before V4, V4m = this change:
+
+| render | tilt dB/oct | contrast dB | > 8 kHz dB | > 12 kHz dB | nonharm dB |
+|---|---|---|---|---|---|
+| saw110 V0 | +0.50 | 24.11 | -12.36 | -30.49 | -29.82 |
+| saw110 V4m | -2.78 | 21.57 | -28.18 | -56.33 | -29.85 |
+| Am V0 | -0.62 | 23.24 | -15.18 | -31.86 | - |
+| Am V4m | -3.33 | 20.87 | -31.69 | -60.14 | - |
+
+The 8-16 kHz energy of white noise through white noise drops 10.4 dB against the same Bands with the tilt off (host test, `bands V4`). The tilt is about 2 dB steeper than the voice's -1.6 on these two renders and above 12 kHz it now sits below the dry voice's -56 for saw110 only by 0.3 dB; both are starting values to be tuned by ear, not a claim that BANDS now matches speech.
+
+Tests: the digest of `talk_test` (BANDS output) was renewed, and the gate edge detector of `rhythm_test` falls under 0.4 of the peak instead of half (the tilt lowers the top end and the on-state's dips read as edges); the filter bank's own flatness checks (`sweep_ripple_db`) run with the tilt off, since the tilt is -5 dB at 6 kHz by design; the block-size equivalence limit for FORMANT moved from -50 to -49 dB, because the tilt removes the top of the reference and the same error reads 0.2 dB higher against it.
+
+Cost [estimate, not a measurement]: one multiply-add and one subtract per sample on top of the sum that was already there, about 3 cycles a sample, 200 cycles (about 1 microsecond) a block, under 0.1 % of the render budget; THRU live adds a 3-sample delay copy. BANDS stays to be read on the unit against its 69 % limit (65.5 % peak before this change).
+
+Owed: the sound by ear on the unit, `kTiltA` and `kUvNoiseGain` against a real microphone, and the CPU on the unit.

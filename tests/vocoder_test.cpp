@@ -411,6 +411,7 @@ std::vector<float> noise_vec(std::size_t n, float amp) {
 float sweep_ripple_db(float* worst_lo, float* worst_hi) {
   Bands b;
   b.prepare(kFs);
+  b.set_tilt_for_test(1.0f);  // V4: the filter bank's own flatness; the output tilt (-5 dB at 6 kHz by design) has its own test below
   b.hold_envelopes(1.0f);
   std::vector<float> db;
   for (float f = 200.0f; f <= 6000.0f; f *= 1.03f) {
@@ -1052,7 +1053,7 @@ TEST_CASE("bands: FORMANT away from 0 gives blocks of any size the output of blo
     }
     const float db = 10.0f * std::log10(err / sig + 1.0e-30f);
     MESSAGE("block " << blk << ": error " << db << " dB");
-    CHECK(db < -50.0f);
+    CHECK(db < -49.0f);  // V4: was -50; the tilt takes the top off the reference, so the same error reads 0.2 dB higher against it
   }
 }
 
@@ -1210,4 +1211,71 @@ TEST_CASE("vocoder: FORMANT and THRU through the unit change the sound, and the 
     write_wav16(d + "/thru_0.wav", f_0);
     write_wav16(d + "/thru_100.wav", t_100);
   }
+}
+
+// V4: the one-pole low-pass on the bands' sum. "Before V4" is the same Bands with the coefficient at 1 (a pass-through: lp = x), through the
+// test hook; the unvoiced noise gain is the same in both runs, so the difference is the tilt alone (about 5 dB at 8-16 kHz for a = 0.30).
+TEST_CASE("bands V4: white noise through white noise has its 8-16 kHz energy at least 4 dB under the output without the tilt") {
+  const std::size_t n = 1u << 17;
+  const std::vector<float> car = noise_vec(n, 0.3f);
+  std::vector<float> mod(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    mod[i] = 0.3f * car[(i + 1237) % n];  // the same white noise, shifted: a flat modulator that does not track the carrier
+  }
+  auto hi_energy = [&](float tilt_a) {
+    Bands b;
+    b.prepare(kFs);
+    b.set_tilt_for_test(tilt_a);
+    std::vector<float> out(n);
+    for (std::size_t at = 0; at + 64 <= n; at += 64) {
+      b.process(mod.data() + at, car.data() + at, out.data() + at, 64);
+    }
+    float e = 0.0f;
+    for (int k = 0; k < 9; ++k) {
+      const float hz = 8000.0f + 1000.0f * static_cast<float>(k);
+      for (std::size_t a = 16384; a + 4096 <= n; a += 4096) {
+        e += tone_energy(out, a, a + 4096, hz);
+      }
+    }
+    return e;
+  };
+  const float before = hi_energy(1.0f);
+  const float after = hi_energy(0.30f);
+  REQUIRE(before > 0.0f);
+  const float drop_db = 10.0f * std::log10(before / after);
+  MESSAGE("8-16 kHz energy: " << drop_db << " dB lower with the tilt");
+  CHECK(drop_db >= 4.0f);
+}
+
+TEST_CASE("bands V4: THRU keeps its top end while the bands' sum is tilted, and ends without a tail") {
+  const std::size_t n = 1u << 15;
+  const std::vector<float> car(n, 0.0f);  // no carrier: only THRU can sound
+  const std::vector<float> mod = noise_vec(n, 0.3f);
+  const std::vector<float> thru = bands_run(mod, car, 0.0f, 1.0f);
+  float e_hi = 0.0f, e_lo = 0.0f;
+  for (std::size_t a = 8192; a + 4096 <= n; a += 4096) {
+    e_hi += tone_energy(thru, a, a + 4096, 12000.0f);
+    e_lo += tone_energy(thru, a, a + 4096, 1500.0f);
+  }
+  MESSAGE("THRU 12 kHz vs 1.5 kHz: " << 10.0f * std::log10(e_hi / e_lo) << " dB");
+  CHECK(e_hi > 0.0f);
+  // the tilt at 12 kHz would be about -14 dB against 1.5 kHz; the pre-emphasised noise rises, so within 6 dB of flat means it was not dulled
+  CHECK(10.0f * std::log10(e_hi / e_lo) > -6.0f);
+  // THRU 100 then 0 and silence: the delayed THRU runs out and nothing is left (no carrier, so nothing else can sound)
+  Bands b;
+  b.prepare(kFs);
+  b.set_thru(1.0f);
+  std::vector<float> out(n);
+  const std::vector<float> zeros(n, 0.0f);
+  for (std::size_t at = 0; at + 64 <= n; at += 64) {
+    if (at == 4096) {
+      b.set_thru(0.0f);
+    }
+    b.process((at < 4096 ? mod : zeros).data() + at, car.data() + at, out.data() + at, 64);
+  }
+  float tail = 0.0f;
+  for (std::size_t i = 16384; i < n; ++i) {
+    tail = std::fmax(tail, std::fabs(out[i]));
+  }
+  CHECK(tail < 1.0e-6f);
 }

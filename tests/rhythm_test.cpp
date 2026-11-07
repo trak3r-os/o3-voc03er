@@ -303,12 +303,12 @@ TEST_CASE("rhythm: GATE open and closed periods follow the tempo at each rate, w
       const float peak = *std::max_element(env.begin() + 100, env.end());
       REQUIRE(peak > 0.01f);
       const float half = kFs * 60000.0f / static_cast<float>(tempo) * beats[r - 1u];
-      // block-resolution edges: rising and falling at half the peak
+      // block-resolution edges: rising at half the peak, falling under 0.4 of it (V4: the tilt lowers the top end, and dips of the on-state under half the peak read as edges)
       std::vector<float> rise;
       std::vector<float> fall;
       bool on = env[100] > 0.5f * peak;
       for (std::size_t b = 101; b < blocks; ++b) {
-        const bool now = env[b] > 0.5f * peak;
+        const bool now = env[b] > (on ? 0.4f : 0.5f) * peak;
         if (now && !on) {
           rise.push_back(static_cast<float>(b * kBlock));
         } else if (!now && on) {

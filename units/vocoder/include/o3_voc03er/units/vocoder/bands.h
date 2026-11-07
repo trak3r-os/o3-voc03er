@@ -57,6 +57,8 @@ class Bands {
   void set_formant(float semitones) noexcept;
   // THRU: 0..1, the high-passed modulator added to the output, scaled by the followers of bands 13..15 (BANDS only).
   void set_thru(float level) noexcept;
+  // V4 tilt coefficient of the output low-pass (default kTiltA, 1 = off): for the tests, which compare against the output without the tilt.
+  void set_tilt_for_test(float a) noexcept { tilt_a_ = a; }
   void set_noise_source(NoiseSource* src) noexcept { noise_src_ = src; }  // null: the bands' own
   float unvoiced() const noexcept { return uv_; }  // 0..1, the noise mix now
   // The AGC's level, so a change of MODE hands it over: the engine coming in starts on what the one going out knows of the input.
@@ -100,6 +102,10 @@ class Bands {
   float formant_off_ = 0.0f;  // bands, st / 4.8; written by set_formant, read by process (the render context calls both)
   float thru_ = 0.0f;
   float thru_s_ = 0.0f;       // the THRU scale the last block ended on
+  bool thru_hold_ = false;    // THRU was live last block: its delay line (th_dly_) may still hold signal
+  float th_dly_[kFullDelay] = {};  // THRU, delayed like fr_dly_ but added after the output tilt, so THRU is not dulled
+  float tilt_lp_ = 0.0f;      // V4: one-pole low-pass state on the bands' sum (tilt of the output), render context only
+  float tilt_a_ = 0.30f;      // its coefficient (kTiltA); 1 = off
   bool shifted_last_ = false;
   float fs_ = 44100.0f;
   float pre_prev_ = 0.0f;
