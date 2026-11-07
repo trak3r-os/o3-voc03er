@@ -212,6 +212,8 @@ S1b, measured against V0 on the renders (metrics2.py, saw110 / Am): tilt -1.27 /
 
 Owed: by ear on a real microphone (fricatives, plosives, whisper, the hop-and-a-half lag of the duck on a fast "s" to vowel), and the CPU on the unit.
 
+**S1c, the breath's top.** With S1b the consonants carry the breath (kBreath 0.5) instead of the carrier, and >12 kHz rose to -36.3 / -39.8 dB (saw110 / Am) against -44.5 / -46.1 before S1, 93 % of it on unvoiced frames. A one-pole low-pass at 7 kHz on the breath (`kBreathTopHz`, a starting value: the player's air at the microphone, not a full-band hiss; one multiply-add per frame) brings it to -43.3 / -47.3 dB. Same speech.wav, metrics2.py labelled from the speech: tilt -1.56 / -2.30 dB/oct (V0 -1.00 / -1.41), contrast 26.4 / 26.0 (V0 26.6 / 26.3), >8 kHz -24.7 / -28.8 (V0 -24.4 / -28.5), gap -59.8 / -63.4 dB (V0 -49.4 / -53.3). The 4-8 kHz unvoiced-over-voiced share is +9.4 / +9.1 dB (V0 +5.9 / +6.4): the consonants are now the breath and the vowels lost their breath floor, which is the point of S1; whether that reads as a talkbox is for the ear.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.

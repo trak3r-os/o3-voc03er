@@ -148,6 +148,7 @@ class Talk {
   // Breath: high-pass biquad (transposed direct form II), `open` and its ramp. thru_ is written by set_thru, read by process (one context).
   float hp_b0_ = 0.0f, hp_b1_ = 0.0f, hp_b2_ = 0.0f, hp_a1_ = 0.0f, hp_a2_ = 0.0f;
   float hp_s1_ = 0.0f, hp_s2_ = 0.0f;
+  float br_lp_a_ = 0.0f, br_lp_y_ = 0.0f;  // one-pole low-pass on the breath (its top): coefficient (1 - pole), state
   float open_ = 0.0f, open_step_ = 0.0f;
   float thru_ = 0.0f;
   float breath_ = 0.0f, breath_step_ = 0.0f;  // the breath's level and its ramp over a hop
