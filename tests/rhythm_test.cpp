@@ -409,6 +409,59 @@ TEST_CASE("rhythm: ARP sounds the held notes one at a time in the order of each 
   }
 }
 
+namespace {
+
+// The arp's note at step s of the 1/16 grid at 120 BPM as a MIDI note among 45, 48, 50, 52, 0 for none of them.
+int arp_midi(const std::vector<float>& out, unsigned s) {
+  const float step = kFs * 60.0f / 120.0f * 0.25f;
+  const std::size_t from = static_cast<std::size_t>(step * static_cast<float>(s)) + 2200;
+  const float p = pitch(out, from, 3000, 85.0f, 190.0f);
+  const int notes[4] = {45, 48, 50, 52};
+  const float hz[4] = {110.0f, 130.81f, 146.83f, 164.81f};
+  for (int i = 0; i < 4; ++i) {
+    if (std::fabs(p - hz[i]) < 0.04f * hz[i]) {
+      return notes[i];
+    }
+  }
+  return 0;
+}
+
+}  // namespace
+
+TEST_CASE("rhythm: ARP keeps its place in the run when a held note enters or leaves below it") {
+  const std::size_t blocks = 700;  // steps 0 to 7; a step is about 86 blocks
+  const std::vector<dsp::Event> up = {dsp::param_change(Vocoder::Arp, 1.0f, 0)};
+  const std::vector<dsp::Event> down = {dsp::param_change(Vocoder::Arp, 2.0f, 0)};
+  auto seq = [&](const Events& ev, unsigned n) {
+    const auto out = render(ev, blocks);
+    std::vector<int> got;
+    for (unsigned s = 0; s < n; ++s) {
+      got.push_back(arp_midi(out, s));
+    }
+    return got;
+  };
+  {  // UP over 45 48 52, D (50) pressed after step 2 (the 52): the run goes on from the top to the bottom, then 45 48 50 52
+    Events ev = chord(up, blocks);
+    add(ev, 215, dsp::note_on(50, 100, 0, 0));
+    CHECK(seq(ev, 7) == std::vector<int>{45, 48, 52, 45, 48, 50, 52});
+  }
+  {  // UP, 48 let go while it sounds (after step 1): the note that took its place (52) is next, none skipped
+    Events ev = chord(up, blocks);
+    add(ev, 130, dsp::note_off(48, 0));
+    CHECK(seq(ev, 5) == std::vector<int>{45, 48, 52, 45, 52});
+  }
+  {  // DOWN over 45 48 52 (45 alone starts it): 45 let go after step 1 (52 sounding), the run goes on 48, 52, 48
+    Events ev = chord(down, blocks);
+    add(ev, 130, dsp::note_off(45, 0));
+    CHECK(seq(ev, 5) == std::vector<int>{45, 52, 48, 52, 48});
+  }
+  {  // DOWN, D (50) pressed below the sounding 52 after step 1: 50 follows, then 48
+    Events ev = chord(down, blocks);
+    add(ev, 130, dsp::note_on(50, 100, 0, 0));
+    CHECK(seq(ev, 5) == std::vector<int>{45, 52, 50, 48, 45});
+  }
+}
+
 TEST_CASE("rhythm: ARP goes silent with none held, and releases to silence") {
   const std::size_t blocks = 500;
   Events ev = chord({dsp::param_change(Vocoder::Arp, 1.0f, 0)}, blocks);
