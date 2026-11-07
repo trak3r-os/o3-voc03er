@@ -3,7 +3,7 @@
 Status: design, 2026-11-06, nothing built. It answers the maintainer's asks of this date: an intuitive interface that uses every button under its
 printed name and a skin of its own; a sample that can be cut into slices and played from the pads; any of line in, mic, USB in, radio or a sample
 as the source of either side; an internal carrier synth made for vocoding, with chords from the pads as the first thing a new user reaches. The
-mock is `docs/ui-mock.html` (every main screen at 800 x 480 in the skin). What the engine is stays `../o3-sdk/docs/VOCODER-DESIGN.md` and `docs/PLAN.md`; this document changes how it is played and
+first drawing is `docs/ui-mock.html` (every main screen at 800 x 480 in the skin, drawn before the screens were built and kept as it was: where it and the app differ, the app is right, and the built screens are the PNGs of `app/scenarios/`). What the engine is stays `../o3-sdk/docs/VOCODER-DESIGN.md` and `docs/PLAN.md`; this document changes how it is played and
 names the engine work the new parts need (section 8). Every cost is [est] until a unit reads it.
 
 ## 1. The idea in one line
