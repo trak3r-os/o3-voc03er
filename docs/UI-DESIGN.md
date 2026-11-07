@@ -405,7 +405,8 @@ notes** (33,000 cycles, 64 a sample a voice [est], the measured cost of two osci
 | NOISE | 0 .. 100 | today's noise mix, gated by the notes |
 | ATTACK, RELEASE | today's | |
 
-Three oscillators at 64 cycles a sample a voice is the budget's edge; the design pays for SPREAD with the slice readers' room (section 8) and
+Three oscillators a voice at the measured 34 cycles each are 102 a sample a voice, over the budget at eight notes (`docs/ports/carrier-osc.md`): the third oscillator, the
+morph and SUB share what the row leaves, by a plan of the carrier; the design pays for SPREAD with the slice readers' room (section 8) and
 reads it in U10. The source is a later `dsp-scout` job through the `dsp-port` licence gate: the candidates are a Plaits-style virtual-analogue
 oscillator (MIT; `../o3-sdk/docs/FREAK-DESIGN.md` names it as the kit's first port) or an original stack of polyBLEP oscillators with the known
 unison technique. Nothing is recreated by a product's name and nothing comes from the official firmware. The synth's controls live on PARAMS
