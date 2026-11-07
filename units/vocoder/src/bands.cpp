@@ -291,14 +291,15 @@ void Bands::process(const float* modulator, const float* carrier, float* out, st
   float pre[kMaxFrames];
   float lvl = level_;
   float h1 = hp_s1_, h2 = hp_s2_;
+  const float hb0 = hp_b0_, hb1 = hp_b1_, hb2 = hp_b2_, ha1 = hp_a1_, ha2 = hp_a2_, l_att = lvl_att_, l_rel = lvl_rel_;
   for (std::uint32_t i = 0; i < n; ++i) {
     const float x = clean(modulator[i]);
-    const float y = hp_b0_ * x + h1;
-    h1 = hp_b1_ * x - hp_a1_ * y + h2;
-    h2 = hp_b2_ * x - hp_a2_ * y;
+    const float y = hb0 * x + h1;
+    h1 = hb1 * x - ha1 * y + h2;
+    h2 = hb2 * x - ha2 * y;
     hp[i] = y;
     const float a = y < 0.0f ? -y : y;
-    lvl += (a - lvl) * (a > lvl ? lvl_att_ : lvl_rel_);
+    lvl += (a - lvl) * (a > lvl ? l_att : l_rel);
   }
   hp_s1_ = flush(h1);
   hp_s2_ = flush(h2);
