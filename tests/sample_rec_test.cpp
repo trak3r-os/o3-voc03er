@@ -133,6 +133,35 @@ TEST_CASE("sample_rec: a 1 BAR take arms, records, stops by itself and plays the
   CHECK(h.display().peak_frame_words() < 2048u);
 }
 
+namespace {
+// The app is one static object for the whole test process, so the screen keeps LENGTH from the test before: "fresh" is made by LEFT, which stops at FREE.
+void length_to_free(sim::Harness& h) {
+  for (int i = 0; i < 5; ++i) {
+    tap(h, app::Button::Left);
+  }
+}
+}  // namespace
+
+TEST_CASE("sample_rec: one RIGHT from FREE sets LENGTH to 1 BAR, as the F3 tap does (LE7: the press works, the screen state outlives a test)") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  REQUIRE_FALSE(h.engine().playing());
+  length_to_free(h);
+  tap(h, app::Button::Right);  // the first press, no pause before REC: LENGTH 1 BAR, not FREE and not 2
+  tap(h, app::Button::Rec);
+  h.run_ms(300);
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(1.0f));
+  h.run_ms(9000);  // a FREE take would still be recording: only a bar-length take ends by itself
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Play)) == doctest::Approx(1.0f));
+  char line[1200];
+  const std::string text(line, h.runtime().state_line(line, sizeof line));
+  const std::size_t at = text.find("loop1=");
+  REQUIRE(at != std::string::npos);
+  CHECK(text.substr(at, text.find(' ', at) - at) == "loop1=88200");  // 1 bar at 120 BPM, 44.1 kHz
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
 TEST_CASE("sample_rec: REC again stops a free take, AFTER NONE leaves the slot unplaced, DELETE empties it") {
   Rig rig;
   sim::Harness& h = *rig.h;
@@ -199,6 +228,7 @@ TEST_CASE("sample_rec: a 2 BAR take with the transport stopped is exactly 2 bars
   sim::Harness& h = *rig.h;
   REQUIRE_FALSE(h.engine().playing());
   REQUIRE(h.engine().stats().tempo_mbpm == 120000u);
+  length_to_free(h);
   tap(h, app::Button::Right);  // LENGTH: 1 BAR
   h.run_ms(60);
   tap(h, app::Button::Right);  // 2 BARS
