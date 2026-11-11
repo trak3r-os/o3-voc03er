@@ -34,6 +34,9 @@ enum class Plays : std::uint8_t {
 inline constexpr unsigned kPlaysCount = 13;
 inline constexpr const char* kPlaysNames[kPlaysCount] = {"NOTE",        "TRIAD",       "7TH",         "OPEN",       "POWER",   "OFF", "PIANO NOTE",
                                                          "PIANO TRIAD", "PIANO 7TH",   "PIANO OPEN",  "PIANO POWER", "FORMANT", "BEND"};
+// The same for a soft key's value (the Data face holds about eight characters in a 100 px key).
+inline constexpr const char* kPlaysShort[kPlaysCount] = {"NOTE",     "TRIAD",   "7TH",     "OPEN",    "POWER",   "OFF",  "PNO NOTE",
+                                                         "PNO TRI",  "PNO 7TH", "PNO OPEN", "PNO PWR", "FORMANT", "BEND"};
 
 // Row A is the top of the three, C the bottom (the lowest, the one that plays at the pad's own octave).
 enum class Row : std::uint8_t { A, B, C };

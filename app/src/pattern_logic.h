@@ -17,7 +17,7 @@ namespace o3_voc03er::pattern {
 enum class Lane : std::uint8_t { Note, Carrier, Level, Slice };
 inline constexpr unsigned kLanes = 4;
 inline constexpr const char* kLaneNames[kLanes] = {"NOTE", "CARRIER", "LEVEL", "SLICE"};
-// F6's question, one line per lane (the strip shows it until a key answers).
+// CLEAR LANE's question (SHIFT + F6), one line per lane (the strip shows it until a key answers).
 inline constexpr const char* kClearPrompt[kLanes] = {"CLEAR NOTE LANE: F1 CONFIRMS", "CLEAR CARRIER LANE: F1 CONFIRMS", "CLEAR LEVEL LANE: F1 CONFIRMS",
                                                      "CLEAR SLICE LANE: F1 CONFIRMS"};
 
@@ -49,39 +49,20 @@ constexpr unsigned pad_of_pattern(unsigned p) noexcept { return o3sdk::app::pad_
 // is 4.17, so no two pads give the same velocity.
 constexpr unsigned level_of_pad(unsigned pad) noexcept { return ((pad % kPalettePads) + 1u) * 100u / kPalettePads; }
 
-// The NOTE palette's note for pad 0..23: CHORDS: the root of PERFORM's octave, column = pitch class; KEYS: two chromatic octaves, row 0 the upper.
-// Returns 1..127 (clamped).
-constexpr unsigned note_of_pad(unsigned pad, int octave, bool keys) noexcept {
-  const unsigned row = o3sdk::app::pad_row(pad);
-  const unsigned col = o3sdk::app::pad_col(pad);
-  const int up = keys ? (row == 0u ? 12 : 0) : 0;
-  const int n = 48 + 12 * octave + up + static_cast<int>(col);
-  return n < 1 ? 1u : n > 127 ? 127u : static_cast<unsigned>(n);
-}
-// The chord kind of the NOTE palette's row: the chord grid's two lower rows (kind_for_row), so the lower palette row plays F6's kind and the
-// upper one the next kind after it.
-constexpr ChordKind kind_of_pad(unsigned pad, ChordKind bottom) noexcept { return kind_for_row(o3sdk::app::pad_row(pad) % 2u + 2u, bottom); }
-
-// The layout's palette (Q1; PATTERN switches to it in Q2): palette row 0 is row A, row 1 is row B, so a pad plays what pads::pad_play says of it.
+// The NOTE palette is the layout's: palette row 0 is row A, row 1 is row B, so a pad plays what pads::pad_play says of it.
 inline constexpr pads::Row kPaletteRow[2] = {pads::Row::A, pads::Row::B};
 constexpr pads::PadPlay palette_play(unsigned pad, int octave, const pads::Layout& layout) noexcept {
   return pads::pad_play(layout, kPaletteRow[o3sdk::app::pad_row(pad) % 2u], o3sdk::app::pad_col(pad), octave);
 }
 
-// Does the palette pad hold what the step stores? (LED mid on it.)
-constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, bool keys, ChordKind bottom) noexcept {
+// Does the palette pad hold what the step stores? (LED mid on it.) On the NOTE lane the step's note and kind equal the pad's play (a rest, and a pad
+// that plays nothing, never match); the other lanes do not depend on the layout.
+constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, const pads::Layout& layout) noexcept {
   switch (lane) {
-    case Lane::Note:
-      if (s.note == 0u) {
-        return false;
-      }
-      if (keys) {
-        return s.kind == 0u && s.note == note_of_pad(pad, octave, true);
-      }
-      if (s.kind == 0u) {
-        return s.note == note_of_pad(pad, octave, false);  // a single note (SHIFT + a chord pad): its column, lit in both rows
-      }
-      return s.kind == static_cast<unsigned>(kind_of_pad(pad, bottom)) + 1u && s.note == note_of_pad(pad, octave, false);
+    case Lane::Note: {
+      const pads::PadPlay p = palette_play(pad, octave, layout);
+      return s.note != 0u && p.note > 0 && s.note == static_cast<unsigned>(p.note) && s.kind == p.kind;
+    }
     case Lane::Carrier:
       return pad < kCarrierPads && s.carrier == pad;
     case Lane::Level:
@@ -90,15 +71,6 @@ constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octav
       return pad < kSliceMax && pad + 1u == s.slice;
   }
   return false;
-}
-
-// The same with the layout: on the NOTE lane the step's note and kind equal the pad's play (a rest, and a pad that plays nothing, never match).
-constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, const pads::Layout& layout) noexcept {
-  if (lane == Lane::Note) {
-    const pads::PadPlay p = palette_play(pad, octave, layout);
-    return s.note != 0u && p.note > 0 && s.note == static_cast<unsigned>(p.note) && s.kind == p.kind;
-  }
-  return palette_matches(lane, pad, s, octave, false, ChordKind::Triad);  // the other lanes do not depend on the pads
 }
 
 // A palette pad of the SLICE lane: pads 0..23 are slices 1..24 of the SPEAKS slot, lit (dim) up to its slice count `count`.

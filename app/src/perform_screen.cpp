@@ -152,6 +152,7 @@ void PerformScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocod
   sfocus_ = pl::kNoShiftFocus;
   octave_ = 0;
   bottom_ = 0;
+  layout_ = pads::Layout{};
   keys_ = false;
   strip_ = false;
   strip_last_ = 0;

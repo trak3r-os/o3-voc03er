@@ -57,9 +57,9 @@ TEST_CASE("pattern: the SLICE lane's palette, value and clear") {
   CHECK(pt::slice_write(p, 2, 23, 24) == pt::SliceWrite::Written);
   CHECK(get_step(p, 2).slice == 24u);
   // the palette's mid pad is the step's own slice
-  CHECK(pt::palette_matches(pt::Lane::Slice, 4, get_step(p, 0), 0, false, o3_voc03er::ChordKind::Triad));
-  CHECK_FALSE(pt::palette_matches(pt::Lane::Slice, 5, get_step(p, 0), 0, false, o3_voc03er::ChordKind::Triad));
-  CHECK_FALSE(pt::palette_matches(pt::Lane::Slice, 0, get_step(p, 5), 0, false, o3_voc03er::ChordKind::Triad));  // no slice: nothing matches
+  CHECK(pt::palette_matches(pt::Lane::Slice, 4, get_step(p, 0), 0, o3_voc03er::pads::Layout{}));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Slice, 5, get_step(p, 0), 0, o3_voc03er::pads::Layout{}));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Slice, 0, get_step(p, 5), 0, o3_voc03er::pads::Layout{}));  // no slice: nothing matches
   // VALUE steps 0..count; 0 is none; an out of range stored slice steps down to the count
   CHECK(pt::step_value(p, 0, pt::Lane::Slice, 1, 8));
   CHECK(get_step(p, 0).slice == 6u);
@@ -167,6 +167,13 @@ void tap(sim::Harness& h, app::Button b) {
   h.release(b);
   h.run_ms(40);  // the LEDs refresh on the main loop's tick
 }
+void shift_tap(sim::Harness& h, app::Button b) {
+  h.press(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, b);
+  h.release(app::Button::Shift);
+  h.run_ms(5);
+}
 void pad(sim::Harness& h, unsigned p, bool shift = false) {
   if (shift) {
     h.press(app::Button::Shift);
@@ -244,6 +251,163 @@ TEST_CASE("pattern: SHIFT + a step pad writes a rest in the lane") {
   CHECK(rig.led(25) == app::kLedDim);
 }
 
+namespace {
+unsigned step_pad(unsigned i) { return i < 8u ? 24u + i : 36u + (i - 8u); }
+}  // namespace
+
+TEST_CASE("pattern: the palette writes the layout: a note on A, a triad on B, the cursor moves on") {
+  Rig rig;
+  pad(*rig.h, 3);   // A, a note, step 1
+  pad(*rig.h, 15);  // B, a TRIAD, step 2
+  pad(*rig.h, step_pad(0));
+  CHECK(rig.led(3) == app::kLedMid);  // step 1 holds A's note: the pad that plays it is mid
+  CHECK(rig.led(15) != app::kLedMid);
+  pad(*rig.h, step_pad(1));
+  CHECK(rig.led(15) == app::kLedMid);  // step 2 holds B's triad
+  CHECK(rig.led(3) != app::kLedMid);
+  CHECK(rig.led(27) == app::kLedOff);  // two steps written, the cursor is on step 2
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: F6 ROW picks A or B and F7 PLAYS steps that row, 7TH then PIANO NOTE") {
+  Rig rig;
+  tap(*rig.h, app::Button::F6);  // focus ROW
+  tap(*rig.h, app::Button::F6);  // a second tap: B
+  tap(*rig.h, app::Button::F7);  // focus PLAYS
+  tap(*rig.h, app::Button::F7);  // B: TRIAD to 7TH
+  pad(*rig.h, 15);               // step 1: B's 7TH
+  pad(*rig.h, step_pad(0));
+  CHECK(rig.led(15) == app::kLedMid);
+  tap(*rig.h, app::Button::F6);  // focus ROW again
+  tap(*rig.h, app::Button::F6);  // a second tap: back to A
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::F7);  // A: NOTE to TRIAD
+  pad(*rig.h, step_pad(1));
+  pad(*rig.h, 3);  // step 2: A's triad now (a kind-1 step on A's pad 3)
+  pad(*rig.h, step_pad(1));
+  CHECK(rig.led(3) == app::kLedMid);
+  CHECK(rig.led(15) != app::kLedMid);  // B plays 7TH: the step's kind 1 is not its pad's
+  // The encoder on PLAYS steps and stops at the ends: OFF at the top, NOTE at the bottom.
+  rig.h->turn(30);
+  rig.h->run_ms(60);
+  CHECK(rig.count(0, 11, app::kLedOff) == 12u);  // A plays OFF: its row is dark
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F6);  // ROW to B
+  rig.h->turn(30);
+  rig.h->run_ms(60);
+  CHECK(rig.count(12, 23, app::kLedOff) == 12u);  // B plays OFF too
+  rig.h->turn(-30);
+  rig.h->run_ms(60);
+  CHECK(rig.count(12, 23, app::kLedOff) < 12u);  // and NOTE at the bottom: lit again
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: a piano on A and B writes its keys, a gap or an OFF row writes nothing") {
+  Rig rig;
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F6);  // ROW B
+  tap(*rig.h, app::Button::F7);  // focus PLAYS
+  for (unsigned i = 0; i < 6; ++i) {
+    tap(*rig.h, app::Button::F7);  // TRIAD, 7TH, OPEN, POWER, PIANO NOTE, PIANO TRI
+  }
+  rig.h->turn(-1);  // PIANO NOTE
+  rig.h->run_ms(60);
+  CHECK(rig.led(24) == app::kLedMid);
+  pad(*rig.h, 0);  // A's first pad is a gap between black keys: nothing written, the cursor stays
+  CHECK(rig.led(24) == app::kLedMid);
+  CHECK(rig.led(25) == app::kLedOff);
+  pad(*rig.h, 14);  // B: a white key (E), step 1
+  pad(*rig.h, 1);   // A: a black key (C#), step 2
+  CHECK(rig.led(25) == app::kLedDim);
+  pad(*rig.h, step_pad(0));
+  CHECK(rig.led(14) == app::kLedMid);
+  CHECK(rig.led(1) != app::kLedMid);
+  pad(*rig.h, step_pad(1));
+  CHECK(rig.led(1) == app::kLedMid);
+  // B to OFF: its pads are dark and write nothing.
+  rig.h->turn(30);
+  rig.h->run_ms(60);
+  pad(*rig.h, step_pad(5));
+  pad(*rig.h, 14);
+  CHECK(rig.led(step_pad(5)) == app::kLedMid);
+  CHECK(rig.led(step_pad(6)) == app::kLedOff);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: SHIFT + a palette pad writes nothing yet; a step pad still writes a rest") {
+  Rig rig;
+  pad(*rig.h, 3, true);
+  CHECK(rig.led(24) == app::kLedMid);  // the cursor did not move
+  CHECK(rig.led(25) == app::kLedOff);
+  pad(*rig.h, step_pad(4));
+  CHECK(rig.led(24) == app::kLedOff);  // step 1 is still empty
+  pad(*rig.h, 3);                      // a note at step 5
+  pad(*rig.h, step_pad(4), true);      // SHIFT + step: a rest
+  CHECK(rig.led(step_pad(4)) == app::kLedMid);
+  pad(*rig.h, step_pad(0));
+  CHECK(rig.led(step_pad(4)) == app::kLedOff);
+}
+
+TEST_CASE("pattern: F6 and F7 do nothing on LEVEL, CARRIER and SLICE") {
+  Rig rig;
+  tap(*rig.h, app::Button::Vol);
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::Note);
+  // the layout was not touched: A NOTE (an octave up), B TRIAD: a write from A and from B still matches A's and B's default pads
+  pad(*rig.h, 3);
+  pad(*rig.h, 15);
+  pad(*rig.h, step_pad(0));
+  CHECK(rig.led(3) == app::kLedMid);
+  pad(*rig.h, step_pad(1));
+  CHECK(rig.led(15) == app::kLedMid);
+  tap(*rig.h, app::Button::Instr);
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::Note);
+  pad(*rig.h, step_pad(2));
+  pad(*rig.h, 3);
+  pad(*rig.h, step_pad(2));
+  CHECK(rig.led(3) == app::kLedMid);  // still A's note, unchanged
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: changing F6's row flashes that row's LEDs once") {
+  Rig rig;
+  tap(*rig.h, app::Button::F6);  // focus
+  CHECK(rig.count(12, 23, app::kLedOff) < 12u);
+  tap(*rig.h, app::Button::F6);  // B: its row goes dark for a moment
+  CHECK(rig.count(12, 23, app::kLedOff) == 12u);
+  rig.h->run_ms(300);
+  CHECK(rig.count(12, 23, app::kLedOff) < 12u);
+  CHECK(rig.count(0, 11, app::kLedOff) < 12u);
+}
+
+TEST_CASE("pattern: SHIFT + F6 asks to clear the lane and F1 confirms; SHIFT + F7 is FOLLOW") {
+  Rig rig;
+  pad(*rig.h, 3);
+  pad(*rig.h, 5);
+  CHECK(rig.led(24) == app::kLedDim);
+  shift_tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F1);
+  CHECK(rig.led(24) == app::kLedOff);
+  CHECK(rig.led(25) == app::kLedOff);
+  // F6 alone only focuses ROW, it clears nothing.
+  pad(*rig.h, step_pad(0));
+  pad(*rig.h, 3);
+  tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F1);
+  CHECK(rig.led(24) == app::kLedDim);
+  // FOLLOW is SHIFT + F7 (its own test case plays the pattern).
+  shift_tap(*rig.h, app::Button::F7);
+  shift_tap(*rig.h, app::Button::F7);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
 TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and the LEDs show") {
   Rig rig;
   tap(*rig.h, app::Button::Instr);  // CARRIER: seven values
@@ -261,7 +425,8 @@ TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and 
   tap(*rig.h, app::Button::Fx);        // SLICE: drawn, dark
   CHECK(rig.count(0, 23, app::kLedOff) == 24u);
   tap(*rig.h, app::Button::Note);
-  CHECK(rig.count(0, 23, app::kLedOff) == 0u);
+  CHECK(rig.count(0, 23, app::kLedOff) > 0u);  // NOTE mirrors PERFORM's rows: the scale lit, the rest dark
+  CHECK(rig.count(0, 23, app::kLedOff) < 24u);
   tap(*rig.h, app::Button::F2);  // focus LANE
   tap(*rig.h, app::Button::F2);  // a tap steps it: CARRIER
   CHECK(rig.count(0, 23, app::kLedOff) == 17u);
@@ -269,7 +434,7 @@ TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and 
   tap(*rig.h, app::Button::Down);
   CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // UP and DOWN move the lane too
   tap(*rig.h, app::Button::Up);
-  CHECK(rig.count(0, 23, app::kLedOff) == 0u);
+  CHECK(rig.count(0, 23, app::kLedOff) == 0u);  // LEVEL again: all 24 lit
 }
 
 TEST_CASE("pattern: with SPEAKS on LIVE the SLICE lane is dark and writes nothing") {
@@ -282,7 +447,8 @@ TEST_CASE("pattern: with SPEAKS on LIVE the SLICE lane is dark and writes nothin
   rig.h->turn(3);  // the encoder on F5: the same
   rig.h->run_ms(60);
   CHECK(rig.led(24) == app::kLedMid);
-  tap(*rig.h, app::Button::F6);  // CLEAR LANE is allowed and changes nothing here
+  shift_tap(*rig.h, app::Button::F6);  // CLEAR LANE is allowed and changes nothing here
+  tap(*rig.h, app::Button::F1);
   CHECK(rig.led(24) == app::kLedMid);
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
@@ -299,11 +465,11 @@ TEST_CASE("pattern: LENGTH cuts the steps, CLEAR LANE empties the lane") {
   CHECK(rig.led(24 + 7) != app::kLedOff);  // step 8 is still in
   CHECK(rig.led(36) == app::kLedOff);      // step 9 is out
   CHECK(rig.led(43) == app::kLedOff);
-  tap(*rig.h, app::Button::F6);  // CLEAR LANE asks first
+  shift_tap(*rig.h, app::Button::F6);  // CLEAR LANE asks first
   CHECK(rig.led(25) != app::kLedOff);  // nothing cleared yet
   tap(*rig.h, app::Button::F2);        // any other key cancels
   CHECK(rig.led(25) != app::kLedOff);
-  tap(*rig.h, app::Button::F6);
+  shift_tap(*rig.h, app::Button::F6);
   tap(*rig.h, app::Button::F1);  // F1 confirms
   CHECK(rig.led(25) == app::kLedOff);  // the lane is empty
   CHECK(rig.led(24) == app::kLedMid);  // the cursor stays
@@ -346,13 +512,7 @@ TEST_CASE("pattern: COPY, INSERT and DELETE on a step and on a pattern (the logi
 TEST_CASE("pattern: COPY + INSERT moves the steps right, DELETE empties one, SHIFT + DELETE asks F1 for the pattern") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  auto shifted = [&h](app::Button b) {
-    h.press(app::Button::Shift);
-    h.run_ms(5);
-    tap(h, b);
-    h.release(app::Button::Shift);
-    h.run_ms(5);
-  };
+  auto shifted = [&h](app::Button b) { shift_tap(h, b); };
   pad(h, 5);   // step 1
   pad(h, 7);   // step 2
   pad(h, 24);  // the cursor on step 1
@@ -395,13 +555,13 @@ TEST_CASE("pattern: pattern pads show the pattern and the one playing; FOLLOW ri
   CHECK(rig.led(32) == app::kLedDim);
   pad(*rig.h, 32);
   pad(*rig.h, 5);
-  tap(*rig.h, app::Button::F7);  // FOLLOW
+  shift_tap(*rig.h, app::Button::F7);  // FOLLOW
   tap(*rig.h, app::Button::Play);
   rig.h->run_ms(900);
   CHECK(rig.led(32) == app::kLedOn);  // A is playing
   CHECK(rig.count(24, 31, app::kLedOn) + rig.count(36, 43, app::kLedOn) == 1u);  // the playhead
   CHECK(rig.count(24, 31, app::kLedMid) + rig.count(36, 43, app::kLedMid) == 0u);  // the cursor is on it
-  tap(*rig.h, app::Button::F7);                 // FOLLOW off: the cursor stays where it was
+  shift_tap(*rig.h, app::Button::F7);           // FOLLOW off: the cursor stays where it was
   rig.h->run_ms(300);
   CHECK(rig.h->runtime().frame_failures() == 0u);
   CHECK(rig.h->display().peak_frame_words() < 2048u);
@@ -432,6 +592,8 @@ TEST_CASE("pattern: HELP gives a row to every button the screen answers") {
   for (unsigned k = 0; k < 8; ++k) {
     CHECK(help.fkey[k] != nullptr);
   }
+  CHECK(help.fkey_shift[5] != nullptr);  // CLEAR LANE
+  CHECK(help.fkey_shift[6] != nullptr);  // FOLLOW
   CHECK(help.pad_group[0] != 0u);   // the palette
   CHECK(help.pad_group[24] != 0u);  // the steps
   CHECK(help.pad_group[32] != 0u);  // the patterns

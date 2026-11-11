@@ -7,15 +7,17 @@
 - CHORDS pads, one rule for every row (issue #4): the bottom row plays F6's kind and each row above plays the next kind in the order
   TRIAD, 7TH, OPEN, POWER, round. F6 TRIAD, the default, keeps the grid as it was; F6 7TH, OPEN or POWER no longer play one kind on two
   rows. With BEND ROW on, the three chord rows play F6's kind and the next two. PERFORM's HELP names each row's kind.
-- PATTERN's NOTE palette follows the same rule: F6's kind on the lower row, the next kind above it. The pad labels name the kind.
 - A tap on a focused LEVEL key (PARAMS) or on MASTER's GAIN and LEVEL stops at the top instead of wrapping round to the bottom, so a
   third tap no longer silences the output.
 - PARAMS dims QUALITY outside TALK, where it does nothing.
+- PATTERN's NOTE palette is PERFORM's layout (Q2): row 0 is A and row 1 is B as they play, so a pad writes what PERFORM would play, a note or
+  a chord of the layout's kind, a piano key or nothing (a pad that plays nothing writes nothing). F6 is now ROW (A or B) and F7 PLAYS (that
+  row's value, NOTE, TRIAD, 7TH, OPEN, POWER, the piano values, OFF); both are dim outside the NOTE lane, and the row flashes when it
+  changes. CLEAR LANE moved to SHIFT + F6 and FOLLOW to SHIFT + F7. The NOTE lane's LEDs mirror PERFORM's rows: the key's root low, the
+  scale dim, the rest dark, the pad of the cursor's step mid. SHIFT + a palette pad writes nothing for now (it will sound the pad).
 
 ### Added
 
-- PATTERN: SHIFT + a chord pad on the NOTE lane writes its root alone, a single note (issue #2). A single-note step lights its column in
-  both palette rows. With PADS on KEYS the palette is single notes already.
 - PATTERN: COPY copies the cursor's step, INSERT puts the copy there and moves the steps after it right (the last one inside LENGTH
   falls off), DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY copies it, SHIFT + INSERT pastes it
   over the current one (LENGTH too), SHIFT + DELETE empties it after F1 confirms.

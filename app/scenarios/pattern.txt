@@ -1,5 +1,5 @@
-# PATTERN (U6b): a pattern built by hand with the pads (notes, carriers, levels, a rest), played with FOLLOW, then pattern B and a rest, F2 LANE and
-# F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
+# PATTERN (U6b, Q2): a pattern built by hand with the pads (notes, carriers, levels, a rest), the NOTE palette set with F6 ROW and F7 PLAYS (B to 7TH,
+# then a piano), the SHIFT row (CLR LANE, FOLLOW), played with FOLLOW, then pattern B and a rest, F2 LANE and F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -8,7 +8,7 @@ wait 100
 tap pattern
 wait 150
 snap 01_empty
-# NOTE lane: eight chords from the upper palette rows, the cursor steps on by itself
+# NOTE lane: row A is a note per pad, row B a triad (the layout's defaults), the cursor steps on by itself
 paddown 0
 wait 40
 padup 0
@@ -34,14 +34,49 @@ wait 40
 padup 19
 wait 40
 snap 02_notes
-# one note alone on the cursor's step (SHIFT + a chord pad, issue #2): its column lights in both palette rows
+# SHIFT + a palette pad writes nothing (Q3 makes it sound): the cursor stays
 press shift
 paddown 5
 wait 40
 padup 5
 release shift
 wait 100
-snap 02b_one_note
+snap 02b_shift_pad_writes_nothing
+# F6 ROW to B, F7 PLAYS to 7TH: the second tap on a key steps it, the first only focuses; row B goes dark for a moment when it changes
+tap f6
+tap f6
+wait 60
+snap 02c_row_b_flash
+wait 300
+tap f7
+tap f7
+wait 100
+snap 02d_b_is_7th
+paddown 14
+wait 40
+padup 14
+wait 40
+snap 02e_b_7th_written
+# F7 on to PIANO NOTE: B holds the white keys, A the black ones
+tap f7
+tap f7
+tap f7
+wait 100
+snap 02f_piano
+paddown 1
+wait 40
+padup 1
+wait 40
+paddown 14
+wait 40
+padup 14
+wait 40
+# the SHIFT row: CLR LANE on F6, FOLLOW on F7
+press shift
+wait 150
+snap 02g_shift_row
+release shift
+wait 60
 # a rest on step 3 (SHIFT + the step pad)
 press shift
 paddown 26
@@ -85,12 +120,16 @@ wait 100
 snap 05_slice
 # play with FOLLOW on the NOTE lane
 tap note
+press shift
 tap f7
+release shift
 record on
 tap play
 wait 1500
 snap 06_follow
+press shift
 tap f7
+release shift
 # pattern B: next to play, then LENGTH and the LANE key
 paddown 33
 wait 40
@@ -105,30 +144,34 @@ tap f2
 tap f2
 wait 100
 snap 09_lane_key
+press shift
 tap f6
+release shift
 wait 100
 snap 10a_clear_asks
 tap f2
 wait 100
 snap 10b_not_cleared
+press shift
 tap f6
+release shift
 wait 100
 tap f1
 wait 100
 snap 10c_cleared
-# COPY, INSERT and DELETE (Fable's finding 5): two notes, step 1 copied and inserted at step 1, step 2 emptied, then SHIFT + DELETE asks and F1 empties
+# COPY, INSERT and DELETE (Fable's finding 5): two piano keys, step 1 copied and inserted at step 1, step 2 emptied, then SHIFT + DELETE asks and F1 empties
 tap note
 paddown 24
 wait 40
 padup 24
 wait 40
-paddown 0
+paddown 14
 wait 40
-padup 0
+padup 14
 wait 40
-paddown 3
+paddown 16
 wait 40
-padup 3
+padup 16
 wait 40
 paddown 24
 wait 40

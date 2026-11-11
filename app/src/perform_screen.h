@@ -23,6 +23,7 @@
 // Everything runs in the main loop (o3-sdk app/screen.h). The tables (labels, the chord of each pad, the peak holds) are one O3SDK_BIG struct
 // in perform_screen.cpp; the screen keeps a cursor and a few flags in the SRAM.
 
+#include "pads_logic.h"
 #include "perform_logic.h"
 #include "skin/ornoir.h"
 
@@ -112,6 +113,10 @@ class PerformScreen final : public o3sdk::app::Screen {
   unsigned slots_waiting() const noexcept { return slots_waiting_; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }
+  // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play. PATTERN's palette writes from it (rows A and B); PERFORM's own pads
+  // follow it from Q6 on. Main loop only. Not saved yet (Q8 puts it in the project); init() sets the default: A NOTE, B TRIAD, C FORMANT.
+  const pads::Layout& layout() const noexcept { return layout_; }
+  bool set_plays(pads::Row row, pads::Plays value) noexcept { return pads::set_plays(layout_, row, value); }
   bool strip_mode() const noexcept { return strip_; }
   int latched() const noexcept { return latched_; }
 
@@ -156,6 +161,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   int octave_ = 0;
   unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
   unsigned bottom_ = 0;      // ChordKind of the bottom row
+  pads::Layout layout_{};    // see layout()
   std::uint8_t slots_waiting_ = 0;  // see set_slots_waiting
   bool keys_ = false;        // F7 PADS: false CHORDS, true KEYS
   bool strip_ = false;       // BEND ROW (SHIFT + F7): the bottom row is the bend strip

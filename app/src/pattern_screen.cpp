@@ -26,7 +26,13 @@ using Button = app::Button;
 namespace {
 
 constexpr std::uint64_t kNoteMs = 2500;
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"PATTERN", "LANE", "LENGTH", "TEMPO", "VALUE", "CLR LANE", "FOLLOW", "SAVE"};
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"PATTERN", "LANE", "LENGTH", "TEMPO", "VALUE", "ROW", "PLAYS", "SAVE"};
+// The SHIFT row: F6 and F7 only (the others are blank and dim), labelled the way PERFORM's is.
+constexpr const char* kShiftNames[ornoir::kFKeys] = {"", "", "", "", "", "CLR LANE", "FOLLOW", ""};
+constexpr unsigned kKeyRow = 5;     // F6
+constexpr unsigned kKeyPlays = 6;   // F7
+constexpr std::uint64_t kFlashMs = 150;  // the chosen row's LEDs off for this long when F6 changes it (a short off-on)
+inline constexpr pads::Layout kDefaultLayout{};  // when no PERFORM is wired (a standalone screen)
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr char kLetters[kBankPatterns + 1] = "ABCDEFGH";
 constexpr unsigned kTempoStep = 1000;  // one BPM, in milli-BPM
@@ -53,6 +59,11 @@ void cat_uint(char* dst, std::size_t cap, unsigned v) noexcept {
   }
   out[n] = '\0';
   cat(dst, cap, out);
+}
+
+unsigned round_param(const dsp::Engine& e, dsp::UnitId id, std::uint16_t p) noexcept {
+  const float v = e.param(id, p);
+  return v < 0.0f ? 0u : static_cast<unsigned>(v + 0.5f);
 }
 
 int centred(ui::Renderer& r, const char* s, Face f, int cx) noexcept { return cx - r.text_width(s, f) / 2; }
@@ -107,7 +118,7 @@ O3SDK_BIG PatternHelp g_pd = {};
 
 // COPY's clipboard (a step or a pattern), kept while the app runs; INSERT pastes it on any pattern.
 O3SDK_BIG pt::Clip g_clip = {};
-constexpr std::uint8_t kArmLane = 1;     // CLEAR LANE (F6)
+constexpr std::uint8_t kArmLane = 1;     // CLEAR LANE (SHIFT + F6)
 constexpr std::uint8_t kArmPattern = 2;  // SHIFT + DELETE
 
 constexpr int kGridX = 124;
@@ -130,6 +141,8 @@ void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScr
   focus_ = 4;
   shown_ = 0;
   follow_ = false;
+  row_ = 0;
+  flash_until_ = 0;
 }
 
 const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
@@ -185,19 +198,21 @@ void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noe
   ctx.redraw();
 }
 
-// A palette pad writes into the cursor's step, and the cursor moves on. On the NOTE lane in CHORDS, SHIFT + a chord pad writes its root alone
-// (issue #2: a line of single notes is one press a step); in KEYS the pads are single notes already.
+// A palette pad writes into the cursor's step, and the cursor moves on. On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or
+// a chord of PATTERN's voicing); a pad that plays nothing (OFF, a piano gap, out of range) writes nothing, and SHIFT + a pad writes nothing yet (the
+// audition, Q3).
 void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) noexcept {
   PatternData& p = pattern_now();
   bool ok = false;
   switch (lane()) {
     case pt::Lane::Note: {
-      const bool keys = perform_ != nullptr && perform_->keys_mode();
-      const int oct = perform_ != nullptr ? perform_->octave() : 0;
-      const ChordKind bottom = static_cast<ChordKind>(perform_ != nullptr ? perform_->chord_kind() : 0u);
-      const unsigned note = pt::note_of_pad(pad, oct, keys);
-      ok = keys || shift ? set_note(p, cursor_, note) : set_chord(p, cursor_, note, pt::kind_of_pad(pad, bottom),
-                                static_cast<Voicing>(perform_ != nullptr ? perform_->voicing() : 3u));
+      const pads::PadPlay pp = pt::palette_play(pad, perform_ != nullptr ? perform_->octave() : 0, layout_now());
+      if (shift || pp.note < 1) {
+        return;
+      }
+      const unsigned note = static_cast<unsigned>(pp.note);
+      ok = pp.kind == 0u ? set_note(p, cursor_, note)
+                         : set_chord(p, cursor_, note, static_cast<ChordKind>(pp.kind - 1u), static_cast<Voicing>(perform_ != nullptr ? perform_->voicing() : 3u));
       break;
     }
     case pt::Lane::Carrier:
@@ -221,6 +236,8 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
   }
   ctx.redraw();
 }
+
+const pads::Layout& PatternScreen::layout_now() const noexcept { return perform_ != nullptr ? perform_->layout() : kDefaultLayout; }
 
 void PatternScreen::pad(app::Context& ctx, unsigned pad, bool shift) noexcept {
   if (pad < pt::kPalettePads) {
@@ -280,6 +297,25 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       }
       (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u);
       break;
+    case kKeyRow:  // ROW: A or B, the row F7 sets (a tap flips, a detent stops at the ends)
+    case kKeyPlays: {  // PLAYS: the chosen row's value, written through PERFORM's layout
+      if (lane() != pt::Lane::Note || perform_ == nullptr) {
+        return;
+      }
+      if (key == kKeyRow) {
+        const int n = static_cast<int>(row_) + delta;
+        const unsigned next = tap ? row_ ^ 1u : (n < 0 ? 0u : (n > 1 ? 1u : static_cast<unsigned>(n)));
+        if (next != row_) {
+          row_ = static_cast<std::uint8_t>(next);
+          flash_until_ = ctx.uptime_ms() + kFlashMs;
+        }
+      } else {
+        const pads::Row r = static_cast<pads::Row>(row_);
+        const pads::Plays cur = perform_->layout().row[row_];
+        (void)perform_->set_plays(r, tap ? pads::plays_tap(r, cur) : pads::plays_step(r, cur, delta));
+      }
+      break;
+    }
     default:
       return;
   }
@@ -309,21 +345,21 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   if (in.fkey_press(k)) {
     if (in.shift) {
-      return;
-    }
-    if (k == 5u) {  // CLEAR LANE: asks first (F1 confirms, any other key cancels), on the pattern shown
-      armed_ = kArmLane;
-      ctx.redraw();
-      return;
-    }
-    if (k == 6u) {  // FOLLOW
-      follow_ = !follow_;
-      ctx.redraw();
+      if (k == kKeyRow) {  // SHIFT + F6, CLEAR LANE: asks first (F1 confirms, any other key cancels), on the pattern shown
+        armed_ = kArmLane;
+        ctx.redraw();
+      } else if (k == kKeyPlays) {  // SHIFT + F7, FOLLOW
+        follow_ = !follow_;
+        ctx.redraw();
+      }
       return;
     }
     if (k == 7u) {  // SAVE
       say(ctx, save_ != nullptr && save_(save_user_, ctx) ? "SAVING" : "CARD BUSY");
       return;
+    }
+    if ((k == kKeyRow || k == kKeyPlays) && lane() != pt::Lane::Note) {
+      return;  // ROW and PLAYS are the NOTE lane's palette (dim elsewhere)
     }
     if (k == focus_) {  // a second tap steps the value on
       key_tap_ = true;
@@ -394,22 +430,37 @@ void PatternScreen::update(app::Context& ctx) noexcept {
   ctx.redraw();  // the playhead moves with the bar
 }
 
-// Rows 0 and 1: the lane's palette (mid where it holds what the cursor's step stores); rows 2 and 3: the steps and the patterns.
+// Rows 0 and 1: the lane's palette (mid where it holds what the cursor's step stores); rows 2 and 3: the steps and the patterns. On the NOTE lane the
+// palette is PERFORM's rows A and B as they play now: the key's root low, the scale dim, the rest and the pads that play nothing dark; F6's row goes off for
+// a moment when it changes.
 void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const PatternData& p = pattern_now();
   const unsigned len = length_of(p);
   const Step cur = get_step(p, cursor_);
-  const bool keys = perform_ != nullptr && perform_->keys_mode();
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
-  const ChordKind bottom = static_cast<ChordKind>(perform_ != nullptr ? perform_->chord_kind() : 0u);
+  const pads::Layout& layout = layout_now();
   const unsigned slices = seq_ != nullptr ? seq_->slice_count() : 0u;
+  const dsp::Engine& e = ctx.engine();
+  const unsigned key = round_param(e, voice_, Vocoder::Key) % 12u;
+  const std::uint16_t cols = pl::scale_cols(key, round_param(e, voice_, Vocoder::Scale));
+  const bool flash = lane() == pt::Lane::Note && ctx.uptime_ms() < flash_until_;
   for (unsigned pad = 0; pad < pt::kPalettePads; ++pad) {
     std::uint8_t level = app::kLedDim;
-    if (lane() == pt::Lane::Slice) {  // the SPEAKS slot's slices: dim up to its count, mid on the cursor step's
-      level = pad < slices ? (pt::palette_matches(lane(), pad, cur, oct, keys, bottom) ? app::kLedMid : app::kLedDim) : app::kLedOff;
+    if (lane() == pt::Lane::Note) {
+      const pads::PadPlay pp = pt::palette_play(pad, oct, layout);
+      level = app::kLedOff;
+      if (pp.note > 0 && !(flash && app::pad_row(pad) % 2u == row_)) {
+        const unsigned pc = static_cast<unsigned>(pp.note) % 12u;
+        level = pc == key ? app::kLedLow : (((cols >> pc) & 1u) != 0u ? app::kLedDim : app::kLedOff);
+        if (pt::palette_matches(lane(), pad, cur, oct, layout)) {
+          level = app::kLedMid;
+        }
+      }
+    } else if (lane() == pt::Lane::Slice) {  // the SPEAKS slot's slices: dim up to its count, mid on the cursor step's
+      level = pad < slices ? (pt::palette_matches(lane(), pad, cur, oct, layout) ? app::kLedMid : app::kLedDim) : app::kLedOff;
     } else if (lane() == pt::Lane::Carrier && pad >= pt::kCarrierPads) {
       level = app::kLedOff;
-    } else if (pt::palette_matches(lane(), pad, cur, oct, keys, bottom)) {
+    } else if (pt::palette_matches(lane(), pad, cur, oct, layout)) {
       level = app::kLedMid;
     }
     leds.set(pad, level);
@@ -432,6 +483,9 @@ void PatternScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     out.label[i] = kKeyNames[i];
   }
+  if (lane() != pt::Lane::Note) {  // ROW and PLAYS are the NOTE lane's
+    out.dim = static_cast<std::uint8_t>((1u << kKeyRow) | (1u << kKeyPlays));
+  }
 }
 
 // HELP: every button input() answers has a row (tests/pattern_screen_test.cpp holds it), the pads in three groups.
@@ -445,7 +499,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Instr, "CARRIER LANE", nullptr},
       {Button::Vol, "LEVEL LANE", nullptr},
       {Button::Fx, "SLICE LANE: A SPEAKS CUT", nullptr},
-      {Button::Shift, "STEP: REST. CHORD: ONE NOTE", nullptr},
+      {Button::Shift, "SHIFT + STEP: A REST", nullptr},
       {Button::Copy, "COPY THE STEP", "COPY THE PATTERN"},
       {Button::Insert, "INSERT THE COPIED STEP", "PASTE THE COPIED PATTERN"},
       {Button::Delete, "EMPTY THE STEP", "EMPTY THE PATTERN (F1)"},
@@ -466,21 +520,16 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {"STEPS", "MOVES THE CURSOR; SHIFT: A REST IN THE LANE", Color::Play},
       {"PATTERNS", "A TO H: SHOW IT, PLAY IT NEXT", Color::Sel},
   };
-  // The NOTE lane's palette says what its pads write: chords of F6's kind below and the next kind above, or the single notes of KEYS.
-  static constexpr app::HelpPadGroup kChordGroups[] = {
-      {"CHORDS", "LOW ROW F6'S KIND, UP THE NEXT; SHIFT: ONE NOTE", Color::Accent},
+  // The NOTE lane's palette says what its pads write: PERFORM's rows A and B as the layout has them now.
+  static constexpr app::HelpPadGroup kNoteGroups[] = {
+      {"NOTES", "WHAT PERFORM'S ROWS A AND B PLAY (F6, F7)", Color::Accent},
       kGroups[1],
       kGroups[2],
   };
-  static constexpr app::HelpPadGroup kKeyGroups[] = {
-      {"NOTES", "SINGLE NOTES, TWO OCTAVES (PADS = KEYS)", Color::Accent},
-      kGroups[1],
-      kGroups[2],
-  };
-  const bool keys = perform_ != nullptr && perform_->keys_mode();
-  const ChordKind bottom = static_cast<ChordKind>(perform_ != nullptr ? perform_->chord_kind() : 0u);
+  const int oct = perform_ != nullptr ? perform_->octave() : 0;
+  const pads::Layout& layout = layout_now();
   h.summary = "THE 16 STEPS OF A PATTERN AND THEIR LANES. THE UPPER PADS WRITE THE LIT LANE.\n"
-              "A SLICE FIRES A SPEAKS CUT AT ITS STEP, ONE SHOT; STOP RELEASES IT.";
+              "SHIFT + F6: CLEAR LANE (F1 CONFIRMS). SHIFT + F7: FOLLOW. A SLICE IS A ONE-SHOT CUT.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -490,19 +539,26 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[2] = "1 TO 16 STEPS";
   h.fkey[3] = "THE BAR'S BPM";
   h.fkey[4] = "THE CURSOR STEP'S VALUE";
-  h.fkey[5] = "EMPTIES LANE: F1 CONFIRMS";
-  h.fkey[6] = "CURSOR RIDES THE PLAYHEAD";
+  const bool note_lane = lane() == pt::Lane::Note;
+  h.fkey[5] = note_lane ? "PAD ROW A OR B" : "NOTE LANE ONLY";
+  h.fkey[6] = note_lane ? "WHAT THE ROW PLAYS" : "NOTE LANE ONLY";
   h.fkey[7] = "SAVES THE PATTERNS";
+  h.fkey_shift[5] = kShiftNames[5];
+  h.fkey_shift[6] = kShiftNames[6];
   for (unsigned i = 0; i < pt::kPalettePads; ++i) {
     char* l = g_pd.name[i];
     l[0] = '\0';
     switch (lane()) {
-      case pt::Lane::Note:
-        cat(l, sizeof g_pd.name[i], pt::kPitchClass[app::pad_col(i) % 12u]);
-        if (!keys) {  // the row's kind after the root: "C7TH", "C#PWR"
-          cat(l, sizeof g_pd.name[i], pt::kCellKind[static_cast<unsigned>(pt::kind_of_pad(i, bottom)) & 3u]);
+      case pt::Lane::Note: {
+        const pads::PadPlay pp = pt::palette_play(i, oct, layout);
+        if (pp.note > 0) {  // the root and the kind after it: "C", "C7TH", "C#PWR"
+          cat(l, sizeof g_pd.name[i], pt::kPitchClass[static_cast<unsigned>(pp.note) % 12u]);
+          if (pp.kind != 0u) {
+            cat(l, sizeof g_pd.name[i], pt::kCellKind[(pp.kind - 1u) & 3u]);
+          }
         }
         break;
+      }
       case pt::Lane::Carrier:
         if (i < pt::kCarrierPads) {
           cat(l, sizeof g_pd.name[i], pt::kPadCarrier[i]);
@@ -529,7 +585,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
     l[1] = '\0';
     h.pad_label[pt::pad_of_pattern(q)] = l;
   }
-  h.groups = lane() != pt::Lane::Note ? kGroups : (keys ? kKeyGroups : kChordGroups);
+  h.groups = lane() != pt::Lane::Note ? kGroups : kNoteGroups;
   h.group_count = sizeof kGroups / sizeof kGroups[0];
   // help_pads() would null the labels set above, so the groups are written here.
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
@@ -577,7 +633,23 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     cell_text(lane(), cur, one, two);
     cat(keys[4].value, sizeof keys[4].value, one[0] != '\0' ? one : "-");
   }
-  cat(keys[6].value, sizeof keys[6].value, follow_ ? "ON" : "OFF");
+  {
+    const bool note_lane = lane() == pt::Lane::Note;
+    const unsigned row = row_ & 1u;
+    cat(keys[kKeyRow].value, sizeof keys[kKeyRow].value, pads::kRowNames[row]);
+    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, pads::kPlaysShort[pads::idx(layout_now().row[row])]);
+    keys[kKeyRow].dim = keys[kKeyPlays].dim = !note_lane;  // the NOTE lane's palette; dim elsewhere
+    keys[kKeyRow].hot = keys[kKeyRow].hot && note_lane;
+    keys[kKeyPlays].hot = keys[kKeyPlays].hot && note_lane;
+  }
+  if (ctx.panel().shift()) {  // the SHIFT row replaces the plain one (names and values)
+    for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
+      keys[i] = ornoir::FKey{};
+      keys[i].name = kShiftNames[i];
+      keys[i].dim = i != kKeyRow && i != kKeyPlays;
+    }
+    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, follow_ ? "ON" : "OFF");
+  }
 
   ui::plot::Canvas c(r);
   c.open();
@@ -654,10 +726,9 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   } else if (note_ != nullptr) {
     r.text(kGridX, kCellY + 4 * kLaneStep + 10, note_, Color::Accent, Face::Label);
   } else {
-    const bool chords = lane() == pt::Lane::Note && !(perform_ != nullptr && perform_->keys_mode());
     r.text(kGridX, kCellY + 4 * kLaneStep + 14,
-           chords ? "PADS: CHORDS ABOVE (SHIFT: ONE NOTE), STEPS AND PATTERNS BELOW. SHIFT + STEP: REST"
-                  : "PADS: PALETTE ABOVE, STEPS AND PATTERNS BELOW. SHIFT + STEP: REST",
+           lane() == pt::Lane::Note ? "PADS: ROWS A AND B ABOVE (F6, F7), STEPS AND PATTERNS BELOW. SHIFT + STEP: REST"
+                                    : "PADS: PALETTE ABOVE, STEPS AND PATTERNS BELOW. SHIFT + STEP: REST",
            Color::TextDim, Face::Micro);
   }
 }

@@ -4,14 +4,16 @@
 // PATTERN (docs/UI-DESIGN.md "PATTERN"), in the OR NOIR skin: the pattern letter A..H large at the left, sixteen step cells with four lanes under each
 // (NOTE, CARRIER, LEVEL, SLICE: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
 //
-//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 CLEAR LANE  F7 FOLLOW  F8 SAVE
-//   A tap on F1..F5 points the encoder at that key (it stays lit); a second tap steps it on. F6 clears the lane of the pattern at once, F7 toggles the
-//   cursor riding the playhead, F8 saves the bank like FILE does. The encoder starts on F5, the cursor step's value in the lane.
+//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW)
+//   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of PERFORM's two upper pad rows (A or B)
+//   F7 changes, F7 PLAYS is that row's value (NOTE, TRIAD, 7TH, OPEN, POWER, OFF or a piano value: pads::Layout, PERFORM holds it); both are dim off the
+//   NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
+//   The encoder starts on F5, the cursor step's value in the lane.
 //   UP / DOWN: the lane. LEFT / RIGHT: the cursor (they repeat when held). NOTE, INSTR, VOL, FX: the lane (app.cpp opens the screen on it).
 //   Pads: rows 2 and 3, columns 0..7: steps 1..16 (a press moves the cursor; SHIFT + press writes a rest in the lane); columns 8..11: patterns A..H (the
-//   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: PERFORM's two lower chord rows, or two
-//   octaves of keys when PERFORM is on KEYS, at PERFORM's octave; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS slot's cuts 1..24, lit up to its count).
-//   A palette pad writes into the cursor's step and moves the cursor on.
+//   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: the pads of PERFORM's rows A and B, what
+//   they play there, at PERFORM's octave, lit like PERFORM's; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS
+//   slot's cuts 1..24, lit up to its count). A palette pad writes into the cursor's step and moves the cursor on; a pad that plays nothing writes nothing.
 //
 // Main loop only. The screen keeps a cursor and a few flags; HELP's labels are in the SDRAM (g_pd in the .cpp).
 
@@ -64,6 +66,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   void show_pattern(o3sdk::app::Context& ctx, unsigned p) noexcept;
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
+  const pads::Layout& layout_now() const noexcept;  // PERFORM's (the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
@@ -79,6 +82,8 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint8_t focus_ = 4;   // the F key the encoder drives (F5, VALUE)
   std::uint8_t shown_ = 0;   // the pattern on the screen, 0..7
   bool follow_ = false;
+  std::uint8_t row_ = 0;     // F6: the row F7 changes, pads::Row A (0) or B (1) (the palette's two rows)
+  std::uint64_t flash_until_ = 0;  // the chosen row's LEDs are off until then, a short off-on when F6 changes it (leds() checks it; main loop only)
   std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE
   bool key_tap_ = false;     // turn() came from a second tap on an F key, not from the encoder
 };
