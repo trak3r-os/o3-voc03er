@@ -5,6 +5,7 @@
 // test (tests/perform_logic_test.cpp) holds them. Nothing here allocates or reads the engine.
 
 #include <o3_voc03er/chords.h>
+#include <o3_voc03er/modes.h>
 #include <o3_voc03er/pad_map.h>
 #include <o3_voc03er/units/vocoder/scale.h>
 
@@ -20,7 +21,7 @@ inline constexpr const char* kKeyNames[12] = {"C", "C#", "D", "D#", "E", "F", "F
 inline constexpr const char* kScaleNames[kScaleTableCount] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
 inline constexpr const char* kCarrierNames[9] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE", "VOICE"};  // Vocoder::CarSrc 0..8
 inline constexpr const char* kKindNames[4] = {"TRIAD", "7TH", "OPEN", "POWER"};                                    // ChordKind
-inline constexpr const char* kModeNames[4] = {"BANDS", "TALK", "TUNE", "ROBOT"};
+using o3_voc03er::kModeNames;  // modes.h: the one table of modes
 // The Voicing enum's order (chords.h): the setting is its index (PARAMS' VOICING, the Sounds readout).
 inline constexpr const char* kVoicingNames[4] = {"CLOSE", "OPEN", "WIDE", "SMOOTH"};
 inline constexpr const char* kRowNames[4] = {"POWER", "OPEN", "7TH", ""};  // the bottom row's name is the kind's
@@ -41,11 +42,19 @@ inline float capture_stop_at(unsigned bars, float bar, bool playing) noexcept {
   return playing ? (static_cast<float>(bars) - 0.5f) * bar : static_cast<float>(bars) * bar;
 }
 
-// The mode index of the unit's Mode value (0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT): it names the mode (kModeNames). The app's own mode_index (app.cpp) still
-// knows three.
-constexpr unsigned mode_index(float v) noexcept { return v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u)); }
+using o3_voc03er::mode_index;  // modes.h: the unit's Mode value to 0..kModeCount - 1
 // What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page.
 constexpr unsigned mode_page(unsigned mode) noexcept { return mode == 3u ? 0u : mode; }
+inline constexpr unsigned kModePages = 3;  // the pages PERFORM draws (BANDS, TALK, TUNE): kF8 below has one hint each
+constexpr bool pages_cover_modes() noexcept {
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    if (mode_page(m) >= kModePages) {
+      return false;
+    }
+  }
+  return true;
+}
+static_assert(pages_cover_modes(), "a new mode needs a PERFORM page: mode_page, kModePages and kF8");
 
 // `value` stepped by `delta` and held inside lo..hi (no wrap).
 constexpr int step_clamped(int value, int delta, int lo, int hi) noexcept {
@@ -353,8 +362,8 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
       "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: THE KIND ON THE BOTTOM ROW",
       "F7 PADS: CHORDS OR KEYS. SHIFT: BEND ROW",
   };
-  static constexpr const char* kF8[3] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
-  return focus < 7u ? kHints[focus] : kF8[mode_page(mode < 4u ? mode : 0u)];
+  static constexpr const char* kF8[kModePages] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
+  return focus < 7u ? kHints[focus] : kF8[mode_page(mode < kModeCount ? mode : 0u)];
 }
 
 }  // namespace o3_voc03er::perform

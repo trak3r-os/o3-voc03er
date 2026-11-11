@@ -92,9 +92,6 @@ constexpr app::DiagCommand kCommands[] = {
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
 };
 
-constexpr const char* kModeWord[4] = {"bands", "talk", "tune", "robot"};
-constexpr unsigned mode_index(float v) noexcept { return v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u)); }
-
 constexpr std::size_t text_length(const char* s) noexcept {
   std::size_t n = 0;
   while (s[n] != '\0') {
@@ -564,7 +561,7 @@ class MyApp final : public app::App {
     for (unsigned i = 0; i < console_notes_; ++i) {
       (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100, o3_voc03er::Vocoder::kNoteLocal);
     }
-    out.text("voc: ").text(kModeWord[c.mode]).text(" notes ").dec(console_notes_).nl();
+    out.text("voc: ").text(o3_voc03er::kModeWords[c.mode < o3_voc03er::kModeCount ? c.mode : 0u]).text(" notes ").dec(console_notes_).nl();
     ctx_->redraw();
   }
 
@@ -589,7 +586,7 @@ class MyApp final : public app::App {
     w.num("in_failed", have && in.failed() ? 1u : 0u);
     w.num("in_peak_l", permille(meter_.left()));
     w.num("in_peak_r", permille(meter_.right()));
-    w.str("voc_mode", kModeWord[mode_index(ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode))]);
+    w.str("voc_mode", o3_voc03er::kModeWords[o3_voc03er::mode_index(ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode))]);
     w.num("voc_notes", console_notes_);
     for (unsigned i = 0; i < o3_voc03er::Loop::kCount; ++i) {
       const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);

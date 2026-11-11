@@ -30,7 +30,7 @@ enum class Fmt : std::uint8_t {
   MsLin,    // milliseconds, a fixed step
   Db,       // tenths of a dB
   Int,      // the parameter itself, clamped
-  Mode,     // 0..3 (BANDS, TALK, TUNE, ROBOT), clamped
+  Mode,     // 0..kModeCount - 1 (BANDS, TALK, TUNE, ROBOT), clamped
   Key,      // 0..11, round
   Scale,    // 0..kScaleTableCount - 1, round
   OnOff,    // 0 / 1
@@ -62,7 +62,7 @@ inline constexpr KeyDef kTable[kPages][kKeys] = {
      {"ATTACK", Kind::Value, Vocoder::Attack, Fmt::MsLog, 1, 500, 1, 1},
      {"RELEASE", Kind::Value, Vocoder::Release, Fmt::MsLog, 5, 2000, 1, 1},
      {"LEVEL", Kind::Value, Vocoder::Level, Fmt::Db, -480, 60, 5, 60}},
-    {{"MODE", Kind::Value, Vocoder::Mode, Fmt::Mode, 0, 3, 1, 1},
+    {{"MODE", Kind::Value, Vocoder::Mode, Fmt::Mode, 0, static_cast<int>(kModeCount) - 1, 1, 1},
      {"QUALITY", Kind::Value, Vocoder::Quality, Fmt::Int, 8, 24, 1, 4},
      {"FREEZE", Kind::Value, Vocoder::Freeze, Fmt::OnOff, 0, 1, 1, 1},
      {"DRY", Kind::Value, Vocoder::Dry, Fmt::Pct, 0, 100, 2, 10},
@@ -194,7 +194,7 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
       }
       break;
     case Fmt::Mode:
-      put(perform::kModeNames[u < 4u ? u : 0u]);
+      put(perform::kModeNames[u < kModeCount ? u : 0u]);
       break;
     case Fmt::Key:
       put(perform::kKeyNames[u % 12u]);

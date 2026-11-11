@@ -4,6 +4,8 @@
 // The vocoder's input side, the pure parts (host test: tests/input_test.cpp): the audio sources and their names, the gain a source
 // starts at, the input peak meter that forgets the previous source after a switch, and the console's `voc` command.
 
+#include <o3_voc03er/modes.h>
+
 #include <o3sdk/hal/capture.h>
 
 #include <cstddef>
@@ -104,7 +106,7 @@ class InputMeter {
 // `voc <bands|talk|tune|robot> [notes 0..8]`: the mode and how many notes the console holds (the unit round has no person at the pads).
 inline constexpr unsigned kVocMaxNotes = 8;
 struct VocCommand {
-  unsigned mode = 0;  // Vocoder::Mode: 0 bands, 1 talk, 2 tune, 3 robot (the console parser still knows three)
+  unsigned mode = 0;  // Vocoder::Mode: the index of its word in kModeWords (modes.h)
   unsigned notes = 0;
 };
 // false (out untouched) for a word that is not a mode, a count that is not 0..8 or an extra word. No count means 0 (release all).
@@ -175,17 +177,14 @@ inline bool parse_voc_shape(const char* what, const char* value, VocShape& out) 
 
 inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noexcept {
   VocCommand v;
-  if (mode != nullptr && std::strcmp(mode, "bands") == 0) {
-    v.mode = 0;
-  } else if (mode != nullptr && std::strcmp(mode, "talk") == 0) {
-    v.mode = 1;
-  } else if (mode != nullptr && std::strcmp(mode, "tune") == 0) {
-    v.mode = 2;
-  } else if (mode != nullptr && std::strcmp(mode, "robot") == 0) {
-    v.mode = 3;
-  } else {
+  unsigned m = 0;
+  while (m < kModeCount && (mode == nullptr || std::strcmp(mode, kModeWords[m]) != 0)) {
+    ++m;
+  }
+  if (m == kModeCount) {
     return false;
   }
+  v.mode = m;
   if (count != nullptr) {
     unsigned n = 0;
     std::size_t i = 0;

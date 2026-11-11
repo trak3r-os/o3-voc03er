@@ -915,7 +915,7 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   }
   switch (focus_) {
     case 0:
-      (void)e.set_param(voice_, Vocoder::Mode, static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, 3)));
+      (void)e.set_param(voice_, Vocoder::Mode, static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, static_cast<int>(kModeCount) - 1)));
       break;
     case 1:
       if (delta != 0) {
