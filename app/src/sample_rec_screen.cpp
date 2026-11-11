@@ -165,10 +165,12 @@ void SampleRecScreen::delete_press(app::Context& ctx) noexcept {
       phase_ = Phase::Idle;
       drop_ = false;
       say(ctx, "CANCELLED");
-    } else if (!stop_) {  // recording: the take ends at the bar line and is thrown away
+    } else {  // recording, or stopping until the bar line: the take ends there and is thrown away
       drop_ = true;
-      write_rec(ctx, false);
-      stop_ = true;
+      if (!stop_) {
+        write_rec(ctx, false);
+        stop_ = true;
+      }
     }
     ctx.redraw();
     return;

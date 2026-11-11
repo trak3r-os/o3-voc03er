@@ -269,3 +269,24 @@ TEST_CASE("sample_rec: DELETE while recording stops the take at the bar line and
   CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
   CHECK(h.runtime().frame_failures() == 0u);
 }
+
+TEST_CASE("sample_rec: DELETE while a take is stopping (REC pressed, the bar line not reached) still throws it away") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  h.run_ms(60);
+  tap(h, app::Button::Play);  // the transport runs: a stop waits for the bar line (up to 2 s)
+  h.run_ms(100);
+  REQUIRE(h.engine().playing());
+  tap(h, app::Button::Rec);  // armed, then records from the next bar line
+  h.run_ms(2300);            // past that bar line, inside the 1 BAR take
+  REQUIRE(slot1_state(h) != "loop1=0");
+  tap(h, app::Button::Rec);  // stop: the unit ends the take at the bar line
+  h.run_ms(40);
+  tap(h, app::Button::Delete);  // before the bar line: the take is thrown away, not kept
+  h.run_ms(4500);
+  CHECK(slot1_state(h) == "loop1=0");
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Play)) == doctest::Approx(0.0f));
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
