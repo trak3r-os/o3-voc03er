@@ -190,7 +190,7 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const unsigned tempo = e.stats().tempo_mbpm;
 
   ornoir::Voiceprint vp;
-  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the envelope and the ladder (follow_print)
+  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the envelope and the ladder (follow_print); TRACT: the grid (V2 draws the mouth)
   if (perform_ != nullptr) {
     perform_->follow_bands(ctx, vp.level, vp.peak);
     if (!vp.bars) {

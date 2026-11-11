@@ -26,6 +26,13 @@
 
 ### Added
 
+- TRACT, a fifth mode (V1, console only): the vocoder runs the carrier alone (BANDS, TALK and TUNE idle) and the carrier bus, after the
+  CARRIER switch, goes through a vocal tract unit (`units/tract`, `TractUnit`, on slot 0's insert 0, wrapping the kit's `extras/tract` at
+  Full quality). Any SOUNDS source speaks through it; GATE, ARP, GLIDE, BEND, VIB, SUB, TILT, NOISE and the carrier lane work as before. The
+  unit's ids are VOWEL, TONGUE, JAW, LIPS, CLOSE, GLIDE, SIZE, RES, HISS, MIX and SLIDE (V3's own); MIX 0 is a bit-exact bypass, and the unit
+  sleeps on silence. The app's `apply_mode()` writes the tube's MIX (1 in TRACT, 0 elsewhere) for every writer of MODE; the unit holds the
+  MIX rise 12 ms, so a mode change crossfades first. `voc tract` and `tract <param> <value>` from the console; PERFORM's F1 reaches it and
+  draws BANDS' page without the bars (V2 draws the mouth). Modes 0 to 3 render sample for sample as before. Unit check owed: CPU and the first listen.
 - The project keeps more (P3, Q8): STAT 1.1 adds VOICING, the BEND ROW and its range, FOLLOW, the preset (by name, so a reordered
   table does not move it), and the pads layout (rows A, B, C and the two last-used chord pads); SLOT 1.1 adds TRIG and CHOKE per slot.
   A v0.2.0 project loads with SMOOTH, bend row off, range 2, FOLLOW off, no preset, ONE SHOT and CHOKE ON, and its KEYS or chord kind

@@ -18,7 +18,10 @@
 //              target of NOTES-IN). ROBOT is BANDS (the same engine, not a second one) followed by a fast compressor on its wet sum
 //              (robot.h: 1 ms attack, 50 ms release, 4:1, make-up), so a voice that changes level comes out nearly flat. A 10 ms
 //              crossfade between any two modes (one ramp per mode), and only the active mode runs, except during the crossfade;
-//              a mode that was not running starts from a clean state when it is entered (a BANDS to ROBOT switch keeps the engine going)
+//              a mode that was not running starts from a clean state when it is entered (a BANDS to ROBOT switch keeps the engine going).
+//              4 TRACT: the carrier alone (what CarSrc picked, after GATE, ARP, GLIDE, BEND, VIB, SUB, TILT and NOISE) times LEVEL goes to the
+//              output; Bands, Talk and Tune do not run. The vocal tract itself is the app's TractUnit, an insert after this unit (the app's
+//              apply_mode() turns its MIX on in TRACT and off in the other modes)
 //   8 Quality  LPC order 8..24 (default 16), Talk only
 //   9 Freeze   0 off, 1 on: Talk stops updating its reflection coefficients (a held vowel)
 //  10..21    Loops, three for each of the four loops n = 0..3 (ids 10 + 3n + field; Vocoder::loop_param):
@@ -304,6 +307,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   o3sdk::dsp::Ramp talk_mix_;
   o3sdk::dsp::Ramp tune_mix_;
   o3sdk::dsp::Ramp robot_mix_;  // ROBOT: the BANDS wet sum through comp_; bands_ runs for it (one engine for both ramps)
+  o3sdk::dsp::Ramp carrier_mix_;  // TRACT: the carrier bus itself (after CarSrc, GATE and the loops) to the output; no engine runs, the tube is the app's insert
   RobotComp comp_;
   RobotComp talk_comp_;  // TALK's wet output through the same compressor with other constants (S3)
   Loop loops_;

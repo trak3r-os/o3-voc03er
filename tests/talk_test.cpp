@@ -891,11 +891,11 @@ constexpr std::size_t kSeg = 120;  // blocks per level segment: 174 ms, faster t
 
 }  // namespace
 
-TEST_CASE("robot: MODE has four values, ROBOT is the fourth and takes no new parameter") {
+TEST_CASE("robot: MODE has five values (TRACT is the fifth, V1), ROBOT is the fourth and takes no new parameter") {
   static Vocoder vo;
   vo.prepare(kFs);
   const auto& p = vo.info().params[Vocoder::Mode];
-  CHECK(p.max == 3.0f);
+  CHECK(p.max == 4.0f);
   CHECK(p.def == 0.0f);
   CHECK(Vocoder::kParamCount == 64);
 }

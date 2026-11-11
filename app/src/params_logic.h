@@ -30,7 +30,7 @@ enum class Fmt : std::uint8_t {
   MsLin,    // milliseconds, a fixed step
   Db,       // tenths of a dB
   Int,      // the parameter itself, clamped
-  Mode,     // 0..kModeCount - 1 (BANDS, TALK, TUNE, ROBOT), clamped
+  Mode,     // 0..kModeCount - 1 (BANDS, TALK, TUNE, ROBOT, TRACT), clamped
   Key,      // 0..11, round
   Scale,    // 0..kScaleTableCount - 1, round
   OnOff,    // 0 / 1

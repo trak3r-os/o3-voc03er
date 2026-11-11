@@ -345,7 +345,7 @@ TEST_CASE("vocoder: TUNE is mode 2 after TALK, the new parameters are appended, 
   CHECK(Vocoder::Key == 35);
   CHECK(Vocoder::NotesIn == 39);
   const auto& info = vo.info();
-  CHECK(info.params[Vocoder::Mode].max == 3.0f);
+  CHECK(info.params[Vocoder::Mode].max == 4.0f);  // TRACT is the fifth mode (V1)
   CHECK(std::string(info.params[Vocoder::Mode].names[2]) == "TUNE");
   CHECK(std::string(info.params[Vocoder::Mode].names[1]) == "TALK");
   CHECK(std::string(info.params[Vocoder::Key].name) == "KEY");

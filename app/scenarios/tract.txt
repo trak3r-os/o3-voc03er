@@ -1,0 +1,36 @@
+# TRACT (V1), the fifth mode: the vocoder runs the carrier alone and the tract unit (a vocal tract, o3-sdk's extras/tract) speaks it. F1 steps to it
+# (the first tap takes the focus), the state line says `voc_mode=tract`, a chord held sounds through the tube, and F1 round again is BANDS. The
+# simulator shows the screen and that the chord sounds; whether it sounds like a mouth is by ear on the unit. The tube's knobs have no screen
+# yet (V2): the vowel sweep is the console's (`tract vowel <0..1>`) and is tested in tests/tract_mode_test.cpp, a scenario has no console line.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/tract.txt --out <dir>   (the dir must exist)
+record on
+input tone 220 -12
+paddown 36
+paddown 40
+paddown 43
+wait 600
+snap 01_bands
+expect state voc_mode=bands
+tap f1
+tap f1
+tap f1
+tap f1
+tap f1
+wait 800
+snap 02_tract
+expect state voc_mode=tract
+wait 600
+snap 03_tract_held
+padup 36
+padup 40
+padup 43
+wait 400
+paddown 36
+wait 600
+snap 04_tract_one_note
+padup 36
+wait 300
+tap f1
+wait 800
+snap 05_bands_again
+expect state voc_mode=bands

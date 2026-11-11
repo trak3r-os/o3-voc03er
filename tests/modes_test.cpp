@@ -24,12 +24,15 @@ TEST_CASE("modes: kModeCount and the names are the unit's Mode range and names")
 }
 
 TEST_CASE("modes: mode_index rounds to the nearest mode and holds the ends") {
-  // The thresholds the screens used before the table: 0.5, 1.5, 2.5.
+  // The thresholds the screens used before the table: 0.5, 1.5, 2.5; TRACT (V1) added 3.5.
   for (int t = -20; t <= 60; ++t) {
     const float v = static_cast<float>(t) * 0.1f;
-    const unsigned old = v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u));
+    const unsigned old = v >= 3.5f ? 4u : (v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u)));
     CHECK(mode_index(v) == old);
   }
+  CHECK(kModeCount == 5u);
+  CHECK(kModeTract == 4u);
+  CHECK(mode_index(4.0f) == kModeTract);
   CHECK(mode_index(1e9f) == kModeCount - 1u);
   CHECK(mode_index(-1e9f) == 0u);
   CHECK(mode_index(std::nanf("")) == 0u);

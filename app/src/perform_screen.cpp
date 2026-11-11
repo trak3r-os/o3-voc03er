@@ -1348,7 +1348,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   }
 
   ornoir::Voiceprint vp;
-  vp.bars = pl::mode_page(mode) == 0u;  // BANDS and ROBOT draw the bars
+  vp.bars = pl::mode_page(mode) == 0u && mode != o3_voc03er::kModeTract;  // BANDS and ROBOT draw the bars (in TRACT the bands idle: the grid, until V2's area function)
   if (!vp.bars) {
     follow_print(ctx, vp);  // TALK's envelope, TUNE's ladder
   }
@@ -1576,7 +1576,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
               "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
-  h.fkey[0] = "BANDS, TALK, TUNE, ROBOT";
+  h.fkey[0] = "THE 5 MODES, TRACT LAST";
   h.fkey[1] = "A LIST OF WHAT TALKS";
   h.fkey[2] = "SYNTH, LOOPS, VOICE, LIVE";
   h.fkey[3] = "THE SCALE'S ROOT";

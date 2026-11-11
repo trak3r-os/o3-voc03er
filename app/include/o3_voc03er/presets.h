@@ -40,7 +40,7 @@ constexpr Preset make(const char* name, float mode, float carsrc, float wave, fl
 }
 }  // namespace preset_detail
 
-// Mode 0 BANDS, 3 ROBOT. CarSrc 1 SYNTH, 2 NOISE. Gate 3 is 1/16; Arp 1 is UP.
+// Mode 0 BANDS, 3 ROBOT (4 TRACT is not a preset: the tube is played, not preset). CarSrc 1 SYNTH, 2 NOISE. Gate 3 is 1/16; Arp 1 is UP.
 //                                                      mode car wave noise  atk  rel  det  q   fmt  thru glide gate arp vib frz
 inline constexpr Preset kPresets[kPresetCount] = {
     preset_detail::make("ROBOT",   3, 1, 0, 0.0f,   5.0f,   80.0f,  0.0f, 16, 0,  0.0f,   0.0f, 0, 0, 0.0f, 0),

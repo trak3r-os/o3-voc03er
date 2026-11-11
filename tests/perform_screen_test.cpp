@@ -2,6 +2,8 @@
 // PERFORM on the engine: a chord pad sounds a chord, SHIFT latches it, DELETE lets it go; a frame fits the display list.
 #include <doctest/doctest.h>
 
+#include "tract_skip.h"
+
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/runtime.h>
@@ -159,6 +161,7 @@ namespace {
 float unit_param(sim::Harness& h, std::uint16_t id) {
   float best = 0.0f;
   for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) continue;
     const float v = h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
     best = std::fabs(v) > std::fabs(best) ? v : best;
   }
@@ -414,7 +417,7 @@ TEST_CASE("perform: a REC take goes on to its end when PERFORM is left (the capt
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-// Finding 10: a second tap on F1 MODE steps round (ROBOT to BANDS); the encoder stops at the ends.
+// Finding 10: a second tap on F1 MODE steps round (TRACT, the fifth mode since V1, to BANDS); the encoder stops at the ends.
 TEST_CASE("perform: F1 MODE taps wrap round, the encoder clamps") {
   auto h = std::make_unique<sim::Harness>(::o3sdk_app());
   REQUIRE(h->start());
@@ -425,13 +428,13 @@ TEST_CASE("perform: F1 MODE taps wrap round, the encoder clamps") {
   h->turn(-8);  // the encoder clamps at the first mode ...
   h->run_ms(20);
   CHECK(unit_param(*h, kMode) == doctest::Approx(0.0f));
-  h->turn(8);  // ... and at the last (ROBOT)
+  h->turn(8);  // ... and at the last (TRACT)
   h->run_ms(20);
-  CHECK(unit_param(*h, kMode) == doctest::Approx(3.0f));
+  CHECK(unit_param(*h, kMode) == doctest::Approx(4.0f));
   h->turn(1);
   h->run_ms(20);
-  CHECK(unit_param(*h, kMode) == doctest::Approx(3.0f));
-  tap(*h, app::Button::F1);  // a tap at ROBOT goes round to the first mode, where it used to stop
+  CHECK(unit_param(*h, kMode) == doctest::Approx(4.0f));
+  tap(*h, app::Button::F1);  // a tap at TRACT goes round to the first mode, where it used to stop
   h->run_ms(20);
   CHECK(unit_param(*h, kMode) == doctest::Approx(0.0f));
   tap(*h, app::Button::F1);

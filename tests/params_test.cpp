@@ -3,6 +3,8 @@
 // value through the engine's parameter, VOICING is the app's own key, PARAMS / DOWN page it, HELP).
 #include <doctest/doctest.h>
 
+#include "tract_skip.h"
+
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/runtime.h>
@@ -140,8 +142,9 @@ TEST_CASE("params: stepping clamps the linear keys and wraps the round ones") {
   CHECK(pm::step_display(quality, 20, 1, true) == 24);
   CHECK(pm::step_display(quality, 24, 1, false) == 24);
   const pm::KeyDef& mode = pm::key_def(1, 0);
-  CHECK(pm::step_display(mode, 2, 1, false) == 3);  // ROBOT, the last mode
-  CHECK(pm::step_display(mode, 3, 1, false) == 3);
+  CHECK(pm::step_display(mode, 2, 1, false) == 3);  // ROBOT
+  CHECK(pm::step_display(mode, 3, 1, false) == 4);  // TRACT, the last mode
+  CHECK(pm::step_display(mode, 4, 1, false) == 4);
 
   const pm::KeyDef& level = pm::key_def(0, 7);
   CHECK(pm::step_display(level, 0, 1, false) == 5);
@@ -243,6 +246,7 @@ void tap(sim::Harness& h, app::Button b) {
 float param(sim::Harness& h, std::uint16_t id) {
   float best = 0.0f;
   for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) continue;
     const float v = h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
     best = std::fabs(v) > std::fabs(best) ? v : best;
   }

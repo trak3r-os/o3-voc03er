@@ -45,6 +45,7 @@
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pattern.h>
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <o3sdk/app/app.h>
@@ -82,12 +83,14 @@ class MyApp;
 MyApp& instance() noexcept;
 void ain_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+void tract_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
+    {"tract", "tract <vowel|tongue|jaw|lips|close|glide|size|res|hiss|mix|slide> <v>", &tract_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
 };
@@ -133,6 +136,11 @@ class MyApp final : public app::App {
     // simulator and app_test fail on it, so the result need not be checked here.
     (void)e.set_source(0, voice);
     voc_id_ = voice;
+    // TRACT (units/tract): the tube sits after the vocoder on slot 0 (insert 0). Its MIX is 0, a bit-exact bypass, until apply_mode() raises it with Mode TRACT.
+    const dsp::UnitId tube = e.attach(tract_);
+    (void)e.set_insert(0, 0, tube);
+    tract_id_ = tube;
+    applied_mode_ = kNoMode;  // setup() can run again on this object: the first update() writes the tract's MIX from the Mode it finds
     // the first boot of section 10 of docs/UI-DESIGN.md: the synth under the voice, in C major
     (void)e.set_param(voice, o3_voc03er::Vocoder::CarSrc, 1.0f);
     (void)e.set_param(voice, o3_voc03er::Vocoder::Scale, 1.0f);
@@ -174,6 +182,7 @@ class MyApp final : public app::App {
   // The file jobs end and start here, once per pass of the main loop (a Screen has an update() too, for what only it needs).
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
+    apply_mode(ctx.engine());  // every writer of Mode (PERFORM F1, PARAMS, a preset, the console, a project load) goes through the engine's parameter: this is the one reader
     sample_.service(ctx);  // slice voices end and tables follow lengths whichever screen is up
     // The screens' work that must not stop when one leaves (a screen button can leave at any moment; the kit gives App::input the key first). FILE's goes before
     // this pass's own job below starts, so that its job is settled (or still running) when files.busy() is read.
@@ -555,7 +564,33 @@ class MyApp final : public app::App {
     }
   }
 
-  // `voc <bands|talk|tune|robot> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
+  // The one function that couples the vocoder's Mode to the tract unit: TRACT writes the tract's MIX 1, any other mode writes 0 (the tract is then a
+  // bit-exact bypass and runs nothing, so BANDS, TALK, TUNE and ROBOT sound as they did before the tract existed). Main loop. The tract unit itself holds
+  // the MIX rise back for 12 ms (TractUnit::kEnterHoldMs), so the tube does not start while the old engine's 10 ms crossfade is still running.
+  void apply_mode(dsp::Engine& e) noexcept {
+    const unsigned m = o3_voc03er::mode_index(e.param(voc_id_, o3_voc03er::Vocoder::Mode));
+    if (m == applied_mode_ || tract_id_ == dsp::kNoUnit) {
+      return;
+    }
+    if (e.set_param(tract_id_, o3_voc03er::TractUnit::Mix, m == o3_voc03er::kModeTract ? 1.0f : 0.0f)) {
+      applied_mode_ = m;  // a refused write (a full queue) is tried again on the next pass
+    }
+  }
+
+  // `tract <param> <value>` (main loop): a parameter of the tract unit by word (parse_tract), a number inside its range or a choice's name.
+  void tract(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    o3_voc03er::TractCommand c;
+    if (ctx_ == nullptr || args.argc != 3u || !o3_voc03er::parse_tract(args.arg(1), args.arg(2), c) ||
+        !o3sdk::core::param_in_range(tract_.info().params[c.id], c.value)) {
+      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 5..500> <value>").nl();
+      return;
+    }
+    (void)ctx_->engine().set_param(tract_id_, static_cast<std::uint16_t>(c.id), c.value);
+    out.text("tract: ").text(o3_voc03er::kTractWords[c.id]).text(" ").text(args.arg(2)).nl();
+    ctx_->redraw();
+  }
+
+  // `voc <bands|talk|tune|robot|tract> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
     o3_voc03er::VocShape shape;
     if (ctx_ != nullptr && args.argc == 3u && o3_voc03er::parse_voc_shape(args.arg(1), args.arg(2), shape)) {
@@ -584,11 +619,12 @@ class MyApp final : public app::App {
     o3_voc03er::VocCommand c;
     if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u ||
         !o3_voc03er::parse_voc(args.arg(1), args.argc == 3u ? args.arg(2) : nullptr, c)) {
-      out.text("usage: voc <bands|talk|tune|robot> [notes 0..8] | formant <st> | thru <0..100> | glide <0..500> | gate <0..4> | arp <0..4> | speaks <0..6> | sounds <0..7> | bendrange <2|5|12>").nl();
+      out.text("usage: voc <bands|talk|tune|robot|tract> [notes 0..8] | formant <st> | thru <0..100> | glide <0..500> | gate <0..4> | arp <0..4> | speaks <0..6> | sounds <0..7> | bendrange <2|5|12>").nl();
       return;
     }
     dsp::Engine& e = ctx_->engine();
     (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, static_cast<float>(c.mode));
+    apply_mode(e);
     for (unsigned i = 0; i < console_notes_; ++i) {
       (void)e.send(voc_id_, o3_voc03er::Vocoder::note_off_local(o3_voc03er::kVocChord[i]));
     }
@@ -679,6 +715,9 @@ class MyApp final : public app::App {
   app::Context* ctx_ = nullptr;
   o3_voc03er::InputMeter meter_;
   dsp::UnitId voc_id_ = dsp::kNoUnit;
+  dsp::UnitId tract_id_ = dsp::kNoUnit;
+  static constexpr unsigned kNoMode = 0xFFu;
+  unsigned applied_mode_ = kNoMode;  // the mode apply_mode() last wrote the tract's MIX for (main loop only)
   unsigned console_notes_ = 0;  // the notes `voc` holds (main loop only)
 
   enum class Op : std::uint8_t { None, LoadPattern, LoadConfig, SavePattern, SaveConfig };  // the job in flight
@@ -705,6 +744,7 @@ class MyApp final : public app::App {
   }
 
   o3_voc03er::Vocoder voc_;
+  o3_voc03er::TractUnit tract_;  // an Effect: slot 0, insert 0 (setup())
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;
   o3_voc03er::ParamsScreen params_;
@@ -737,6 +777,9 @@ void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().voc(args, out);
 }
 
+void tract_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().tract(args, out);
+}
 void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().loop(args, out);
 }

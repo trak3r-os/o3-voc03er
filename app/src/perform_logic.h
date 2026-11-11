@@ -43,8 +43,10 @@ inline float capture_stop_at(unsigned bars, float bar, bool playing) noexcept {
 }
 
 using o3_voc03er::mode_index;  // modes.h: the unit's Mode value to 0..kModeCount - 1
-// What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page.
-constexpr unsigned mode_page(unsigned mode) noexcept { return mode == 3u ? 0u : mode; }
+// What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page. TRACT (V1) keeps that page's F8
+// (SPREAD, the carrier's detune, which works in TRACT) and does not draw the bars (the bands idle in TRACT: perform_screen.cpp); its own F8 (VOWEL)
+// and its own voiceprint (the area function) are V2's.
+constexpr unsigned mode_page(unsigned mode) noexcept { return mode >= 3u ? 0u : mode; }
 inline constexpr unsigned kModePages = 3;  // the pages PERFORM draws (BANDS, TALK, TUNE): kF8 below has one hint each
 constexpr bool pages_cover_modes() noexcept {
   for (unsigned m = 0; m < kModeCount; ++m) {
@@ -306,7 +308,7 @@ constexpr unsigned preset_step(unsigned cur, int delta, unsigned count) noexcept
 // The pad of the formant strip in force: `col` holds `formant` (both middle pads at 0).
 constexpr bool formant_lit(int formant, unsigned col) noexcept { return col < 12u && kFormantStrip[col] == formant; }
 
-// The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT) picks F8's word.
+// The line under PERFORM's grid: what the F key under the encoder does (`focus` 0 to 7). `mode` (0 BANDS, 1 TALK, 2 TUNE, 3 ROBOT, 4 TRACT) picks F8's word.
 inline constexpr unsigned kKeyHintMax = 40;  // characters of the Micro face that fit beside the pads' hint
 // With a picker open the line right of the grid is empty and the left one says what its keys do (perform_screen.cpp).
 inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNoShiftFocus) noexcept {
@@ -332,7 +334,7 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
     return "ENCODER FREE: IT BENDS THE PITCH";
   }
   static constexpr const char* kHints[7] = {
-      "F1 MODE: BANDS, TALK, TUNE OR ROBOT",    "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
+      "F1 MODE: BANDS, TALK, TUNE, ROBOT, TRACT", "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
       "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 ROW: A, B OR C; F7 SETS WHAT IT PLAYS",
       "F7 PLAYS: WHAT THE CHOSEN ROW'S PADS DO",
   };

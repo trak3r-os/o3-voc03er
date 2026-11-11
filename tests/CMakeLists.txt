@@ -8,7 +8,7 @@ list(APPEND test_sources ${tract_test_sources})
 # The helper links what the tests need: the kit, the simulator, the host platform and the app library WHOLE (it defines o3sdk_app(),
 # which app_test.cpp names), and hands app/scenarios to the sources as the macro APP_SCENARIO_DIR (app_test.cpp runs every scenario
 # as it is). DEPENDS: the units the tests exercise.
-o3sdk_app_test_suite(o3_voc03er SOURCES ${test_sources} DEPENDS unit_voice unit_vocoder unit_tract_dsp)
+o3sdk_app_test_suite(o3_voc03er SOURCES ${test_sources} DEPENDS unit_voice unit_vocoder unit_tract unit_tract_dsp)
 
 # The two longest ctests are cut into shares, so that a parallel run's floor is the longest share and not the longest file.
 #  * app_test.cpp: its scenarios case takes O3_VOC03ER_SCENARIO_SHARD=i/n (tests/app_test.cpp, by the sorted file names), three shares; a direct run, with no

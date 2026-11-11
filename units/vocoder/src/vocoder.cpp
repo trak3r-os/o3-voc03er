@@ -12,7 +12,7 @@ using o3sdk::core::ParamCurve;
 using o3sdk::core::ParamUnit;
 using o3sdk::dsp::Ramp;
 
-constexpr const char* kModeNames[] = {"BANDS", "TALK", "TUNE", "ROBOT"};
+constexpr const char* kModeNames[] = {"BANDS", "TALK", "TUNE", "ROBOT", "TRACT"};
 constexpr const char* kFreezeNames[] = {"OFF", "ON"};
 constexpr const char* kKeyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 constexpr const char* kScaleNames[] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
@@ -65,7 +65,7 @@ constexpr o3sdk::core::ParamDesc kParams[Vocoder::kParamCount] = {
     {"DRY", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"LEVEL", "dB", nullptr, nullptr, -48.0f, 6.0f, -6.0f, 108, 12, 0, ParamUnit::Fixed1, ParamCurve::Linear, 0, 0},
     {"DETUNE", "ct", nullptr, nullptr, 0.0f, 100.0f, 8.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},  // SPREAD: oscillator 2 at +ct, 3 at -ct
-    {"MODE", "", kModeNames, nullptr, 0.0f, 3.0f, 0.0f, 3, 1, 4, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
+    {"MODE", "", kModeNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"QUALITY", "", nullptr, nullptr, 8.0f, 24.0f, 16.0f, 16, 2, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"FREEZE", "", kFreezeNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     rec_row("L1 REC"), loop_row("L1 PLAY", kPlayNames), loop_row("L1 ROLE", kRoleNames),
@@ -116,6 +116,7 @@ constexpr float kTalkCompReleaseMs = 120.0f;
 constexpr float kTalkCompMakeup = 2.0f;
 constexpr float kTalkGain = 28.0f;    // speech on a one-note saw has the rms in TALK that it has in BANDS, so a change of MODE keeps the level (bench, docs/ENGINE-REALISM.md); by ear on the unit
 constexpr float kTalkCompThreshold = 0.125893f / kTalkGain;  // -18 dBFS (peak) of the TALK wet sum after kTalkGain, in TALK's own units; 2:1 above it
+constexpr float kCarrierGain = 1.0f;  // TRACT: the carrier bus as it is (the tube's own level match keeps its output near the input's rms); [est] by ear on the unit
 constexpr float kWetGain = 128.0f;  // the followers read a modulator the AGC holds at a mean-abs of 0.1, and each band passes a slice of the carrier: a vowel on a three-note saw chord peaks at about 0.9 at LEVEL 0 dB (0.47 at the default -6)
 
 // Cubic soft clip: linear near 0, flat at +-1.5 where it reaches 0.999: the peak never goes above it.
@@ -173,6 +174,7 @@ void Vocoder::prepare(float sample_rate) noexcept {
   talk_mix_.set_length(fade);
   tune_mix_.set_length(fade);
   robot_mix_.set_length(fade);
+  carrier_mix_.set_length(fade);
   comp_.prepare(sample_rate);
   talk_comp_.configure(kTalkCompAttackMs, kTalkCompReleaseMs, kTalkCompThreshold, kTalkCompMakeup, true);
   talk_comp_.prepare(sample_rate);
@@ -196,6 +198,7 @@ void Vocoder::prepare(float sample_rate) noexcept {
   talk_mix_.jump(0.0f);
   tune_mix_.jump(0.0f);
   robot_mix_.jump(0.0f);
+  carrier_mix_.jump(0.0f);
   tune_.reset();
   loops_.clear();
   for (Slot& s : slot_) {
@@ -274,9 +277,9 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       carrier_.set_detune_cents(v);
       break;
     case Mode: {
-      const unsigned m = v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u));
-      Ramp* const ramps[4] = {&bands_mix_, &talk_mix_, &tune_mix_, &robot_mix_};
-      for (unsigned i = 0; i < 4; ++i) {
+      const unsigned m = v >= 3.5f ? 4u : (v >= 2.5f ? 3u : (v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u)));
+      Ramp* const ramps[5] = {&bands_mix_, &talk_mix_, &tune_mix_, &robot_mix_, &carrier_mix_};
+      for (unsigned i = 0; i < 5; ++i) {
         const float t = i == m ? 1.0f : 0.0f;
         Ramp& r = *ramps[i];
         if (t == r.target_value()) continue;
@@ -293,9 +296,9 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
             talk_.reset();
             talk_comp_.reset();
             talk_.adopt_level(lvl);
-          } else {
+          } else if (i == 2u) {
             tune_.reset();
-          }
+          }  // i == 4 (TRACT): the carrier bus has no engine of its own, nothing to restart
         }
         r.target(t);
       }
@@ -1217,6 +1220,42 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
   if (robot) {
     for (std::uint32_t i = 0; i < n; ++i) rw[i] = wet[i];
     comp_.process(rw, n);
+  }
+  if (runs(carrier_mix_)) {
+    // TRACT, alone or crossfading with another mode: carrier x LEVEL, the carrier bus after the CarSrc switch (the synth, the noise, a
+    // loop, the live input or the voice: whatever CarSrc picked) and after GATE, ARP and the rest of the carrier side. The app's TractUnit
+    // (an insert after this unit) is the tube; here the carrier only has to reach the output, through the same LEVEL and soft clip.
+    // The other modes' terms stay in the sum for the crossfade (zero arrays while they do not run). Modes 0..3 never come here, so their
+    // samples are what they were before TRACT existed.
+    const bool others_off = !runs(bands_mix_) && !runs(talk_mix_) && !runs(tune_mix_) && !robot;
+    if (others_off && !level_.moving() && !dry_.moving() && !carrier_mix_.moving()) {
+      const float g = level_.value();
+      const float d = dry_.value();
+      const float cm = kCarrierGain * carrier_mix_.value();
+      for (std::uint32_t i = 0; i < n; ++i) {
+        const float y = soft_clip(g * (car[i] * cm + d * mod[i]));
+        args.out_l[i] = y;
+        args.out_r[i] = y;
+      }
+      return;
+    }
+    if (!robot) {
+      for (std::uint32_t i = 0; i < n; ++i) rw[i] = 0.0f;
+    }
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const float g = level_.next();
+      const float d = dry_.next();
+      const float wm = bands_mix_.next();
+      const float tm = talk_mix_.next();
+      const float um = tune_mix_.next();
+      const float rm = robot_mix_.next();
+      const float cm = carrier_mix_.next();
+      const float y = soft_clip(g * ((wet[i] * kWetGain) * wm + (rw[i] * kWetGain) * rm + (tw[i] * kTalkGain) * tm + (tn[i] * kTuneGain) * um +
+                                     (car[i] * kCarrierGain) * cm + d * mod[i]));
+      args.out_l[i] = y;
+      args.out_r[i] = y;
+    }
+    return;
   }
   if (!level_.moving() && !dry_.moving() && !bands_mix_.moving() && !talk_mix_.moving() && !tune_mix_.moving() && !robot_mix_.moving()) {
     const float g = level_.value();

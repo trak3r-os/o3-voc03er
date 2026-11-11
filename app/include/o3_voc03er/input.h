@@ -199,6 +199,79 @@ inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noex
   out = v;
   return true;
 }
+// `tract <param> <value>`: a parameter of the tract unit (units/tract) by its word (the unit's table order is the id: vowel 0 .. slide 10) and a
+// value, a decimal number ("0.5", "-1", "30") or, for CLOSE and SIZE, the name of the choice (open lips tip back; big large normal small tiny).
+// The range is the unit's own: the app checks it against the table (param_in_range) and refuses what is outside.
+inline constexpr unsigned kTractParamCount = 11;
+inline constexpr const char* kTractWords[kTractParamCount] = {"vowel", "tongue", "jaw", "lips", "close", "glide", "size", "res", "hiss", "mix", "slide"};
+inline constexpr const char* kTractCloseWords[4] = {"open", "lips", "tip", "back"};
+inline constexpr const char* kTractSizeWords[5] = {"big", "large", "normal", "small", "tiny"};
+struct TractCommand {
+  unsigned id = 0;
+  float value = 0.0f;
+};
+// A plain decimal: an optional '-', digits, an optional '.' and digits, nothing else, at most 8 characters (no exponent, no NaN, no infinity).
+inline bool parse_decimal(const char* s, float& out) noexcept {
+  if (s == nullptr) {
+    return false;
+  }
+  std::size_t i = 0;
+  const bool negative = s[0] == '-';
+  if (negative) {
+    ++i;
+  }
+  float whole = 0.0f;
+  std::size_t digits = 0;
+  for (; s[i] >= '0' && s[i] <= '9'; ++i, ++digits) {
+    whole = whole * 10.0f + static_cast<float>(s[i] - '0');
+  }
+  float frac = 0.0f;
+  if (s[i] == '.') {
+    ++i;
+    float scale = 0.1f;
+    for (; s[i] >= '0' && s[i] <= '9'; ++i, ++digits) {
+      frac += scale * static_cast<float>(s[i] - '0');
+      scale *= 0.1f;
+    }
+  }
+  if (digits == 0 || s[i] != '\0' || i > 8u) {
+    return false;
+  }
+  out = negative ? -(whole + frac) : whole + frac;
+  return true;
+}
+inline bool parse_tract(const char* name, const char* value, TractCommand& out) noexcept {
+  if (name == nullptr || value == nullptr) {
+    return false;
+  }
+  unsigned id = 0;
+  while (id < kTractParamCount && std::strcmp(name, kTractWords[id]) != 0) {
+    ++id;
+  }
+  if (id == kTractParamCount) {
+    return false;
+  }
+  TractCommand c;
+  c.id = id;
+  const bool is_close = id == 4u;
+  const bool is_size = id == 6u;
+  if (is_close || is_size) {
+    const unsigned n = is_close ? 4u : 5u;
+    for (unsigned i = 0; i < n; ++i) {
+      if (std::strcmp(value, is_close ? kTractCloseWords[i] : kTractSizeWords[i]) == 0) {
+        c.value = static_cast<float>(i);
+        out = c;
+        return true;
+      }
+    }
+  }
+  if (!parse_decimal(value, c.value)) {
+    return false;
+  }
+  out = c;
+  return true;
+}
+
 // The i-th held note: C3 major seventh and up, spread over two octaves (a chord that exercises the carrier's voices).
 inline constexpr std::uint8_t kVocChord[kVocMaxNotes] = {48, 52, 55, 59, 60, 64, 67, 71};
 

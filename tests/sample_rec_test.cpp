@@ -3,6 +3,8 @@
 // plays, DELETE, HELP, the display list).
 #include <doctest/doctest.h>
 
+#include "tract_skip.h"
+
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
 #include <o3sdk/app/runtime.h>
@@ -98,6 +100,7 @@ struct Rig {
 float unit_param(sim::Harness& h, std::uint16_t id) {
   float best = 0.0f;
   for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) continue;
     const float v = h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
     best = std::fabs(v) > std::fabs(best) ? v : best;
   }
