@@ -876,6 +876,9 @@ TEST_CASE("project: P3 a STAT field out of range refuses the file and leaves the
   refused("layout B FORMANT", 22, static_cast<unsigned>(pads::Plays::Formant));
   refused("layout C a piano value", 23, static_cast<unsigned>(pads::Plays::PianoNote));
   refused("layout last A BEND", 24, static_cast<unsigned>(pads::Plays::Bend));
+  refused("layout A MOUTH (C only)", 21, static_cast<unsigned>(pads::Plays::Mouth));
+  refused("layout B MOUTH (C only)", 22, static_cast<unsigned>(pads::Plays::Mouth));
+  refused("layout last B MOUTH", 25, static_cast<unsigned>(pads::Plays::Mouth));
   // A STAT cut short of its 1.1 fields (a 1.1 version over 1.0's length) is damaged, not a 1.0.
   Bytes cut = stat11();
   cut.resize(cut.size() - 3);
@@ -902,6 +905,26 @@ TEST_CASE("project: P3 a STAT field out of range refuses the file and leaves the
   wrefused([](Project& p) { p.preset_len = 1; p.preset[0] = '\n'; });
   wrefused([](Project& p) { p.layout[0] = pads::kPlaysCount; });
   wrefused([](Project& p) { p.layout[2] = static_cast<std::uint8_t>(pads::Plays::PianoNote); });
+  wrefused([](Project& p) { p.layout[0] = static_cast<std::uint8_t>(pads::Plays::Mouth); });
+  wrefused([](Project& p) { p.layout[1] = static_cast<std::uint8_t>(pads::Plays::Mouth); });
+}
+
+TEST_CASE("project: V2 a layout with row C on MOUTH round-trips whatever the mode, and MOUTH on A or B never loads") {
+  Project p = stat_base();
+  pads::Layout l = project_layout(p);
+  l.row[2] = pads::Plays::Mouth;
+  set_project_layout(p, l);
+  Bytes b = write(p);
+  REQUIRE(!b.empty());
+  Project q = {};
+  REQUIRE(read(b, q));
+  CHECK(project_layout(q).row[2] == pads::Plays::Mouth);
+  CHECK(project_layout(q).row[0] == l.row[0]);
+  CHECK(project_layout(q).row[1] == l.row[1]);
+  CHECK(write(q) == b);
+  // A and B take their own values only: the legacy row of a MOUTH layout is a plain NOTE / TRIAD one
+  const pads::LegacyFields lf = pads::legacy_fields(l);
+  CHECK_FALSE(lf.bend_row);
 }
 
 TEST_CASE("project: P3 a file without STAT keeps the header's rule, the 1.1 fields are not read") {

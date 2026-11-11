@@ -4,14 +4,14 @@
 // PERFORM, the home screen (docs/UI-DESIGN.md), in the OR NOIR skin (skin/ornoir.h): what speaks (the audio input) on the left, the voiceprint
 // of the vocoder's 16 bands in the middle, what sounds (the carrier) on the right, and the pads as a chord grid under them.
 //
-//   F1 MODE  F2 SPEAKS  F3 SOUNDS  F4 KEY  F5 SCALE  F6 ROW  F7 PLAYS  F8 by mode (BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED)
+//   F1 MODE  F2 SPEAKS  F3 SOUNDS  F4 KEY  F5 SCALE  F6 ROW  F7 PLAYS  F8 by mode (BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL)
 //   A tap on an F key points the encoder at it (the key stays lit); a second tap steps it on. The encoder changes the value.
 //   F2, F3      a tap opens a list over the column (SPEAKS: sources and slots; SOUNDS: SYNTH, NOISE, LIVE, sources, slots): UP / DOWN or the encoder move the
 //               cursor, the key again or F1 takes the row, F8 backs out; F4..F7, SHIFT, PERFORMANCE and the screen buttons close it, the pads sound as ever.
 //               A dimmed row (a second LIVE source) arms a capture. REC records the live source for two bars into the first empty slot, which then takes
 //               the side that held LIVE (route.h; the capture is a state machine run by update()).
 //   pads          row 0 is KEYS' controls in every layout (OCT, VOL, ROOT, MOD, BND); rows 1, 2 and 3 are the layout's A, B and C (pads_logic.h), each with its PLAYS
-//                 value: a note, a chord kind, a piano (A the black keys, B the white ones), OFF, and on C the FORMANT strip or the BEND strip. F6 ROW picks
+//                 value: a note, a chord kind, a piano (A the black keys, B the white ones), OFF, and on C the FORMANT strip, the BEND strip or the MOUTH strip (TRACT: nine vowel pads and the closures LIPS, TIP, BACK). F6 ROW picks
 //                 A, B or C (a tap steps and wraps, the encoder stops at the ends; the row's LEDs flash once); F7 PLAYS sets that row. Holding a pad of a
 //                 row and tapping F7 (or turning) changes THAT row at once, and F6 follows it. A row above plays one octave higher per playing row below it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
@@ -54,7 +54,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   // (app.cpp's select_source).
   using SourceStep = void (*)(void* user, o3sdk::hal::capture::Source src, unsigned gain) noexcept;
 
-  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, const Vocoder* voc, SourceStep step, void* user) noexcept;
+  // `tract` is the tract unit (TRACT mode's mouth: F8 VOWEL and row C set to MOUTH write its parameters, the voiceprint reads them); kNoUnit: none.
+  void init(o3sdk::dsp::UnitId voice, o3sdk::dsp::UnitId tract, const InputMeter* meter, const Vocoder* voc, SourceStep step, void* user) noexcept;
 
   const char* title() const noexcept override { return "PERFORM"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -147,6 +148,10 @@ class PerformScreen final : public o3sdk::app::Screen {
   void shift_key(o3sdk::app::Context& ctx, unsigned key) noexcept;
   void apply_bend(o3sdk::app::Context& ctx) noexcept;
   void apply_vib(o3sdk::app::Context& ctx) noexcept;
+  void mouth_press(o3sdk::app::Context& ctx, unsigned pad, const perform::PadSpec& sp) noexcept;
+  void mouth_release(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void write_close(o3sdk::app::Context& ctx) noexcept;
+  bool mouth_active(const o3sdk::dsp::Engine& e) const noexcept;  // the unit is in TRACT mode
   void control_press(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void control_release(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void choose_row(o3sdk::app::Context& ctx, pads::Row row) noexcept;
@@ -169,6 +174,11 @@ class PerformScreen final : public o3sdk::app::Screen {
   void loop_rec(o3sdk::app::Context& ctx, unsigned slot, bool on) noexcept;
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
+  o3sdk::dsp::UnitId tract_ = o3sdk::dsp::kNoUnit;
+  // The mouth strip's closure pads held (row C set to MOUTH, TRACT): pad bits and the order they went down in. Layout-independent, so a row changed
+  // under a held pad still lets it go. Main loop only.
+  std::uint64_t mouth_pads_ = 0;
+  perform::MouthHold mouth_;
   const InputMeter* meter_ = nullptr;
   const Vocoder* voc_ = nullptr;
   SourceStep step_source_ = nullptr;

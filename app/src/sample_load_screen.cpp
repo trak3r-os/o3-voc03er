@@ -510,7 +510,7 @@ void SampleLoadScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "PAGE UP THE LIST", nullptr},
       {Button::Right, "PAGE DOWN THE LIST", nullptr},
-      {Button::Params, "PARAMS: THREE PAGES", nullptr},
+      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::SampleLoad, "THIS SCREEN", nullptr},

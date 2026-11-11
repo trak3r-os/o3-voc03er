@@ -103,6 +103,22 @@ void tune_shapes(plot::Canvas& c, int ax, int ay, int aw, int ah, const Voicepri
   }
 }
 
+// TRACT: the mouth as a profile, glottis on the left to the lips on the right: each of the 22 sections is a column centred on the middle line, as
+// tall as the section is wide (255 is 2.0), the lips' end drawn in the carrier ink and the closed sections as a line. 22 rects, about 130 words.
+void mouth_shapes(plot::Canvas& c, int ax, int ay, int aw, int ah, const Voiceprint& vp) noexcept {
+  const int stride = (aw - 8) / static_cast<int>(kTubeSections);
+  const int w = stride > 3 ? stride - 1 : stride;
+  const int x0 = ax + (aw - stride * static_cast<int>(kTubeSections)) / 2;
+  const int mid = ay + ah / 2;
+  const int span = ah - 16;  // the column of 255
+  fill(c, ax + 4, mid, aw - 8, 1, Color::Empty);
+  for (unsigned i = 0; i < kTubeSections; ++i) {
+    int h = static_cast<int>(vp.tube[i]) * span / 255;
+    h = h < 2 ? 2 : h;
+    fill(c, x0 + static_cast<int>(i) * stride, mid - h / 2, w, h, i + 1u == kTubeSections ? Color::Sel : Color::Play);
+  }
+}
+
 }  // namespace
 
 // The voiceprint as a strip (PARAMS): the frame, the pane and, with `bars`, the sixteen levels from the bottom with the held peaks over them.
@@ -115,6 +131,7 @@ void voiceprint_strip(plot::Canvas& c, int x, int y, int w, int h, const Voicepr
     }
     if (vp.kind == Print::Talk) talk_shapes(c, x + 2, y + 2, w - 4, h - 4, vp);
     if (vp.kind == Print::Tune) tune_shapes(c, x + 2, y + 2, w - 4, h - 4, vp);
+    if (vp.kind == Print::Mouth) mouth_shapes(c, x + 2, y + 2, w - 4, h - 4, vp);
     return;
   }
   const int inner = w - 8, ih = h - 8;
@@ -385,7 +402,7 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
   c.round_rect(Rect{516, 52, 32, 14}, 112, col(Color::Play));
 
   // SPEAKS.
-  c.round_rect(Rect{16, 68, 208, 20}, 160, col(Color::Play));
+  c.round_rect(Rect{16, 68, 208, 20}, 160, col(sp.dim ? Color::Empty : Color::Play));
   if (sp.picker != nullptr) {
     picker_shapes(c, *sp.picker, 16, 208, Color::Play);
   } else {
@@ -474,12 +491,12 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
     }
   }
   {
-    const int h_in = static_cast<int>(ladder_height(sp.in.level, 150));
+    const int h_in = sp.dim ? 0 : static_cast<int>(ladder_height(sp.in.level, 150));
     if (h_in > 0 && sp.picker == nullptr) {
       fill(c, 16, 270 - h_in, 12, h_in, Color::Play);
     }
     const int pk = static_cast<int>(ladder_height(sp.in.peak, 150));
-    if (sp.picker == nullptr) {
+    if (sp.picker == nullptr && !sp.dim) {
       fill(c, 16, 270 - pk - kPitch, 12, kPitch, Color::Text);
     }
     const int w_out = static_cast<int>(ladder_height(so.out.level, 216));
@@ -515,6 +532,8 @@ void perform_shapes(plot::Canvas& c, const HeaderState& h, const FKey (&keys)[kF
     talk_shapes(c, kVx, kVy, 288, 174, vp);
   } else if (vp.kind == Print::Tune) {
     tune_shapes(c, kVx, kVy, 288, 174, vp);
+  } else if (vp.kind == Print::Mouth) {
+    mouth_shapes(c, kVx, kVy, 288, 174, vp);
   }
 }
 
@@ -533,13 +552,18 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
     for (const auto& a : kAxis) {
       r.text(kVx + a.half_col * kColStride / 2 + 6 - len(a.s) * 3, 254, a.s, Color::TextDim, Face::Micro);
     }
+  } else if (vp.kind == Print::Mouth) {
+    static const char kMouthNote[] = "NO INPUT: THE MOUTH IS PLAYED";
+    r.text(kVx + (288 - len(kMouthNote) * 6) / 2, 254, kMouthNote, Color::TextDim, Face::Micro);
+    r.text(kVx + 2, kVy + 2, "GLOTTIS", Color::TextDim, Face::Micro);
+    r.text(kVx + 288 - 4 * 6 - 2, kVy + 2, "LIPS", Color::SelText, Face::Micro);
   } else if (vp.kind == Print::Grid) {
     r.text(240 + (320 - len(placeholder) * 8) / 2, 150, placeholder, Color::TextDim, Face::Label);
   }
 
   // SPEAKS.
-  r.text(16, 48, "SPEAKS", Color::Play, Face::Label);
-  r.text(30, 70, sp.source, Color::PlayText, Face::Label);
+  r.text(16, 48, "SPEAKS", sp.dim ? Color::TextDim : Color::Play, Face::Label);
+  r.text(30, 70, sp.source, sp.dim ? Color::TextDim : Color::PlayText, Face::Label);
   char buf[16];
   {
     unsigned n = 0;
@@ -562,8 +586,8 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
     r.text(36, 180, "-12", Color::TextDim, Face::Micro);
     r.text(36, 258, "-48", Color::TextDim, Face::Micro);
     r.text(70, 121, "CLIP", sp.clipping ? Color::Text : Color::TextDim, Face::Micro);
-    r.text(60, 150, "LIVE", Color::Text, Face::Label);
-    r.text(60, 168, sp.live != nullptr ? sp.live : sp.source, Color::Play, Face::Label);
+    r.text(60, 150, "LIVE", sp.dim ? Color::TextDim : Color::Text, Face::Label);
+    r.text(60, 168, sp.live != nullptr ? sp.live : sp.source, sp.dim ? Color::TextDim : Color::Play, Face::Label);
     bool any = false;
     for (int i = 0; i < 4; ++i) any = any || sp.slot[i] != 0;
     if (!any) r.text(60, 188, "NO SLOTS YET", Color::TextDim, Face::Micro);

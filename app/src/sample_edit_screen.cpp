@@ -984,7 +984,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Delete, "THE CUT AT THE CURSOR", nullptr},
       {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
       {Button::Shift, "COARSE CURSOR", nullptr},
-      {Button::Params, "PARAMS: THREE PAGES", nullptr},
+      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

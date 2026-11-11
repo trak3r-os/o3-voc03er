@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "perform_screen.h"
 
+#include "mouth_logic.h"
 #include "perform_logic.h"
 #include "skin/ornoir.h"
 #include "voiceprint_logic.h"
 
 #include <o3_voc03er/chords.h>
 #include <o3_voc03er/presets.h>
+#include <o3_voc03er/units/tract/tract.h>
 
 #include <o3sdk/app/audio_in.h>
 #include <o3sdk/app/context.h>
@@ -142,8 +144,11 @@ Chord chord_from(const std::uint8_t* notes, unsigned count) noexcept {
 
 }  // namespace
 
-void PerformScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocoder* voc, SourceStep step, void* user) noexcept {
+void PerformScreen::init(dsp::UnitId voice, dsp::UnitId tract, const InputMeter* meter, const Vocoder* voc, SourceStep step, void* user) noexcept {
   voice_ = voice;
+  tract_ = tract;
+  mouth_pads_ = 0;
+  mouth_ = {};
   meter_ = meter;
   voc_ = voc;
   step_source_ = step;
@@ -248,6 +253,10 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
       show_flash(ctx, "FORMANT", val);
       return;
     }
+    case pl::PadFn::Vowel:    // the mouth strip (C = MOUTH): TRACT only
+    case pl::PadFn::Closure:
+      mouth_press(ctx, pad, sp);
+      return;
     case pl::PadFn::Play:
       break;
     default:  // a control (row 0): no note; the notes held keep the note they began with
@@ -278,6 +287,47 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
     (void)e.note_on(voice_, g_pd.notes[pad][i], kVelocity, o3_voc03er::Vocoder::kNoteLocal);
   }
   ctx.redraw();
+}
+
+// ---- the mouth strip (row C set to MOUTH, TRACT mode) ------------------------------------------------------------------------------------
+
+// The tract's CLOSE for the closures held: the one pressed last, OPEN with none.
+void PerformScreen::write_close(app::Context& ctx) noexcept {
+  if (tract_ != dsp::kNoUnit) {
+    (void)ctx.engine().set_param(tract_, TractUnit::Close, static_cast<float>(mouth_.current()));
+  }
+}
+
+// A vowel pad sets VOWEL and it stays; a closure pad writes CLOSE while it is down (SHIFT does not latch either). Outside TRACT the strip is dark and
+// says where it speaks; nothing is written.
+void PerformScreen::mouth_press(app::Context& ctx, unsigned pad, const pl::PadSpec& sp) noexcept {
+  if (!mouth_active(ctx.engine())) {
+    notice(ctx, pl::kMouthElsewhere);
+    return;
+  }
+  if (sp.fn == pl::PadFn::Vowel) {
+    const float v = pl::mouth_vowel(static_cast<unsigned>(sp.offset));
+    if (tract_ != dsp::kNoUnit) {
+      (void)ctx.engine().set_param(tract_, TractUnit::Vowel, v);
+    }
+    show_flash(ctx, "VOWEL", pl::kMouthLabel[sp.offset]);
+    return;
+  }
+  mouth_pads_ |= std::uint64_t{1} << pad;
+  mouth_.press(static_cast<unsigned>(sp.offset));
+  write_close(ctx);
+  ctx.redraw();
+}
+
+void PerformScreen::mouth_release(app::Context& ctx, unsigned pad) noexcept {
+  mouth_pads_ &= ~(std::uint64_t{1} << pad);
+  mouth_.release(static_cast<unsigned>(pad % app::kPadCols) - pl::kMouthVowelCols + 1u);
+  write_close(ctx);
+  ctx.redraw();
+}
+
+bool PerformScreen::mouth_active(const dsp::Engine& e) const noexcept {
+  return pl::mode_index(e.param(voice_, Vocoder::Mode)) == kModeTract;
 }
 
 void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
@@ -330,6 +380,10 @@ void PerformScreen::audition_release_all(app::Context& ctx) noexcept {
 }
 
 void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
+  if (pad < app::kPadCount && ((mouth_pads_ >> pad) & 1u) != 0u) {
+    mouth_release(ctx, pad);
+    return;
+  }
   if (pad < app::kPadCount && ((ctl_held_ >> pad) & 1u) != 0u) {
     control_release(ctx, pad, pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_).fn);
     return;
@@ -409,6 +463,9 @@ void PerformScreen::release_all(app::Context& ctx) noexcept {
   }
   held_ = 0;
   ctl_held_ = 0;
+  mouth_pads_ = 0;
+  mouth_ = {};
+  write_close(ctx);
   bnd_dir_ = 0;
   mod_held_ = false;
   vib_pad_ = 0.0f;
@@ -1031,7 +1088,12 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) no
       }
       break;
     default:
-      if (pl::mode_page(mode) == 0u) {  // SPREAD: the detune, cents (BANDS and ROBOT)
+      if (mode == kModeTract) {  // VOWEL: 1 % a detent (SHIFT 10 %), written in the unit's 0..1; the mouth strip's LEDs follow
+        if (tract_ != dsp::kNoUnit) {
+          const int pct = pl::step_clamped(static_cast<int>(e.param(tract_, TractUnit::Vowel) * 100.0f + 0.5f), delta * (coarse ? 10 : 1), 0, 100);
+          (void)e.set_param(tract_, TractUnit::Vowel, static_cast<float>(pct) * 0.01f);
+        }
+      } else if (pl::mode_page(mode) == 0u) {  // SPREAD: the detune, cents (BANDS and ROBOT)
         (void)e.set_param(voice_, Vocoder::Detune,
                           static_cast<float>(pl::step_clamped(static_cast<int>(round_param(e, voice_, Vocoder::Detune)), delta * (coarse ? 10 : 1), 0, 100)));
       } else if (mode == 1u) {  // QUALITY: the LPC order
@@ -1137,7 +1199,8 @@ namespace {
 const char* fkey_name(unsigned key, unsigned mode) noexcept {
   static constexpr const char* kNames[] = {"MODE", "SPEAKS", "SOUNDS", "KEY", "SCALE", "ROW", "PLAYS"};
   const unsigned page = pl::mode_page(mode);
-  return key < 7u ? kNames[key] : (page == 0u ? "SPREAD" : (page == 1u ? "QUALITY" : "SPEED"));
+  static constexpr const char* kF8[pl::kModePages] = {"SPREAD", "QUALITY", "SPEED", "VOWEL"};
+  return key < 7u ? kNames[key] : kF8[page];
 }
 
 }  // namespace
@@ -1145,7 +1208,8 @@ const char* fkey_name(unsigned key, unsigned mode) noexcept {
 void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
   const unsigned key = round_param(e, voice_, Vocoder::Key);
   const unsigned scale = round_param(e, voice_, Vocoder::Scale);
-  std::uint32_t sig = key | (scale << 4) | (static_cast<std::uint32_t>(octave_ + 8) << 8);
+  const bool tract = mouth_active(e);  // a MOUTH row names its pads in TRACT only
+  std::uint32_t sig = key | (scale << 4) | (static_cast<std::uint32_t>(octave_ + 8) << 8) | (tract ? 0x1000u : 0u);
   for (unsigned r = 0; r < pads::kRows; ++r) {
     sig = sig * 17u + pads::idx(layout_.row[r]);  // the layout's three values (13 each) make the rest of the signature
   }
@@ -1165,6 +1229,10 @@ void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
       char lbl[pl::kLabelChars + 1] = {};
       pl::strip_label(sp.offset, lbl);
       append(out, lbl);
+    } else if (sp.fn == pl::PadFn::Vowel || sp.fn == pl::PadFn::Closure) {
+      if (tract) {
+        append(out, pl::kMouthLabel[app::pad_col(pad)]);
+      }
     } else if (sp.fn == pl::PadFn::Play) {
       const unsigned note = static_cast<unsigned>(sp.play.note);
       if (sp.play.kind == 0u) {
@@ -1200,6 +1268,19 @@ void PerformScreen::follow_bands(app::Context& ctx, std::uint8_t (&level)[16], s
 void PerformScreen::follow_print(app::Context& ctx, ornoir::Voiceprint& vp) noexcept {
   const dsp::Engine& e = ctx.engine();
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
+  if (mode == kModeTract) {  // the mouth: the area function of the shape the app wrote (main loop, the engine's parameters, never the unit's state)
+    if (tract_ != dsp::kNoUnit) {
+      mouth::Params mp;
+      mp.vowel = e.param(tract_, TractUnit::Vowel);
+      mp.tongue = e.param(tract_, TractUnit::Tongue);
+      mp.jaw = e.param(tract_, TractUnit::Jaw);
+      mp.lips = e.param(tract_, TractUnit::Lips);
+      mp.close = static_cast<unsigned>(e.param(tract_, TractUnit::Close) + 0.5f);
+      mouth::profile(mp, vp.tube);
+    }
+    vp.kind = ornoir::Print::Mouth;
+    return;
+  }
   if (voc_ == nullptr || (mode != 1u && mode != 2u)) {
     return;
   }
@@ -1285,7 +1366,20 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   set(6, pads::kPlaysShort[pads::idx(layout_.row[pads::idx(row_)])]);
   {
     char num[12] = {};
-    if (pl::mode_page(mode) == 0u) {
+    if (mode == kModeTract) {  // VOWEL: a pure column's name (A, AE, E ...) or the percentage
+      const float vw = tract_ != dsp::kNoUnit ? e.param(tract_, TractUnit::Vowel) : 0.0f;
+      const unsigned col = pl::mouth_nearest_col(vw);
+      const float off = vw - pl::mouth_vowel(col);
+      if (off > -0.005f && off < 0.005f) {
+        append(keys[7].value, pl::kMouthLabel[col]);
+      } else {
+        const unsigned pct = static_cast<unsigned>(vw * 100.0f + 0.5f);
+        (void)pl::format_uint(pct, num);
+        append(keys[7].value, num);
+        append(keys[7].value, "%");
+      }
+      keys[7].pct = pl::bar_percent(vw, 0.0f, 1.0f);
+    } else if (pl::mode_page(mode) == 0u) {
       const unsigned ct = round_param(e, voice_, Vocoder::Detune);
       (void)pl::format_uint(ct, num);
       append(keys[7].value, num);
@@ -1348,7 +1442,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   }
 
   ornoir::Voiceprint vp;
-  vp.bars = pl::mode_page(mode) == 0u && mode != o3_voc03er::kModeTract;  // BANDS and ROBOT draw the bars (in TRACT the bands idle: the grid, until V2's area function)
+  vp.bars = pl::mode_page(mode) == 0u;  // BANDS and ROBOT draw the bars; TRACT draws the mouth (follow_print)
   if (!vp.bars) {
     follow_print(ctx, vp);  // TALK's envelope, TUNE's ladder
   }
@@ -1361,6 +1455,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   sp.in = {g_pd.in_level, g_pd.in_peak};
   sp.clipping = meter_ != nullptr && ain.available() && meter_->clipping();
   sp.live = live;
+  sp.dim = mode == kModeTract;  // TRACT plays the mouth: no input to speak
   char capture[40] = {};
   if (voc_ != nullptr) {
     for (unsigned i = 0; i < route::kSlots; ++i) {
@@ -1450,6 +1545,8 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const int formant = static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f));
   const std::uint64_t now = ctx.uptime_ms();
   const bool flashing = now < row_flash_until_;  // F6: the chosen row goes dark for a moment
+  const bool mouth_on = mouth_active(e);
+  const float vowel = mouth_on && tract_ != dsp::kNoUnit ? e.param(tract_, TractUnit::Vowel) : 0.0f;
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     std::uint8_t level = app::kLedOff;
     const pl::PadSpec sp = pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_);
@@ -1459,6 +1556,12 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
         break;
       case pl::PadFn::Formant:  // the pad of the value in force on, the others dim
         level = pl::formant_lit(formant, app::pad_col(pad)) ? app::kLedOn : app::kLedDim;
+        break;
+      case pl::PadFn::Vowel:  // the mouth strip (TRACT only: dark elsewhere)
+      case pl::PadFn::Closure:
+        if (mouth_on) {
+          level = pl::mouth_led(app::pad_col(pad), vowel, mouth_.mask());
+        }
         break;
       case pl::PadFn::Play: {  // the key's root low, the scale dim, outside it dark (the piano's keys the same, by their note)
         const unsigned pc = static_cast<unsigned>(sp.play.note) % 12u;
@@ -1486,7 +1589,7 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
         level = app::kLedDim;
         break;
     }
-    if ((((held_ | ctl_held_) >> pad) & 1u) != 0u) {
+    if ((((held_ | ctl_held_ | mouth_pads_) >> pad) & 1u) != 0u) {
       level = app::kLedOn;
     }
     if (flashing && app::pad_row(pad) == pads::idx(row_) + 1u) {
@@ -1532,6 +1635,8 @@ const char* plays_help(pads::Row r, pads::Plays p) noexcept {
       return "A TAP SETS IT, -12 TO +12, AND IT STAYS";
     case pads::Plays::Bend:
       return "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0";
+    case pads::Plays::Mouth:
+      return "TRACT: A TO U, THEN HELD LIPS, TIP, BACK";
   }
   return "";
 }
@@ -1542,7 +1647,7 @@ const char* plays_help(pads::Row r, pads::Plays p) noexcept {
 // on this screen has a row, and tests/perform_screen_test.cpp holds that. The legend carries the groups of the page in force only.
 void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Params, "PARAMS: THREE PAGES", nullptr},
+      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "AGAIN: FREES THE ENCODER", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
@@ -1574,8 +1679,13 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   }
   help_groups_[4] = {"PAD LEDS", "KEY BRIGHTEST, SCALE DIM, OUTSIDE IT DARK", ui::Color::TextDim};
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
-  h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
-              "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
+  if (mode == kModeTract) {
+    h.summary = "TRACT: THE CARRIER SPEAKS THROUGH A MOUTH YOU PLAY. F8 MORPHS THE VOWEL, A TO U.\n"
+                "SET ROW C TO MOUTH: NINE VOWEL PADS, AND HOLD LIPS, TIP OR BACK TO CLOSE THE MOUTH.";
+  } else {
+    h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
+                "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
+  }
   h.fkey[0] = "THE 5 MODES, TRACT LAST";
   h.fkey[1] = "A LIST OF WHAT TALKS";
   h.fkey[2] = "SYNTH, LOOPS, VOICE, LIVE";
@@ -1586,7 +1696,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row (key 7 is empty: no text)
     h.fkey_shift[i] = pl::kShiftKeys[i].name[0] != '\0' ? pl::kShiftKeys[i].name : nullptr;
   }
-  h.fkey[7] = pl::mode_page(mode) == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");
+  h.fkey[7] = mode == kModeTract ? "THE MOUTH, A TO U" : (pl::mode_page(mode) == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED"));
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "VALUE OR BEND (SHIFT COARSE)";
@@ -1620,6 +1730,8 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
         }
         lbl[n] = ch;
       }
+    } else if (sp.fn == pl::PadFn::Vowel || sp.fn == pl::PadFn::Closure) {
+      put(lbl, pl::kMouthLabel[app::pad_col(pad)]);
     } else {
       put(lbl, pl::kControlName[app::pad_col(pad)]);
     }

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// PARAMS' pure logic (docs/UI-DESIGN.md, "PARAMS"): the three pages of eight keys, which key the encoder drives, how a key steps and how its value
+// PARAMS' pure logic (docs/UI-DESIGN.md, "PARAMS"): the four pages of eight keys, which key the encoder drives, how a key steps and how its value
 // reads, and the over-budget test of QUALITY. Apart from the screen so a host test (tests/params_test.cpp) holds it. Nothing here allocates or
 // reads the engine; values go through the unit's own parameter ids, in the units PERFORM writes them (so the two screens never disagree).
 //
 // A key is blank (None), drawn dim with no value (Later: a key whose setting does not exist yet; a tap says COMES LATER; no row uses it now), or
-// live: Value (an engine parameter) or App (a setting the app holds, because the unit's table is full: VOICING, kept by PerformScreen). A live
+// live: Value (an engine parameter of the vocoder), Tract (a parameter of the tract unit: the screen knows its id) or App (a setting the app holds, because the unit's table is full: VOICING, kept by PerformScreen). A live
 // key has a "display value", an int: a percent for a 0..1 parameter, tenths of a dB for the level, otherwise the parameter itself.
 
 #include "perform_logic.h"
 
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <cstddef>
@@ -18,13 +19,16 @@
 
 namespace o3_voc03er::params {
 
-inline constexpr unsigned kPages = 3;
+inline constexpr unsigned kPages = 4;
+inline constexpr unsigned kTractPage = 3;  // the page of the tract unit's parameters (Kind::Tract)
 inline constexpr unsigned kKeys = 8;
 
-enum class Kind : std::uint8_t { None, Later, Value, App };
+enum class Kind : std::uint8_t { None, Later, Value, App, Tract };
 // How a live key reads and steps.
 enum class Fmt : std::uint8_t {
   Pct,      // a 0..1 parameter as 0..100 %
+  SPct,     // a -1..+1 parameter as -100..+100 %, written with its sign
+  Size,     // TRACT's SIZE, 0..4 (BIG, LARGE, NORMAL, SMALL, TINY), clamped
   Wave,     // SHAPE, in hundredths of Wave's 0..2: SAW, PULSE and NARROW by name, the morph between them as a number
   MsLog,    // milliseconds on a log curve: a step is a tenth of the value (a third coarse), at least 1
   MsLin,    // milliseconds, a fixed step
@@ -40,7 +44,7 @@ enum class Fmt : std::uint8_t {
 struct KeyDef {
   const char* name;
   Kind kind;
-  std::uint16_t param;  // Vocoder::Param (Value only; an App key has no parameter)
+  std::uint16_t param;  // Vocoder::Param (Value) or TractUnit::Param (Tract); an App key has no parameter
   Fmt fmt;
   int lo, hi;           // display values
   int step, coarse;     // per detent, and per detent with SHIFT (and a second tap on the key)
@@ -50,7 +54,13 @@ inline constexpr KeyDef kBlank{"", Kind::None, 0, Fmt::Int, 0, 0, 0, 0};
 inline constexpr KeyDef app_key(const char* name, Fmt fmt, int lo, int hi) noexcept { return KeyDef{name, Kind::App, 0, fmt, lo, hi, 1, 1}; }
 inline constexpr KeyDef later(const char* name) noexcept { return KeyDef{name, Kind::Later, 0, Fmt::Int, 0, 0, 0, 0}; }
 
-inline constexpr const char* kPageNames[kPages] = {"CARRIER", "SHAPE", "TUNE"};
+inline constexpr const char* kPageNames[kPages] = {"CARRIER", "SHAPE", "TUNE", "TRACT"};
+inline constexpr const char* kSizeNames[5] = {"BIG", "LARGE", "NORMAL", "SMALL", "TINY"};
+// The page tabs under the voiceprint: four at 181 wide on a 189 step from x = 26, the last ends at x = 774 (the voiceprint's right edge).
+inline constexpr int kTabX0 = 26;
+inline constexpr int kTabW = 181;
+inline constexpr int kTabStep = 189;
+constexpr int tab_x(unsigned i) noexcept { return kTabX0 + static_cast<int>(i) * kTabStep; }
 
 // The pages (docs/UI-DESIGN.md, "PARAMS"). SHAPE is Wave as a morph, SPREAD is Detune, SUB and TILT the carrier's (U10). VOICING is the app's own (Kind::App).
 inline constexpr KeyDef kTable[kPages][kKeys] = {
@@ -72,6 +82,15 @@ inline constexpr KeyDef kTable[kPages][kKeys] = {
      {"SPEED", Kind::Value, Vocoder::Speed, Fmt::MsLin, 0, 500, 5, 25},
      {"AMOUNT", Kind::Value, Vocoder::Amount, Fmt::Pct, 0, 100, 2, 10},
      {"NOTES IN", Kind::Value, Vocoder::NotesIn, Fmt::OnOff, 0, 1, 1, 1}, kBlank, kBlank, kBlank},
+    // TRACT's mouth (the tract unit's own table): live in every mode, it speaks in TRACT only.
+    {{"VOWEL", Kind::Tract, TractUnit::Vowel, Fmt::Pct, 0, 100, 1, 10},
+     {"TONGUE", Kind::Tract, TractUnit::Tongue, Fmt::SPct, -100, 100, 2, 10},
+     {"JAW", Kind::Tract, TractUnit::Jaw, Fmt::SPct, -100, 100, 2, 10},
+     {"LIPS", Kind::Tract, TractUnit::Lips, Fmt::SPct, -100, 100, 2, 10},
+     {"GLIDE", Kind::Tract, TractUnit::Glide, Fmt::MsLog, 5, 500, 1, 1},
+     {"SIZE", Kind::Tract, TractUnit::Size, Fmt::Size, 0, 4, 1, 1},
+     {"RES", Kind::Tract, TractUnit::Res, Fmt::Pct, 0, 100, 2, 10},
+     {"HISS", Kind::Tract, TractUnit::Hiss, Fmt::Pct, 0, 100, 2, 10}},
 };
 
 inline constexpr const KeyDef& key_def(unsigned page, unsigned key) noexcept { return kTable[page % kPages][key % kKeys]; }
@@ -83,7 +102,9 @@ inline constexpr unsigned next_page(unsigned page, int delta = 1) noexcept { ret
 // there (it stays focusable: the value is TALK's when the mode comes back). Every other key acts in every mode.
 inline constexpr bool key_live(const KeyDef& k, unsigned mode) noexcept { return !(k.kind == Kind::Value && k.param == Vocoder::Quality && mode != 1u); }
 
-inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && (key_def(page, key).kind == Kind::Value || key_def(page, key).kind == Kind::App); }
+inline constexpr bool live_kind(Kind k) noexcept { return k == Kind::Value || k == Kind::App || k == Kind::Tract; }
+
+inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && live_kind(key_def(page, key).kind); }
 
 // The key the encoder points at when a page opens: its first live one.
 inline constexpr unsigned first_focus(unsigned page) noexcept {
@@ -101,6 +122,7 @@ inline constexpr unsigned first_focus(unsigned page) noexcept {
 inline int to_display(Fmt f, float v) noexcept {
   switch (f) {
     case Fmt::Pct:
+    case Fmt::SPct:
     case Fmt::Wave:
       return static_cast<int>(v * 100.0f + (v < 0.0f ? -0.5f : 0.5f));
     case Fmt::Db:
@@ -113,6 +135,7 @@ inline int to_display(Fmt f, float v) noexcept {
 inline float to_param(Fmt f, int d) noexcept {
   switch (f) {
     case Fmt::Pct:
+    case Fmt::SPct:
     case Fmt::Wave:
       return static_cast<float>(d) * 0.01f;
     case Fmt::Db:
@@ -129,7 +152,7 @@ inline constexpr bool tap_holds(const KeyDef& k) noexcept { return k.kind == Kin
 // `cur` stepped by `delta` detents (SHIFT or a second tap: `coarse`). Round keys wrap; the rest stop at their ends, unless `wrap` (a tap) is set
 // and the value already stands at the end it moves towards, which sends it to the other end (not LEVEL: tap_holds).
 inline int step_display(const KeyDef& k, int cur, int delta, bool coarse, bool wrap = false) noexcept {
-  if (delta == 0 || (k.kind != Kind::Value && k.kind != Kind::App)) {
+  if (delta == 0 || !live_kind(k.kind)) {
     return cur;
   }
   wrap = wrap && !tap_holds(k);
@@ -175,6 +198,15 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
       (void)perform::format_uint(u, num);
       put(num);
       put("%");
+      break;
+    case Fmt::SPct:
+      (void)perform::format_uint(static_cast<unsigned>(d < 0 ? -d : d), num);
+      put(d < 0 ? "-" : (d > 0 ? "+" : ""));
+      put(num);
+      put("%");
+      break;
+    case Fmt::Size:
+      put(kSizeNames[u < 5u ? u : 4u]);
       break;
     case Fmt::MsLog:
     case Fmt::MsLin:
@@ -224,6 +256,7 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
 inline int bar_of(const KeyDef& k, int d) noexcept {
   switch (k.fmt) {
     case Fmt::Pct:
+    case Fmt::SPct:
     case Fmt::Wave:
     case Fmt::MsLin:
     case Fmt::Db:

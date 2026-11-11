@@ -652,7 +652,7 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Left, "OCTAVE DOWN, HOLD REPEATS", nullptr},
       {Button::Right, "OCTAVE UP, HOLD REPEATS", nullptr},
       {Button::Shift, "WITH F1: ROW A OR B", nullptr},
-      {Button::Params, "PARAMS: THREE PAGES", nullptr},
+      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

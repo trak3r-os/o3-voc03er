@@ -33,6 +33,15 @@
   sleeps on silence. The app's `apply_mode()` writes the tube's MIX (1 in TRACT, 0 elsewhere) for every writer of MODE; the unit holds the
   MIX rise 12 ms, so a mode change crossfades first. `voc tract` and `tract <param> <value>` from the console; PERFORM's F1 reaches it and
   draws BANDS' page without the bars (V2 draws the mouth). Modes 0 to 3 render sample for sample as before. Unit check owed: CPU and the first listen.
+- PERFORM and PARAMS in TRACT (V2): row C gains a PLAYS value, MOUTH (`Plays::Mouth` 13, offered on row C in every mode, after BEND and before
+  OFF; it plays no notes, so the rows above it get no octave). In TRACT a MOUTH row is a strip: pads 0 to 8 set VOWEL (A, a-e, E, e-i, I, i-o,
+  O, o-u, U) and it stays; pads 9, 10 and 11 close the mouth while held (LIPS, TIP, BACK; the last pressed wins, a release opens it). Outside
+  TRACT the row is dark and the hint says MOUTH SPEAKS IN TRACT. F8 in TRACT is VOWEL (1 % a detent, 10 % coarse). The voiceprint in TRACT draws
+  the tube's 22 sections as a mouth profile (SPEAKS dimmed, "NO INPUT: THE MOUTH IS PLAYED"). PARAMS has a fourth page, TRACT: VOWEL, TONGUE, JAW,
+  LIPS, GLIDE, SIZE, RES and HISS, live in every mode (outside TRACT it says TRACT MODE ONLY and keeps the values). The writes go to the tube from
+  the main loop. PARAMS now opens on its first page after a `setup()`. Unit check owed: the strip by hand, the pop of a closure by ear, PERFORM's
+  frame in TRACT under the display budget, FORMANT on row C in TRACT (it does nothing there: whether it becomes the mouth is the maintainer's call);
+  DRY (mic thru) also goes through the tube in TRACT, and entering TRACT may let the raw carrier through for a few ms before the tube fades in.
 - The project keeps more (P3, Q8): STAT 1.1 adds VOICING, the BEND ROW and its range, FOLLOW, the preset (by name, so a reordered
   table does not move it), and the pads layout (rows A, B, C and the two last-used chord pads); SLOT 1.1 adds TRIG and CHOKE per slot.
   A v0.2.0 project loads with SMOOTH, bend row off, range 2, FOLLOW off, no preset, ONE SHOT and CHOKE ON, and its KEYS or chord kind

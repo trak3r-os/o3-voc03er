@@ -11,8 +11,10 @@
 #include <o3sdk/sim/harness.h>
 
 #include <o3_voc03er/route.h>
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -661,5 +663,191 @@ TEST_CASE("perform: SHIFT + F7 is empty and a layout's OCT and VOL pads keep wor
   h.pad_up(1);
   h.run_ms(60);
   CHECK(h.leds().level(1) == 24);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// ---- V2: the mouth strip, F8 VOWEL and the voiceprint in TRACT ----------------------------------------------------------------------------
+
+namespace {
+// The tract unit's own parameter (the unit named TRACT; `unit_param` skips it).
+float tract_param(sim::Harness& h, std::uint16_t id) {
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) {
+      return h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    }
+  }
+  return -1.0e9f;
+}
+constexpr unsigned kRowC = 36;  // the pad of row C's column 0
+
+// Row C to MOUTH (F6 holds the focus at start: A, B, C; F7 steps FORMANT, BEND, MOUTH), then the mode `mode` under F1.
+void mouth_setup(sim::Harness& h, int mode_turn) {
+  tap(h, app::Button::F6);
+  tap(h, app::Button::F6);
+  tap(h, app::Button::F7);
+  h.turn(2);
+  h.run_ms(40);
+  tap(h, app::Button::F1);
+  h.turn(mode_turn);
+  h.run_ms(300);
+}
+}  // namespace
+
+TEST_CASE("perform: in TRACT a MOUTH row writes VOWEL (sticky) and CLOSE (momentary, the last pressed wins), and its LEDs follow") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  REQUIRE(tract_param(h, TractUnit::Close) > -1.0e8f);
+  mouth_setup(h, 8);  // TRACT
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(4.0f));
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.0f));
+  CHECK(h.leds().level(kRowC + 0) == 255);  // the nearest column to A
+  CHECK(h.leds().level(kRowC + 2) == 140);  // a pure vowel
+  CHECK(h.leds().level(kRowC + 1) == 24);
+  CHECK(h.leds().level(kRowC + 9) == 24);   // the closures idle dim
+  CHECK(h.leds().level(kRowC + 11) == 24);
+
+  // a vowel pad sets VOWEL and it stays after the release; the LEDs follow
+  h.pad_down(kRowC + 4);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.5f));
+  h.pad_up(kRowC + 4);
+  h.run_ms(300);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.5f));
+  CHECK(h.leds().level(kRowC + 4) == 255);
+  CHECK(h.leds().level(kRowC + 0) == 140);
+  CHECK(h.leds().level(kRowC + 3) == 24);
+  h.pad_down(kRowC + 3);  // an in-between column: 3/8
+  h.run_ms(40);
+  h.pad_up(kRowC + 3);
+  h.run_ms(40);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.375f));
+
+  // closures: momentary, two held, the last pressed wins, a release gives back the one still held
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
+  h.pad_down(kRowC + 9);  // LIPS
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(1.0f));
+  CHECK(h.leds().level(kRowC + 9) == 255);
+  h.pad_down(kRowC + 10);  // TIP
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(2.0f));
+  h.pad_up(kRowC + 10);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(1.0f));
+  CHECK(h.leds().level(kRowC + 10) == 24);
+  h.pad_up(kRowC + 9);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
+  CHECK(h.leds().level(kRowC + 9) == 24);
+
+  // SHIFT does not latch a closure, and SHIFT + a vowel pad is a plain press
+  h.pad_down(kRowC + 11);  // BACK
+  h.run_ms(40);
+  tap(h, app::Button::Shift);
+  h.pad_up(kRowC + 11);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  h.pad_down(kRowC + 8);
+  h.run_ms(40);
+  h.pad_up(kRowC + 8);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(1.0f));
+
+  // the strip writes the tract unit only: the vocoder's MODE stays
+  CHECK(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(4.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: outside TRACT a MOUTH row is dark and writes nothing") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  mouth_setup(h, 0);  // BANDS
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(0.0f));
+  CHECK(row_dark(h, 3));
+  const float vowel0 = tract_param(h, TractUnit::Vowel);
+  h.pad_down(kRowC + 4);
+  h.run_ms(60);
+  h.pad_up(kRowC + 4);
+  h.pad_down(kRowC + 9);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
+  h.pad_up(kRowC + 9);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(vowel0));
+  CHECK(row_dark(h, 3));
+  // a closure held while the mode leaves TRACT still ends with its pad (OPEN)
+  tap(h, app::Button::F1);
+  h.turn(8);
+  h.run_ms(100);
+  h.pad_down(kRowC + 10);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(2.0f));
+  tap(h, app::Button::F1);
+  h.turn(-8);
+  h.run_ms(60);
+  h.pad_up(kRowC + 10);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: F8 is VOWEL in TRACT, 1 percent a detent, and the strip follows; HELP names it") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  mouth_setup(h, 8);
+  tap(h, app::Button::F8);  // the first tap takes the focus
+  h.run_ms(40);
+  h.turn(7);
+  h.run_ms(300);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.07f).epsilon(0.02));
+  CHECK(h.leds().level(kRowC + 1) == 255);  // 7 % is nearest the column 1 (12.5 %)
+  h.turn(-3);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.04f).epsilon(0.02));
+  h.turn(-30);  // the encoder stops at A
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.0f));
+  h.turn(130);  // and at U
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(1.0f));
+
+  open_help(h);
+  const app::Help& help = h.runtime().help_overlay().help();
+  app::HelpProblem p;
+  const bool ok = app::help_check(help, &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+  REQUIRE(help.fkey[7] != nullptr);
+  CHECK(std::string(help.fkey[7]).find("MOUTH") != std::string::npos);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: the display list of PERFORM in TRACT (the mouth's profile, a held closure) fits next to the busiest mode") {
+  std::size_t busiest = 0;
+  for (int turn : {0, 1, 2, 3}) {  // BANDS, TALK, ROBOT, SING
+    auto h = std::make_unique<sim::Harness>(::o3sdk_app());
+    REQUIRE(h->start());
+    h->run_ms(100);
+    tap(*h, app::Button::F1);
+    h->turn(-8);
+    h->turn(turn);
+    h->run_ms(400);
+    busiest = std::max(busiest, h->display().peak_frame_words());
+  }
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  mouth_setup(h, 8);
+  h.pad_down(kRowC + 9);  // a closure held: the profile pinches
+  h.run_ms(400);
+  tap(h, app::Button::F8);
+  h.turn(40);
+  h.run_ms(400);
+  const std::size_t tract = h.display().peak_frame_words();
+  CHECK_MESSAGE(tract < 2048u, "TRACT " << tract << " words, busiest other mode " << busiest);
   CHECK(h.runtime().frame_failures() == 0u);
 }

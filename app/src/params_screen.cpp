@@ -21,11 +21,15 @@ namespace {
 
 constexpr std::uint64_t kNoteMs = 2000;
 constexpr int kTabsY = 224;
+constexpr int kTabH = 44;
 constexpr int kVpX = 26, kVpY = 78, kVpW = 748, kVpH = 128;
 
 int centred(ui::Renderer& r, const char* s, Face f, int cx) noexcept { return cx - r.text_width(s, f) / 2; }
 
 int read(const dsp::Engine& e, dsp::UnitId id, const pr::KeyDef& k) noexcept { return pr::to_display(k.fmt, e.param(id, k.param)); }
+
+// The unit a key's parameter belongs to: the tract unit's for Kind::Tract, the vocoder's otherwise.
+dsp::UnitId unit_of(const pr::KeyDef& k, dsp::UnitId voice, dsp::UnitId tract) noexcept { return k.kind == pr::Kind::Tract ? tract : voice; }
 
 // An App key's value is PerformScreen's (SMOOTH, the default, when the screen has none).
 int read_app(const PerformScreen* perform, const pr::KeyDef& k) noexcept {
@@ -34,9 +38,13 @@ int read_app(const PerformScreen* perform, const pr::KeyDef& k) noexcept {
 
 }  // namespace
 
-void ParamsScreen::init(dsp::UnitId voice, PerformScreen* perform) noexcept {
+void ParamsScreen::init(dsp::UnitId voice, dsp::UnitId tract, PerformScreen* perform) noexcept {
   voice_ = voice;
+  tract_ = tract;
   perform_ = perform;
+  page_ = 0;  // setup() can run again on this object (tests, `reboot`): PARAMS opens on its first page
+  focus_ = static_cast<std::uint8_t>(pr::first_focus(0));
+  note_ = nullptr;
 }
 
 const ui::Theme* ParamsScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
@@ -91,8 +99,9 @@ void ParamsScreen::step(app::Context& ctx, unsigned key, int delta, bool coarse,
     ctx.redraw();
     return;
   }
-  const int next = pr::step_display(k, read(e, voice_, k), delta, coarse, tap);
-  (void)e.set_param(voice_, k.param, pr::to_param(k.fmt, next));
+  const dsp::UnitId id = unit_of(k, voice_, tract_);
+  const int next = pr::step_display(k, read(e, id, k), delta, coarse, tap);
+  (void)e.set_param(id, k.param, pr::to_param(k.fmt, next));
   ctx.redraw();
 }
 
@@ -105,7 +114,7 @@ void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     const pr::KeyDef& def = pr::key_def(page_, k);
     if (def.kind == pr::Kind::Later) {
       say(ctx, "COMES LATER");
-    } else if (def.kind == pr::Kind::Value || def.kind == pr::Kind::App) {
+    } else if (pr::live_kind(def.kind)) {
       if (k == focus_) {  // a second tap steps the value on
         step(ctx, k, 1, true, true);
       } else {
@@ -170,8 +179,11 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       h.fkey_shift[i] = nullptr;
     }
   }
-  h.summary = "THREE PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE. PARAMS OR UP AND DOWN\n"
-              "TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. THE PADS PLAY PERFORM'S LAYOUT.";
+  h.summary = page_ == pr::kTractPage
+                  ? "THE MOUTH OF TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS.\n"
+                    "THEY SPEAK IN TRACT MODE ONLY. THE VALUES ARE KEPT IN THE OTHER MODES."
+                  : "FOUR PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE, TRACT. PARAMS OR UP\n"
+                    "AND DOWN TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. PADS PLAY CHORDS.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = pr::focusable(page_, i) ? "TAP: FOCUS, THEN STEP" : nullptr;  // a blank key has no row
   }
@@ -190,7 +202,7 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const unsigned tempo = e.stats().tempo_mbpm;
 
   ornoir::Voiceprint vp;
-  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the envelope and the ladder (follow_print); TRACT: the grid (V2 draws the mouth)
+  vp.bars = mode == 0u || mode == 3u;  // BANDS and ROBOT; TALK and TUNE: the envelope and the ladder (follow_print); TRACT: the mouth (follow_print)
   if (perform_ != nullptr) {
     perform_->follow_bands(ctx, vp.level, vp.peak);
     if (!vp.bars) {
@@ -212,9 +224,9 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     keys[i].name = k.name;
     if (k.kind == pr::Kind::Later) {
       keys[i].dim = true;
-    } else if (k.kind == pr::Kind::Value || k.kind == pr::Kind::App) {
+    } else if (pr::live_kind(k.kind)) {
       keys[i].dim = !pr::key_live(k, mode);  // QUALITY outside TALK
-      const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, voice_, k);
+      const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, unit_of(k, voice_, tract_), k);
       char txt[12];
       pr::format_value(k, v, txt);
       std::memcpy(keys[i].value, txt, sizeof txt < sizeof keys[i].value ? sizeof txt : sizeof keys[i].value);
@@ -233,16 +245,16 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   ornoir::frow_shapes(c, keys);
   ornoir::voiceprint_strip(c, kVpX, kVpY, kVpW, kVpH, vp);
   for (unsigned i = 0; i < pr::kPages; ++i) {  // the page tabs
-    const int x = kVpX + static_cast<int>(i) * 252;
-    ornoir::fill_rect(c, x, kTabsY, 244, 44, i == page_ ? Color::Accent : Color::Empty);
-    ornoir::fill_rect(c, x + 2, kTabsY + 2, 240, 40, Color::Pane);
+    const int x = pr::tab_x(i);
+    ornoir::fill_rect(c, x, kTabsY, pr::kTabW, kTabH, i == page_ ? Color::Accent : Color::Empty);
+    ornoir::fill_rect(c, x + 2, kTabsY + 2, pr::kTabW - 4, kTabH - 4, Color::Pane);
   }
   c.close();
   ornoir::header_text(r, h);
   ornoir::frow_text(r, keys);
 
   for (unsigned i = 0; i < pr::kPages; ++i) {
-    const int cx = kVpX + static_cast<int>(i) * 252 + 122;
+    const int cx = pr::tab_x(i) + pr::kTabW / 2;
     r.text(centred(r, pr::kPageNames[i], Face::Label, cx), kTabsY + 14, pr::kPageNames[i], i == page_ ? Color::Text : Color::TextDim, Face::Label);
   }
 
@@ -252,6 +264,8 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   }
   if (note_ != nullptr) {
     r.text(kVpX, 350, note_, Color::TextDim, Face::Label);
+  } else if (page_ == pr::kTractPage && mode != kModeTract) {
+    r.text(kVpX, 350, "TRACT MODE ONLY", Color::TextDim, Face::Label);  // the values are kept; the mouth speaks in TRACT
   }
 }
 

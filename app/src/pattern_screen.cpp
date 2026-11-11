@@ -599,7 +599,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Copy, "COPY THE STEP", "COPY THE PATTERN"},
       {Button::Insert, "INSERT THE COPIED STEP", "PASTE THE COPIED PATTERN"},
       {Button::Delete, "EMPTY THE STEP", "EMPTY THE PATTERN (F1)"},
-      {Button::Params, "PARAMS: THREE PAGES", nullptr},
+      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

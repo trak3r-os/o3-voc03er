@@ -15,7 +15,7 @@
 namespace o3_voc03er::pads {
 
 // What a row plays. The numbers are saved in the project: append, never renumber. 0..4 are the step's stored kind (0 a note, 1..4 the ChordKind + 1);
-// 6..10 are the same on the piano, kind = value - 6. MOUTH (13, with the tract) is appended later.
+// 6..10 are the same on the piano, kind = value - 6; 11 FORMANT, 12 BEND and 13 MOUTH (V2: the tract's vowels and closures, TRACT mode) are row C's.
 enum class Plays : std::uint8_t {
   Note = 0,
   Triad = 1,
@@ -30,13 +30,14 @@ enum class Plays : std::uint8_t {
   PianoPower = 10,
   Formant = 11,
   Bend = 12,
+  Mouth = 13,
 };
-inline constexpr unsigned kPlaysCount = 13;
+inline constexpr unsigned kPlaysCount = 14;
 inline constexpr const char* kPlaysNames[kPlaysCount] = {"NOTE",        "TRIAD",       "7TH",         "OPEN",       "POWER",   "OFF", "PIANO NOTE",
-                                                         "PIANO TRIAD", "PIANO 7TH",   "PIANO OPEN",  "PIANO POWER", "FORMANT", "BEND"};
+                                                         "PIANO TRIAD", "PIANO 7TH",   "PIANO OPEN",  "PIANO POWER", "FORMANT", "BEND", "MOUTH"};
 // The same for a soft key's value (the Data face holds about eight characters in a 100 px key).
 inline constexpr const char* kPlaysShort[kPlaysCount] = {"NOTE",     "TRIAD",   "7TH",     "OPEN",    "POWER",   "OFF",  "PNO NOTE",
-                                                         "PNO TRI",  "PNO 7TH", "PNO OPEN", "PNO PWR", "FORMANT", "BEND"};
+                                                         "PNO TRI",  "PNO 7TH", "PNO OPEN", "PNO PWR", "FORMANT", "BEND", "MOUTH"};
 
 // Row A is the top of the three, C the bottom (the lowest, the one that plays at the pad's own octave).
 enum class Row : std::uint8_t { A, B, C };
@@ -53,11 +54,11 @@ struct Layout {
 };
 
 constexpr bool is_piano_value(Plays p) noexcept { return p >= Plays::PianoNote && p <= Plays::PianoPower; }
-// A value that sounds from its pads (a note, a chord or a piano key): not OFF, FORMANT or BEND.
+// A value that sounds from its pads (a note, a chord or a piano key): not OFF, FORMANT, BEND or MOUTH.
 constexpr bool plays_notes(Plays p) noexcept { return p <= Plays::Power || is_piano_value(p); }
 constexpr bool is_piano(const Layout& l) noexcept { return is_piano_value(l.row[idx(Row::A)]) && is_piano_value(l.row[idx(Row::B)]); }
 
-// Every row offers NOTE..OFF; A and B also the piano values; only C FORMANT and BEND.
+// Every row offers NOTE..OFF; A and B also the piano values; only C FORMANT, BEND and MOUTH.
 constexpr bool offered(Row r, Plays p) noexcept {
   if (p <= Plays::Off) {
     return true;
@@ -65,16 +66,17 @@ constexpr bool offered(Row r, Plays p) noexcept {
   if (is_piano_value(p)) {
     return r != Row::C;
   }
-  return (p == Plays::Formant || p == Plays::Bend) && r == Row::C;
+  return (p == Plays::Formant || p == Plays::Bend || p == Plays::Mouth) && r == Row::C;
 }
 
 // The order PLAYS steps through, per row.
 inline constexpr Plays kOrderAB[11] = {Plays::Note,       Plays::Triad,      Plays::Seventh,     Plays::Open,       Plays::Power,    Plays::PianoNote,
                                        Plays::PianoTriad, Plays::PianoSeventh, Plays::PianoOpen, Plays::PianoPower, Plays::Off};
-inline constexpr Plays kOrderC[8] = {Plays::Note, Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power, Plays::Formant, Plays::Bend, Plays::Off};
+inline constexpr Plays kOrderC[9] = {Plays::Note,    Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power,
+                                    Plays::Formant, Plays::Bend,  Plays::Mouth,   Plays::Off};
 
 constexpr const Plays* order_of(Row r) noexcept { return r == Row::C ? kOrderC : kOrderAB; }
-constexpr unsigned order_count(Row r) noexcept { return r == Row::C ? 8u : 11u; }
+constexpr unsigned order_count(Row r) noexcept { return r == Row::C ? 9u : 11u; }
 // The place of `p` in the row's order; a value the row does not offer is taken as the first (NOTE).
 constexpr unsigned order_index(Row r, Plays p) noexcept {
   const Plays* o = order_of(r);
@@ -141,7 +143,7 @@ constexpr int row_octave(const Layout& l, Row r) noexcept {
 inline constexpr int kWhiteOffset[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};     // C D E F G A B C D E F G
 inline constexpr int kBlackOffset[12] = {-1, 1, 3, -1, 6, 8, 10, -1, 13, 15, -1, 18};  // C# D# . F# G# A# . C# D# . F#; -1 no key
 
-// What a pad plays: `note` 1..127 (0 is a rest in a step, so never returned; -1 plays nothing: OFF, FORMANT, BEND, a piano gap, a note out of
+// What a pad plays: `note` 1..127 (0 is a rest in a step, so never returned; -1 plays nothing: OFF, FORMANT, BEND, MOUTH, a piano gap, a note out of
 // range) and the step's stored `kind` (0 a note, 1..4 the ChordKind + 1).
 struct PadPlay {
   int note = -1;

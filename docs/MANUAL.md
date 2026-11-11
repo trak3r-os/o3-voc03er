@@ -126,7 +126,7 @@ now.
 | F5 SCALE | The scale: the chords and TUNE stay in it |
 | F6 ROW | Which pad row F7 sets: A, B or C. A tap steps and wraps; the encoder stops at the ends. The row's pads flash once |
 | F7 PLAYS | What the chosen row plays (below). Hold a pad of A, B or C and F7 changes that pad's row at once |
-| F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED |
+| F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL |
 | SHIFT + F1 | FREEZE the vowel |
 | SHIFT + F2 | GATE: chops the sound in time (OFF, 1/4, 1/8, 1/16, 1/32) |
 | SHIFT + F3 | ARP: plays held notes one at a time (OFF, UP, DOWN, UP-DOWN, RANDOM) |
@@ -157,6 +157,8 @@ A tap on F7 steps on and wraps round; the encoder stops at the ends.
   choosing a piano value on either row sets both, and choosing a plain value on one of them splits the piano again.
 - FORMANT and BEND (row C only): FORMANT is a strip of semitones: a tap sets the formant and nothing is held. BEND is the pitch-bend strip:
   the middle pair is zero, each pad outwards is a semitone, and it springs back when you let go.
+- MOUTH (row C only, TRACT mode): a strip that plays the mouth. Pads 0 to 8 set the vowel, A to U, and it stays; pads 9, 10 and 11 close the
+  mouth while held (LIPS, TIP, BACK), and letting go opens it. In the other modes the row is dark.
 - OFF: the row is dark and silent.
 
 The default is A NOTE, B TRIAD and C FORMANT. **Each row that plays notes sits one octave above the playing rows under it**, so a note on row
@@ -178,7 +180,7 @@ source and a slot have no pitch of their own to move.
 
 ### PARAMS
 
-PARAMS shows three pages of eight values on the F keys, with the voiceprint small above so you see each change. Press PARAMS again, or
+PARAMS shows four pages of eight values on the F keys, with the voiceprint small above so you see each change. Press PARAMS again, or
 UP and DOWN, to change page.
 The pads play PERFORM's layout here too.
 
@@ -229,6 +231,8 @@ Section 7.
 
 Section 9.
 
+*TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and HISS, the mouth of TRACT mode. They are live in every mode and speak in TRACT only.*
+
 ## 5. The four modes
 
 The mode is the way the voiceprint is taken and applied. F1 on PERFORM steps through them.
@@ -255,6 +259,10 @@ It plays no synth. SPEED is how fast it pulls: at the fastest it steps from note
 
 **ROBOT.** BANDS with a fast leveller after it. Loud and soft syllables come out at about the same level, which gives the flat, mechanical
 voice. Hold a fifth, or set a row to POWER (F6 then F7) and press one of its pads, for the classic robot sound.
+
+**TRACT.** A fifth mode: nothing is analysed, the synth speaks through a model of a vocal tract, and you play the mouth. Set row C to MOUTH
+(F6, then F7) and use its strip for the vowel and the closures, or turn F8 (VOWEL); PARAMS' TRACT page has the rest. The voiceprint draws the
+tube as a profile of the mouth. DRY (the live voice) goes through the tube too.
 
 ## 6. Samples and slices
 

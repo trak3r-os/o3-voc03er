@@ -438,7 +438,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "SHORTER LENGTH, HOLD REPEATS", nullptr},
       {Button::Right, "LONGER LENGTH, HOLD REPEATS", nullptr},
-      {Button::Params, "PARAMS: THREE PAGES", nullptr},
+      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

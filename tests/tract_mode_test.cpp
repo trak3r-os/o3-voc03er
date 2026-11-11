@@ -246,9 +246,10 @@ TEST_CASE("tract mode: the tables agree: five modes, TRACT is the fifth, the tub
   CHECK(tu.info().params[TractUnit::Slide].def == 30.0f);
 }
 
-TEST_CASE("tract mode: PERFORM has a page for TRACT: it keeps the first page's F8 until V2 gives it VOWEL") {
+TEST_CASE("tract mode: PERFORM has a page of its own for TRACT (F8 VOWEL); ROBOT keeps BANDS' page") {
   namespace pl = o3_voc03er::perform;
-  CHECK(pl::mode_page(kModeTract) == pl::mode_page(0u));
+  CHECK(pl::mode_page(kModeTract) == pl::kTractPage);
+  CHECK(pl::mode_page(kModeTract) != pl::mode_page(0u));
   CHECK(pl::mode_page(3u) == pl::mode_page(0u));  // ROBOT
   for (unsigned m = 0; m < kModeCount; ++m) CHECK(pl::mode_page(m) < pl::kModePages);
 }

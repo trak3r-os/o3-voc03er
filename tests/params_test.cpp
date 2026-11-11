@@ -10,6 +10,7 @@
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/sim/harness.h>
 
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include "../app/src/params_logic.h"
@@ -24,8 +25,8 @@ namespace sim = o3sdk::sim;
 namespace pm = o3_voc03er::params;
 using o3_voc03er::Vocoder;
 
-TEST_CASE("params: three pages of eight, the live keys name a parameter the unit has") {
-  CHECK(pm::kPages == 3u);
+TEST_CASE("params: four pages of eight, the live keys name a parameter the unit has") {
+  CHECK(pm::kPages == 4u);
   CHECK(pm::kKeys == 8u);
   CHECK(std::strcmp(pm::key_def(0, 0).name, "SHAPE") == 0);
   CHECK(pm::key_def(0, 0).kind == pm::Kind::Value);
@@ -43,7 +44,7 @@ TEST_CASE("params: three pages of eight, the live keys name a parameter the unit
   for (unsigned p = 0; p < pm::kPages; ++p) {
     for (unsigned k = 0; k < pm::kKeys; ++k) {
       const pm::KeyDef& d = pm::key_def(p, k);
-      CHECK(pm::focusable(p, k) == (d.kind == pm::Kind::Value || d.kind == pm::Kind::App));
+      CHECK(pm::focusable(p, k) == (d.kind == pm::Kind::Value || d.kind == pm::Kind::App || d.kind == pm::Kind::Tract));
       if (d.kind == pm::Kind::Value) {
         CHECK(d.lo < d.hi);
         CHECK(d.step > 0);
@@ -56,12 +57,68 @@ TEST_CASE("params: three pages of eight, the live keys name a parameter the unit
 
 TEST_CASE("params: a page change is round, and a page opens on its first live key") {
   CHECK(pm::next_page(0) == 1u);
-  CHECK(pm::next_page(2) == 0u);
-  CHECK(pm::next_page(0, -1) == 2u);
+  CHECK(pm::next_page(2) == 3u);
+  CHECK(pm::next_page(3) == 0u);
+  CHECK(pm::next_page(0, -1) == 3u);
   CHECK(pm::next_page(1, -1) == 0u);
   CHECK(pm::first_focus(0) == 0u);
   CHECK(pm::first_focus(1) == 0u);
   CHECK(pm::first_focus(2) == 0u);
+  CHECK(pm::first_focus(3) == 0u);
+}
+
+TEST_CASE("params: the TRACT page is the tract unit's eight keys, signed percents and a size by name, and four tabs of at most 196 px") {
+  using o3_voc03er::TractUnit;
+  CHECK(pm::kTractPage == 3u);
+  CHECK(std::string(pm::kPageNames[3]) == "TRACT");
+  const char* const names[8] = {"VOWEL", "TONGUE", "JAW", "LIPS", "GLIDE", "SIZE", "RES", "HISS"};
+  const std::uint16_t ids[8] = {TractUnit::Vowel, TractUnit::Tongue, TractUnit::Jaw, TractUnit::Lips,
+                                TractUnit::Glide, TractUnit::Size,   TractUnit::Res, TractUnit::Hiss};
+  for (unsigned k = 0; k < pm::kKeys; ++k) {
+    const pm::KeyDef& d = pm::key_def(3, k);
+    INFO(names[k]);
+    CHECK(std::strcmp(d.name, names[k]) == 0);
+    CHECK(d.kind == pm::Kind::Tract);
+    CHECK(d.param == ids[k]);
+    CHECK(d.param < TractUnit::kParamCount);
+    CHECK(d.lo < d.hi);
+    CHECK(d.step > 0);
+    CHECK(pm::focusable(3, k));
+    CHECK(pm::key_live(d, 0u));
+    CHECK(pm::key_live(d, o3_voc03er::kModeTract));
+  }
+  char t[12];
+  pm::format_value(pm::key_def(3, 1), -35, t);
+  CHECK(std::string(t) == "-35%");
+  pm::format_value(pm::key_def(3, 1), 20, t);
+  CHECK(std::string(t) == "+20%");
+  pm::format_value(pm::key_def(3, 1), 0, t);
+  CHECK(std::string(t) == "0%");
+  for (int d = 0; d < 5; ++d) {
+    pm::format_value(pm::key_def(3, 5), d, t);
+    CHECK(std::string(t) == pm::kSizeNames[d]);
+    CHECK(pm::to_display(pm::Fmt::Size, static_cast<float>(d)) == d);
+  }
+  CHECK(pm::to_display(pm::Fmt::SPct, -0.35f) == -35);
+  CHECK(pm::to_param(pm::Fmt::SPct, -35) == doctest::Approx(-0.35f));
+  // a signed key steps through zero and stops at both ends; VOWEL goes in 1 % detents and 10 % coarse
+  const pm::KeyDef& tongue = pm::key_def(3, 1);
+  CHECK(pm::step_display(tongue, 0, -1, false) == -2);
+  CHECK(pm::step_display(tongue, -98, -3, false) == -100);
+  CHECK(pm::step_display(tongue, 95, 1, true) == 100);
+  const pm::KeyDef& vowel = pm::key_def(3, 0);
+  CHECK(pm::step_display(vowel, 50, 1, false) == 51);
+  CHECK(pm::step_display(vowel, 50, -1, true) == 40);
+  CHECK(pm::step_display(vowel, 100, 1, false) == 100);
+  // the tabs: four, each at most 196 px, in order and inside the 800 px screen
+  for (unsigned i = 0; i < pm::kPages; ++i) {
+    CHECK(pm::kTabW <= 196);
+    CHECK(pm::tab_x(i) >= 0);
+    CHECK(pm::tab_x(i) + pm::kTabW <= 800);
+    if (i > 0u) {
+      CHECK(pm::tab_x(i) >= pm::tab_x(i - 1u) + pm::kTabW);
+    }
+  }
 }
 
 TEST_CASE("params: VOICING is an app key, 0..3 by name, clamped at its ends") {
@@ -253,6 +310,16 @@ float param(sim::Harness& h, std::uint16_t id) {
   return best;
 }
 
+// The tract unit's own parameter (the unit named TRACT; `param` skips it).
+float tract_param(sim::Harness& h, std::uint16_t id) {
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) {
+      return h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    }
+  }
+  return -1.0e9f;
+}
+
 bool has_row(const app::Help& help, app::Button b) {
   for (std::size_t i = 0; i < help.button_count; ++i) {
     if (help.buttons[i].button == b) {
@@ -326,6 +393,47 @@ TEST_CASE("params: the screen moves a value through the engine, VOICING takes th
     INFO(std::string(app::button_name(b)));
     CHECK(has_row(help, b));
   }
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("params: the TRACT page writes the tract unit in every mode and its HELP is valid") {
+  using o3_voc03er::TractUnit;
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  REQUIRE(tract_param(h, TractUnit::Hiss) > -1.0e8f);  // the unit is in the engine
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  tap(h, app::Button::Up);  // CARRIER, one page back: TRACT (round)
+  h.run_ms(60);
+  const float mode0 = param(h, Vocoder::Mode);
+  // VOWEL is F1, the page's first key and so under the encoder as the page opens: a detent 1 %
+  h.turn(7);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.07f).epsilon(0.02));
+  // JAW is signed: a detent 2 %, down through zero
+  tap(h, app::Button::F3);
+  h.turn(-3);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Jaw) == doctest::Approx(-0.06f).epsilon(0.02));
+  // SIZE by name: BIG..TINY, written as 0..4
+  tap(h, app::Button::F6);
+  h.turn(1);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Size) == doctest::Approx(3.0f));
+  // the vocoder is untouched, and so is the vowel while the encoder points elsewhere
+  CHECK(param(h, Vocoder::Mode) == doctest::Approx(mode0));
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.07f).epsilon(0.02));
+
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Config);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  REQUIRE(h.runtime().help_open());
+  app::HelpProblem p;
+  const bool ok = app::help_check(h.runtime().help_overlay().help(), &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
   CHECK(h.runtime().frame_failures() == 0u);
 }
 

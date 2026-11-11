@@ -148,9 +148,9 @@ class MyApp final : public app::App {
     console_notes_ = 0;
     g_bank = o3_voc03er::Bank{};  // setup() can run again on this object (tests, `reboot`): the patterns start empty; no render runs yet
     g_chain = o3_voc03er::Chain{};
-    perform_.init(voice, &meter_, &voc_, &pick_source_cb, this);
+    perform_.init(voice, tube, &meter_, &voc_, &pick_source_cb, this);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
-    params_.init(voice, &perform_);
+    params_.init(voice, tube, &perform_);
     master_.init(voice, &meter_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem);

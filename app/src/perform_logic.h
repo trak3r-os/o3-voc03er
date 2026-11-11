@@ -9,6 +9,7 @@
 #include <o3_voc03er/pad_map.h>
 #include <o3_voc03er/units/vocoder/scale.h>
 
+#include <o3sdk/app/pad_leds.h>
 #include <o3sdk/core/audio_clock.h>
 
 #include "pads_logic.h"
@@ -43,11 +44,11 @@ inline float capture_stop_at(unsigned bars, float bar, bool playing) noexcept {
 }
 
 using o3_voc03er::mode_index;  // modes.h: the unit's Mode value to 0..kModeCount - 1
-// What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page. TRACT (V1) keeps that page's F8
-// (SPREAD, the carrier's detune, which works in TRACT) and does not draw the bars (the bands idle in TRACT: perform_screen.cpp); its own F8 (VOWEL)
-// and its own voiceprint (the area function) are V2's.
-constexpr unsigned mode_page(unsigned mode) noexcept { return mode >= 3u ? 0u : mode; }
-inline constexpr unsigned kModePages = 3;  // the pages PERFORM draws (BANDS, TALK, TUNE): kF8 below has one hint each
+// What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page. TRACT (V2) has its own page: F8 is
+// the mouth's VOWEL and the voiceprint draws the area function (the bands idle in TRACT).
+inline constexpr unsigned kTractPage = 3;
+constexpr unsigned mode_page(unsigned mode) noexcept { return mode == o3_voc03er::kModeTract ? kTractPage : (mode >= 3u ? 0u : mode); }
+inline constexpr unsigned kModePages = 4;  // the pages PERFORM draws (BANDS, TALK, TUNE, TRACT): kF8 below has one hint each
 constexpr bool pages_cover_modes() noexcept {
   for (unsigned m = 0; m < kModeCount; ++m) {
     if (mode_page(m) >= kModePages) {
@@ -159,11 +160,12 @@ constexpr bool strip_on(const o3_voc03er::pads::Layout& l) noexcept { return l.r
 // What a pad of PERFORM is (docs/REVIEW-2026-11-11.md section 3). Row 0 (the top) is the controls in every layout; rows 1, 2 and 3 are the layout's
 // A, B and C, and what each plays is pads::pad_play (so a pad gives the same note and kind on every screen); C may be the formant strip or the bend
 // strip instead. A control pad plays no note: BND and MOD act while held, the others on the press.
-enum class PadFn : std::uint8_t { None, Play, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip, Formant };
+// Vowel and Closure are the mouth strip (C set to MOUTH; the screen acts on them in TRACT only).
+enum class PadFn : std::uint8_t { None, Play, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip, Formant, Vowel, Closure };
 struct PadSpec {
   PadFn fn = PadFn::None;
   o3_voc03er::pads::PadPlay play;  // Play: the note (1..127) and the stored kind (0 a note, 1..4 the ChordKind + 1)
-  int offset = 0;                  // Formant: the semitones of the pad
+  int offset = 0;                  // Formant: the semitones of the pad; Vowel: its column 0..8; Closure: the tract's CLOSE value 1..3 (LIPS, TIP, BACK)
 };
 // Row 0, by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; 2, 5 and 8 are gaps.
 inline constexpr PadFn kControlFn[12] = {PadFn::OctDown,  PadFn::OctUp,   PadFn::None,    PadFn::VolDown, PadFn::VolUp,  PadFn::None,
@@ -171,6 +173,59 @@ inline constexpr PadFn kControlFn[12] = {PadFn::OctDown,  PadFn::OctUp,   PadFn:
 inline constexpr const char* kControlName[12] = {"OCT-", "OCT+", "", "VOL-", "VOL+", "", "ROOT-", "ROOT+", "", "MOD", "BND-", "BND+"};
 // The formant strip (row C set to FORMANT): the Vocoder::Formant semitones of each column; both middle pads are 0.
 inline constexpr int kFormantStrip[12] = {-12, -9, -6, -4, -2, 0, 0, 2, 4, 6, 9, 12};
+// The mouth strip (row C set to MOUTH, TRACT mode): columns 0..8 are the VOWEL in eighths (A, A-E, E, E-I, I, I-O, O, O-U, U: the five pure vowels
+// on the even columns), columns 9, 10, 11 the closures LIPS, TIP and BACK (the tract's CLOSE 1..3), momentary.
+inline constexpr unsigned kMouthVowelCols = 9;
+inline constexpr const char* kMouthLabel[12] = {"A", "AE", "E", "EI", "I", "IO", "O", "OU", "U", "LIPS", "TIP", "BACK"};
+inline constexpr const char* kVowelLetters[5] = {"A", "E", "I", "O", "U"};
+// The VOWEL (0..1) a press of vowel column `col` (0..8) writes.
+constexpr float mouth_vowel(unsigned col) noexcept { return static_cast<float>(col < 8u ? col : 8u) * 0.125f; }
+// The vowel column (0..8) nearest to VOWEL `v`.
+constexpr unsigned mouth_nearest_col(float v) noexcept {
+  const float c = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+  return static_cast<unsigned>(c * 8.0f + 0.5f);
+}
+// The pure vowel (0 A, 1 E, 2 I, 3 O, 4 U) nearest to VOWEL `v`.
+constexpr unsigned mouth_nearest_vowel(float v) noexcept { return (mouth_nearest_col(v) + 1u) / 2u; }
+// The pad's LED on the mouth strip: the vowel column nearest to `vowel` on, the pure vowels mid, the rest dim; a closure on while held, else dim.
+// `held` is the closure mask (bit 1..3 = CLOSE value held).
+constexpr std::uint8_t mouth_led(unsigned col, float vowel, unsigned held) noexcept {
+  if (col < kMouthVowelCols) {
+    return col == mouth_nearest_col(vowel) ? o3sdk::app::kLedOn : ((col & 1u) == 0u ? o3sdk::app::kLedMid : o3sdk::app::kLedDim);
+  }
+  return col < 12u && ((held >> (col - kMouthVowelCols + 1u)) & 1u) != 0u ? o3sdk::app::kLedOn : o3sdk::app::kLedDim;
+}
+// The closures held on the strip: the CLOSE value to write is the one pressed last of those still down, OPEN (0) with none.
+struct MouthHold {
+  std::uint8_t order[3] = {};  // the held CLOSE values, oldest first
+  unsigned n = 0;
+  constexpr void press(unsigned close) noexcept {
+    release(close);
+    if (close >= 1u && close <= 3u) {
+      order[n++] = static_cast<std::uint8_t>(close);
+    }
+  }
+  constexpr void release(unsigned close) noexcept {
+    unsigned j = 0;
+    for (unsigned i = 0; i < n; ++i) {
+      if (order[i] != close) {
+        order[j++] = order[i];
+      }
+    }
+    n = j;
+  }
+  constexpr unsigned current() const noexcept { return n == 0u ? 0u : order[n - 1u]; }
+  constexpr unsigned mask() const noexcept {
+    unsigned m = 0;
+    for (unsigned i = 0; i < n; ++i) {
+      m |= 1u << order[i];
+    }
+    return m;
+  }
+};
+// The line when a pad of a MOUTH row is pressed outside TRACT.
+inline constexpr const char* kMouthElsewhere = "MOUTH SPEAKS IN TRACT";
+
 // The layout's row of a pad row 1..3 (A, B, C).
 constexpr o3_voc03er::pads::Row layout_row(unsigned pad_row) noexcept { return static_cast<o3_voc03er::pads::Row>(pad_row - 1u); }
 // The pad at (`row` 0..3 from the top, `col` 0..11) of `l` with the screen's octave shift `octave`.
@@ -190,6 +245,9 @@ constexpr PadSpec pad_spec(const o3_voc03er::pads::Layout& l, unsigned row, unsi
     s.offset = kFormantStrip[col];
   } else if (r == o3_voc03er::pads::Row::C && v == o3_voc03er::pads::Plays::Bend) {
     s.fn = PadFn::Strip;
+  } else if (r == o3_voc03er::pads::Row::C && v == o3_voc03er::pads::Plays::Mouth) {
+    s.fn = col < kMouthVowelCols ? PadFn::Vowel : PadFn::Closure;
+    s.offset = col < kMouthVowelCols ? static_cast<int>(col) : static_cast<int>(col - kMouthVowelCols) + 1;
   } else {
     s.play = o3_voc03er::pads::pad_play(l, r, col, octave);
     if (s.play.note >= 0) {
@@ -198,7 +256,9 @@ constexpr PadSpec pad_spec(const o3_voc03er::pads::Layout& l, unsigned row, unsi
   }
   return s;
 }
-constexpr bool is_control(PadFn f) noexcept { return f != PadFn::None && f != PadFn::Play && f != PadFn::Strip && f != PadFn::Formant; }
+constexpr bool is_control(PadFn f) noexcept {
+  return f != PadFn::None && f != PadFn::Play && f != PadFn::Strip && f != PadFn::Formant && f != PadFn::Vowel && f != PadFn::Closure;
+}
 constexpr bool is_held_control(PadFn f) noexcept { return f == PadFn::Mod || f == PadFn::BndDown || f == PadFn::BndUp; }
 
 // The time bend (BND- and BND+) and the vibrato (MOD): linear in the time held, full after kRampMs; the vibrato falls the same way on release.
@@ -338,7 +398,8 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
       "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 ROW: A, B OR C; F7 SETS WHAT IT PLAYS",
       "F7 PLAYS: WHAT THE CHOSEN ROW'S PADS DO",
   };
-  static constexpr const char* kF8[kModePages] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
+  static constexpr const char* kF8[kModePages] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES",
+                                                  "F8 VOWEL: MORPHS THE MOUTH A TO U"};
   return focus < 7u ? kHints[focus] : kF8[mode_page(mode < kModeCount ? mode : 0u)];
 }
 

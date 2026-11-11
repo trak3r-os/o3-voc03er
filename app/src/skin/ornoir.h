@@ -68,8 +68,9 @@ void frow_text(o3sdk::ui::Renderer& r, const FKey (&keys)[kFKeys]) noexcept;
 
 inline constexpr unsigned kBandCount = 16;
 
-// What a voiceprint without bars draws: nothing (the unlit grid), TALK's envelope or TUNE's ladder.
-enum class Print : std::uint8_t { Grid, Talk, Tune };
+// What a voiceprint without bars draws: nothing (the unlit grid), TALK's envelope, TUNE's ladder or TRACT's mouth.
+enum class Print : std::uint8_t { Grid, Talk, Tune, Mouth };
+inline constexpr unsigned kTubeSections = 22;  // TRACT: the tube's sections (app/src/mouth_logic.h)
 
 struct Voiceprint {
   std::uint8_t level[kBandCount] = {};  // 0..255 (0 is -60 dB, 255 is 0 dBFS), the unit's View
@@ -86,6 +87,8 @@ struct Voiceprint {
   std::int8_t target = -1;
   std::int16_t shift = 0;  // cents
   bool voiced = false;
+  // TRACT: the tube's diameters, glottis to lips, 0..255 (mouth::profile).
+  std::uint8_t tube[kTubeSections] = {};
 };
 
 // The voiceprint as a plain strip of w x h at (x, y), shapes only (PARAMS shows it small above its keys).
@@ -135,6 +138,7 @@ struct SpeaksState {
   unsigned gain = 0;
   Ladder in;
   bool clipping = false;
+  bool dim = false;  // TRACT: nothing speaks, the mouth is played: the column is drawn quiet (no ladder)
 };
 
 struct SoundsState {

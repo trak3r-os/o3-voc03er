@@ -83,7 +83,7 @@ TEST_CASE("or noir: the bitmaps hold the pinhole and the glyphs") {
 }
 
 TEST_CASE("perform: the hint line says what every F key does and fits beside the pads' gestures") {
-  for (unsigned mode = 0; mode < 3; ++mode) {
+  for (unsigned mode = 0; mode < kModeCount; ++mode) {
     for (unsigned focus = 0; focus < 8; ++focus) {
       const std::string hint = pl::key_hint(focus, mode);
       CHECK(hint.size() > 3u);
@@ -94,6 +94,8 @@ TEST_CASE("perform: the hint line says what every F key does and fits beside the
   }
   CHECK(std::string(pl::key_hint(7, 1)).find("QUALITY") != std::string::npos);
   CHECK(std::string(pl::key_hint(7, 2)).find("SPEED") != std::string::npos);
+  CHECK(std::string(pl::key_hint(7, kModeTract)).find("VOWEL") != std::string::npos);
+  CHECK(std::string(pl::key_hint(7, 3)).find("SPREAD") != std::string::npos);  // ROBOT keeps BANDS' F8
 }
 
 TEST_CASE("perform: the hint of the free encoder fits") {
@@ -197,6 +199,105 @@ TEST_CASE("perform: row C is the formant strip, the bend strip, a note row or da
   CHECK_FALSE(pl::strip_on(notes));
   CHECK(pl::layout_row(1) == pads::Row::A);
   CHECK(pl::layout_row(3) == pads::Row::C);
+}
+
+TEST_CASE("perform: the mouth strip is vowels on columns 0..8 and closures on 9..11, the map pure") {
+  using F = pl::PadFn;
+  const pads::Layout mouth = layout_of(pads::Plays::Note, pads::Plays::Triad, pads::Plays::Mouth);
+  for (unsigned c = 0; c < 12; ++c) {
+    const pl::PadSpec sp = pl::pad_spec(mouth, 3, c, 0);
+    CAPTURE(c);
+    CHECK(sp.play.note == -1);
+    if (c < 9u) {
+      CHECK(sp.fn == F::Vowel);
+      CHECK(sp.offset == static_cast<int>(c));
+      CHECK(pl::mouth_vowel(c) == doctest::Approx(static_cast<float>(c) / 8.0f));
+    } else {
+      CHECK(sp.fn == F::Closure);
+      CHECK(sp.offset == static_cast<int>(c) - 8);  // LIPS 1, TIP 2, BACK 3
+    }
+    CHECK_FALSE(pl::is_control(sp.fn));
+    CHECK(std::string(pl::kMouthLabel[c]).size() <= 5u);
+  }
+  CHECK(pl::mouth_vowel(0) == 0.0f);
+  CHECK(pl::mouth_vowel(8) == 1.0f);
+  CHECK(pl::mouth_vowel(99) == 1.0f);
+  // Only row C: the same layout's rows A and B stay what they were; the mouth is not the strip.
+  CHECK(pl::pad_spec(mouth, 1, 0, 0).fn == F::Play);
+  CHECK(pl::pad_spec(mouth, 2, 0, 0).fn == F::Play);
+  CHECK_FALSE(pl::strip_on(mouth));
+  // Rows A and B sit on C's octave: C plays no note.
+  CHECK(pl::pad_spec(mouth, 2, 0, 0).play.note == pads::pad_play(mouth, pads::Row::B, 0, 0).note);
+  CHECK(pl::pad_spec(mouth, 2, 0, 0).play.note == pads::pad_play(layout_of(pads::Plays::Note, pads::Plays::Triad, pads::Plays::Off), pads::Row::B, 0, 0).note);
+}
+
+TEST_CASE("perform: a vowel pad is sticky: the nearest column to VOWEL is the lit one") {
+  // The press writes mouth_vowel(col); reading it back lights that same column, for every column.
+  for (unsigned c = 0; c < 9; ++c) {
+    CAPTURE(c);
+    CHECK(pl::mouth_nearest_col(pl::mouth_vowel(c)) == c);
+  }
+  CHECK(pl::mouth_nearest_col(0.06f) == 0u);
+  CHECK(pl::mouth_nearest_col(0.07f) == 1u);  // 0.07 * 8 = 0.56: past the half
+  CHECK(pl::mouth_nearest_col(1.7f) == 8u);
+  CHECK(pl::mouth_nearest_col(-3.0f) == 0u);
+  // The pure vowels: A 0, E 2, I 4, O 6, U 8 are 0..4 (the F8 key's letter).
+  CHECK(pl::mouth_nearest_vowel(0.0f) == 0u);
+  CHECK(pl::mouth_nearest_vowel(0.25f) == 1u);
+  CHECK(pl::mouth_nearest_vowel(0.5f) == 2u);
+  CHECK(pl::mouth_nearest_vowel(0.75f) == 3u);
+  CHECK(pl::mouth_nearest_vowel(1.0f) == 4u);
+}
+
+TEST_CASE("perform: the mouth strip's closures are momentary: the last pressed of those held wins") {
+  pl::MouthHold h;
+  CHECK(h.current() == 0u);  // OPEN
+  CHECK(h.mask() == 0u);
+  h.press(1);  // LIPS
+  CHECK(h.current() == 1u);
+  h.press(3);  // BACK joins: it is the one written
+  CHECK(h.current() == 3u);
+  CHECK(h.mask() == ((1u << 1) | (1u << 3)));
+  h.release(3);  // the LIPS is still down: it comes back
+  CHECK(h.current() == 1u);
+  h.press(2);
+  h.release(1);  // an older pad released: the newer one stays
+  CHECK(h.current() == 2u);
+  h.release(2);
+  CHECK(h.current() == 0u);
+  CHECK(h.mask() == 0u);
+  // A pad pressed twice without a release counts once; a release of one never pressed does nothing.
+  h.press(1);
+  h.press(1);
+  h.release(2);
+  CHECK(h.n == 1u);
+  h.release(1);
+  CHECK(h.current() == 0u);
+  // Out-of-range values are ignored.
+  h.press(0);
+  h.press(4);
+  CHECK(h.n == 0u);
+}
+
+TEST_CASE("perform: the mouth strip's LEDs: nearest column on, pure vowels mid, the rest dim, closures on while held") {
+  namespace a = o3sdk::app;
+  for (unsigned vowel_col = 0; vowel_col < 9; ++vowel_col) {
+    const float v = pl::mouth_vowel(vowel_col);
+    for (unsigned c = 0; c < 9; ++c) {
+      CAPTURE(vowel_col);
+      CAPTURE(c);
+      const std::uint8_t want = c == vowel_col ? a::kLedOn : ((c % 2u) == 0u ? a::kLedMid : a::kLedDim);
+      CHECK(pl::mouth_led(c, v, 0) == want);
+    }
+    for (unsigned c = 9; c < 12; ++c) CHECK(pl::mouth_led(c, v, 0) == a::kLedDim);  // the vowel never lights a closure
+  }
+  // Closures: bit CLOSE value of the held mask.
+  CHECK(pl::mouth_led(9, 0.0f, 1u << 1) == a::kLedOn);
+  CHECK(pl::mouth_led(10, 0.0f, 1u << 1) == a::kLedDim);
+  CHECK(pl::mouth_led(10, 0.0f, (1u << 2) | (1u << 3)) == a::kLedOn);
+  CHECK(pl::mouth_led(11, 0.0f, (1u << 2) | (1u << 3)) == a::kLedOn);
+  // A held closure does not touch the vowel LEDs.
+  CHECK(pl::mouth_led(4, 0.5f, 1u << 2) == a::kLedOn);
 }
 
 TEST_CASE("perform: OFF is dark and silent on every row") {

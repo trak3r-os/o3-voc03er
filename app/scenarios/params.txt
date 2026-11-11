@@ -1,4 +1,4 @@
-# PARAMS: the unit's values in three pages of eight (CARRIER, SHAPE, TUNE) on the F row, PERFORM's voiceprint small above them. Each page, a value
+# PARAMS: the unit's values in four pages of eight (CARRIER, SHAPE, TUNE, TRACT) on the F row, PERFORM's voiceprint small above them. Each page, a value
 # changed and seen (NOISE under the encoder, a bigger voiceprint noise floor is not what is checked: the number and its bar are), VOICING (the app's own
 # key, SMOOTH by default, stepped to CLOSE and WIDE with the same chord pad held each time: the WAV carries the three chords), QUALITY at 24, PARAMS
 # pressed again paging on, SHIFT + PARAMS the same as PARAMS.
@@ -69,4 +69,36 @@ tap params
 release shift
 wait 300
 snap 10_shift_params_pages
+# V2: the TRACT page (VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS: the tract unit's own parameters), live in every mode: in BANDS its strip says
+# TRACT MODE ONLY and the values are kept; then in TRACT mode the voiceprint above it is the mouth.
+tap params
+tap params
+wait 300
+snap 11_tract_page_in_bands
+tap f1
+turn 30
+tap f3
+turn -10
+tap f6
+turn 1
+wait 200
+snap 12_tract_values_in_bands
+press shift
+tap config
+release shift
+wait 300
+snap 13_tract_page_help
+tap config
+wait 200
+tap performance
+tap f1
+turn 8
+wait 400
+tap params
+wait 400
+snap 14_tract_page_in_tract
+tap f5
+turn 4
+wait 200
+snap 15_glide_changed
 wav params

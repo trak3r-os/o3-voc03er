@@ -32,6 +32,10 @@ TEST_CASE("pads: the values keep their saved numbers and names") {
   CHECK(static_cast<int>(Plays::PianoPower) == 10);
   CHECK(static_cast<int>(Plays::Formant) == 11);
   CHECK(static_cast<int>(Plays::Bend) == 12);
+  CHECK(static_cast<int>(Plays::Mouth) == 13);
+  CHECK(pd::kPlaysCount == 14u);
+  CHECK(std::strcmp(pd::kPlaysNames[13], "MOUTH") == 0);
+  CHECK(std::strcmp(pd::kPlaysShort[13], "MOUTH") == 0);
   CHECK(std::strcmp(pd::kPlaysNames[0], "NOTE") == 0);
   CHECK(std::strcmp(pd::kPlaysNames[2], "7TH") == 0);
   CHECK(std::strcmp(pd::kPlaysNames[6], "PIANO NOTE") == 0);
@@ -55,7 +59,7 @@ TEST_CASE("pads: which row offers which value") {
     CAPTURE(v);
     CHECK(pd::offered(Row::A, p) == (v <= 10));
     CHECK(pd::offered(Row::B, p) == (v <= 10));
-    CHECK(pd::offered(Row::C, p) == (v <= 5 || v >= 11));
+    CHECK(pd::offered(Row::C, p) == (v <= 5 || v >= 11));  // FORMANT, BEND and MOUTH are row C's only
   }
 }
 
@@ -74,21 +78,24 @@ TEST_CASE("pads: a tap steps and wraps, the encoder steps and stops at the ends"
     CHECK(pd::plays_step(r, Plays::Off, -40) == Plays::Note);
     CHECK(pd::plays_step(r, Plays::Triad, 4) == Plays::PianoNote);
   }
-  // C: NOTE TRIAD 7TH OPEN POWER FORMANT BEND OFF.
-  const Plays c[8] = {Plays::Note, Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power, Plays::Formant, Plays::Bend, Plays::Off};
-  for (unsigned i = 0; i < 8; ++i) {
+  // C: NOTE TRIAD 7TH OPEN POWER FORMANT BEND MOUTH OFF.
+  const Plays c[9] = {Plays::Note, Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power, Plays::Formant, Plays::Bend, Plays::Mouth, Plays::Off};
+  for (unsigned i = 0; i < 9; ++i) {
     CAPTURE(i);
-    CHECK(pd::plays_tap(Row::C, c[i]) == c[(i + 1) % 8]);
-    CHECK(pd::plays_step(Row::C, c[i], 1) == c[i < 7 ? i + 1 : 7]);
+    CHECK(pd::plays_tap(Row::C, c[i]) == c[(i + 1) % 9]);
+    CHECK(pd::plays_step(Row::C, c[i], 1) == c[i < 8 ? i + 1 : 8]);
     CHECK(pd::plays_step(Row::C, c[i], -1) == c[i > 0 ? i - 1 : 0]);
   }
+  CHECK(pd::plays_step(Row::C, Plays::Bend, 1) == Plays::Mouth);
+  CHECK(pd::plays_step(Row::C, Plays::Mouth, 1) == Plays::Off);
+  CHECK(pd::plays_step(Row::C, Plays::Mouth, -1) == Plays::Bend);
   CHECK(pd::plays_step(Row::C, Plays::Power, 1) == Plays::Formant);
   // A value the row does not offer is taken as the first.
   CHECK(pd::plays_tap(Row::C, Plays::PianoNote) == Plays::Triad);
   // Every value either step reaches is one the row offers.
   for (Row r : {Row::A, Row::B, Row::C}) {
     Plays p = Plays::Note;
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < 14; ++i) {
       CHECK(pd::offered(r, p));
       p = pd::plays_tap(r, p);
     }
@@ -161,6 +168,11 @@ TEST_CASE("pads: a row plays one octave above each playing row below it") {
   CHECK(pd::row_octave(make(Plays::Note, Plays::Off, Plays::Note), Row::A) == 1);
   CHECK(pd::row_octave(make(Plays::Note, Plays::Triad, Plays::Bend), Row::A) == 1);
   CHECK(pd::row_octave(make(Plays::Off, Plays::Note, Plays::Note), Row::B) == 1);
+  // C MOUTH plays no note, so it gives the rows above no octave: the same as C BEND.
+  CHECK(pd::row_octave(make(Plays::Note, Plays::Triad, Plays::Mouth), Row::B) == 0);
+  CHECK(pd::row_octave(make(Plays::Note, Plays::Triad, Plays::Mouth), Row::A) == 1);
+  CHECK(pd::row_octave(make(Plays::PianoTriad, Plays::PianoTriad, Plays::Mouth), Row::A) == 0);
+  CHECK_FALSE(pd::plays_notes(Plays::Mouth));
 }
 
 TEST_CASE("pads: a grid pad is the root of its column, the kind is the stored one") {
@@ -213,6 +225,7 @@ TEST_CASE("pads: OFF, FORMANT and BEND play nothing, and notes stay in 1..127 an
     for (Row r : {Row::A, Row::B, Row::C}) CHECK(pd::pad_play(l, r, col, 0).note == -1);
   }
   CHECK(pd::pad_play(make(Plays::Note, Plays::Note, Plays::Bend), Row::C, 0, 0).note == -1);
+  for (unsigned col = 0; col < 12; ++col) CHECK(pd::pad_play(make(Plays::Note, Plays::Note, Plays::Mouth), Row::C, col, 0).note == -1);
   // The range: every note is 1..127, the edges are exact, one past is -1.
   const pd::Layout n = make(Plays::Note, Plays::Note, Plays::Note);
   for (int oct = -8; oct <= 8; ++oct) {
@@ -282,6 +295,12 @@ TEST_CASE("pads: legacy_fields derives the 1.0 settings of a layout (keys, the l
   f = pd::legacy_fields(l);
   CHECK(f.bend_row == 1);
   CHECK(f.chord == 0);  // B's TRIAD again
+  l.row[2] = Plays::Mouth;  // a mouth is not a chord, a key row nor a bend row
+  f = pd::legacy_fields(l);
+  CHECK(f.bend_row == 0);
+  CHECK(f.chord == 0);
+  CHECK(f.keys == 0);
+  l.row[2] = Plays::Bend;
 
   l.row[1] = Plays::Off;
   l.row[0] = Plays::Power;  // only A is a chord
