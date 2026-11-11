@@ -1,4 +1,4 @@
-# SLICES: a 1 BAR take, the even cuts (8), pads 0 to 7 in turn over a latched chord on SOUNDS, then CHOKE OFF and five pads held: the fifth steals the oldest.
+# SLICES: a 1 BAR take, the even cuts (8), pads 0 to 7 in turn on SOUNDS with a layout pad (row B, a triad) held, then CHOKE OFF and five pads held: the fifth steals the oldest.
 # The simulator shows the screen, the LEDs and that the unit plays; it cannot say how the cuts sound or what the frame costs.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/slices.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -21,10 +21,7 @@ tap f2
 wait 100
 tap f2
 wait 100
-paddown 26
-wait 100
-tap shift
-padup 26
+paddown 38
 wait 600
 snap 01_cuts
 paddown 0
@@ -83,3 +80,4 @@ padup 3
 padup 4
 wait 1500
 snap 05_released
+padup 38

@@ -151,7 +151,6 @@ void PerformScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocod
   focus_ = 5;
   sfocus_ = pl::kNoShiftFocus;
   octave_ = 0;
-  bottom_ = 0;
   layout_ = pads::Layout{};
   row_ = pads::Row::A;
   row_flash_until_ = 0;
@@ -940,11 +939,6 @@ void PerformScreen::finish_capture(app::Context& ctx) noexcept {
 }
 
 // ---- input --------------------------------------------------------------------------------------------------------------------------
-
-void PerformScreen::bottom_kind(app::Context& ctx, int delta) noexcept {
-  bottom_ = pl::step_wrapped(bottom_, delta, 4);
-  ctx.redraw();
-}
 
 void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) noexcept {
   dsp::Engine& e = ctx.engine();

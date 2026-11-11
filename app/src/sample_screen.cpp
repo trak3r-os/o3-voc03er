@@ -2,6 +2,8 @@
 #include "sample_screen.h"
 
 #include "overview.h"
+#include "pads_logic.h"
+#include "pattern_logic.h"
 #include "perform_logic.h"
 #include "sample_logic.h"
 #include "sample_rec_logic.h"
@@ -21,6 +23,7 @@ namespace pl = perform;
 namespace sm = sample;
 namespace sr = sample_rec;
 namespace ov = overview;
+namespace pt = pattern;
 using ui::Color;
 using ui::Face;
 using Button = app::Button;
@@ -32,7 +35,10 @@ constexpr std::uint64_t kNoteMs = 2500;
 constexpr int kLevelTap = 6;  // a second tap on F8 moves the level this many half-dB (a detent moves 1)
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"CHORD", "SIDE", "SPEED", "DIR", "LOOP", "TRIG", "CHOKE", "LEVEL"};
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"PLAYS", "SIDE", "SPEED", "DIR", "LOOP", "TRIG", "CHOKE", "LEVEL"};
+// The SHIFT row: F1 only (the others are blank and dim), labelled the way PATTERN's and PERFORM's are.
+constexpr const char* kShiftNames[ornoir::kFKeys] = {"ROW", "", "", "", "", "", "", ""};
+constexpr unsigned kKeyPlays = 0;  // F1
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
   std::size_t n = std::strlen(dst);
@@ -102,7 +108,7 @@ struct SampleData {
   SliceMap map;                 // the SPEAKS slot's slices for the step sequencer's SLICE lane (published through StepSeq::slices_open)
   sm::SlicePublished published;  // what the map holds
   app::HelpPadGroup groups[app::kHelpMaxGroups];
-  char pad_name[sm::kTopPads][app::kHelpPadLabel + 1];
+  char pad_name[app::kPadCount][app::kHelpPadLabel + 1];
 };
 O3SDK_BIG SampleData g_sd = {};
 static_assert(kSliceMax == sm::kMaxSlices, "the step sequencer's map holds one entry per slice");
@@ -127,6 +133,9 @@ void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* pe
   perform_ = perform;
   slot_ = 0;
   focus_ = 0;
+  row_ = 0;
+  flash_until_ = 0;
+  aud_ = 0;
   g_sd = SampleData{};  // a restarted app starts from the defaults
 }
 
@@ -153,8 +162,9 @@ void SampleScreen::leave(app::Context& ctx) noexcept { pad_leave(ctx); }
 void SampleScreen::pad_leave(app::Context& ctx) noexcept {
   release_all(ctx);
   if (perform_ != nullptr) {
-    perform_->leave(ctx);  // releases the held pads
+    perform_->audition_release_all(ctx);  // the layout pads' notes let go
   }
+  aud_ = 0;
 }
 
 std::uint64_t SampleScreen::repeat_buttons(const app::Context&) const noexcept {
@@ -424,10 +434,8 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
   const bool tap = delta == 1 && key_tap_;
   const Vocoder::LoopStatus ls = view(slot_);
   switch (key) {
-    case 0:  // CHORD
-      if (perform_ != nullptr) {
-        perform_->step_chord(ctx, delta);
-      }
+    case kKeyPlays:  // PLAYS: the row's value, through PERFORM's layout
+      step_plays(ctx, delta, tap);
       break;
     case 1:  // SIDE
       set_side(ctx, delta);
@@ -464,6 +472,9 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
     if (in.shift) {
+      if (k == kKeyPlays) {  // SHIFT + F1: ROW
+        flip_row(ctx);
+      }
       return;
     }
     if (k == focus_ || (k >= 3u && k <= 6u)) {  // a second tap steps the value on (DIR, LOOP, TRIG and CHOKE have nothing else to do)
@@ -488,27 +499,84 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     ctx.redraw();
   } else if ((in.press(Button::Left) || in.press(Button::Right)) && perform_ != nullptr) {  // repeats arrive as presses (repeat_buttons)
     perform_->step_octave(ctx, in.press(Button::Left) ? -1 : 1);
-  } else if ((in.press(Button::Shift) || in.press(Button::Delete)) && perform_ != nullptr) {  // PERFORM's latch and release
-    perform_->input(ctx, in);
   } else {
     (void)pad_input(ctx, in);
   }
 }
 
-// The pads, here and on SAMPLE EDIT: the top rows play the selected slot's slices, the bottom rows are PERFORM's chords.
+// The pads, here and on SAMPLE EDIT: the top rows play the selected slot's slices, the bottom rows PERFORM's layout rows A and B.
 bool SampleScreen::pad_input(app::Context& ctx, const app::Input& in) noexcept {
-  if (in.press(Button::Shift) && perform_ != nullptr) {  // PERFORM's latch of the held chord pad
-    perform_->input(ctx, in);
-  } else if (in.pad_press() && !sm::chord_pad(in.pad())) {
-    trigger(ctx, slot_, in.pad());
-  } else if (in.pad_release() && !sm::chord_pad(in.pad())) {
-    release_pad(ctx, in.pad());
-  } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr && sm::chord_pad(in.pad())) {
-    perform_->pad_event(ctx, in);
+  if (in.pad_press()) {
+    if (sm::layout_pad(in.pad())) {
+      play_pad(ctx, in.pad());
+    } else {
+      trigger(ctx, slot_, in.pad());
+    }
+  } else if (in.pad_release()) {
+    if (sm::layout_pad(in.pad())) {
+      release_play(ctx, in.pad());
+    } else {
+      release_pad(ctx, in.pad());
+    }
   } else {
     return false;
   }
   return true;
+}
+
+// Pad 24..47 is column pad % 12 of row A (24..35) or B (36..47), as PATTERN's palette rows 0 and 1 are: the layout says what it plays (a note, a chord,
+// a piano key, nothing on OFF or a gap) at PERFORM's octave, and PERFORM's audition entry sounds it (ids 0..23: pad - 24, no widening needed).
+void SampleScreen::play_pad(app::Context& ctx, unsigned pad) noexcept {
+  if (perform_ == nullptr || !sm::layout_pad(pad) || pad >= app::kPadCount) {
+    return;
+  }
+  const unsigned p = pad - sm::kTopPads;  // 0..23
+  const pads::PadPlay pp = pads::pad_play(perform_->layout(), p < app::kPadCols ? pads::Row::A : pads::Row::B, p % app::kPadCols, perform_->octave());
+  if (pp.note < 1) {
+    return;
+  }
+  perform_->audition_press(ctx, p, static_cast<unsigned>(pp.note), pp.kind);
+  aud_ |= std::uint32_t{1} << p;
+}
+
+void SampleScreen::release_play(app::Context& ctx, unsigned pad) noexcept {
+  if (perform_ == nullptr || !sm::layout_pad(pad) || pad >= app::kPadCount) {
+    return;
+  }
+  const unsigned p = pad - sm::kTopPads;
+  if (((aud_ >> p) & 1u) != 0u) {
+    aud_ &= ~(std::uint32_t{1} << p);
+    perform_->audition_release(ctx, p);
+  }
+}
+
+// F1: PLAYS of the row of the lowest layout pad that sounds (row A's first), else of the chosen row; ROW follows. A tap steps and wraps, a detent stops at
+// the ends. A new value ends the notes: the old meaning started them (the held pad stays down and sounds again at its next press).
+void SampleScreen::step_plays(app::Context& ctx, int delta, bool tap) noexcept {
+  if (perform_ == nullptr) {
+    return;
+  }
+  unsigned r = row_ & 1u;
+  if ((aud_ & 0xFFFu) != 0u) {
+    r = 0;
+  } else if ((aud_ >> app::kPadCols) != 0u) {
+    r = 1;
+  }
+  row_ = static_cast<std::uint8_t>(r);
+  const pads::Row row = static_cast<pads::Row>(r);
+  const pads::Plays cur = perform_->layout().row[r];
+  const pads::Plays next = tap ? pads::plays_tap(row, cur) : pads::plays_step(row, cur, delta);
+  if (next != cur && perform_->set_plays(row, next)) {
+    perform_->audition_release_all(ctx);
+    aud_ = 0;
+  }
+  ctx.redraw();
+}
+
+void SampleScreen::flip_row(app::Context& ctx) noexcept {
+  row_ ^= 1u;
+  flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
+  ctx.redraw();
 }
 
 void SampleScreen::pad_update(app::Context& ctx) noexcept {
@@ -525,14 +593,34 @@ void SampleScreen::update(app::Context& ctx) noexcept {
   ctx.redraw();  // the play state moves with the bar
 }
 
-// The chord grid of PERFORM's two lower rows; the top two rows are the slot's slices: a cut dim, a sounding one on, an empty slot dark.
+// The top two rows are the slot's slices: a cut dim, a sounding one on, an empty slot dark. The bottom two are PERFORM's rows A and B as they play now (the
+// key's root low, the scale dim, the rest and the pads that play nothing dark, a held pad on), the chosen row's going dark for a moment when ROW changes.
 void SampleScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept { pad_leds(ctx, leds); }
 
 void SampleScreen::pad_leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   if (perform_ == nullptr) {
     return;
   }
-  perform_->leds(ctx, leds);
+  {
+    const dsp::Engine& e = ctx.engine();
+    const unsigned key = round_param(e, voice_, Vocoder::Key) % 12u;
+    const std::uint16_t cols = pl::scale_cols(key, round_param(e, voice_, Vocoder::Scale));
+    const bool flash = ctx.uptime_ms() < flash_until_;
+    for (unsigned pad = sm::kTopPads; pad < app::kPadCount; ++pad) {
+      const unsigned p = pad - sm::kTopPads;
+      const unsigned row = p / app::kPadCols;
+      const pads::PadPlay pp = pads::pad_play(perform_->layout(), static_cast<pads::Row>(row), p % app::kPadCols, perform_->octave());
+      std::uint8_t level = app::kLedOff;
+      if (pp.note > 0 && !(flash && row == row_)) {
+        const unsigned pc = static_cast<unsigned>(pp.note) % 12u;
+        level = pc == key ? app::kLedLow : (((cols >> pc) & 1u) != 0u ? app::kLedDim : app::kLedOff);
+      }
+      if (((aud_ >> p) & 1u) != 0u) {
+        level = app::kLedOn;
+      }
+      leds.set(pad, level);
+    }
+  }
   const unsigned count = g_sd.table[slot_ & 3u].count;
   const std::uint32_t on = sounding_mask(slot_);
   // The slice the SLICE lane played last, on the SPEAKS slot: mid, unless a pad press has it on already.
@@ -556,15 +644,14 @@ void SampleScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   }
 }
 
-// HELP: the pads come from PERFORM (they play its chords); every button input() answers here has a row (tests/sample_test.cpp holds it).
-void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
+// HELP: the lower pads are PERFORM's rows A and B (its layout); every button input() answers here has a row (tests/sample_test.cpp holds it).
+void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "SLOT BEFORE", nullptr},
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "OCTAVE DOWN, HOLD REPEATS", nullptr},
       {Button::Right, "OCTAVE UP, HOLD REPEATS", nullptr},
-      {Button::Shift, "LATCH THE HELD CHORD PAD", nullptr},
-      {Button::Delete, "RELEASE THE LATCHED CHORD", nullptr},
+      {Button::Shift, "WITH F1: ROW A OR B", nullptr},
       {Button::Params, "PARAMS: THREE PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
@@ -581,34 +668,41 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Vol, "PATTERN: LEVEL LANE", nullptr},
       {Button::Fx, "PATTERN: SLICE LANE", nullptr},
   };
-  if (perform_ != nullptr) {
-    perform_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
-    for (unsigned i = 0; i < app::kFKeyCount; ++i) {
-      h.fkey[i] = nullptr;
-      h.fkey_shift[i] = nullptr;
-    }
+  for (unsigned i = 0; i < app::kFKeyCount; ++i) {
+    h.fkey[i] = nullptr;
+    h.fkey_shift[i] = nullptr;
   }
   h.summary = "THE FOUR SLOTS: UP AND DOWN PICK ONE; ITS SIDE, SPEED, DIRECTION AND LEVEL ARE THE F KEYS.\n"
-              "UPPER PADS: SLICES; LOWER: CHORDS. MIDI NOTES FROM 36 FIRE THE SPEAKS SLOT'S SLICES.";
-  if (h.groups != nullptr && h.group_count < app::kHelpMaxGroups) {  // PERFORM's groups, then the slices (the screen's own storage in the SDRAM)
-    for (unsigned i = 0; i < h.group_count; ++i) {
-      g_sd.groups[i] = h.groups[i];
+              "UPPER PADS: SLICES; LOWER: PERFORM'S ROWS A AND B. MIDI NOTES FROM 36: THE SPEAKS SLICES.";
+  // The legend: the slices, then the layout's rows A and B as they play now (a pad's group is its row + 1: the slices 1, A 2, B 3).
+  const pads::Layout layout = perform_ != nullptr ? perform_->layout() : pads::Layout{};
+  const int oct = perform_ != nullptr ? perform_->octave() : 0;
+  g_sd.groups[0] = {"SLICES", "A SLICE PLAYS ITS CUT ONCE; A HIT RESTARTS IT", ui::Color::Accent};
+  g_sd.groups[1] = {pads::kPlaysNames[pads::idx(layout.row[0])], "ROW A: F1 PLAYS SETS WHAT IT PLAYS", ui::Color::Vol};
+  g_sd.groups[2] = {pads::kPlaysNames[pads::idx(layout.row[1])], "ROW B: SHIFT + F1 CHOOSES THE ROW", ui::Color::Fx};
+  h.groups = g_sd.groups;
+  h.group_count = 3;
+  for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
+    char* l = g_sd.pad_name[pad];
+    l[0] = '\0';
+    h.pad_group[pad] = static_cast<std::uint8_t>(pad < sm::kTopPads ? 1u : (pad - sm::kTopPads < app::kPadCols ? 2u : 3u));
+    if (pad < sm::kTopPads) {
+      cat_uint(l, sizeof g_sd.pad_name[pad], pad + 1u);
+    } else {
+      const unsigned p = pad - sm::kTopPads;
+      const pads::PadPlay pp = pads::pad_play(layout, p < app::kPadCols ? pads::Row::A : pads::Row::B, p % app::kPadCols, oct);
+      if (pp.note > 0) {  // the root and the kind after it: "C", "C7TH", "C#PWR"
+        cat(l, sizeof g_sd.pad_name[pad], pt::kPitchClass[static_cast<unsigned>(pp.note) % 12u]);
+        if (pp.kind != 0u) {
+          cat(l, sizeof g_sd.pad_name[pad], pt::kCellKind[(pp.kind - 1u) & 3u]);
+        }
+      }
     }
-    g_sd.groups[h.group_count] = {"SLICES", "A SLICE PLAYS ITS CUT ONCE; A HIT RESTARTS IT", ui::Color::Accent};
-    h.groups = g_sd.groups;
-    ++h.group_count;
-    for (unsigned pad = 0; pad < sm::kTopPads; ++pad) {
-      const unsigned n = pad + 1u;
-      char* l = g_sd.pad_name[pad];
-      l[0] = n >= 10u ? static_cast<char>('0' + n / 10u) : static_cast<char>('0' + n);
-      l[1] = n >= 10u ? static_cast<char>('0' + n % 10u) : '\0';
-      l[2] = '\0';
-      h.pad_label[pad] = l;
-      h.pad_group[pad] = h.group_count;
-    }
-    h.pads = "UPPER ROWS: SLICES 1 TO 24 OF THE SLOT. LOWER ROWS: CHORDS (LATCH WITH SHIFT).";
+    h.pad_label[pad] = l[0] != '\0' ? l : nullptr;
   }
-  h.fkey[0] = "THE CHORD ROW'S KIND";
+  h.pads = "UPPER ROWS: THE SLOT'S SLICES. LOWER ROWS: PERFORM'S ROWS A AND B; F1 SETS WHAT A ROW PLAYS.";
+  h.fkey[0] = "WHAT THE ROW PLAYS";
+  h.fkey_shift[0] = kShiftNames[0];
   h.fkey[1] = "SPEAKS, SOUNDS, NONE";
   h.fkey[2] = "0.5X, 1X, 2X";
   h.fkey[3] = "FORWARD, REVERSE";
@@ -703,7 +797,8 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const unsigned tempo = e.stats().tempo_mbpm;
   const float bar = pl::bar_samples(tempo);
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
-  const unsigned kind = perform_ != nullptr ? perform_->chord_kind() : 0u;
+  const pads::Layout layout = perform_ != nullptr ? perform_->layout() : pads::Layout{};
+  const unsigned row = row_ & 1u;
 
   Vocoder::LoopStatus st[4];
   for (unsigned i = 0; i < 4 && voc_ != nullptr; ++i) {
@@ -721,7 +816,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     keys[i].name = kKeyNames[i];
     keys[i].hot = i == focus_;
   }
-  cat(keys[0].value, sizeof keys[0].value, pl::kKindNames[kind & 3u]);
+  cat(keys[0].value, sizeof keys[0].value, pads::kPlaysShort[pads::idx(layout.row[row])]);
   cat(keys[1].value, sizeof keys[1].value, sm::kSideNames[static_cast<unsigned>(side)]);
   keys[1].role = side == sm::Side::Speaks ? ornoir::KeyRole::Voice : (side == sm::Side::Sounds ? ornoir::KeyRole::Carrier : ornoir::KeyRole::Plain);
   cat(keys[2].value, sizeof keys[2].value, sm::kSpeedNames[ls.speed < sm::kSpeedCount ? ls.speed : 1u]);
@@ -735,6 +830,15 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     cat(keys[7].value, sizeof keys[7].value, num);
     cat(keys[7].value, sizeof keys[7].value, " DB");
     keys[7].pct = sm::level_percent(ls.level_db);
+  }
+
+  if (ctx.panel().shift()) {  // the SHIFT row replaces the plain one (names and values)
+    for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
+      keys[i] = ornoir::FKey{};
+      keys[i].name = kShiftNames[i];
+      keys[i].dim = i != kKeyPlays;
+    }
+    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, pads::kRowNames[row]);
   }
 
   ui::plot::Canvas c(r);
@@ -800,16 +904,19 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     draw_line(ctx, r, slot_, ls.length, kMidX + 14, kRowY + 214, kMidW - 28);
   }
 
-  // The right: SOUNDS as PERFORM shows it, and the chord.
+  // The right: SOUNDS as PERFORM shows it, and the row F1 sets.
   r.text(kRightX + 12, kRowY + 12, "SOUNDS", Color::TextDim, Face::Micro);
   r.text(kRightX + 12, kRowY + 34, h.sounds, Color::Sel, Face::Label);
-  r.text(kRightX + 12, kRowY + 100, "CHORD", Color::TextDim, Face::Micro);
-  r.text(kRightX + 12, kRowY + 122, pl::kKindNames[kind & 3u], Color::Text, Face::Label);
+  buf[0] = '\0';
+  cat(buf, sizeof buf, "ROW ");
+  cat(buf, sizeof buf, pads::kRowNames[row]);
+  r.text(kRightX + 12, kRowY + 100, buf, Color::TextDim, Face::Micro);
+  r.text(kRightX + 12, kRowY + 122, pads::kPlaysNames[pads::idx(layout.row[row])], Color::Text, Face::Label);
 
   if (note_ != nullptr) {
     r.text(kColX, kRowY + 4 * kRowH + 2, note_, Color::Accent, Face::Label);
   } else {
-    r.text(kColX, kRowY + 4 * kRowH + 6, "PADS: SLICES ON THE UPPER TWO ROWS, CHORDS BELOW", Color::TextDim, Face::Micro);
+    r.text(kColX, kRowY + 4 * kRowH + 6, "PADS: SLICES ON THE UPPER TWO ROWS, PERFORM'S ROWS A AND B BELOW", Color::TextDim, Face::Micro);
   }
 }
 

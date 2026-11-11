@@ -1,0 +1,54 @@
+# SAMPLE's lower pad rows play PERFORM's layout rows A and B (Q7, docs/REVIEW-2026-11-11.md finding 15), the upper two rows stay the slot's slices. F1 PLAYS sets
+# the row that SHIFT + F1 ROW chose (A to start); a pad of a row held while F1 turns changes that row. The default is A NOTE, B TRIAD: A goes to 7TH, then B
+# to PIANO NOTE (A and B join) and to a PIANO of triads; B to OFF. The WAV carries the notes; the unit's feel and the keys' LEDs by hand are for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_layout.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+tap sampleplay
+wait 300
+snap 01_default
+paddown 29
+wait 300
+snap 02_a_note_held
+padup 29
+wait 600
+turn 2
+wait 200
+paddown 29
+wait 300
+snap 03_a_7th_held
+padup 29
+wait 600
+press shift
+wait 20
+snap 04_shift_row
+tap f1
+release shift
+wait 60
+snap 05_row_b_flash
+wait 300
+snap 06_row_b
+turn 4
+wait 200
+snap 07_piano_note
+paddown 38
+paddown 41
+wait 300
+snap 08_piano_keys_held
+padup 38
+padup 41
+wait 600
+turn 1
+wait 200
+snap 09_piano_triad
+paddown 38
+wait 300
+turn -1
+wait 200
+snap 10_shortcut_held_pad_f1
+padup 38
+wait 600
+turn 30
+wait 200
+snap 11_b_off

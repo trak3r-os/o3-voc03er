@@ -508,7 +508,6 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
   if (g_proj.stat != 0u) {
     (void)ctx.engine().set_tempo(g_proj.tempo_mbpm);
     perform_->set_octave(g_proj.octave);
-    perform_->set_chord_kind(g_proj.chord);  // SAMPLE's chord kind until Q7
     // STAT 1.1 (a 1.0 file arrives here with the defaults of today and the legacy layout, read_stat's doing).
     perform_->set_voicing(g_proj.voicing);
     (void)perform_->set_bend_range(g_proj.bend_range);

@@ -89,10 +89,6 @@ class PerformScreen final : public o3sdk::app::Screen {
   route::Route route_now(const o3sdk::app::Context& ctx) const noexcept;
   void apply_route(o3sdk::app::Context& ctx, route::Side side, route::Route from, route::Route to) noexcept { set_route(ctx, side, from, to); }
 
-  // SAMPLE's F1 CHORD is PERFORM's own old bottom-row kind (0..3), and its LEFT / RIGHT the octave. PERFORM itself no longer uses the kind (its rows
-  // follow the layout since Q6); bottom_, chord_kind() and step_chord() live on for SAMPLE only, until Q7 moves SAMPLE onto the layout too.
-  unsigned chord_kind() const noexcept { return bottom_ & 3u; }
-  void step_chord(o3sdk::app::Context& ctx, int delta) noexcept { bottom_kind(ctx, delta); }
   void step_octave(o3sdk::app::Context& ctx, int delta) noexcept;
 
   // PARAMS draws PERFORM's voiceprint small: the sixteen bands followed as draw() follows them (same smoothing, held peaks, the busy rule),
@@ -108,9 +104,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   // Main loop only. Saved with the octave (the config file).
   unsigned voicing() const noexcept { return voicing_; }
   void set_voicing(unsigned v) noexcept { voicing_ = v > 3u ? 3u : v; }
-  // FILE (U9c2) restores these: the octave is clamped as the keys clamp it, the chord kind is SAMPLE's (0..3; the layout holds PERFORM's rows).
+  // FILE (U9c2) restores these: the octave is clamped as the keys clamp it.
   void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
-  void set_chord_kind(unsigned k) noexcept { bottom_ = static_cast<decltype(bottom_)>(k & 3u); }
   // FILE (P3) restores these too. The layout is taken as it is (the caller has checked it with pads::offered; PERFORM is not on screen, so no pad is
   // held); the preset is an index of presets.h, anything past the table is none (the window shows ---).
   void set_layout(const pads::Layout& l) noexcept { layout_ = l; }
@@ -155,7 +150,6 @@ class PerformScreen final : public o3sdk::app::Screen {
   void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;
   pads::Row pressed_row() const noexcept;
   void show_flash(o3sdk::app::Context& ctx, const char* name, const char* value) noexcept;
-  void bottom_kind(o3sdk::app::Context& ctx, int delta) noexcept;
   void refresh_labels(const o3sdk::dsp::Engine& e) noexcept;
   bool note_in_use(std::uint8_t note, unsigned except_pad) const noexcept;
   // The pickers and the capture (perform_screen.cpp).
@@ -181,7 +175,6 @@ class PerformScreen final : public o3sdk::app::Screen {
   unsigned focus_ = 5;       // the F key the encoder drives (default F6, ROW); perform::kBendFocus (8): none, the encoder bends
   int octave_ = 0;
   unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
-  unsigned bottom_ = 0;      // SAMPLE's chord kind (0..3) until Q7; PERFORM's rows follow layout_
   pads::Layout layout_{};    // see layout()
   pads::Row row_ = pads::Row::A;  // F6: the row F7 and the encoder set (main loop only)
   std::uint64_t row_flash_until_ = 0;  // the chosen row's LEDs are dark until then, a short off-on when F6 changes the row (leds() checks it)

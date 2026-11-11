@@ -918,7 +918,7 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       ask_copy(ctx);
     }
   } else if (g_se.job_kind == kJobNone) {
-    (void)sample_->pad_input(ctx, in);  // the pads and SHIFT's latch, as on SAMPLE; none while a job rewrites a slot
+    (void)sample_->pad_input(ctx, in);  // the pads, as on SAMPLE; none while a job rewrites a slot
   }
 }
 
@@ -975,7 +975,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Insert, "A CUT AT THE CURSOR", nullptr},
       {Button::Delete, "THE CUT AT THE CURSOR", nullptr},
       {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
-      {Button::Shift, "COARSE CURSOR, LATCH CHORD", nullptr},
+      {Button::Shift, "COARSE CURSOR", nullptr},
       {Button::Params, "PARAMS: THREE PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
@@ -1009,7 +1009,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   h.fkey[4] = "TRIM END, F1 TRIMS";
   h.fkey[5] = "PEAK TO -1 DB, F1 CONFIRMS";
   h.fkey[7] = "ONE CUT OVER THE SLOT";
-  h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: CHORDS (LATCH WITH SHIFT).";
+  h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: PERFORM'S ROWS A AND B.";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "CURSOR, LIT F KEY, BRACKET";

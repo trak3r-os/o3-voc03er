@@ -22,7 +22,6 @@ namespace o3_voc03er::perform {
 inline constexpr const char* kKeyNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 inline constexpr const char* kScaleNames[kScaleTableCount] = {"CHROM", "MAJOR", "MINOR", "MAJ-P", "MIN-P", "BLUES", "DORIAN"};
 inline constexpr const char* kCarrierNames[9] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE", "VOICE"};  // Vocoder::CarSrc 0..8
-inline constexpr const char* kKindNames[4] = {"TRIAD", "7TH", "OPEN", "POWER"};                                    // ChordKind
 using o3_voc03er::kModeNames;  // modes.h: the one table of modes
 // The Voicing enum's order (chords.h): the setting is its index (PARAMS' VOICING, the Sounds readout).
 inline constexpr const char* kVoicingNames[4] = {"CLOSE", "OPEN", "WIDE", "SMOOTH"};

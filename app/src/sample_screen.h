@@ -2,11 +2,12 @@
 #pragma once
 
 // SAMPLE (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"), in the OR NOIR skin: the four slots as a column (the selected one framed: name,
-// length, speed, direction, its side in that side's ink), the slot's slices and play line in the middle, SOUNDS and the chord on the right.
+// length, speed, direction, its side in that side's ink), the slot's slices and play line in the middle, SOUNDS and the pad row on the right.
 //
-//   F1 CHORD  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL
+//   F1 PLAYS  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL        SHIFT + F1: ROW (A or B)
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on (DIR and LOOP flip at once). UP / DOWN: the slot.
-//   LEFT / RIGHT: the octave. The bottom two pad rows play PERFORM's chords (its code); the top two rows are the slot's slices 1..24 (even cuts,
+//   LEFT / RIGHT: the octave. The bottom two pad rows play PERFORM's layout rows A and B (Q7: the layout is PERFORM's, F1 PLAYS sets the row SHIFT + F1
+//   chose, or the row of a pad that is held), sounded through PERFORM's audition entry like PATTERN's palette; the top two rows are the slot's slices 1..24 (even cuts,
 //   8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), it plays its cut once and stops at the end cut (TRIG ONE SHOT, the default; GATE also stops it at the release).
 //   A slice turns the slot's whole loop off (LOOP reads OFF) until F5 starts it again; a new hit restarts the slice from its start cut.
 //   TRIG and CHOKE are per slot; CHOKE ON (default) gives a slot one voice (a hit fades the sounding slice out and starts the new one), OFF lets its slices overlap on the free readers (or steal the oldest).
@@ -73,7 +74,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   Vocoder::LoopStatus status(unsigned slot) const noexcept { return view(slot); }
   bool pad_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;  // a pad press or release; false when `in` is no pad
   void pad_leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept;
-  void pad_leave(o3sdk::app::Context& ctx) noexcept;  // the slice voices and the held chord pads let go
+  void pad_leave(o3sdk::app::Context& ctx) noexcept;  // the slice voices and the held layout pads let go
   void pad_update(o3sdk::app::Context& ctx) noexcept;
   void fill_header(o3sdk::app::Context& ctx, ornoir::HeaderState& h) const noexcept;
 
@@ -100,6 +101,10 @@ class SampleScreen final : public o3sdk::app::Screen {
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void stop_loop(o3sdk::app::Context& ctx, unsigned slot) noexcept;  // Play 0 on the slot's loop when it plays or waits (a slice owns the slot)
   void release_all(o3sdk::app::Context& ctx) noexcept;
+  void play_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;     // pad 24..47: what PERFORM's row A (24..35) or B (36..47) plays there, held until the release
+  void release_play(o3sdk::app::Context& ctx, unsigned pad) noexcept;  // its release (a pad that is not held does nothing)
+  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;  // F1: PLAYS of the row of the lowest held layout pad, else of the chosen row
+  void flip_row(o3sdk::app::Context& ctx) noexcept;                    // SHIFT + F1: the other row; its pads go dark for a moment
   void draw_line(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept;
   Vocoder::LoopStatus view(unsigned loop) const noexcept;
 
@@ -108,7 +113,10 @@ class SampleScreen final : public o3sdk::app::Screen {
   PerformScreen* perform_ = nullptr;
   StepSeq* seq_ = nullptr;
   std::uint8_t slot_ = 0;       // 0..3
-  std::uint8_t focus_ = 0;      // the F key the encoder drives (F1, CHORD)
+  std::uint8_t focus_ = 0;      // the F key the encoder drives (F1, PLAYS)
+  std::uint8_t row_ = 0;        // the layout row F1 sets: 0 A, 1 B (pads 24..35, 36..47)
+  std::uint64_t flash_until_ = 0;  // ROW changed: its pads are dark until then
+  std::uint32_t aud_ = 0;       // the layout pads sounding (bit pad - 24): the audition entry's pad ids; main loop only
   bool key_tap_ = false;        // turn() came from a second tap on an F key, not from the encoder
   const char* note_ = nullptr;  // a moment's line (a static string), until note_until_
   std::uint64_t note_until_ = 0;

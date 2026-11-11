@@ -18,6 +18,11 @@
   row's value, NOTE, TRIAD, 7TH, OPEN, POWER, the piano values, OFF); both are dim outside the NOTE lane, and the row flashes when it
   changes. CLEAR LANE moved to SHIFT + F6 and FOLLOW to SHIFT + F7. The NOTE lane's LEDs mirror PERFORM's rows: the key's root low, the
   scale dim, the rest dark, the pad of the cursor's step mid. SHIFT + a palette pad writes nothing.
+- SAMPLE plays the layout (Q7): pads 0 to 23 stay the slice pads, and the bottom two rows play PERFORM's rows A and B (the upper one A, the
+  lower one B) at PERFORM's octave, each as it is set there: note, chord, piano or nothing. A pad sounds while it is held and leaving the screen lets
+  everything go. F1 is PLAYS (it sets the chosen row, or the row of a held bottom pad) and SHIFT + F1 is ROW (A or B; the row's pads go dark
+  for a moment). The chord page and the latch of a chord on SAMPLE are gone (a chord is held with the hand, as on PATTERN's
+  palette), and SAMPLE no longer handles DELETE. SAMPLE EDIT's lower pads play the same rows.
 
 ### Added
 

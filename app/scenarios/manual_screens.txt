@@ -141,7 +141,7 @@ snap m_sample_rec_done
 # the transport ran for the take: stop it, so PATTERN and SONG start it themselves
 tap play
 wait 600
-# ---- SAMPLE: the slices on the pads, one sounding over a latched chord
+# ---- SAMPLE: the slices on the pads, one sounding over a held triad of row B
 tap sampleplay
 wait 200
 tap f2
@@ -150,9 +150,6 @@ wait 100
 tap f2
 wait 100
 paddown 38
-wait 100
-tap shift
-padup 38
 wait 600
 paddown 0
 wait 250
@@ -162,6 +159,7 @@ paddown 2
 wait 250
 snap m_sample
 padup 2
+padup 38
 wait 150
 # ---- SAMPLE EDIT: the cuts
 tap sampleedit

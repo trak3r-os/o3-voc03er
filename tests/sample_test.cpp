@@ -5,6 +5,7 @@
 
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
+#include <o3sdk/app/pad_leds.h>
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/platform/host/fake_capture.h>
 #include <o3sdk/sim/harness.h>
@@ -16,9 +17,11 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace app = o3sdk::app;
 namespace sim = o3sdk::sim;
@@ -73,10 +76,10 @@ TEST_CASE("sample: SPEED, LEVEL and the pad split") {
   CHECK(std::strcmp(t, "-0.5") == 0);
   CHECK(sm::level_percent(-24.0f) == 0);
   CHECK(sm::level_percent(12.0f) == 100);
-  CHECK_FALSE(sm::chord_pad(0));
-  CHECK_FALSE(sm::chord_pad(23));
-  CHECK(sm::chord_pad(24));
-  CHECK(sm::chord_pad(47));
+  CHECK_FALSE(sm::layout_pad(0));
+  CHECK_FALSE(sm::layout_pad(23));
+  CHECK(sm::layout_pad(24));
+  CHECK(sm::layout_pad(47));
 }
 
 TEST_CASE("sample: even cuts tile the slot, 8 by default, fewer for a slot shorter than that") {
@@ -276,7 +279,7 @@ TEST_CASE("sample: HELP gives a row to every button the screen answers") {
   app::HelpProblem p;
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
-  for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Shift, app::Button::Delete,
+  for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Shift,
                               app::Button::Params, app::Button::Performance, app::Button::Play, app::Button::Master,
                               app::Button::File, app::Button::SampleLoad, app::Button::SamplePlay, app::Button::SampleEdit,
                               app::Button::SampleRec, app::Button::Song, app::Button::Pattern, app::Button::Note, app::Button::Instr,
@@ -420,4 +423,151 @@ TEST_CASE("sample: a borrowed reader gets its own values and role back; SAMPLE k
   CHECK(lp(h, 0, Vocoder::LoopField::Speed) == doctest::Approx(0.0f));  // slot 1 untouched
   CHECK(h.runtime().frame_failures() == 0u);
   CHECK(h.display().peak_frame_words() < 2048u);
+}
+
+// ---- the lower pad rows play PERFORM's layout rows A and B (Q7) -------------------------------------------------------------------
+// The observable is the output energy (as tests/pattern_audition_test.cpp): the vocoder speaks while it hears the tone on the fake capture and a carrier note is held.
+
+namespace {
+constexpr double kSound = 1e-4;     // above: a note is sounding
+constexpr unsigned kRowA = 24;      // the first pad of layout row A on SAMPLE (pads 24..35); row B is 36..47
+constexpr unsigned kRowB = 36;
+
+struct LayoutRig {
+  Rig rig;
+  sim::Harness& h;
+  LayoutRig() : h(*rig.h) {
+    h.record(true);
+    rig.open();
+  }
+  unsigned led(unsigned p) const { return h.leds().level(p); }
+  unsigned count(unsigned from, unsigned to, unsigned level) const {
+    unsigned n = 0;
+    for (unsigned p = from; p <= to; ++p) {
+      n += led(p) == level ? 1u : 0u;
+    }
+    return n;
+  }
+  double listen(unsigned ms) {
+    const std::size_t from = h.audio().size();
+    h.run_ms(ms);
+    const std::vector<std::int16_t>& a = h.audio();
+    double sum = 0.0;
+    std::size_t n = 0;
+    for (std::size_t i = from; i < a.size(); i += 2) {
+      sum += static_cast<double>(a[i]) * static_cast<double>(a[i]);
+      ++n;
+    }
+    return n != 0 ? std::sqrt(sum / static_cast<double>(n)) / 32768.0 : 0.0;
+  }
+};
+}  // namespace
+
+TEST_CASE("sample: rows 2 and 3 play layout rows A (a note) and B (a triad) while held, and let go on the release") {
+  LayoutRig r;
+  CHECK(r.listen(200) < kSound);
+  r.h.pad_down(kRowA + 5);  // row A: NOTE
+  CHECK(r.listen(300) > kSound);
+  CHECK(r.led(kRowA + 5) == app::kLedOn);
+  r.h.pad_up(kRowA + 5);
+  r.h.run_ms(900);
+  CHECK(r.led(kRowA + 5) != app::kLedOn);
+  CHECK(r.listen(200) < kSound);
+  r.h.pad_down(kRowB + 5);  // row B: TRIAD
+  CHECK(r.listen(300) > kSound);
+  CHECK(r.led(kRowB + 5) == app::kLedOn);
+  r.h.pad_up(kRowB + 5);
+  r.h.run_ms(900);
+  CHECK(r.listen(200) < kSound);
+  CHECK(r.h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: F1 PLAYS sets the chosen row and SHIFT + F1 chooses it; OFF is dark and silent") {
+  LayoutRig r;
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+  r.h.turn(30);  // F1 is the lit key: A to OFF
+  r.h.run_ms(60);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);  // B is untouched
+  r.h.pad_down(kRowA + 5);
+  CHECK(r.listen(300) < kSound);
+  r.h.pad_up(kRowA + 5);
+  r.h.press(app::Button::Shift);
+  r.h.run_ms(5);
+  tap(r.h, app::Button::F1);  // ROW: B
+  r.h.release(app::Button::Shift);
+  r.h.run_ms(250);  // past the flash
+  r.h.turn(30);
+  r.h.run_ms(60);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);  // B plays OFF too
+  r.h.turn(-30);
+  r.h.run_ms(60);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);  // NOTE at the bottom: lit again
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);  // and A stays OFF
+  CHECK(r.h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: the row flashes dark when SHIFT + F1 chooses it") {
+  LayoutRig r;
+  r.h.press(app::Button::Shift);
+  r.h.run_ms(5);
+  r.h.press(app::Button::F1);
+  r.h.run_ms(20);
+  r.h.release(app::Button::F1);
+  r.h.run_ms(20);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);  // B's pads are dark for the flash (150 ms)
+  r.h.release(app::Button::Shift);
+  r.h.run_ms(300);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+}
+
+TEST_CASE("sample: a piano on A and B plays its keys and a gap plays nothing") {
+  LayoutRig r;
+  r.h.turn(5);  // A: PIANO NOTE (joins B)
+  r.h.run_ms(60);
+  r.h.pad_down(kRowA + 0);  // the first pad is a gap between black keys
+  CHECK(r.listen(300) < kSound);
+  CHECK(r.led(kRowA + 0) != app::kLedOn);
+  r.h.pad_up(kRowA + 0);
+  r.h.pad_down(kRowB + 2);  // B: a white key
+  CHECK(r.listen(300) > kSound);
+  CHECK(r.led(kRowB + 2) == app::kLedOn);
+  r.h.pad_up(kRowB + 2);
+  r.h.run_ms(900);
+  r.h.pad_down(kRowA + 1);  // A: a black key
+  CHECK(r.listen(300) > kSound);
+  r.h.pad_up(kRowA + 1);
+  CHECK(r.h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: a held pad of row B plus F1 changes that row, and ROW follows it") {
+  LayoutRig r;
+  r.h.pad_down(kRowB + 5);
+  r.h.run_ms(60);
+  r.h.turn(30);  // the held pad's row (B) goes to OFF, and its note lets go
+  r.h.run_ms(60);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+  r.h.pad_up(kRowB + 5);
+  r.h.run_ms(900);
+  CHECK(r.listen(200) < kSound);
+  r.h.turn(-30);  // ROW followed to B: B is NOTE again, A was never touched
+  r.h.run_ms(60);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+}
+
+TEST_CASE("sample: leaving SAMPLE with a layout pad held lets it go, and the late release is harmless") {
+  LayoutRig r;
+  r.h.pad_down(kRowA + 5);
+  CHECK(r.listen(300) > kSound);
+  tap(r.h, app::Button::Performance);
+  r.h.run_ms(900);
+  CHECK(r.listen(200) < kSound);
+  r.h.pad_up(kRowA + 5);
+  r.h.run_ms(100);
+  CHECK(r.listen(200) < kSound);
+  tap(r.h, app::Button::SamplePlay);
+  r.h.run_ms(60);
+  CHECK(r.led(kRowA + 5) != app::kLedOn);  // SAMPLE comes back with no pad lit
 }

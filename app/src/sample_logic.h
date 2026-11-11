@@ -25,7 +25,7 @@ inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "NONE
 
 // The top two rows (pads 0..23) are the slices of the selected slot.
 inline constexpr unsigned kTopPads = 24;
-constexpr bool chord_pad(unsigned pad) noexcept { return pad >= kTopPads; }
+constexpr bool layout_pad(unsigned pad) noexcept { return pad >= kTopPads; }
 
 constexpr std::uint8_t slot_value(unsigned slot) noexcept { return static_cast<std::uint8_t>(route::kFirstSlot + slot); }
 
