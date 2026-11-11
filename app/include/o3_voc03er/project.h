@@ -12,6 +12,11 @@
 //   PTNS 1.0  u8 count, then per pattern u16 record length, u8 length (0..16, 0 reads as 16), 16 x u32 packed step (stepseq.h)
 //   CHAI 1.0  u8 count (0..16), u8 loop (0/1), then count x (u8 pattern 0..7, u8 repeats 1..kChainRepeatMax): the SONG chain
 //   ROUT 1.0  u8 speaks, u8 sounds (route.h values; the pair must be allowed), u8 live source (route::LiveSrc). Absent: the default route
+//   MOUT 1.0  (TRACT V3, after PTNS; written only when a step has a mouth byte) u8 count (8), then per pattern its 16 mouth bytes (stepseq.h mouth_valid: 0 FOLLOW,
+//             1..9 the vowels, 10..12 the closures, bit 7 GLD on a vowel). Absent: every step FOLLOWs. A count other than 8 or a byte that is not valid refuses the file
+//   TRCT 1.0  (TRACT V3, after STAT; written when the capture holds the tract) 8 x f32: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS (kTractSaved, the unit's own
+//             units). Not CLOSE (an action), MIX (the mode owns it) or SLIDE (the sequencer's). Absent: the unit's defaults. A value out of its range, or not a
+//             number, refuses the file
 //   SLOT 1.1  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
 //             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL),
 //             then u8 values (appended: 1 = the trim, speed, reverse and level above were captured live and are restored; 0 or absent = a file from before, they are left alone),
@@ -47,6 +52,7 @@
 #include <o3_voc03er/presets.h>
 #include <o3_voc03er/route.h>
 #include <o3_voc03er/stepseq.h>
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 #include <o3sdk/formats/chunk_file.h>
 #include <o3sdk/hal/save_guard.h>
@@ -96,6 +102,13 @@ struct ProjectSlot {
 inline constexpr std::size_t kPresetNameMax = 16;  // the longest preset name a file may hold (presets.h's are at most 8)
 inline constexpr unsigned kLayoutBytes = 5;        // rows A, B, C, then last[0], last[1]
 
+// TRCT's parameters, in file order (TractUnit::Param ids), and the range a file may hold for each (the unit's own descriptors; tests/project_test.cpp compares them).
+inline constexpr unsigned kTractSaved = 8;
+inline constexpr std::uint16_t kTractSavedId[kTractSaved] = {TractUnit::Vowel, TractUnit::Tongue, TractUnit::Jaw,  TractUnit::Lips,
+                                                              TractUnit::Glide, TractUnit::Size,   TractUnit::Res, TractUnit::Hiss};
+inline constexpr float kTractSavedMin[kTractSaved] = {0.0f, -1.0f, -1.0f, -1.0f, 5.0f, 0.0f, 0.0f, 0.0f};
+inline constexpr float kTractSavedMax[kTractSaved] = {1.0f, 1.0f, 1.0f, 1.0f, 500.0f, 4.0f, 1.0f, 1.0f};
+
 inline constexpr unsigned kEngineIds = 64;  // the unit's table is at most 64 parameters (the kit's limit): the ids a Project can hold
 
 // What a project restores. All defaults are zero.
@@ -124,6 +137,9 @@ struct Project {
   std::uint8_t preset_len = 0;                     // 0: no preset
   char preset[kPresetNameMax + 1] = {};            // the factory sound's name, preset_len bytes, printable
   std::uint8_t layout[kLayoutBytes] = {};          // pads::Plays of rows A, B, C, then Layout::last[0], last[1]
+  // TRCT (V3): 1 when the tract's values below are held (a file without TRCT, and a zero Project, are 0: the unit's defaults, which are not zero).
+  std::uint8_t trct = 0;
+  float tract[kTractSaved] = {};                   // by kTractSavedId, the unit's own units
 };
 
 // The layout a project holds, and the way back.
@@ -222,11 +238,13 @@ inline constexpr std::size_t kSlotRecMax = 4 + 1 + 8 * sample::kMaxSlices + 8 + 
 inline constexpr std::size_t kPtnsMax = 2 + 1 + kBankPatterns * (2 + 1 + 4 * kPatternSteps);
 inline constexpr std::size_t kChaiMax = 2 + 2 + 2 * kChainMax;
 inline constexpr std::size_t kRoutMax = 2 + 3;
+inline constexpr std::size_t kMoutMax = 2 + 1 + kBankPatterns * kPatternSteps;
+inline constexpr std::size_t kTrctMax = 2 + 4 * kTractSaved;
 inline constexpr std::size_t kSlotMax = 2 + 1 + route::kSlots * (2 + kSlotRecMax);
 inline constexpr std::size_t kValuMax = 2 + 2 + 6 * kEngineIds;
 inline constexpr std::size_t kStatMax = 2 + 4 + 5 + 4 + 1 + kPresetNameMax + kLayoutBytes;
 inline constexpr std::size_t kWorst = o3sdk::formats::chunk::kHeaderBytes + o3sdk::formats::chunk::kCrcChunkBytes + chunk_bytes(kPtnsMax) + chunk_bytes(kChaiMax) +
-                                      chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax) + chunk_bytes(kStatMax);
+                                      chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax) + chunk_bytes(kStatMax) + chunk_bytes(kMoutMax) + chunk_bytes(kTrctMax);
 
 }  // namespace project_detail
 
@@ -286,10 +304,29 @@ inline bool project_route_valid(const Project& p) noexcept {
   return p.sounds == 0u ? p.speaks == 0u : route::allowed(route::Route{p.speaks, p.sounds});
 }
 
-// A stored pattern: the length byte 0..16 (0 reads as 16), every step in range.
+// The tract's saved values: each a number inside the unit's range (SIZE a whole number). Checked only with `trct`.
+inline bool trct_valid(const Project& p) noexcept {
+  for (unsigned i = 0; i < kTractSaved; ++i) {
+    const float v = p.tract[i];
+    if (!(v >= kTractSavedMin[i] && v <= kTractSavedMax[i])) {  // false for a NaN too
+      return false;
+    }
+    if (kTractSavedId[i] == TractUnit::Size && static_cast<float>(static_cast<int>(v)) != v) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A stored pattern: the length byte 0..16 (0 reads as 16), every step in range, every mouth byte valid (stepseq.h).
 inline bool pattern_valid(const PatternData& p) noexcept {
   if (p.length > kPatternSteps) {
     return false;
+  }
+  for (unsigned i = 0; i < kPatternSteps; ++i) {
+    if (!mouth_valid(get_mouth(p, i))) {
+      return false;
+    }
   }
   for (const std::uint32_t w : p.step) {
     if (!step_valid(unpack_step(w)) || pack_step(unpack_step(w)) != w) {
@@ -327,7 +364,7 @@ inline bool stat_valid(const Project& p) noexcept {
 }
 
 inline bool project_valid(const Project& p) noexcept {
-  if (!chain_valid(p.chain) || !project_route_valid(p) || (p.stat != 0u && !stat_valid(p))) {
+  if (!chain_valid(p.chain) || !project_route_valid(p) || (p.stat != 0u && !stat_valid(p)) || p.trct > 1u || (p.trct == 1u && !trct_valid(p))) {
     return false;
   }
   for (const PatternData& pd : p.bank.pattern) {
@@ -405,11 +442,43 @@ inline bool read_ptns(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
     if (!rec_done(f, start, rec_len)) {
       return false;
     }
-    if (i < kBankPatterns) {
-      got.bank.pattern[i] = pd;
+    if (i < kBankPatterns) {  // the steps and the length only: MOUT may have been read before this chunk
+      got.bank.pattern[i].length = pd.length;
+      std::memcpy(got.bank.pattern[i].step, pd.step, sizeof pd.step);
     }
   }
   return f.ok();
+}
+
+inline bool read_mout(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
+  o3sdk::formats::chunk::Fields f(c);
+  if (!open_chunk(c, f)) {
+    return false;
+  }
+  if (f.u8() != kBankPatterns || !f.ok()) {
+    return false;
+  }
+  for (PatternData& pd : got.bank.pattern) {
+    for (std::uint8_t& m : pd.mouth) {
+      m = f.u8();
+      if (!f.ok() || !mouth_valid(m)) {
+        return false;
+      }
+    }
+  }
+  return f.ok();
+}
+
+inline bool read_trct(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
+  o3sdk::formats::chunk::Fields f(c);
+  if (!open_chunk(c, f)) {
+    return false;
+  }
+  for (float& v : got.tract) {
+    v = f.f32();
+  }
+  got.trct = 1;
+  return f.ok() && trct_valid(got);
 }
 
 inline bool read_chai(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
@@ -592,7 +661,29 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
       }
     }
   }
-  if (!w.end() || !w.begin("CHAI") || !w.u16(ver) || !w.u8(p.chain.count) || !w.u8(p.chain.loop)) {
+  bool any_mouth = false;
+  for (const PatternData& pd : p.bank.pattern) {
+    any_mouth = any_mouth || mouths_used(pd) != 0u;
+  }
+  if (!w.end()) {
+    return 0;
+  }
+  if (any_mouth) {
+    if (!w.begin("MOUT") || !w.u16(ver) || !w.u8(static_cast<std::uint8_t>(kBankPatterns))) {
+      return 0;
+    }
+    for (const PatternData& pd : p.bank.pattern) {
+      for (unsigned i = 0; i < kPatternSteps; ++i) {
+        if (!w.u8(get_mouth(pd, i))) {
+          return 0;
+        }
+      }
+    }
+    if (!w.end()) {
+      return 0;
+    }
+  }
+  if (!w.begin("CHAI") || !w.u16(ver) || !w.u8(p.chain.count) || !w.u8(p.chain.loop)) {
     return 0;
   }
   for (unsigned i = 0; i < p.chain.count; ++i) {
@@ -658,6 +749,19 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
       return 0;
     }
   }
+  if (p.trct != 0u) {
+    if (!w.begin("TRCT") || !w.u16(ver)) {
+      return 0;
+    }
+    for (const float v : p.tract) {
+      if (!w.f32(v)) {
+        return 0;
+      }
+    }
+    if (!w.end()) {
+      return 0;
+    }
+  }
   return w.finish();
 }
 
@@ -678,7 +782,8 @@ inline bool read_project(const std::uint8_t* data, std::size_t n, Project& dst) 
       bool (*read)(const chunk::Chunk&, Project&) noexcept;
     };
     static constexpr Known kKnown[] = {{"PTNS", project_detail::read_ptns}, {"CHAI", project_detail::read_chai}, {"ROUT", project_detail::read_rout},
-                                       {"SLOT", project_detail::read_slot}, {"VALU", project_detail::read_valu}, {"STAT", project_detail::read_stat}};
+                                       {"SLOT", project_detail::read_slot}, {"VALU", project_detail::read_valu}, {"STAT", project_detail::read_stat},
+                                       {"MOUT", project_detail::read_mout}, {"TRCT", project_detail::read_trct}};
     for (unsigned i = 0; i < sizeof kKnown / sizeof kKnown[0]; ++i) {
       if (c.id[0] != kKnown[i].id[0] || c.id[1] != kKnown[i].id[1] || c.id[2] != kKnown[i].id[2] || c.id[3] != kKnown[i].id[3]) {
         continue;

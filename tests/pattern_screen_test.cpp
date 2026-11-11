@@ -9,10 +9,14 @@
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/platform/host/fake_capture.h>
 #include <o3sdk/sim/harness.h>
+#include <o3_voc03er/units/tract/tract.h>
+#include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include "../app/src/pattern_logic.h"
+#include "tract_skip.h"
 
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -599,4 +603,240 @@ TEST_CASE("pattern: HELP gives a row to every button the screen answers") {
   CHECK(help.pad_label[24] != nullptr);
   CHECK(help.pad_label[32] != nullptr);
   CHECK(help.pad_label[5] != nullptr);
+}
+
+// ---- V3: the MOUTH lane (the fifth) --------------------------------------------------------------------------------------------------------
+
+TEST_CASE("pattern: MOUTH is the fifth lane; its palette is PERFORM's strip and the same with GLD") {
+  using o3_voc03er::kMouthGld;
+  CHECK(pt::kLanes == 5u);
+  CHECK(static_cast<unsigned>(pt::Lane::Mouth) == 4u);  // appended: the others keep their numbers
+  CHECK(std::string(pt::kLaneNames[4]) == "MOUTH");
+  CHECK(std::string(pt::kClearPrompt[4]) == "CLEAR MOUTH LANE: F1 CONFIRMS");
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(pt::mouth_of_pad(c) == c + 1u);  // row 0: nine vowels, LIPS, TIP, BACK
+  }
+  for (unsigned c = 0; c < 9; ++c) {
+    CHECK(pt::mouth_of_pad(12 + c) == (c + 1u) + kMouthGld);  // row 1: the vowels with GLD
+  }
+  for (unsigned c = 9; c < 12; ++c) {
+    CHECK(pt::mouth_of_pad(12 + c) == 0u);  // dark
+  }
+  CHECK(pt::mouth_of_pad(24) == 0u);
+  char t[6];
+  pt::mouth_text(t, 0);
+  CHECK(std::string(t) == "");
+  pt::mouth_text(t, 1);
+  CHECK(std::string(t) == "A");
+  pt::mouth_text(t, 2);
+  CHECK(std::string(t) == "AE");
+  pt::mouth_text(t, 9);
+  CHECK(std::string(t) == "U");
+  pt::mouth_text(t, 3 + kMouthGld);
+  CHECK(std::string(t) == ">E");
+  pt::mouth_text(t, 10);
+  CHECK(std::string(t) == "LIP");
+  pt::mouth_text(t, 11);
+  CHECK(std::string(t) == "TIP");
+  pt::mouth_text(t, 12);
+  CHECK(std::string(t) == "BCK");
+}
+
+TEST_CASE("pattern: the MOUTH lane's writes, values, rests and the clipboard (the logic)") {
+  using o3_voc03er::PatternData;
+  using o3_voc03er::get_mouth;
+  using o3_voc03er::kMouthGld;
+  PatternData p{};
+  (void)o3_voc03er::set_length(p, 4);
+  CHECK(pt::mouth_write(p, 0, 4));  // E-I
+  CHECK(get_mouth(p, 0) == 5u);
+  CHECK(pt::mouth_write(p, 1, 12 + 2));  // E with GLD
+  CHECK(get_mouth(p, 1) == 3u + kMouthGld);
+  CHECK_FALSE(pt::mouth_write(p, 2, 21));  // a dark pad
+  CHECK(get_mouth(p, 2) == 0u);
+  CHECK(pt::mouth_write(p, 2, 10));  // TIP
+  CHECK(get_mouth(p, 2) == 11u);
+  CHECK(pt::palette_matches(pt::Lane::Mouth, 4, o3_voc03er::Step{}, 0, pd::Layout{}, 5u));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Mouth, 4, o3_voc03er::Step{}, 0, pd::Layout{}, 0u));  // FOLLOW matches no pad
+  // the encoder: a vowel keeps GLD, a closure is not a vowel, the range is 0..12
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 1));
+  CHECK(get_mouth(p, 1) == 4u + kMouthGld);
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 20));
+  CHECK(get_mouth(p, 1) == 12u);  // BACK: GLD is dropped on a closure (the file refuses it)
+  CHECK_FALSE(pt::step_value(p, 1, pt::Lane::Mouth, 1));
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, -20));
+  CHECK(get_mouth(p, 1) == 0u);
+  // COPY and INSERT carry the byte, DELETE clears it, a whole pattern carries all four
+  pt::Clip c;
+  pt::copy_step(c, p, 0);
+  CHECK(c.mouth == 5u);
+  REQUIRE(pt::insert_step(p, 1, c));
+  CHECK(get_mouth(p, 0) == 5u);
+  CHECK(get_mouth(p, 1) == 5u);
+  CHECK(get_mouth(p, 3) == 11u);  // the old step 3 (TIP) came to the end of LENGTH
+  CHECK(get_mouth(p, 2) == 0u);
+  REQUIRE(pt::clear_step(p, 3));
+  CHECK(get_mouth(p, 3) == 0u);
+  CHECK(pt::rest_lane(p, 0, pt::Lane::Mouth));
+  CHECK(get_mouth(p, 0) == 0u);
+  CHECK(pt::mouth_write(p, 0, 0));
+  pt::Clip whole;
+  pt::copy_whole(whole, p);
+  PatternData q{};
+  REQUIRE(pt::paste_whole(q, whole));
+  CHECK(get_mouth(q, 1) == 5u);
+  CHECK(o3_voc03er::same_pattern(p, q));
+  (void)o3_voc03er::set_mouth(q, 9, 1);
+  CHECK_FALSE(o3_voc03er::same_pattern(p, q));
+  pt::clear_steps(q);
+  CHECK(o3_voc03er::mouths_used(q) == 0u);
+}
+
+namespace {
+// The vocoder's mode set straight on its unit (the tract unit is skipped: its ids collide with the vocoder's low ones).
+void set_mode(sim::Harness& h, float mode) {
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) {
+      continue;
+    }
+    const auto id = static_cast<o3sdk::dsp::UnitId>(u);
+    const o3sdk::dsp::UnitInfo* info = h.engine().unit_info(id);
+    if (info != nullptr && info->param_count == o3_voc03er::Vocoder::kParamCount) {
+      (void)h.engine().set_param(id, o3_voc03er::Vocoder::Mode, mode);
+    }
+  }
+  h.run_ms(300);
+}
+float tract_value(sim::Harness& h, std::uint16_t id) {
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) {
+      return h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    }
+  }
+  return -1.0e9f;
+}
+}  // namespace
+
+TEST_CASE("pattern: FX goes SLICE, MOUTH, SLICE; F2 taps through the five lanes") {
+  Rig rig;
+  set_mode(*rig.h, 4.0f);
+  tap(*rig.h, app::Button::Fx);  // SLICE: dark
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);
+  tap(*rig.h, app::Button::Fx);  // MOUTH: twenty-one pads lit, three dark
+  CHECK(rig.count(0, 23, app::kLedOff) == 3u);
+  CHECK(rig.led(21) == app::kLedOff);
+  CHECK(rig.led(22) == app::kLedOff);
+  CHECK(rig.led(23) == app::kLedOff);
+  CHECK(rig.led(20) == app::kLedDim);
+  tap(*rig.h, app::Button::Fx);  // back to SLICE
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);
+  tap(*rig.h, app::Button::Note);
+  tap(*rig.h, app::Button::F2);  // focus LANE
+  for (unsigned i = 0; i < 4; ++i) {
+    tap(*rig.h, app::Button::F2);  // CARRIER, LEVEL, SLICE, MOUTH
+  }
+  CHECK(rig.count(0, 23, app::kLedOff) == 3u);
+  tap(*rig.h, app::Button::F2);  // wraps to NOTE
+  CHECK(rig.count(0, 23, app::kLedOff) < 24u);
+  CHECK(rig.count(0, 23, app::kLedOff) != 3u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: a MOUTH pad writes the cursor's step and moves on; GLD is row 1; a dark pad does nothing") {
+  Rig rig;
+  set_mode(*rig.h, 4.0f);
+  tap(*rig.h, app::Button::Fx);
+  tap(*rig.h, app::Button::Fx);
+  CHECK(rig.led(24) == app::kLedMid);  // the cursor, empty: FOLLOW
+  pad(*rig.h, 2);                      // E
+  CHECK(rig.led(24) == app::kLedDim);  // content
+  CHECK(rig.led(25) == app::kLedMid);  // the cursor moved on
+  pad(*rig.h, 14);                     // E with GLD, into step 2
+  CHECK(rig.led(25) == app::kLedDim);
+  CHECK(rig.led(26) == app::kLedMid);
+  pad(*rig.h, 21);  // dark: nothing, the cursor stays
+  CHECK(rig.led(26) == app::kLedMid);
+  CHECK(rig.led(27) == app::kLedOff);
+  pad(*rig.h, 24);  // back on step 1: its pad is the strip's E, not the GLD row's
+  CHECK(rig.led(2) == app::kLedMid);
+  CHECK(rig.led(14) == app::kLedDim);
+  pad(*rig.h, 25);
+  CHECK(rig.led(14) == app::kLedMid);
+  CHECK(rig.led(2) == app::kLedDim);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: with a step held a MOUTH pad writes that step; SHIFT + a palette pad only sounds; SHIFT + a step clears it") {
+  Rig rig;
+  set_mode(*rig.h, 4.0f);
+  tap(*rig.h, app::Button::Fx);
+  tap(*rig.h, app::Button::Fx);
+  const unsigned s5 = step_pad(4), s7 = step_pad(6);
+  rig.h->pad_down(s5);
+  rig.h->run_ms(20);
+  rig.h->pad_down(s7);
+  rig.h->run_ms(20);
+  pad(*rig.h, 9);  // LIPS into both held steps
+  rig.h->pad_up(s7);
+  rig.h->run_ms(20);
+  rig.h->pad_up(s5);
+  rig.h->run_ms(20);
+  CHECK(rig.led(s5) == app::kLedDim);
+  CHECK(rig.led(s7) == app::kLedMid);  // the cursor stays on the last step pressed, which holds the mouth too
+  CHECK(rig.led(step_pad(5)) == app::kLedOff);
+  pad(*rig.h, s5);
+  CHECK(rig.led(9) == app::kLedMid);
+  pad(*rig.h, s7);
+  CHECK(rig.led(9) == app::kLedMid);
+  // SHIFT + a palette pad: the sound, never the step
+  pad(*rig.h, 3, true);
+  CHECK(rig.led(3) == app::kLedDim);
+  CHECK(rig.led(9) == app::kLedMid);
+  // SHIFT + a step pad: FOLLOW again
+  pad(*rig.h, s5, true);
+  CHECK(rig.led(s5) == app::kLedMid);  // the cursor is there, and it holds nothing now
+  CHECK(rig.led(s7) == app::kLedDim);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: in TRACT a MOUTH pad sounds: a vowel sets VOWEL, a closure holds CLOSE while it is down; elsewhere it is silent") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  tap(*rig.h, app::Button::Fx);
+  tap(*rig.h, app::Button::Fx);
+  const float v0 = tract_value(*rig.h, TractUnit::Vowel);
+  pad(*rig.h, 8, true);  // U, not in TRACT: nothing sounds
+  CHECK(tract_value(*rig.h, TractUnit::Vowel) == doctest::Approx(v0));
+  set_mode(*rig.h, 4.0f);
+  rig.h->press(app::Button::Shift);
+  rig.h->run_ms(5);
+  rig.h->pad_down(4);  // I, the fifth vowel: (5 - 1) / 8
+  rig.h->run_ms(60);
+  CHECK(tract_value(*rig.h, TractUnit::Vowel) == doctest::Approx(0.5f));
+  rig.h->pad_up(4);
+  rig.h->run_ms(20);
+  rig.h->pad_down(10);  // TIP: held
+  rig.h->run_ms(60);
+  CHECK(tract_value(*rig.h, TractUnit::Close) == doctest::Approx(2.0f));
+  rig.h->pad_up(10);
+  rig.h->run_ms(60);
+  CHECK(tract_value(*rig.h, TractUnit::Close) == doctest::Approx(0.0f));
+  rig.h->release(app::Button::Shift);
+  rig.h->run_ms(20);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: the MOUTH lane draws inside the display list's limit, in and out of TRACT") {
+  Rig rig;
+  tap(*rig.h, app::Button::Fx);
+  tap(*rig.h, app::Button::Fx);
+  for (unsigned i = 0; i < 6; ++i) {
+    pad(*rig.h, i % 12);  // a line of vowels
+  }
+  rig.h->run_ms(100);
+  CHECK(rig.h->display().peak_frame_words() < 2048u);
+  set_mode(*rig.h, 4.0f);
+  rig.h->run_ms(100);
+  CHECK(rig.h->display().peak_frame_words() < 2048u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
 }

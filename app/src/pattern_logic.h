@@ -7,6 +7,7 @@
 #include <o3_voc03er/stepseq.h>
 
 #include "pads_logic.h"
+#include "perform_logic.h"
 
 #include <o3sdk/app/panel.h>
 
@@ -14,12 +15,12 @@
 
 namespace o3_voc03er::pattern {
 
-enum class Lane : std::uint8_t { Note, Carrier, Level, Slice };
-inline constexpr unsigned kLanes = 4;
-inline constexpr const char* kLaneNames[kLanes] = {"NOTE", "CARRIER", "LEVEL", "SLICE"};
+enum class Lane : std::uint8_t { Note, Carrier, Level, Slice, Mouth };
+inline constexpr unsigned kLanes = 5;
+inline constexpr const char* kLaneNames[kLanes] = {"NOTE", "CARRIER", "LEVEL", "SLICE", "MOUTH"};
 // CLEAR LANE's question (SHIFT + F6), one line per lane (the strip shows it until a key answers).
 inline constexpr const char* kClearPrompt[kLanes] = {"CLEAR NOTE LANE: F1 CONFIRMS", "CLEAR CARRIER LANE: F1 CONFIRMS", "CLEAR LEVEL LANE: F1 CONFIRMS",
-                                                     "CLEAR SLICE LANE: F1 CONFIRMS"};
+                                                     "CLEAR SLICE LANE: F1 CONFIRMS", "CLEAR MOUTH LANE: F1 CONFIRMS"};
 
 inline constexpr unsigned kPalettePads = 24;  // pads 0..23: rows 0 and 1 (row 0 is the top)
 inline constexpr unsigned kFirstStepPad = 24;  // rows 2 and 3
@@ -55,9 +56,23 @@ constexpr pads::PadPlay palette_play(unsigned pad, int octave, const pads::Layou
   return pads::pad_play(layout, kPaletteRow[o3sdk::app::pad_row(pad) % 2u], o3sdk::app::pad_col(pad), octave);
 }
 
+// The MOUTH palette (TRACT V3): row 0 is PERFORM's mouth strip (columns 0..8 the vowels A..U = values 1..9, columns 9..11 the closures LIPS, TIP, BACK =
+// 10..12); row 1 columns 0..8 are the same vowels with GLD (the slide into it), columns 9..11 are dark. The mouth byte a pad writes; 0: a dark pad.
+constexpr std::uint8_t mouth_of_pad(unsigned pad) noexcept {
+  const unsigned col = o3sdk::app::pad_col(pad);
+  const unsigned row = o3sdk::app::pad_row(pad);
+  if (pad >= kPalettePads || col >= 12u) {
+    return 0;
+  }
+  if (row == 0u) {
+    return static_cast<std::uint8_t>(col + 1u);
+  }
+  return col < kMouthVowels ? static_cast<std::uint8_t>((col + 1u) | kMouthGld) : std::uint8_t{0};
+}
+
 // Does the palette pad hold what the step stores? (LED mid on it.) On the NOTE lane the step's note and kind equal the pad's play (a rest, and a pad
-// that plays nothing, never match); the other lanes do not depend on the layout.
-constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, const pads::Layout& layout) noexcept {
+// that plays nothing, never match); the other lanes do not depend on the layout. `mouth` is the step's mouth byte (the MOUTH lane's).
+constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, const pads::Layout& layout, std::uint8_t mouth = 0) noexcept {
   switch (lane) {
     case Lane::Note: {
       const pads::PadPlay p = palette_play(pad, octave, layout);
@@ -69,6 +84,8 @@ constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octav
       return level_of_pad(pad) == step_velocity(s);
     case Lane::Slice:
       return pad < kSliceMax && pad + 1u == s.slice;
+    case Lane::Mouth:
+      return mouth != 0u && mouth_of_pad(pad) == mouth;
   }
   return false;
 }
@@ -85,11 +102,35 @@ inline SliceWrite slice_write(PatternData& p, unsigned i, unsigned pad, unsigned
   return set_slice(p, i, pad + 1u) ? SliceWrite::Written : SliceWrite::Dark;
 }
 
+// A palette pad of the MOUTH lane writes `m`; a dark pad writes nothing (false).
+inline bool mouth_write(PatternData& p, unsigned i, unsigned pad) noexcept {
+  const std::uint8_t m = mouth_of_pad(pad);
+  return m != 0u && set_mouth(p, i, m);
+}
+
 // The next step of the cursor after a palette write: one on, wrapping at LENGTH.
 constexpr unsigned next_cursor(unsigned cursor, unsigned length) noexcept { return length == 0u ? 0u : (cursor + 1u) % length; }
 
 inline constexpr const char* kCellCarrier[kCarrierPads] = {"FLW", "SYN", "NSE", "S1", "S2", "S3", "S4"};
 inline constexpr const char* kPadCarrier[kCarrierPads] = {"FOLLW", "SYNTH", "NOISE", "SLOT1", "SLOT2", "SLOT3", "SLOT4"};
+// The MOUTH lane's cell: the vowel's letters (PERFORM's labels), "LIP", "TIP", "BCK" for the closures, a ">" before a vowel that slides in (GLD); empty for
+// FOLLOW. Up to 3 characters and the terminator.
+inline void mouth_text(char (&out)[6], std::uint8_t m) noexcept {
+  static constexpr const char* kClosure[3] = {"LIP", "TIP", "BCK"};
+  out[0] = '\0';
+  if (!mouth_is_vowel(m) && !mouth_is_closure(m)) {
+    return;
+  }
+  unsigned n = 0;
+  if (mouth_gld(m)) {
+    out[n++] = '>';
+  }
+  const char* t = mouth_is_vowel(m) ? perform::kMouthLabel[mouth_value(m) - 1u] : kClosure[mouth_close(m) - 1u];
+  while (*t != '\0' && n < 4u) {
+    out[n++] = *t++;
+  }
+  out[n] = '\0';
+}
 inline constexpr const char* kCellKind[4] = {"TRI", "7TH", "OPN", "PWR"};
 inline constexpr const char* kPitchClass[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
@@ -141,6 +182,14 @@ inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigne
       v = v < 0 ? 0 : (v > static_cast<int>(slice_count) ? static_cast<int>(slice_count) : v);
       return v != static_cast<int>(s.slice) && set_slice(p, i, static_cast<unsigned>(v));
     }
+    case Lane::Mouth: {  // 0 FOLLOW, 1..9 the vowels, 10..12 the closures; a vowel keeps its GLD
+      const std::uint8_t m = get_mouth(p, i);
+      int v = static_cast<int>(mouth_value(m)) + delta;
+      v = v < 0 ? 0 : (v > static_cast<int>(kMouthBack) ? static_cast<int>(kMouthBack) : v);
+      const unsigned u = static_cast<unsigned>(v);
+      const bool vowel = u >= 1u && u <= kMouthVowels;
+      return u != mouth_value(m) && set_mouth(p, i, u | (vowel && mouth_gld(m) ? kMouthGld : 0u));
+    }
   }
   return false;
 }
@@ -156,6 +205,8 @@ inline bool rest_lane(PatternData& p, unsigned i, Lane lane) noexcept {
       return set_level(p, i, 0u);
     case Lane::Slice:
       return set_slice(p, i, 0u);
+    case Lane::Mouth:
+      return set_mouth(p, i, 0u);
   }
   return false;
 }
@@ -166,12 +217,14 @@ enum class ClipKind : std::uint8_t { Empty, Step, Pattern };
 struct Clip {
   ClipKind kind = ClipKind::Empty;
   std::uint32_t word = 0;  // the step (pack_step)
+  std::uint8_t mouth = 0;  // its mouth byte (V3)
   PatternData pattern{};
 };
 inline void copy_step(Clip& c, const PatternData& p, unsigned i) noexcept {
   if (i < kPatternSteps) {
     c.kind = ClipKind::Step;
     c.word = load_word(p.step[i]);
+    c.mouth = get_mouth(p, i);
   }
 }
 inline void copy_whole(Clip& c, const PatternData& p) noexcept {
@@ -187,8 +240,10 @@ inline bool insert_step(PatternData& p, unsigned i, const Clip& c) noexcept {
   }
   for (unsigned j = len - 1u; j > i; --j) {
     store_word(p.step[j], load_word(p.step[j - 1u]));
+    (void)set_mouth(p, j, get_mouth(p, j - 1u));
   }
   store_word(p.step[i], c.word);
+  (void)set_mouth(p, i, c.mouth);
   return true;
 }
 // SHIFT + INSERT: the copied pattern over this one, LENGTH and all. False with no pattern copied.
@@ -200,7 +255,10 @@ inline bool paste_whole(PatternData& p, const Clip& c) noexcept {
   return true;
 }
 // DELETE: the step empty in every lane (a rest, FOLLOW, the default level, no slice), as rest_lane leaves each lane.
-inline bool clear_step(PatternData& p, unsigned i) noexcept { return set_step(p, i, Step{}); }
+inline bool clear_step(PatternData& p, unsigned i) noexcept {
+  const bool ok = set_step(p, i, Step{});
+  return set_mouth(p, i, 0u) && ok;
+}
 // SHIFT + DELETE, once F1 confirms: every step empty; LENGTH stays.
 inline void clear_steps(PatternData& p) noexcept {
   for (unsigned i = 0; i < kPatternSteps; ++i) {

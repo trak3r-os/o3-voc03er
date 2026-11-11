@@ -40,6 +40,8 @@ class FileScreen final : public o3sdk::app::Screen {
   // `load` and `mem` (the loop bank, slot n at n * Loop::kMaxSamples): F5 writes the slots out of `mem`, and LOAD reads the WAVs back through `load`'s external entry.
   void init(o3sdk::dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain, SampleLoadScreen* load,
             std::int16_t* mem) noexcept;
+  // V3: the tract unit, whose VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and HISS the project holds (TRCT); none (the default): TRCT is neither read nor applied.
+  void set_tract(o3sdk::dsp::UnitId tract) noexcept { tract_ = tract; }
   // LE4: the SONG screen, told when a load replaces the chain under a player that walks it.
   void set_song(SongScreen* song) noexcept { song_ = song; }
   // The screen F8 returns to (the one that opened this); nullptr (and the default) is PERFORM.
@@ -95,6 +97,7 @@ class FileScreen final : public o3sdk::app::Screen {
   void slots_draw(o3sdk::ui::Renderer& r) const noexcept;
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
+  o3sdk::dsp::UnitId tract_ = o3sdk::dsp::kNoUnit;
   SampleScreen* sample_ = nullptr;
   PerformScreen* perform_ = nullptr;
   PatternScreen* pattern_ = nullptr;

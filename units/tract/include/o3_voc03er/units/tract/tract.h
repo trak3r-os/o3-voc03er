@@ -17,8 +17,9 @@
 //   7 Res     0..1 (default 0.5): the ringing of the formants
 //   8 Hiss    0..1 (default 0.3): noise at the narrowest point, only while it is narrow (a consonant's turbulence)
 //   9 Mix     0..1 (default 0): 0 is a bit-exact bypass (no state runs), 1 the tube alone
-//  10 Slide   ms, 5..500 (default 30): the sequencer's own glide. V3 writes it, so a step's glide never fights the GLIDE knob. Unused until then:
-//             the unit takes it and does nothing with it
+//  10 Slide   ms, 0..2000 (default 0): the sequencer's own glide (the MOUTH line writes it, a slid step's length). 0 means GLIDE rules; above 0 the
+//             unit glides with SLIDE instead, so a step's glide never fights the GLIDE knob (a GLIDE turn never changes SLIDE, and the hook never
+//             writes GLIDE). The Processor clamps the glide it is given to 5..500 ms: a slide longer than 500 ms is 500
 //
 // Two things the wrapper adds to the Processor:
 //  * MIX rises only after a hold of kEnterHoldMs (12 ms, a little more than the vocoder's 10 ms mode crossfade): the app writes MIX 1 together with

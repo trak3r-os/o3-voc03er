@@ -2,7 +2,7 @@
 #pragma once
 
 // PATTERN (docs/UI-DESIGN.md "PATTERN"), in the OR NOIR skin: the pattern letter A..H large at the left, sixteen step cells with four lanes under each
-// (NOTE, CARRIER, LEVEL, SLICE: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
+// (NOTE, CARRIER, LEVEL, SLICE, MOUTH: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
 //
 //   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW)
 //   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of PERFORM's two upper pad rows (A or B)
@@ -10,11 +10,12 @@
 //   NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
 //   The encoder starts on F5, the cursor step's value in the lane.
 //   UP / DOWN: the octave (PERFORM's and SAMPLE's, one press one step, the palette's notes move by 12). LEFT / RIGHT: the cursor (they repeat when
-//   held). NOTE, INSTR, VOL, FX and F2: the lane (app.cpp opens the screen on it).
+//   held). NOTE, INSTR, VOL, FX and F2: the lane (app.cpp opens the screen on it; FX: SLICE, then MOUTH, then SLICE).
 //   Pads: rows 2 and 3, columns 0..7: steps 1..16 (a press moves the cursor; SHIFT + press writes a rest in the lane); columns 8..11: patterns A..H (the
 //   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: the pads of PERFORM's rows A and B, what
 //   they play there, at PERFORM's octave, lit like PERFORM's; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS
-//   slot's cuts 1..24, lit up to its count). A palette pad writes into the cursor's step and moves the cursor on; a pad that plays nothing writes nothing.
+//   slot's cuts 1..24, lit up to its count; MOUTH: row 0 PERFORM's mouth strip, the nine vowels then LIPS, TIP, BACK, row 1 the vowels with GLD, the
+//   slide into them; the lane speaks in TRACT only, dim elsewhere, and a pad sounds the mouth live there). A palette pad writes into the cursor's step and moves the cursor on; a pad that plays nothing writes nothing.
 //   On the NOTE lane a palette pad also sounds while it is held (PERFORM's local-note path, so the bar's note-offs do not cut it) and is lit; SHIFT +
 //   a palette pad sounds and writes nothing. With one or more step pads held a palette pad writes every held step and the cursor stays.
 //
@@ -77,6 +78,8 @@ class PatternScreen final : public o3sdk::app::Screen {
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
+  void lane_chosen(o3sdk::app::Context& ctx) noexcept;  // the lane changed: the MOUTH lane outside TRACT says where it speaks
+  bool tract_on(const o3sdk::app::Context& ctx) const noexcept;  // the vocoder is in TRACT mode
   void show_pattern(o3sdk::app::Context& ctx, unsigned p, bool by_hand) noexcept;  // by_hand: a chain that plays keeps its own request
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
@@ -106,6 +109,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint64_t flash_until_ = 0;  // the chosen row's LEDs are off until then, a short off-on when F6 changes it (leds() checks it; main loop only)
   std::uint16_t steps_held_ = 0;  // the step pads held (bit step 0..15): a palette pad writes all of them and the cursor stays; main loop only
   char oct_say_[12] = {};         // "OCTAVE +1", the strip's line for UP and DOWN (say() keeps the pointer)
+  std::uint32_t mouth_aud_ = 0;  // the MOUTH palette's closure pads held and sounding (bit pad; a subset of aud_); main loop only
   std::uint32_t aud_ = 0;    // the palette pads held and sounding (bit pad 0..23, PerformScreen::audition_press); main loop only
   std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE
   bool key_tap_ = false;     // turn() came from a second tap on an F key, not from the encoder

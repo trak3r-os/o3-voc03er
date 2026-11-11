@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include <o3_voc03er/project.h>
+#include <o3_voc03er/units/tract/tract.h>
 
 #include <array>
 #include <cstdint>
@@ -20,6 +21,13 @@ using namespace o3_voc03er;
 namespace chunk = o3sdk::formats::chunk;
 using Bytes = std::vector<std::uint8_t>;
 
+// A TRCT that is valid and not the default in any field.
+void with_trct(Project& p) {
+  p.trct = 1;
+  const float v[kTractSaved] = {0.375f, -0.5f, 0.25f, -0.75f, 120.0f, 3.0f, 0.5f, 0.125f};
+  std::memcpy(p.tract, v, sizeof v);
+}
+
 Project full() {
   Project p = {};
   for (unsigned b = 0; b < kBankPatterns; ++b) {
@@ -34,8 +42,12 @@ Project full() {
       s.level = static_cast<std::uint8_t>(1 + i);
       s.slice = static_cast<std::uint8_t>(i % (kSliceMax + 1u));
       CHECK(set_step(pd, i, s));
+      // A mouth line on every pattern: FOLLOW, the nine vowels with and without GLD, the three closures.
+      static const std::uint8_t kLine[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 128 + 1, 128 + 5, 128 + 9};
+      CHECK(set_mouth(pd, i, kLine[(i + b) % 16]));
     }
   }
+  with_trct(p);
   p.chain.count = 5;
   p.chain.loop = 1;
   for (unsigned i = 0; i < 5; ++i) {
@@ -96,6 +108,9 @@ Project small() {
   Step s;
   s.note = 40;
   CHECK(set_step(p.bank.pattern[1], 3, s));
+  CHECK(set_mouth(p.bank.pattern[1], 3, 128 + 3));
+  CHECK(set_mouth(p.bank.pattern[6], 15, 11));
+  with_trct(p);
   p.chain.count = 1;
   p.chain.entry[0] = {1, 2};
   set_project_route(p, route::Route{route::kSpeaksLive, route::kSoundsNoise});
@@ -110,9 +125,13 @@ Project small() {
 
 bool same(const Project& a, const Project& b) {
   for (unsigned i = 0; i < kBankPatterns; ++i) {
-    if (a.bank.pattern[i].length != b.bank.pattern[i].length || std::memcmp(a.bank.pattern[i].step, b.bank.pattern[i].step, sizeof a.bank.pattern[i].step) != 0) {
+    if (a.bank.pattern[i].length != b.bank.pattern[i].length || std::memcmp(a.bank.pattern[i].step, b.bank.pattern[i].step, sizeof a.bank.pattern[i].step) != 0 ||
+        std::memcmp(a.bank.pattern[i].mouth, b.bank.pattern[i].mouth, sizeof a.bank.pattern[i].mouth) != 0) {
       return false;
     }
+  }
+  if (a.trct != b.trct || (a.trct != 0u && std::memcmp(a.tract, b.tract, sizeof a.tract) != 0)) {
+    return false;
   }
   if (a.chain.count != b.chain.count || a.chain.loop != b.chain.loop) {
     return false;
@@ -258,6 +277,11 @@ TEST_CASE("project: the worst case fits the buffer") {
     s.choke_off = 1;
   }
   with_stat(p);
+  for (PatternData& pd : p.bank.pattern) {
+    for (unsigned i = 0; i < kPatternSteps; ++i) {
+      CHECK(set_mouth(pd, i, 128 + 9));  // every step a slid U: MOUT at its fullest
+    }
+  }
   p.preset_len = static_cast<std::uint8_t>(kPresetNameMax);  // the longest name a file may hold
   std::memset(p.preset, 'W', kPresetNameMax);
   p.chain.count = kChainMax;
@@ -352,14 +376,17 @@ TEST_CASE("project: a value that is not a number is a damaged file") {
 TEST_CASE("project: a file missing a chunk leaves that part at its defaults") {
   const Project p = full();
   const Bytes f = write(p);
-  for (const char* drop : {"PTNS", "CHAI", "ROUT", "SLOT", "VALU"}) {
+  for (const char* drop : {"PTNS", "CHAI", "ROUT", "SLOT", "VALU", "MOUT", "TRCT"}) {
     Edit e;
     e.drop = drop;
     Project got = {};
     REQUIRE(read(rebuild(f, e), got));
     Project want = p;
     if (std::strcmp(drop, "PTNS") == 0) {
-      want.bank = Bank{};
+      want.bank = Bank{};  // the steps and the lengths; MOUT is its own chunk and keeps the mouth line
+      for (unsigned i = 0; i < kBankPatterns; ++i) {
+        std::memcpy(want.bank.pattern[i].mouth, p.bank.pattern[i].mouth, sizeof want.bank.pattern[i].mouth);
+      }
     } else if (std::strcmp(drop, "CHAI") == 0) {
       want.chain = Chain{};
     } else if (std::strcmp(drop, "ROUT") == 0) {
@@ -368,6 +395,12 @@ TEST_CASE("project: a file missing a chunk leaves that part at its defaults") {
       for (ProjectSlot& s : want.slot) {
         s = ProjectSlot{};
       }
+    } else if (std::strcmp(drop, "MOUT") == 0) {
+      for (PatternData& pd : want.bank.pattern) {
+        std::memset(pd.mouth, 0, sizeof pd.mouth);
+      }
+    } else if (std::strcmp(drop, "TRCT") == 0) {
+      want.trct = 0;
     } else {
       want.engine_set = 0;
     }
@@ -448,22 +481,27 @@ TEST_CASE("project: a slot record a later minor made longer is skipped, and a re
 
 TEST_CASE("project: a known chunk twice is refused") {
   const Bytes f = write(small());
-  chunk::Reader r;
-  REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
-  alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
-  chunk::Writer w(buf.data(), buf.size(), "VOCP");
-  chunk::Chunk c{};
-  while (r.next(c)) {
-    const char id[5] = {c.id[0], c.id[1], c.id[2], c.id[3], 0};
-    REQUIRE(w.chunk(id, c.data, c.size));
-    if (chunk::id_is(c, "CHAI")) {
+  for (const char* twice : {"CHAI", "MOUT", "TRCT"}) {
+    chunk::Reader r;
+    REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+    alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
+    chunk::Writer w(buf.data(), buf.size(), "VOCP");
+    chunk::Chunk c{};
+    bool seen = false;
+    while (r.next(c)) {
+      const char id[5] = {c.id[0], c.id[1], c.id[2], c.id[3], 0};
       REQUIRE(w.chunk(id, c.data, c.size));
+      if (std::memcmp(id, twice, 4) == 0) {
+        seen = true;
+        REQUIRE(w.chunk(id, c.data, c.size));
+      }
     }
+    REQUIRE(seen);
+    const std::size_t n = w.finish();
+    REQUIRE(n != 0);
+    Project into = {};
+    CHECK_MESSAGE(!read_project(buf.data(), n, into), twice);
   }
-  const std::size_t n = w.finish();
-  REQUIRE(n != 0);
-  Project into = {};
-  CHECK(!read_project(buf.data(), n, into));
 }
 
 TEST_CASE("project: values out of range are refused on both sides") {
@@ -492,6 +530,19 @@ TEST_CASE("project: values out of range are refused on both sides") {
   refused([](Project& p) { p.slot[0].gate = 2; });
   refused([](Project& p) { p.slot[0].choke_off = 2; });
   refused([](Project& p) { p.engine_set |= std::uint64_t{1} << Vocoder::Load; });
+  refused([](Project& p) { p.bank.pattern[0].mouth[0] = 13; });
+  refused([](Project& p) { p.bank.pattern[7].mouth[15] = 0x8A; });  // GLD on a closure
+  refused([](Project& p) { p.bank.pattern[3].mouth[2] = 0x80; });   // GLD on FOLLOW
+  refused([](Project& p) { p.bank.pattern[3].mouth[2] = 0x11; });   // bit 4
+  refused([](Project& p) { p.trct = 2; });
+  refused([](Project& p) { p.tract[0] = 1.01f; });
+  refused([](Project& p) { p.tract[1] = -1.01f; });
+  refused([](Project& p) { p.tract[4] = 4.0f; });
+  refused([](Project& p) { p.tract[4] = 501.0f; });
+  refused([](Project& p) { p.tract[5] = 2.5f; });  // SIZE is a whole number
+  refused([](Project& p) { p.tract[5] = 5.0f; });
+  refused([](Project& p) { p.tract[7] = std::numeric_limits<float>::quiet_NaN(); });
+  refused([](Project& p) { p.tract[6] = std::numeric_limits<float>::infinity(); });
   Project scratch = {};
   CHECK(!project_set_engine(scratch, Vocoder::Load, 1.0f));
   CHECK(!project_set_engine(scratch, Vocoder::Wave, std::numeric_limits<float>::infinity()));
@@ -936,4 +987,239 @@ TEST_CASE("project: P3 a file without STAT keeps the header's rule, the 1.1 fiel
   CHECK(got.voicing == 0);
   CHECK(got.bend_range == 0);
   CHECK(got.preset_len == 0);
+}
+
+TEST_CASE("project: V3 the MOUT chunk is written after PTNS, only when a step has a mouth byte, and carries each byte") {
+  Project p = small();
+  Bytes f = write(p);
+  REQUIRE(!f.empty());
+  chunk::Reader r;
+  REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+  chunk::Chunk c{};
+  bool ptns = false, mout = false, trct = false;
+  while (r.next(c)) {
+    if (chunk::id_is(c, "PTNS")) {
+      ptns = true;
+      CHECK_FALSE(mout);
+    } else if (chunk::id_is(c, "MOUT")) {
+      mout = true;
+      CHECK(ptns);
+      CHECK(c.size == 2u + 1u + kBankPatterns * kPatternSteps);
+      CHECK(c.data[0] == 0x01);
+      CHECK(c.data[1] == 0x00);
+      CHECK(c.data[2] == kBankPatterns);
+      CHECK(c.data[3 + 1 * kPatternSteps + 3] == 128 + 3);
+      CHECK(c.data[3 + 6 * kPatternSteps + 15] == 11);
+      CHECK(c.data[3] == 0);
+    } else if (chunk::id_is(c, "TRCT")) {
+      trct = true;
+      CHECK(c.size == 2u + 4u * kTractSaved);
+    }
+  }
+  CHECK(ptns);
+  CHECK(mout);
+  CHECK(trct);
+  // No mouth byte anywhere, no capture: neither chunk
+  p = small();
+  for (PatternData& pd : p.bank.pattern) {
+    clear_pattern(pd);
+  }
+  p.trct = 0;
+  f = write(p);
+  REQUIRE(!f.empty());
+  REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+  while (r.next(c)) {
+    CHECK_FALSE(chunk::id_is(c, "MOUT"));
+    CHECK_FALSE(chunk::id_is(c, "TRCT"));
+  }
+}
+
+TEST_CASE("project: V3 a MOUT with the wrong count, a bad byte, a wrong major or a cut payload refuses the file whole") {
+  const Project p = full();
+  const Bytes f = write(p);
+  chunk::Reader r;
+  REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+  chunk::Chunk c{};
+  Bytes good;
+  while (r.next(c)) {
+    if (chunk::id_is(c, "MOUT")) {
+      good.assign(c.data, c.data + c.size);
+    }
+  }
+  REQUIRE(good.size() == 2u + 1u + kBankPatterns * kPatternSteps);
+  const Project sentinel = small();
+  const auto refused = [&](const Bytes& with) {
+    Edit e;
+    e.replace = "MOUT";
+    e.with = with;
+    Project into = sentinel;
+    CHECK_FALSE(read(rebuild(f, e), into));
+    CHECK(same(into, sentinel));
+  };
+  Bytes b = good;
+  b[2] = 7;
+  refused(b);
+  b = good;
+  b[2] = 9;
+  refused(b);
+  b = good;
+  b[0] = 0x02;  // a newer major
+  refused(b);
+  b = good;
+  b.pop_back();
+  refused(b);
+  b = good;
+  b.resize(2);
+  refused(b);
+  for (const std::uint8_t bad : {std::uint8_t{13}, std::uint8_t{15}, std::uint8_t{0x8A}, std::uint8_t{0x80}, std::uint8_t{0x21}, std::uint8_t{0xFF}}) {
+    b = good;
+    b[3 + 5 * kPatternSteps + 7] = bad;
+    refused(b);
+  }
+  // and a newer minor with more bytes after the known ones is read as far as it is known
+  b = good;
+  b[1] = 0x01;
+  b.push_back(0xAA);
+  b.push_back(0xBB);
+  Edit e;
+  e.replace = "MOUT";
+  e.with = b;
+  Project got = {};
+  REQUIRE(read(rebuild(f, e), got));
+  CHECK(same(got, p));
+}
+
+TEST_CASE("project: V3 a mouth read before PTNS or after it ends in the same bank") {
+  // MOUT is written after PTNS; a file with the two the other way round (a later writer) gives the same bank
+  const Project p = full();
+  const Bytes f = write(p);
+  chunk::Reader r;
+  REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+  chunk::Chunk c{};
+  Bytes ptns, mout;
+  while (r.next(c)) {
+    if (chunk::id_is(c, "PTNS")) {
+      ptns.assign(c.data, c.data + c.size);
+    } else if (chunk::id_is(c, "MOUT")) {
+      mout.assign(c.data, c.data + c.size);
+    }
+  }
+  REQUIRE(!ptns.empty());
+  REQUIRE(!mout.empty());
+  Bytes swapped;
+  {
+    REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+    alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
+    chunk::Writer w(buf.data(), buf.size(), "VOCP");
+    while (r.next(c)) {
+      if (chunk::id_is(c, "PTNS")) {
+        REQUIRE(w.chunk("MOUT", mout.data(), mout.size()));
+        REQUIRE(w.chunk("PTNS", ptns.data(), ptns.size()));
+      } else if (!chunk::id_is(c, "MOUT")) {
+        const char id[5] = {c.id[0], c.id[1], c.id[2], c.id[3], 0};
+        REQUIRE(w.chunk(id, c.data, c.size));
+      }
+    }
+    const std::size_t n = w.finish();
+    REQUIRE(n != 0);
+    swapped.assign(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(n));
+  }
+  Project got = {};
+  REQUIRE(read(swapped, got));
+  CHECK(same(got, p));
+}
+
+TEST_CASE("project: V3 TRCT round-trips value by value, a file without it holds nothing, a bad one refuses the file") {
+  const Project p = full();
+  REQUIRE(p.trct == 1);
+  Project got = {};
+  const Bytes f = write(p);
+  REQUIRE(read(f, got));
+  CHECK(got.trct == 1);
+  for (unsigned i = 0; i < kTractSaved; ++i) {
+    CHECK(got.tract[i] == p.tract[i]);
+  }
+  CHECK(write(got) == f);
+  // Every range end is accepted, one step past either end is not
+  for (unsigned i = 0; i < kTractSaved; ++i) {
+    for (const float edge : {kTractSavedMin[i], kTractSavedMax[i]}) {
+      Project q = p;
+      q.tract[i] = edge;
+      Project back = {};
+      REQUIRE_MESSAGE(read(write(q), back), i);
+      CHECK(back.tract[i] == edge);
+    }
+    Project q = p;
+    q.tract[i] = kTractSavedMax[i] + 0.5f;
+    alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
+    CHECK_MESSAGE(write_project(q, buf.data(), buf.size()) == 0u, i);
+    q.tract[i] = kTractSavedMin[i] - 0.5f;
+    CHECK_MESSAGE(write_project(q, buf.data(), buf.size()) == 0u, i);
+  }
+  // A file with a TRCT of the right length but a bad value, a wrong major, a short payload
+  chunk::Reader r;
+  REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+  chunk::Chunk c{};
+  Bytes good;
+  while (r.next(c)) {
+    if (chunk::id_is(c, "TRCT")) {
+      good.assign(c.data, c.data + c.size);
+    }
+  }
+  REQUIRE(good.size() == 2u + 4u * kTractSaved);
+  const Project sentinel = small();
+  const auto refused = [&](const Bytes& with) {
+    Edit e;
+    e.replace = "TRCT";
+    e.with = with;
+    Project into = sentinel;
+    CHECK_FALSE(read(rebuild(f, e), into));
+    CHECK(same(into, sentinel));
+  };
+  const auto with_value = [&](unsigned index, float v) {
+    Bytes b = good;
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof bits);
+    for (unsigned k = 0; k < 4; ++k) {
+      b[2 + 4 * index + k] = static_cast<std::uint8_t>(bits >> (24 - 8 * k));
+    }
+    return b;
+  };
+  refused(with_value(0, 2.0f));
+  refused(with_value(4, 4.0f));
+  refused(with_value(5, 1.5f));
+  refused(with_value(7, std::numeric_limits<float>::quiet_NaN()));
+  refused(with_value(3, -std::numeric_limits<float>::infinity()));
+  Bytes b = good;
+  b[0] = 0x02;
+  refused(b);
+  b = good;
+  b.pop_back();
+  refused(b);
+  b = good;
+  b.resize(2);
+  refused(b);
+  // a valid one is read (the helper builds the same bytes the writer did)
+  Edit e;
+  e.replace = "TRCT";
+  e.with = with_value(5, 3.0f);
+  REQUIRE(read(rebuild(f, e), got));
+  CHECK(got.tract[5] == 3.0f);
+}
+
+TEST_CASE("project: V3 the saved ranges are the tract unit's own descriptors, and CLOSE, MIX and SLIDE are not saved") {
+  TractUnit u;
+  const o3sdk::dsp::UnitInfo& info = u.info();
+  for (unsigned i = 0; i < kTractSaved; ++i) {
+    const unsigned id = kTractSavedId[i];
+    REQUIRE(id < info.param_count);
+    const o3sdk::core::ParamDesc& pi = info.params[id];
+    CHECK_MESSAGE(pi.min == kTractSavedMin[i], pi.name);
+    CHECK_MESSAGE(pi.max == kTractSavedMax[i], pi.name);
+    CHECK_MESSAGE(pi.def >= kTractSavedMin[i], pi.name);  // the defaults a missing TRCT leaves are inside the range
+    CHECK_MESSAGE(pi.def <= kTractSavedMax[i], pi.name);
+    CHECK(id != TractUnit::Close);
+    CHECK(id != TractUnit::Mix);
+    CHECK(id != TractUnit::Slide);
+  }
 }

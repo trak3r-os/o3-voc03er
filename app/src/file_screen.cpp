@@ -52,6 +52,7 @@ struct FileData {
   bool pending_has;   // the folder of the job in hand becomes the current project when it ends
   bool reset_slots;   // NEW: the slots' cuts go back to even
   unsigned next;      // the next engine id the restore looks at
+  unsigned tnext;     // then the next TRCT value (V3) it writes to the tract unit
   unsigned restored, kept;
   char name[40];
   char pending[40];
@@ -280,6 +281,15 @@ void FileScreen::capture(app::Context& ctx) noexcept {
       (void)project_set_engine(p, id, ctx.engine().param(voice_, static_cast<std::uint16_t>(id)));
     }
   }
+  p.trct = 0;
+  if (tract_ != dsp::kNoUnit) {
+    for (unsigned i = 0; i < kTractSaved; ++i) {  // inside the unit's range, SIZE a whole choice: a value a knob left between two steps still saves
+      float v = ctx.engine().param(tract_, kTractSavedId[i]);
+      v = v < kTractSavedMin[i] ? kTractSavedMin[i] : (v > kTractSavedMax[i] ? kTractSavedMax[i] : v);
+      p.tract[i] = kTractSavedId[i] == TractUnit::Size ? static_cast<float>(static_cast<int>(v + 0.5f)) : v;
+    }
+    p.trct = 1;
+  }
   const std::uint32_t t = ctx.engine().own_tempo();
   p.stat = 1;
   p.tempo_mbpm = t < kStatTempoMin ? kStatTempoMin : (t > kStatTempoMax ? kStatTempoMax : t);
@@ -379,6 +389,7 @@ void FileScreen::start_new(app::Context& ctx) noexcept {
   g_fd.pending_has = false;
   g_fd.reset_slots = true;
   g_fd.next = 0;
+  g_fd.tnext = 0;
   g_fd.stage = kRestoring;
 }
 
@@ -444,6 +455,7 @@ void FileScreen::service(app::Context& ctx) noexcept {
     g_fd.has_name = g_fd.pending_has;
     g_fd.reset_slots = false;
     g_fd.next = 0;
+    g_fd.tnext = 0;
     g_fd.stage = kRestoring;
   }
   if (g_fd.stage != kRestoring) {
@@ -462,7 +474,22 @@ void FileScreen::service(app::Context& ctx) noexcept {
     g_fd.next = id + 1u;
     ++sent;
   }
-  if (g_fd.next >= kEngineIds) {
+  if (g_fd.next < kEngineIds) {
+    return;
+  }
+  // The tract's values (TRCT, V3): the file's, or the unit's defaults when the file has none (NEW, or a file from before). Through the same ring, a few a
+  // frame, and not cancellable like the rest of the restore (LE6).
+  while (tract_ != dsp::kNoUnit && g_fd.tnext < kTractSaved && sent < fl::kValuesPerFrame) {
+    const std::uint16_t id = kTractSavedId[g_fd.tnext];
+    const core::ParamDesc* d = ctx.engine().param_desc(tract_, id);
+    const float v = g_proj.trct != 0u ? g_proj.tract[g_fd.tnext] : (d != nullptr ? d->def : 0.0f);
+    if (!ctx.engine().set_param(tract_, id, v)) {
+      return;
+    }
+    ++g_fd.tnext;
+    ++sent;
+  }
+  if (tract_ == dsp::kNoUnit || g_fd.tnext >= kTractSaved) {
     apply(ctx, true);
   }
 }

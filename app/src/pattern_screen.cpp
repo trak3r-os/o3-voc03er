@@ -70,7 +70,7 @@ unsigned round_param(const dsp::Engine& e, dsp::UnitId id, std::uint16_t p) noex
 int centred(ui::Renderer& r, const char* s, Face f, int cx) noexcept { return cx - r.text_width(s, f) / 2; }
 
 // What a step stores in a lane, as text for the cell (`line2` is a second, smaller line: a chord's kind). Empty for nothing.
-void cell_text(pt::Lane lane, const Step& s, char (&line1)[6], const char*& line2) noexcept {
+void cell_text(pt::Lane lane, const Step& s, std::uint8_t mouth, char (&line1)[6], const char*& line2) noexcept {
   line1[0] = '\0';
   line2 = "";
   switch (lane) {
@@ -93,11 +93,14 @@ void cell_text(pt::Lane lane, const Step& s, char (&line1)[6], const char*& line
         cat_uint(line1, sizeof line1, s.slice);
       }
       break;
+    case pt::Lane::Mouth:
+      pt::mouth_text(line1, mouth);
+      break;
   }
 }
 
 // Does the lane hold something in this step? (the step pad's dim LED, the cell's ink)
-bool has_content(pt::Lane lane, const Step& s) noexcept {
+bool has_content(pt::Lane lane, const Step& s, std::uint8_t mouth) noexcept {
   switch (lane) {
     case pt::Lane::Note:
       return s.note != 0u;
@@ -107,6 +110,8 @@ bool has_content(pt::Lane lane, const Step& s) noexcept {
       return s.level != 0u;
     case pt::Lane::Slice:
       return s.slice != 0u;
+    case pt::Lane::Mouth:
+      return mouth != 0u;
   }
   return false;
 }
@@ -124,9 +129,9 @@ constexpr std::uint8_t kArmPattern = 2;  // SHIFT + DELETE
 
 constexpr int kGridX = 124;
 constexpr int kCellW = 40;
-constexpr int kCellY = 128;
-constexpr int kCellH = 56;
-constexpr int kLaneStep = 60;
+constexpr int kCellY = 120;
+constexpr int kCellH = 48;
+constexpr int kLaneStep = 52;  // five lanes (V3): 120 + 5 * 52 leaves the strip's line above the F row (y 419)
 
 }  // namespace
 
@@ -166,6 +171,10 @@ void PatternScreen::leave(app::Context& ctx) noexcept {
     }
   }
   aud_ = 0;
+  if (mouth_aud_ != 0u && perform_ != nullptr) {
+    perform_->mouth_sound_release(ctx);  // a closure still held ends with the screen
+  }
+  mouth_aud_ = 0;
   steps_held_ = 0;
 }
 
@@ -205,7 +214,20 @@ void PatternScreen::say(app::Context& ctx, const char* text) noexcept {
 
 void PatternScreen::set_lane(app::Context& ctx, pt::Lane lane) noexcept {
   lane_ = static_cast<std::uint8_t>(lane);
+  lane_chosen(ctx);
+}
+
+// The MOUTH lane speaks in TRACT only: outside it the lane is shown dim, still edits, and the strip says so once, when the lane is chosen.
+void PatternScreen::lane_chosen(app::Context& ctx) noexcept {
+  if (lane() == pt::Lane::Mouth && !tract_on(ctx)) {
+    say(ctx, perform::kMouthElsewhere);
+    return;
+  }
   ctx.redraw();
+}
+
+bool PatternScreen::tract_on(const app::Context& ctx) const noexcept {
+  return pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode)) == kModeTract;
 }
 
 void PatternScreen::show_pattern(app::Context& ctx, unsigned p, bool by_hand) noexcept {
@@ -268,6 +290,23 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
       return;
     }
   }
+  if (lane() == pt::Lane::Mouth) {  // a dark pad (row 1 past the nine vowels) writes nothing and sounds nothing
+    const std::uint8_t m = pt::mouth_of_pad(pad);
+    if (m == 0u) {
+      return;
+    }
+    if (perform_ != nullptr && perform_->mouth_active(ctx.engine())) {  // it sounds while held: a vowel sets VOWEL, a closure holds CLOSE
+      perform_->mouth_sound(ctx, m);
+      aud_ |= std::uint32_t{1} << pad;
+      if (mouth_is_closure(m)) {
+        mouth_aud_ |= std::uint32_t{1} << pad;
+      }
+    }
+    if (shift) {
+      ctx.redraw();
+      return;
+    }
+  }
   bool ok = false;
   for (unsigned i = 0; i < len; ++i) {
     if (((targets >> i) & 1u) == 0u) {
@@ -295,6 +334,9 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
         ok |= w == pt::SliceWrite::Written;
         break;
       }
+      case pt::Lane::Mouth:
+        ok |= pt::mouth_write(p, i, pad);
+        break;
     }
   }
   if (ok && lane() == pt::Lane::Level) {
@@ -346,7 +388,12 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
     }
     case 1: {  // LANE
       const int n = static_cast<int>(lane_) + delta;
+      const std::uint8_t before = lane_;
       lane_ = static_cast<std::uint8_t>(tap ? (lane_ + 1u) % pt::kLanes : (n < 0 ? 0 : (n >= static_cast<int>(pt::kLanes) ? pt::kLanes - 1u : static_cast<unsigned>(n))));
+      if (lane_ != before) {
+        lane_chosen(ctx);
+        return;
+      }
       break;
     }
     case 2: {  // LENGTH
@@ -467,8 +514,8 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     set_lane(ctx, pt::Lane::Carrier);
   } else if (in.press(Button::Vol)) {
     set_lane(ctx, pt::Lane::Level);
-  } else if (in.press(Button::Fx)) {
-    set_lane(ctx, pt::Lane::Slice);
+  } else if (in.press(Button::Fx)) {  // SLICE, then MOUTH, then back to SLICE
+    set_lane(ctx, lane() == pt::Lane::Slice ? pt::Lane::Mouth : pt::Lane::Slice);
   } else if (in.press(Button::Left) || in.press(Button::Right)) {  // repeats arrive as presses (repeat_buttons)
     const unsigned len = length_of(pattern_now());
     const unsigned c = cursor_;
@@ -502,6 +549,10 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     aud_ &= ~(std::uint32_t{1} << in.pad());
     if (perform_ != nullptr) {
       perform_->audition_release(ctx, in.pad());
+      if (((mouth_aud_ >> in.pad()) & 1u) != 0u) {
+        mouth_aud_ &= ~(std::uint32_t{1} << in.pad());
+        perform_->mouth_sound_release(ctx);
+      }
     }
     if (sample_ != nullptr) {
       sample_->release_slice(ctx, in.pad());
@@ -530,6 +581,7 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const PatternData& p = pattern_now();
   const unsigned len = length_of(p);
   const Step cur = get_step(p, cursor_);
+  const std::uint8_t curm = get_mouth(p, cursor_);
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
   const pads::Layout& layout = layout_now();
   const unsigned slices = seq_ != nullptr ? seq_->slice_count() : 0u;
@@ -553,6 +605,8 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
       level = pad < slices ? (pt::palette_matches(lane(), pad, cur, oct, layout) ? app::kLedMid : app::kLedDim) : app::kLedOff;
     } else if (lane() == pt::Lane::Carrier && pad >= pt::kCarrierPads) {
       level = app::kLedOff;
+    } else if (lane() == pt::Lane::Mouth) {  // the strip and its GLD row; the dark pads off
+      level = pt::mouth_of_pad(pad) == 0u ? app::kLedOff : (pt::palette_matches(lane(), pad, cur, oct, layout, curm) ? app::kLedMid : app::kLedDim);
     } else if (pt::palette_matches(lane(), pad, cur, oct, layout)) {
       level = app::kLedMid;
     }
@@ -565,7 +619,7 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   for (unsigned i = 0; i < kPatternSteps; ++i) {
     std::uint8_t level = app::kLedOff;
     if (i < len) {
-      level = playing && seq_->playing_step() == i ? app::kLedOn : (i == cursor_ ? app::kLedMid : (has_content(lane(), get_step(p, i)) ? app::kLedDim : app::kLedOff));
+      level = playing && seq_->playing_step() == i ? app::kLedOn : (i == cursor_ ? app::kLedMid : (has_content(lane(), get_step(p, i), get_mouth(p, i)) ? app::kLedDim : app::kLedOff));
     }
     leds.set(pt::pad_of_step(i), level);
   }
@@ -594,7 +648,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Note, "NOTE LANE", nullptr},
       {Button::Instr, "CARRIER LANE", nullptr},
       {Button::Vol, "LEVEL LANE", nullptr},
-      {Button::Fx, "SLICE LANE: A SPEAKS CUT", nullptr},
+      {Button::Fx, "SLICE LANE, THEN MOUTH LANE", nullptr},
       {Button::Shift, "SHIFT + STEP: A REST", nullptr},
       {Button::Copy, "COPY THE STEP", "COPY THE PATTERN"},
       {Button::Insert, "INSERT THE COPIED STEP", "PASTE THE COPIED PATTERN"},
@@ -631,7 +685,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
     h.fkey_shift[i] = nullptr;
   }
   h.fkey[0] = "A TO H";
-  h.fkey[1] = "NOTE, CARRIER, LEVEL, SLICE";
+  h.fkey[1] = "NOTE TO MOUTH, FIVE LANES";
   h.fkey[2] = "1 TO 16 STEPS";
   h.fkey[3] = "THE BAR'S BPM";
   h.fkey[4] = "THE CURSOR STEP'S VALUE";
@@ -666,6 +720,12 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       case pt::Lane::Slice:
         cat_uint(l, sizeof g_pd.name[i], i + 1u);
         break;
+      case pt::Lane::Mouth: {  // the strip: "A", "AE" .. "U", "LIP", "TIP", "BCK"; row 1 the same with ">" (GLD); two pads dark
+        char t[6];
+        pt::mouth_text(t, pt::mouth_of_pad(i));
+        cat(l, sizeof g_pd.name[i], t);
+        break;
+      }
     }
     h.pad_label[i] = l[0] != '\0' ? l : nullptr;
   }
@@ -706,6 +766,8 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   const bool playing = seq_ != nullptr && e.playing() && seq_->playing_pattern() == shown_;
   const unsigned head = playing ? seq_->playing_step() : kPatternSteps;
   const Step cur = get_step(p, cursor_);
+  const std::uint8_t curm = get_mouth(p, cursor_);
+  const bool mouth_dim = !tract_on(ctx);  // the MOUTH lane speaks in TRACT only: shown dim elsewhere
 
   ornoir::HeaderState h;
   header_route(e, voice_, src != nullptr ? src->label : "NONE", src != nullptr && src->source == hal::capture::Source::Usb, h);
@@ -720,13 +782,13 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     keys[i].hot = i == focus_;
   }
   keys[0].value[0] = kLetters[shown_ & 7u];
-  cat(keys[1].value, sizeof keys[1].value, pt::kLaneNames[lane_ & 3u]);
+  cat(keys[1].value, sizeof keys[1].value, pt::kLaneNames[lane_ % pt::kLanes]);
   cat_uint(keys[2].value, sizeof keys[2].value, len);
   cat_uint(keys[3].value, sizeof keys[3].value, e.own_tempo() / 1000u);
   {
     char one[6];
     const char* two = "";
-    cell_text(lane(), cur, one, two);
+    cell_text(lane(), cur, curm, one, two);
     cat(keys[4].value, sizeof keys[4].value, one[0] != '\0' ? one : "-");
   }
   {
@@ -760,14 +822,15 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     if (i >= len) {
       continue;
     }
-    ornoir::fill_rect(c, x, kCellY, kCellW - 2, 4 * kLaneStep - 4, i == cursor_ ? Color::Accent : (i == head ? Color::Play : Color::Empty));
+    ornoir::fill_rect(c, x, kCellY, kCellW - 2, static_cast<int>(pt::kLanes) * kLaneStep - 4, i == cursor_ ? Color::Accent : (i == head ? Color::Play : Color::Empty));
     for (unsigned l = 0; l < pt::kLanes; ++l) {
       ornoir::fill_rect(c, x + 2, kCellY + static_cast<int>(l) * kLaneStep + 2, kCellW - 6, kCellH - 4, Color::Pane);
     }
   }
   for (unsigned l = 0; l < pt::kLanes; ++l) {  // the lane in force: a bar at the left of its row
     if (l == lane_) {
-      ornoir::fill_rect(c, 12, kCellY + static_cast<int>(l) * kLaneStep + 2, 6, kCellH - 4, Color::Accent);
+      ornoir::fill_rect(c, 12, kCellY + static_cast<int>(l) * kLaneStep + 2, 6, kCellH - 4,
+                        l == static_cast<unsigned>(pt::Lane::Mouth) && mouth_dim ? Color::TextDim : Color::Accent);
     }
   }
   c.close();
@@ -789,7 +852,8 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
 
   for (unsigned l = 0; l < pt::kLanes; ++l) {
     const int y = kCellY + static_cast<int>(l) * kLaneStep;
-    r.text(24, y + 20, pt::kLaneNames[l], l == lane_ ? Color::Text : Color::TextDim, Face::Label);
+    const bool dim = l == static_cast<unsigned>(pt::Lane::Mouth) && mouth_dim;
+    r.text(24, y + 16, pt::kLaneNames[l], l == lane_ && !dim ? Color::Text : Color::TextDim, Face::Label);
   }
   for (unsigned i = 0; i < kPatternSteps; ++i) {
     const int x = kGridX + static_cast<int>(i) * kCellW;
@@ -803,26 +867,29 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     for (unsigned l = 0; l < pt::kLanes; ++l) {
       char t1[6];
       const char* t2 = "";
-      cell_text(static_cast<pt::Lane>(l), s, t1, t2);
+      const std::uint8_t sm = get_mouth(p, i);
+      cell_text(static_cast<pt::Lane>(l), s, sm, t1, t2);
       const int y = kCellY + static_cast<int>(l) * kLaneStep;
       const int cx = x + kCellW / 2 - 1;
-      const Color ink = has_content(static_cast<pt::Lane>(l), s) ? (l == lane_ ? Color::Text : Color::TextDim) : Color::Empty;
-      const bool shown_text = t1[0] != '\0' && (has_content(static_cast<pt::Lane>(l), s) || static_cast<pt::Lane>(l) == pt::Lane::Level);
+      const bool content = has_content(static_cast<pt::Lane>(l), s, sm);
+      const bool dim = static_cast<pt::Lane>(l) == pt::Lane::Mouth && mouth_dim;
+      const Color ink = content ? (l == lane_ && !dim ? Color::Text : Color::TextDim) : Color::Empty;
+      const bool shown_text = t1[0] != '\0' && (content || static_cast<pt::Lane>(l) == pt::Lane::Level);
       if (shown_text) {
-        r.text(centred(r, t1, Face::Label, cx), y + (t2[0] != '\0' ? 10 : 20), t1, ink == Color::Empty ? Color::TextDim : ink, Face::Label);
+        r.text(centred(r, t1, Face::Label, cx), y + (t2[0] != '\0' ? 6 : 16), t1, ink == Color::Empty ? Color::TextDim : ink, Face::Label);
       }
       if (t2[0] != '\0') {
-        r.text(centred(r, t2, Face::Micro, cx), y + 34, t2, Color::TextDim, Face::Micro);
+        r.text(centred(r, t2, Face::Micro, cx), y + 30, t2, Color::TextDim, Face::Micro);
       }
     }
   }
   if (armed_ != 0u) {
-    r.text(kGridX, kCellY + 4 * kLaneStep + 10, armed_ == kArmPattern ? pt::kClearPatternPrompt : pt::kClearPrompt[lane_ & 3u], Color::Accent,
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, armed_ == kArmPattern ? pt::kClearPatternPrompt : pt::kClearPrompt[lane_ % pt::kLanes], Color::Accent,
            Face::Label);
   } else if (note_ != nullptr) {
-    r.text(kGridX, kCellY + 4 * kLaneStep + 10, note_, Color::Accent, Face::Label);
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, note_, Color::Accent, Face::Label);
   } else {
-    r.text(kGridX, kCellY + 4 * kLaneStep + 14,
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 14,
            lane() == pt::Lane::Note ? "PADS: ROWS A AND B ABOVE (F6, F7), STEPS AND PATTERNS BELOW. SHIFT + STEP: REST"
                                     : "PADS: PALETTE ABOVE, STEPS AND PATTERNS BELOW. SHIFT + STEP: REST",
            Color::TextDim, Face::Micro);

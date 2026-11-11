@@ -8,6 +8,7 @@
 
 #include <o3_voc03er/chords.h>
 #include <o3_voc03er/presets.h>
+#include <o3_voc03er/stepseq.h>
 #include <o3_voc03er/units/tract/tract.h>
 
 #include <o3sdk/app/audio_in.h>
@@ -291,6 +292,13 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
 
 // ---- the mouth strip (row C set to MOUTH, TRACT mode) ------------------------------------------------------------------------------------
 
+// The step sequencer's mouth line stands aside while a closure pad is down (the pad owns the tract then).
+void PerformScreen::sync_mouth_hold() noexcept {
+  if (seq_ != nullptr) {
+    seq_->set_mouth_hold(mouth_pads_ != 0u);
+  }
+}
+
 // The tract's CLOSE for the closures held: the one pressed last, OPEN with none.
 void PerformScreen::write_close(app::Context& ctx) noexcept {
   if (tract_ != dsp::kNoUnit) {
@@ -315,6 +323,7 @@ void PerformScreen::mouth_press(app::Context& ctx, unsigned pad, const pl::PadSp
   }
   mouth_pads_ |= std::uint64_t{1} << pad;
   mouth_.press(static_cast<unsigned>(sp.offset));
+  sync_mouth_hold();
   write_close(ctx);
   ctx.redraw();
 }
@@ -322,6 +331,7 @@ void PerformScreen::mouth_press(app::Context& ctx, unsigned pad, const pl::PadSp
 void PerformScreen::mouth_release(app::Context& ctx, unsigned pad) noexcept {
   mouth_pads_ &= ~(std::uint64_t{1} << pad);
   mouth_.release(static_cast<unsigned>(pad % app::kPadCols) - pl::kMouthVowelCols + 1u);
+  sync_mouth_hold();
   write_close(ctx);
   ctx.redraw();
 }
@@ -329,6 +339,19 @@ void PerformScreen::mouth_release(app::Context& ctx, unsigned pad) noexcept {
 bool PerformScreen::mouth_active(const dsp::Engine& e) const noexcept {
   return pl::mode_index(e.param(voice_, Vocoder::Mode)) == kModeTract;
 }
+
+void PerformScreen::mouth_sound(app::Context& ctx, std::uint8_t mouth) noexcept {
+  if (tract_ == dsp::kNoUnit || !mouth_active(ctx.engine())) {
+    return;
+  }
+  if (mouth_is_vowel(mouth)) {
+    (void)ctx.engine().set_param(tract_, TractUnit::Vowel, mouth_vowel(mouth));
+  } else if (mouth_is_closure(mouth)) {
+    (void)ctx.engine().set_param(tract_, TractUnit::Close, static_cast<float>(mouth_close(mouth)));
+  }
+}
+
+void PerformScreen::mouth_sound_release(app::Context& ctx) noexcept { write_close(ctx); }  // the strip's closure still held, else open
 
 void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
   constexpr unsigned kAuditionPads = 24;  // the palette: rows A and B (and C, which PATTERN does not use)
@@ -465,6 +488,7 @@ void PerformScreen::release_all(app::Context& ctx) noexcept {
   ctl_held_ = 0;
   mouth_pads_ = 0;
   mouth_ = {};
+  sync_mouth_hold();
   write_close(ctx);
   bnd_dir_ = 0;
   mod_held_ = false;

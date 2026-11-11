@@ -1,0 +1,179 @@
+# MOUTH LANE (TRACT V3, docs/REVIEW-2026-11-11.md section 4): PATTERN's fifth lane, F2 / the Fx key. In TRACT a chord on steps 1 to 8 (NOTE lane), then the
+# MOUTH palette: row 0 is the strip (the nine vowels A to U on pads 0..8, LIPS, TIP, BACK on 9..11), row 1 columns 0..8 are the same vowels with GLD (pads
+# 12..20, a ">" before the cell), 21..23 dark. A palette press writes the cursor step and moves on; a step held plus a palette pad writes that step;
+# SHIFT + a palette pad only sounds; SHIFT + a step clears it. Played, the tube changes vowel at the steps (the WAV), a closure shuts it for the gate,
+# and Stop opens it. Outside TRACT the lane is dim, still edits, and the strip says MOUTH SPEAKS IN TRACT once (snap 08). The simulator shows the screen,
+# the LEDs and that the unit plays; the phrase by ear, the click at a slid step and the closures' sound are for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/mouth_lane.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+# TRACT: F1 steps BANDS, TALK, TUNE, ROBOT, TRACT (the first tap takes the focus)
+tap f1
+tap f1
+tap f1
+tap f1
+tap f1
+wait 600
+expect state voc_mode=tract
+tap pattern
+wait 150
+tap note
+wait 100
+# a note on each of steps 1 to 8 (row A, one pad a note; the cursor steps on by itself)
+paddown 0
+wait 40
+padup 0
+wait 40
+paddown 2
+wait 40
+padup 2
+wait 40
+paddown 4
+wait 40
+padup 4
+wait 40
+paddown 5
+wait 40
+padup 5
+wait 40
+paddown 7
+wait 40
+padup 7
+wait 40
+paddown 9
+wait 40
+padup 9
+wait 40
+paddown 11
+wait 40
+padup 11
+wait 40
+paddown 12
+wait 40
+padup 12
+wait 40
+snap 01_notes
+# the cursor stands on step 9 (eight steps written): the lane, SLICE first, then MOUTH, and a step pad puts the cursor back on step 1
+tap fx
+wait 100
+tap fx
+wait 200
+snap 02_mouth_empty
+paddown 24
+wait 40
+padup 24
+wait 100
+# A, E, I, O, U on steps 1..5 (palette row 0 pads 0, 2, 4, 6, 8), LIPS on step 6 (pad 9)
+paddown 0
+wait 40
+padup 0
+wait 40
+paddown 2
+wait 40
+padup 2
+wait 40
+paddown 4
+wait 40
+padup 4
+wait 40
+paddown 6
+wait 40
+padup 6
+wait 40
+paddown 8
+wait 40
+padup 8
+wait 40
+paddown 9
+wait 40
+padup 9
+wait 40
+# a slid A (row 1, pad 12) on step 7 and a slid U (pad 20) on step 8
+paddown 12
+wait 40
+padup 12
+wait 40
+paddown 20
+wait 40
+padup 20
+wait 40
+# TIP and BACK on steps 9 and 10, which have no note: the closure lasts to the step's end
+paddown 10
+wait 40
+padup 10
+wait 40
+paddown 11
+wait 40
+padup 11
+wait 40
+# a dark pad (row 1, pad 21) writes nothing and the cursor goes to step 12
+paddown 21
+wait 40
+padup 21
+wait 100
+snap 03_written
+# a step held plus a palette pad writes that step: step 12 (pad 39) takes a slid E (row 1 pad 14) and the cursor goes to step 12
+paddown 39
+wait 40
+paddown 14
+wait 40
+padup 14
+padup 39
+wait 100
+snap 04_step_held_write
+# SHIFT + a palette pad sounds only: the cursor and the line do not change
+press shift
+paddown 4
+wait 200
+padup 4
+release shift
+wait 100
+snap 05_shift_sounds
+# SHIFT + a step clears it: step 2 (pad 25) goes back to FOLLOW
+press shift
+paddown 25
+wait 40
+padup 25
+release shift
+wait 100
+snap 06_step_cleared
+# played: the tube changes vowel step by step, the closures shut it, Stop opens it
+tap play
+wait 3500
+snap 07_playing
+wav mouth_lane
+tap play
+wait 400
+# outside TRACT the lane is dim and still edits, and the strip says so once
+tap performance
+wait 100
+tap f1
+wait 800
+expect state voc_mode=bands
+tap pattern
+wait 200
+tap fx
+wait 100
+tap fx
+wait 200
+snap 08_outside_tract
+paddown 4
+wait 40
+padup 4
+wait 150
+snap 09_still_edits
+# back in TRACT, CLEAR LANE
+tap performance
+wait 100
+tap f1
+tap f1
+tap f1
+tap f1
+wait 600
+expect state voc_mode=tract
+tap pattern
+wait 200
+tap f6
+wait 150
+snap 10_cleared

@@ -26,7 +26,7 @@ constexpr o3sdk::core::ParamDesc kParams[TractUnit::kParamCount] = {
     {"RES", "%", nullptr, nullptr, 0.0f, 1.0f, 0.5f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"HISS", "%", nullptr, nullptr, 0.0f, 1.0f, 0.3f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"MIX", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
-    {"SLIDE", "ms", nullptr, nullptr, 5.0f, 500.0f, 30.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Log, 0, 0},
+    {"SLIDE", "ms", nullptr, nullptr, 0.0f, 2000.0f, 0.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"TRACT", o3sdk::dsp::UnitKind::Effect, kParams, TractUnit::kParamCount, nullptr, 0};
@@ -93,7 +93,8 @@ void TractUnit::set(std::uint16_t id, float v) noexcept {
       break;
     }
     case Glide:
-      proc_.set_glide_ms(v);
+    case Slide:  // SLIDE above 0 is the sequencer's glide and wins over GLIDE; 0 gives the knob back its say
+      proc_.set_glide_ms(values_[Slide] > 0.0f ? values_[Slide] : values_[Glide]);  // the Processor clamps to 5..500 ms
       break;
     case Size:
       proc_.set_size(round_index(v, 4) - 2);  // BIG is -2 (the longest tube), TINY +2
@@ -126,7 +127,7 @@ void TractUnit::set(std::uint16_t id, float v) noexcept {
       }
       break;
     }
-    default:  // Slide: V3's, taken and kept
+    default:
       break;
   }
 }

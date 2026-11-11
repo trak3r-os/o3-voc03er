@@ -44,6 +44,8 @@
 
 namespace o3_voc03er {
 
+class StepSeq;
+
 // The header's pair, as every screen shows it: the slot or the live source that speaks, and the slot, the live source or the carrier that sounds.
 // `live` is the live source's label and `usb` whether it is the USB in.
 void header_route(const o3sdk::dsp::Engine& e, o3sdk::dsp::UnitId voice, const char* live, bool usb, ornoir::HeaderState& h) noexcept;
@@ -56,6 +58,9 @@ class PerformScreen final : public o3sdk::app::Screen {
 
   // `tract` is the tract unit (TRACT mode's mouth: F8 VOWEL and row C set to MOUTH write its parameters, the voiceprint reads them); kNoUnit: none.
   void init(o3sdk::dsp::UnitId voice, o3sdk::dsp::UnitId tract, const InputMeter* meter, const Vocoder* voc, SourceStep step, void* user) noexcept;
+
+  // The step sequencer hook (V3): while a closure pad of the mouth strip is held the hook writes no mouth events (it sets the hook's relaxed flag). Null: none.
+  void set_mouth_hold_sink(StepSeq* seq) noexcept { seq_ = seq; }
 
   const char* title() const noexcept override { return "PERFORM"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -136,6 +141,12 @@ class PerformScreen final : public o3sdk::app::Screen {
   static constexpr std::uint8_t kAuditionVelocity = 110;
   static constexpr unsigned kCurrentVoicing = 4;  // audition_press: the chord uses PERFORM's voicing (0..3 is a voicing of its own, a step's)  // what PERFORM's pads play
 
+  // V3: PATTERN's MOUTH palette sounds a mouth byte live in TRACT (a vowel sets VOWEL, a closure sets CLOSE until mouth_sound_release); nothing outside TRACT.
+  // Main loop only; the sequencer's own line is not held back (the strip's closure pads do that).
+  bool mouth_active(const o3sdk::dsp::Engine& e) const noexcept;  // the unit is in TRACT mode
+  void mouth_sound(o3sdk::app::Context& ctx, std::uint8_t mouth) noexcept;
+  void mouth_sound_release(o3sdk::app::Context& ctx) noexcept;
+
   // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): the hint line's moment of text.
   void notice(o3sdk::app::Context& ctx, const char* text) noexcept { show_flash(ctx, text, ""); }
 
@@ -151,7 +162,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   void mouth_press(o3sdk::app::Context& ctx, unsigned pad, const perform::PadSpec& sp) noexcept;
   void mouth_release(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void write_close(o3sdk::app::Context& ctx) noexcept;
-  bool mouth_active(const o3sdk::dsp::Engine& e) const noexcept;  // the unit is in TRACT mode
+  void sync_mouth_hold() noexcept;
   void control_press(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void control_release(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void choose_row(o3sdk::app::Context& ctx, pads::Row row) noexcept;
@@ -178,6 +189,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   // The mouth strip's closure pads held (row C set to MOUTH, TRACT): pad bits and the order they went down in. Layout-independent, so a row changed
   // under a held pad still lets it go. Main loop only.
   std::uint64_t mouth_pads_ = 0;
+  StepSeq* seq_ = nullptr;  // told whether a mouth pad is held (set_mouth_hold_sink)
   perform::MouthHold mouth_;
   const InputMeter* meter_ = nullptr;
   const Vocoder* voc_ = nullptr;

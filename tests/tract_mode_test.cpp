@@ -21,7 +21,9 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace o3_voc03er;
@@ -243,7 +245,8 @@ TEST_CASE("tract mode: the tables agree: five modes, TRACT is the fifth, the tub
   CHECK(tu.info().kind == dsp::UnitKind::Effect);
   CHECK(tu.info().params[TractUnit::Mix].def == 0.0f);
   CHECK(tu.info().params[TractUnit::Glide].def == 30.0f);
-  CHECK(tu.info().params[TractUnit::Slide].def == 30.0f);
+  CHECK(tu.info().params[TractUnit::Slide].def == 0.0f);
+  CHECK(tu.info().params[TractUnit::Slide].max == 2000.0f);
 }
 
 TEST_CASE("tract mode: PERFORM has a page of its own for TRACT (F8 VOWEL); ROBOT keeps BANDS' page") {
@@ -485,6 +488,57 @@ TEST_CASE("tract unit: the block size does not change the tube") {
     std::printf("tract unit: block %zu differs from 64 by %.3g\n", size, static_cast<double>(worst));
     CHECK(worst < 1.0e-5f);
   }
+}
+
+TEST_CASE("tract unit: SLIDE above 0 is the glide and wins over GLIDE; a GLIDE turn never changes SLIDE, and SLIDE 0 gives GLIDE back") {
+  using P = std::pair<std::uint16_t, float>;
+  // MIX 1 and the given values, nine blocks of the hold and a few more, then VOWEL 0 -> 1 and 24 blocks of the move, as the left plane. `late` are
+  // written in the block just before the move (a GLIDE or SLIDE turn while it is running).
+  auto trace = [](std::initializer_list<P> setup, std::initializer_list<P> late) {
+    Tube t;
+    std::vector<float> x;
+    float out[64];
+    std::vector<dsp::Event> ev;
+    ev.push_back(dsp::param_change(TractUnit::Mix, 1.0f));
+    for (const P& p : setup) {
+      ev.push_back(dsp::param_change(p.first, p.second));
+    }
+    t.block(out, 64, true, ev.data(), static_cast<std::uint32_t>(ev.size()));
+    for (int b = 0; b < 14; ++b) {
+      t.block(out, 64, true);
+    }
+    ev.clear();
+    for (const P& p : late) {
+      ev.push_back(dsp::param_change(p.first, p.second));
+    }
+    ev.push_back(dsp::param_change(TractUnit::Vowel, 1.0f));
+    t.block(out, 64, true, ev.data(), static_cast<std::uint32_t>(ev.size()));
+    x.insert(x.end(), out, out + 64);
+    for (int b = 0; b < 24; ++b) {
+      t.block(out, 64, true);
+      x.insert(x.end(), out, out + 64);
+    }
+    return x;
+  };
+  const auto glide400 = trace({{TractUnit::Glide, 400.0f}}, {});
+  const auto glide30 = trace({{TractUnit::Glide, 30.0f}}, {});
+  const auto slide400 = trace({{TractUnit::Glide, 30.0f}, {TractUnit::Slide, 400.0f}}, {});
+  CHECK(slide400 == glide400);  // SLIDE is the glide while it is above 0, whatever GLIDE says
+  CHECK(slide400 != glide30);
+  // A GLIDE turn while SLIDE rules changes nothing.
+  CHECK(trace({{TractUnit::Slide, 400.0f}}, {{TractUnit::Glide, 100.0f}}) == glide400);
+  CHECK(trace({{TractUnit::Glide, 100.0f}, {TractUnit::Slide, 400.0f}}, {}) == glide400);
+  // SLIDE 0 hands the glide back to the knob, wherever the knob went meanwhile.
+  const auto glide100 = trace({{TractUnit::Glide, 100.0f}}, {});
+  CHECK(trace({{TractUnit::Slide, 400.0f}, {TractUnit::Glide, 100.0f}, {TractUnit::Slide, 0.0f}}, {}) == glide100);
+  CHECK(trace({{TractUnit::Slide, 400.0f}}, {{TractUnit::Slide, 0.0f}}) != glide400);  // the default GLIDE (30 ms) rules again
+}
+
+TEST_CASE("tract unit: the ids the step hook writes are the unit's VOWEL, CLOSE and SLIDE") {
+  CHECK(TractUnit::Vowel == 0);  // stepseq.h's TractParam restates them, and stepseq_test.cpp's kVowelId, kCloseId, kSlideId
+  CHECK(TractUnit::Close == 4);
+  CHECK(TractUnit::Slide == 10);
+  CHECK(TractUnit::Glide != TractUnit::Slide);
 }
 
 TEST_CASE("tract unit: the sleep: silence costs nothing, the first block after waking has no step over a bound") {

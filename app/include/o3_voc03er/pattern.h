@@ -31,7 +31,7 @@ inline constexpr std::uint8_t kCarrierMax = 6;  // a step's carrier: 0 none, 1 s
 inline constexpr const char* kPatternFile = "pattern.o3a";  // in the app's folder on the card, Apps/<id>/ (the CMake id)
 inline constexpr const char* kConfigFile = "config.o3a";
 // The largest file each makes (about 80 and 50 bytes) with room to spare; the buffers that hold them are word aligned (Files::save reads them).
-inline constexpr std::size_t kPatternFileMax = 768;  // the V2 file with eight patterns is about 600 bytes (stepseq.h)
+inline constexpr std::size_t kPatternFileMax = 1024;  // the V2 file with eight patterns is about 600 bytes, 750 with a mouth line (stepseq.h)
 inline constexpr std::size_t kConfigFileMax = 64;
 
 struct Pattern {

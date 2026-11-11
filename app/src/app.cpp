@@ -156,6 +156,7 @@ class MyApp final : public app::App {
     sample_edit_.init(&sample_, g_loop_mem);
     sample_load_.init(&sample_, g_loop_mem);
     file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain, &sample_load_, g_loop_mem);
+    file_.set_tract(tube);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this, &sample_);
     song_.init(voice, &g_chain, &carriers_, &perform_);
     pattern_.set_song(&song_);
@@ -164,6 +165,9 @@ class MyApp final : public app::App {
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
     (void)ctx.midi().route(voice, 0);
     carriers_.init(voice, &g_bank, sample_.slice_map());
+    perform_.set_mouth_hold_sink(&carriers_);
+    carriers_.set_mouth_hold(false);
+    carriers_.set_tract(tube);  // the MOUTH lane (V3) writes the tract unit; none while PERFORM holds a strip pad
     voc_.bind_slices(sample_.slice_map());  // the same map the hook reads; its address never moves
     carriers_.set_picked(1);  // the boot CarSrc above
     (void)e.add_hook(carriers_);  // the per-step carrier switch (V5c); a refusal is counted like the others
@@ -344,7 +348,8 @@ class MyApp final : public app::App {
     }
     for (const Lane& l : kLanes) {  // NOTE, INSTR, VOL and FX open the same screen on their lane
       if (in.press(l.button)) {
-        pattern_.set_lane(ctx, l.lane);
+        const bool again = l.button == app::Button::Fx && ctx.screen() == &pattern_ && pattern_.lane() == l.lane;  // FX on SLICE: MOUTH; on MOUTH: SLICE
+        pattern_.set_lane(ctx, again ? o3_voc03er::pattern::Lane::Mouth : l.lane);
         if (ctx.screen() != &pattern_) {
           ctx.show(pattern_);
         }
@@ -531,6 +536,9 @@ class MyApp final : public app::App {
         if (s.slice != 0u) {
           out.chr('s').dec(s.slice);
         }
+        if (ov::get_mouth(pd, i) != 0u) {
+          out.chr('m').dec(ov::get_mouth(pd, i));
+        }
       }
       out.nl();
     };
@@ -542,7 +550,7 @@ class MyApp final : public app::App {
     }
     ov::PatCommand c;
     if (!ov::parse_pat(args.argv + 1, args.argc - 1u, c)) {
-      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car follow|synth|noise|s1..s4|lvl v|slc n]]").nl();
+      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car follow|synth|noise|s1..s4|lvl v|slc n|mou 0..12 (+128 gld)]]").nl();
       return;
     }
     ov::PatternData& pd = g_bank.pattern[c.pattern];
@@ -555,6 +563,7 @@ class MyApp final : public app::App {
       case ov::PatAct::Carrier: ok = ov::set_carrier(pd, c.step, c.value); break;
       case ov::PatAct::Level: ok = ov::set_level(pd, c.step, c.value); break;
       case ov::PatAct::Slice: ok = ov::set_slice(pd, c.step, c.value); break;
+      case ov::PatAct::Mouth: ok = ov::set_mouth(pd, c.step, c.value); break;
     }
     if (!ok) {
       out.text("refused").nl();
@@ -584,7 +593,7 @@ class MyApp final : public app::App {
     o3_voc03er::TractCommand c;
     if (ctx_ == nullptr || args.argc != 3u || !o3_voc03er::parse_tract(args.arg(1), args.arg(2), c) ||
         !o3sdk::core::param_in_range(tract_.info().params[c.id], c.value)) {
-      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 5..500> <value>").nl();
+      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 0..2000> <value>").nl();
       return;
     }
     (void)ctx_->engine().set_param(tract_id_, static_cast<std::uint16_t>(c.id), c.value);

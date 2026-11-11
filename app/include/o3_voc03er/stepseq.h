@@ -17,6 +17,14 @@
 //                    slot's slice count is stored and stays silent
 // Everything zero is a valid step (a rest, FOLLOW, default level), so the bank can live zero-initialised in the SDRAM (O3SDK_BIG).
 //
+// The MOUTH lane (TRACT V3) is a byte a step beside the step word, in PatternData::mouth (16 bytes a pattern, so a copy, a clear and a file carry it
+// with the pattern; the step word is untouched):
+//   bits 0..3 value  0 FOLLOW (the step writes nothing), 1..9 the vowels A, A-E, E, E-I, I, I-O, O, O-U, U (the tract's VOWEL is (value - 1) / 8),
+//                    10 LIPS, 11 TIP, 12 BACK (closures); 13..15 are refused on load (kept free for V3b)
+//   bits 4..6        zero
+//   bit 7 GLD        a vowel slides to the step's vowel over the step's length instead of GLIDE's time; refused on a closure and on FOLLOW
+// Read with a relaxed atomic byte load, written by the main loop (single writer), as the step words are.
+//
 // Threads: the main loop edits through the functions below (relaxed atomic word stores, single writer); the render context reads in
 // StepSeq::block(). `length` is a byte of its own, also read and written atomically; 0 reads as 16. The hook's other inputs (the pattern to
 // play next, the key and scale, what the user picked as CARRIER) are relaxed atomics of the hook.
@@ -33,13 +41,15 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace o3_voc03er {
 
 inline constexpr unsigned kBankPatterns = 8;
 inline constexpr std::uint8_t kLevelDefault = 100;
-// The v2 pattern file: the app's PATN with the old STEP and CARR chunks (pattern A, so an older reader still gets it) and BANK (all eight).
-inline constexpr std::size_t kBankFileMax = 768;  // about 600 bytes with room to spare
+// The v2 pattern file: the app's PATN with the old STEP and CARR chunks (pattern A, so an older reader still gets it), BANK (all eight) and, when a
+// step has a mouth byte, MOUT (V3).
+inline constexpr std::size_t kBankFileMax = 1024;  // about 750 bytes with a mouth line, with room to spare
 
 // SliceMap (the SPEAKS slot's slices: the hook's SLICE lane and the unit's MIDI slices read the same map) and kSliceMax live in vocoder.h; the
 // main loop writes it through StepSeq::slices_open / slices_close.
@@ -78,8 +88,9 @@ struct alignas(4) PatternData {
   std::uint32_t step[kPatternSteps];  // packed steps (pack_step); read and written with the atomics below
   std::uint8_t length;                // 1..16, 0 reads as 16
   std::uint8_t reserved[3];
+  std::uint8_t mouth[kPatternSteps];  // the MOUTH lane (see the header comment); 0 FOLLOW; relaxed atomic bytes
 };
-static_assert(sizeof(PatternData) == 4 * kPatternSteps + 4 && alignof(PatternData) == 4, "the hook reads the words aligned");
+static_assert(sizeof(PatternData) == 4 * kPatternSteps + 4 + kPatternSteps && alignof(PatternData) == 4, "the hook reads the words aligned, no padding");
 
 // The bank is zero-initialised POD, so it can sit in the SDRAM: `O3SDK_BIG Bank g_bank;`.
 struct alignas(4) Bank {
@@ -97,6 +108,32 @@ inline unsigned length_of(const PatternData& p) noexcept {
 }
 inline Step get_step(const PatternData& p, unsigned i) noexcept {
   return i < kPatternSteps ? unpack_step(load_word(p.step[i])) : Step{};
+}
+
+// --- the MOUTH lane's byte ---
+inline constexpr unsigned kMouthVowels = 9;       // values 1..9: A, A-E, E, E-I, I, I-O, O, O-U, U
+inline constexpr unsigned kMouthLips = 10;        // values 10..12: the closures
+inline constexpr unsigned kMouthBack = 12;
+inline constexpr std::uint8_t kMouthGld = 0x80;
+inline constexpr std::uint8_t kMouthValueMask = 0x0F;
+constexpr unsigned mouth_value(std::uint8_t m) noexcept { return m & kMouthValueMask; }
+constexpr bool mouth_gld(std::uint8_t m) noexcept { return (m & kMouthGld) != 0u; }
+constexpr bool mouth_is_vowel(std::uint8_t m) noexcept { return mouth_value(m) >= 1u && mouth_value(m) <= kMouthVowels; }
+constexpr bool mouth_is_closure(std::uint8_t m) noexcept { return mouth_value(m) >= kMouthLips && mouth_value(m) <= kMouthBack; }
+// The closure's CLOSE value (1 LIPS, 2 TIP, 3 BACK) of a closure byte.
+constexpr unsigned mouth_close(std::uint8_t m) noexcept { return mouth_value(m) - kMouthLips + 1u; }
+// The tract's VOWEL (0..1) of a vowel byte: value 1 is A at 0, value 9 is U at 1.
+constexpr float mouth_vowel(std::uint8_t m) noexcept { return static_cast<float>(mouth_value(m) - 1u) * (1.0f / 8.0f); }
+// A byte the lane holds: bits 4..6 zero, a value 0..12, GLD on a vowel only.
+constexpr bool mouth_valid(unsigned m) noexcept {
+  if (m > 0xFFu || (m & 0x70u) != 0u) {
+    return false;
+  }
+  const std::uint8_t b = static_cast<std::uint8_t>(m);
+  return mouth_value(b) <= kMouthBack && (!mouth_gld(b) || mouth_is_vowel(b));
+}
+inline std::uint8_t get_mouth(const PatternData& p, unsigned i) noexcept {
+  return i < kPatternSteps ? __atomic_load_n(&p.mouth[i], __ATOMIC_RELAXED) : std::uint8_t{0};
 }
 
 // --- editing (main loop). Every one returns false, changing nothing, for an index or a value out of range. ---
@@ -141,6 +178,14 @@ inline bool set_chord(PatternData& p, unsigned i, unsigned root, ChordKind kind,
 inline bool set_carrier(PatternData& p, unsigned i, unsigned c) noexcept { return edit_step(p, i, &Step::carrier, c, kCarrierMax); }
 inline bool set_level(PatternData& p, unsigned i, unsigned v) noexcept { return edit_step(p, i, &Step::level, v, 127u); }
 inline bool set_slice(PatternData& p, unsigned i, unsigned v) noexcept { return edit_step(p, i, &Step::slice, v, kSliceMax); }
+// The mouth byte of a step (mouth_valid: 0 clears it).
+inline bool set_mouth(PatternData& p, unsigned i, unsigned m) noexcept {
+  if (i >= kPatternSteps || !mouth_valid(m)) {
+    return false;
+  }
+  __atomic_store_n(&p.mouth[i], static_cast<std::uint8_t>(m), __ATOMIC_RELAXED);
+  return true;
+}
 // The next carrier of step `i` (FOLLOW, SYNTH, NOISE, SLOT 1..4, FOLLOW ...).
 inline bool cycle_carrier(PatternData& p, unsigned i) noexcept {
   if (i >= kPatternSteps) {
@@ -159,6 +204,9 @@ inline bool set_length(PatternData& p, unsigned n) noexcept {
 inline void clear_pattern(PatternData& p) noexcept {
   for (std::uint32_t& w : p.step) {
     store_word(w, 0u);
+  }
+  for (std::uint8_t& m : p.mouth) {
+    __atomic_store_n(&m, std::uint8_t{0}, __ATOMIC_RELAXED);
   }
   __atomic_store_n(&p.length, std::uint8_t{0}, __ATOMIC_RELAXED);
 }
@@ -183,12 +231,19 @@ inline unsigned carriers_used(const PatternData& p) noexcept {
   }
   return c;
 }
+inline unsigned mouths_used(const PatternData& p) noexcept {
+  unsigned c = 0;
+  for (unsigned i = 0; i < kPatternSteps; ++i) {
+    c += get_mouth(p, i) != 0u ? 1u : 0u;
+  }
+  return c;
+}
 inline bool same_pattern(const PatternData& a, const PatternData& b) noexcept {
   if (length_of(a) != length_of(b)) {
     return false;
   }
   for (unsigned i = 0; i < kPatternSteps; ++i) {
-    if (load_word(a.step[i]) != load_word(b.step[i])) {
+    if (load_word(a.step[i]) != load_word(b.step[i]) || get_mouth(a, i) != get_mouth(b, i)) {
       return false;
     }
   }
@@ -197,6 +252,7 @@ inline bool same_pattern(const PatternData& a, const PatternData& b) noexcept {
 inline void copy_pattern(PatternData& dst, const PatternData& src) noexcept {
   for (unsigned i = 0; i < kPatternSteps; ++i) {
     store_word(dst.step[i], load_word(src.step[i]));
+    __atomic_store_n(&dst.mouth[i], get_mouth(src, i), __ATOMIC_RELAXED);
   }
   __atomic_store_n(&dst.length, static_cast<std::uint8_t>(length_of(src)), __ATOMIC_RELAXED);
 }
@@ -207,6 +263,7 @@ inline void from_legacy(PatternData& dst, const Pattern& src) noexcept {
     s.note = src.note[i];
     s.carrier = src.carrier[i];
     (void)set_step(dst, i, s);
+    __atomic_store_n(&dst.mouth[i], std::uint8_t{0}, __ATOMIC_RELAXED);  // a v1 file has no mouth line
   }
   (void)set_length(dst, kPatternSteps);
 }
@@ -242,6 +299,8 @@ inline unsigned step_notes(const Step& s, unsigned key, unsigned scale, std::uin
 // --- the file ---
 // BANK: u16 version (0x0100), u8 pattern count (8), then per pattern u8 length (1..16) and 16 u32 steps. A BANK with a wrong count, a length or a
 // step field out of range refuses the whole file; no BANK is a v1 file, which loads into pattern A only.
+// MOUT (V3, written only when a step has a mouth byte): u16 version (0x0100), u8 pattern count (8), then per pattern its 16 mouth bytes. A MOUT with a
+// wrong count or a byte mouth_valid refuses the file; no MOUT means every step FOLLOWs.
 inline std::size_t write_bank(const Bank& b, std::uint8_t* out, std::size_t cap) noexcept {
   namespace chunk = o3sdk::formats::chunk;
   const Pattern a = to_legacy(b.pattern[0]);  // the old reader's view of pattern A
@@ -265,7 +324,31 @@ inline std::size_t write_bank(const Bank& b, std::uint8_t* out, std::size_t cap)
       }
     }
   }
-  return w.end() ? w.finish() : 0;
+  if (!w.end()) {
+    return 0;
+  }
+  bool any_mouth = false;
+  for (const PatternData& p : b.pattern) {
+    any_mouth = any_mouth || mouths_used(p) != 0u;
+  }
+  if (any_mouth) {
+    if (!w.begin("MOUT") || !w.u16(0x0100) || !w.u8(kBankPatterns)) {
+      return 0;
+    }
+    for (const PatternData& p : b.pattern) {
+      std::uint8_t m[kPatternSteps];
+      for (unsigned i = 0; i < kPatternSteps; ++i) {
+        m[i] = get_mouth(p, i);
+      }
+      if (!w.bytes(m, sizeof m)) {
+        return 0;
+      }
+    }
+    if (!w.end()) {
+      return 0;
+    }
+  }
+  return w.finish();
 }
 
 // `b` is changed only when the whole file is good (the checks run on a copy). A v1 file (read_pattern's) loads pattern A and leaves B..H alone.
@@ -278,7 +361,28 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
   }
   Bank got = {};
   bool have_bank = false;
+  bool have_mout = false;
+  std::uint8_t mouth[kBankPatterns][kPatternSteps] = {};
   while (r.next(c)) {
+    if (chunk::id_is(c, "MOUT")) {
+      chunk::Fields f(c);
+      if (have_mout || (f.u16() >> 8) != 1u || f.u8() != kBankPatterns) {
+        return false;
+      }
+      for (auto& row : mouth) {
+        for (std::uint8_t& m : row) {
+          m = f.u8();
+          if (!mouth_valid(m)) {
+            return false;
+          }
+        }
+      }
+      if (!f.ok()) {
+        return false;
+      }
+      have_mout = true;
+      continue;
+    }
     if (!chunk::id_is(c, "BANK")) {
       continue;
     }
@@ -313,6 +417,7 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
       return false;
     }
     for (unsigned i = 0; i < kBankPatterns; ++i) {
+      std::memcpy(got.pattern[i].mouth, mouth[i], kPatternSteps);  // absent MOUT: every step FOLLOWs
       copy_pattern(b.pattern[i], got.pattern[i]);
     }
     return true;
@@ -335,7 +440,13 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
 //            CHOKE are the pads' and do not apply. A slice above the count, or no source, emits nothing. At a Stop one Trig 0 releases the
 //            reader that fired, only if a slice fired since the last Stop.
 //   LEVEL    the notes' velocity: the last note sets the level of the SYNTH and NOISE carriers (one gain, 100 and up are full). A slice has no level.
-// An event budget for a block: a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate, one CarSrc and the 3 region events:
+//   MOUTH    (V3, once set_tract() names the tract unit; events go out in every mode, the unit is a bypass outside TRACT) at most 3 Param events
+//            a step, all on the step's frame or on its gate's end: a vowel writes VOWEL at the step's frame; with GLD it writes SLIDE (the step's
+//            length in ms) first, and the next plain vowel writes SLIDE 0 first; a closure writes CLOSE 1..3 at the step's frame and CLOSE 0 at the
+//            gate's end (a step with no note: at the step's end, the next edge, unless the next step is a closure too); FOLLOW writes nothing. The
+//            hook never writes GLIDE. A Stop (and so a pattern change that lands on it) writes CLOSE 0 and SLIDE 0 once, if the line wrote since the
+//            last one. While set_mouth_hold(true) (a PERFORM strip pad is held: the pad owns the tract) it emits no mouth events at all.
+// An event budget for a block (the vocoder's; the mouth's events go to the tract unit, whose own 32 are far from used): a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate, one CarSrc and the 3 region events:
 // 14 of kMaxEventsPerUnit (32, of which the notes injected by the main loop take at most kMaxInjectPerUnit = 16, so 16 are left); a block holds
 // at most one step edge.
 // PATTERN CHANGE: request_pattern() only stores the wish; the hook takes it when the playing pattern reaches its end (and at a Play). A LENGTH
@@ -411,6 +522,11 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     p.pattern = static_cast<std::uint8_t>((w >> 24) & 7u);
     return p;
   }
+  // Main loop, once at setup: the tract unit the MOUTH lane writes to (kNoUnit, the default: no mouth events).
+  void set_tract(o3sdk::dsp::UnitId tract) noexcept { tract_ = tract; }
+  // Main loop: true while a PERFORM strip pad is held. The hook emits no mouth events while it is set (relaxed, may be a block old).
+  void set_mouth_hold(bool held) noexcept { mouth_hold_.store(held, std::memory_order_relaxed); }
+  bool mouth_hold() const noexcept { return mouth_hold_.load(std::memory_order_relaxed); }
   // Main loop: the CARRIER the user picked (every write of CarSrc from the main side, mirrored by the app each pass), the key and scale the
   // chords are spelled in.
   void set_picked(std::uint8_t v) noexcept { picked_.store(v, std::memory_order_relaxed); }
@@ -432,6 +548,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
         fired_ = kNoReader;
       }
       playing_slice_.store(0, std::memory_order_relaxed);
+      mouth_stop(ctx);
       pos_word_.store(0u, std::memory_order_relaxed);
       if (changed_) {  // only what a lane step did is undone, to the user's pick (never FOLLOW: LIVE and slots survive a Stop)
         (void)ctx.emit(unit_, dsp::param_change(Vocoder::CarSrc, static_cast<float>(picked_.load(std::memory_order_relaxed)), 0));
@@ -444,6 +561,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       note_lap();
     }
     int on_frame = -1;
+    int close_frame = -1;  // the frame a closure began at in this block (its gate's end is after it)
     dsp::for_each_step(t, dsp::kTicksPerSixteenth, 0, 0, [&](std::uint32_t frame, std::uint64_t k) {
       const PatternData& p = bank_->pattern[cur_.load(std::memory_order_relaxed) % kBankPatterns];
       const unsigned len = length_of(p);
@@ -498,11 +616,17 @@ class StepSeq final : public o3sdk::dsp::Clocked {
         sounding_ = true;
         on_frame = static_cast<int>(frame);
       }
+      if (mouth_step(ctx, t, static_cast<std::uint16_t>(frame), get_mouth(p, i), count != 0u)) {
+        close_frame = static_cast<int>(frame);
+      }
     });
     // The gate: 180 ticks after each step edge.
     dsp::for_each_step(t, dsp::kTicksPerSixteenth, kGateTicks, 0, [&](std::uint32_t frame, std::uint64_t) {
       if (sounding_ && (on_frame < 0 || static_cast<int>(frame) >= on_frame)) {
         release(ctx, static_cast<std::uint16_t>(frame));
+      }
+      if (closing_ && close_gate_ && (close_frame < 0 || static_cast<int>(frame) >= close_frame) && mouth_emit(ctx, TractParam::Close, 0.0f, static_cast<std::uint16_t>(frame))) {
+        closing_ = false;
       }
     });
   }
@@ -518,6 +642,56 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       cur_.store(n, std::memory_order_relaxed);
     }
   }
+  // The tract unit's parameter ids the hook writes (TractUnit's enum, restated: the app layer's header does not include the unit's).
+  enum class TractParam : std::uint16_t { Vowel = 0, Close = 4, Slide = 10 };
+  // One Param event for the tract unit; false (nothing emitted) with no unit or while a strip pad is held.
+  bool mouth_emit(o3sdk::dsp::BlockContext& ctx, TractParam id, float v, std::uint16_t frame) noexcept {
+    if (tract_ == o3sdk::dsp::kNoUnit || mouth_hold_.load(std::memory_order_relaxed)) {
+      return false;
+    }
+    mouth_dirty_ = true;
+    (void)ctx.emit(tract_, o3sdk::dsp::param_change(static_cast<std::uint16_t>(id), v, frame));
+    return true;
+  }
+  // The MOUTH lane's events for the step starting at `frame` (see the header comment). Returns true when it began a closure.
+  bool mouth_step(o3sdk::dsp::BlockContext& ctx, const o3sdk::dsp::Transport& t, std::uint16_t frame, std::uint8_t m, bool has_note) noexcept {
+    if (tract_ == o3sdk::dsp::kNoUnit || mouth_hold_.load(std::memory_order_relaxed)) {
+      return false;
+    }
+    const bool closure = mouth_is_closure(m);
+    if (closing_ && !closure && mouth_emit(ctx, TractParam::Close, 0.0f, frame)) {  // a closure with no gate end yet ends with its step
+      closing_ = false;
+    }
+    if (mouth_is_vowel(m)) {
+      if (mouth_gld(m)) {
+        const float bpm = t.tempo_bpm();
+        float ms = bpm > 0.0f ? 15000.0f / bpm : 2000.0f;  // a sixteenth, in ms
+        ms = ms < 5.0f ? 5.0f : (ms > 2000.0f ? 2000.0f : ms);
+        (void)mouth_emit(ctx, TractParam::Slide, ms, frame);
+        slid_ = true;
+      } else if (slid_ && mouth_emit(ctx, TractParam::Slide, 0.0f, frame)) {
+        slid_ = false;
+      }
+      (void)mouth_emit(ctx, TractParam::Vowel, mouth_vowel(m), frame);
+    } else if (closure) {
+      (void)mouth_emit(ctx, TractParam::Close, static_cast<float>(mouth_close(m)), frame);
+      closing_ = true;
+      close_gate_ = has_note;
+      return true;
+    }
+    return false;
+  }
+  // A Stop: CLOSE 0 and SLIDE 0, once, when the line wrote since the last one.
+  void mouth_stop(o3sdk::dsp::BlockContext& ctx) noexcept {
+    if (!mouth_dirty_ || tract_ == o3sdk::dsp::kNoUnit || mouth_hold_.load(std::memory_order_relaxed)) {
+      return;
+    }
+    (void)mouth_emit(ctx, TractParam::Close, 0.0f, 0);
+    (void)mouth_emit(ctx, TractParam::Slide, 0.0f, 0);
+    mouth_dirty_ = false;
+    closing_ = false;
+    slid_ = false;
+  }
   void release(o3sdk::dsp::BlockContext& ctx, std::uint16_t frame) noexcept {
     if (!sounding_) {
       return;
@@ -529,6 +703,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   }
 
   o3sdk::dsp::UnitId unit_ = o3sdk::dsp::kNoUnit;
+  o3sdk::dsp::UnitId tract_ = o3sdk::dsp::kNoUnit;  // the MOUTH lane's unit (set_tract; main loop, once)
   const Bank* bank_ = nullptr;
   // Render context only (one thread): the next step of the playing pattern, the notes of the last step (kept after their off for SMOOTH), the flags.
   std::uint8_t pos_ = 0;
@@ -536,6 +711,10 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   std::uint8_t last_count_ = 0;
   bool sounding_ = false;
   bool changed_ = false;
+  bool closing_ = false;      // a closure is on (CLOSE 1..3 written, no CLOSE 0 yet)
+  bool close_gate_ = false;   // ...and it ends at its gate (the step had a note) rather than at the step's end
+  bool slid_ = false;         // SLIDE is above 0 (a GLD step wrote it, no plain vowel has written 0 since)
+  bool mouth_dirty_ = false;  // the line wrote since the last Stop
   std::uint8_t fired_ = kNoReader;  // the reader a lane slice was fired on since the last Stop
   // Shared with the main loop (relaxed, single writer each): next_ and key_ / scale_ / picked_ are written by the main loop, cur_ and step_ by
   // the render context.
@@ -548,6 +727,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   std::atomic<std::uint8_t> picked_{1};
   std::atomic<std::uint8_t> key_{0};
   std::atomic<std::uint8_t> scale_{0};
+  std::atomic<bool> mouth_hold_{false};  // main loop writes (PERFORM's strip), render context reads
   // The SPEAKS slot's slices: map_ is set at init and written by the main loop only while its source is 0 (see slices_open); source is written
   // by the main loop, read by the render context. playing_slice_ is written by the render context.
   SliceMap* map_ = nullptr;

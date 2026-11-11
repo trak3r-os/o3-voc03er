@@ -214,6 +214,16 @@ TEST_CASE("parse_pat reads a pattern letter, a step and one lane") {
   CHECK(c.value == 0u);
   REQUIRE(parse({"A", "3", "slc", "24"}));
   CHECK(c.value == 24u);
+  REQUIRE(parse({"A", "4", "mou", "0"}));
+  CHECK(c.act == PatAct::Mouth);
+  CHECK(c.step == 3u);
+  CHECK(c.value == 0u);
+  REQUIRE(parse({"B", "16", "mou", "12"}));
+  CHECK(c.value == 12u);
+  REQUIRE(parse({"A", "1", "mou", "129"}));  // A with GLD
+  CHECK(c.value == 129u);
+  REQUIRE(parse({"A", "1", "mou", "137"}));  // U with GLD
+  CHECK(c.value == 137u);
 }
 
 TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and leaves the command alone") {
@@ -237,6 +247,15 @@ TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and lea
   CHECK(bad({"A", "1", "note", "0"}));  // a rest is spelled out
   CHECK(bad({"A", "1", "note"}));
   CHECK(bad({"A", "1", "note", "60", "x"}));
+  CHECK(bad({"A", "1", "mou", "13"}));
+  CHECK(bad({"A", "1", "mou", "127"}));
+  CHECK(bad({"A", "1", "mou", "128"}));  // GLD on FOLLOW
+  CHECK(bad({"A", "1", "mou", "138"}));  // GLD on a closure
+  CHECK(bad({"A", "1", "mou", "140"}));
+  CHECK(bad({"A", "1", "mou", "141"}));
+  CHECK(bad({"A", "1", "mou", "-1"}));
+  CHECK(bad({"A", "1", "mou"}));
+  CHECK(bad({"A", "17", "mou", "1"}));
   CHECK(bad({"A", "1", "chord", "60"}));
   CHECK(bad({"A", "1", "chord", "60", "maj"}));
   CHECK(bad({"A", "1", "chord", "60", "tri", "huge"}));

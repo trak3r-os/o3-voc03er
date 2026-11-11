@@ -42,6 +42,19 @@
   the main loop. PARAMS now opens on its first page after a `setup()`. Unit check owed: the strip by hand, the pop of a closure by ear, PERFORM's
   frame in TRACT under the display budget, FORMANT on row C in TRACT (it does nothing there: whether it becomes the mouth is the maintainer's call);
   DRY (mic thru) also goes through the tube in TRACT, and entering TRACT may let the raw carrier through for a few ms before the tube fades in.
+- The MOUTH line (V3): each pattern step gets a mouth byte (16 a pattern, inside `PatternData`, so copy, INSERT, DELETE, SHIFT + COPY and the
+  pattern file carry it): FOLLOW, the nine vowels, the closures LIPS, TIP and BACK (13 to 15 are refused until V3b), and GLD (bit 7, vowels
+  only). StepSeq's `set_tract(UnitId)` turns it into at most three Param events a step in every mode: VOWEL; a GLD vowel writes SLIDE (the step
+  length in ms) first and the next plain step writes SLIDE 0; a closure writes CLOSE 1 to 3 at the step and CLOSE 0 at the gate's end (a step with
+  no note: the step's end); Stop, and a pattern change that lands on Stop, write CLOSE 0 and SLIDE 0 once. A pad of PERFORM's MOUTH strip held
+  suppresses the events. The tract unit's SLIDE (id 10) is live: 0 to 2000 ms, default 0, 0 means GLIDE rules; GLIDE is never written by the
+  hook, and the voice clamps a glide to 5 to 500 ms. PATTERN's fifth lane, MOUTH (F2, or FX after SLICE): the strip, the vowels with GLD, a
+  palette press sounds live in TRACT, "A", "AE", ..., "LIP", "TIP", "BCK", a `>` before a slid vowel; dim outside TRACT. Console:
+  `pat <A-H> <step> mou <0-12, +128 GLD>`. The project file gains two chunks, `MOUT` (u16 0x0100, a count, 16 bytes a pattern, after PTNS; absent
+  is FOLLOW; a bad byte or count refuses the file) and `TRCT` (u16 0x0100, then VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS; absent is the
+  defaults; out of range refuses the file; CLOSE, MIX and SLIDE are not saved); they carry the chunk version 0x0100, the file, PTNS and STAT keep
+  their versions, and an older build skips both. F4 NEW resets them. Unit check owed: the sequenced phrase by ear, no click at a slid step, the
+  closures and GLD, a sequenced mode change with 8 notes and 4 loops, a save and an open of a project with a mouth line on the card.
 - The project keeps more (P3, Q8): STAT 1.1 adds VOICING, the BEND ROW and its range, FOLLOW, the preset (by name, so a reordered
   table does not move it), and the pads layout (rows A, B, C and the two last-used chord pads); SLOT 1.1 adds TRIG and CHOKE per slot.
   A v0.2.0 project loads with SMOOTH, bend row off, range 2, FOLLOW off, no preset, ONE SHOT and CHOKE ON, and its KEYS or chord kind

@@ -325,13 +325,13 @@ inline bool parse_loop(const char* num, const char* act, LoopCommand& out, const
 }
 
 // `pat [A-H] [len <n>] | [A-H <step 1-16> note <1-127|rest> | chord <root> <tri|sev|open|pow> [close|open|wide|smooth] | car <follow|synth|noise|s1..s4> |
-// lvl <0-127> | slc <0-24>]`: the words after `pat`. Kind and voicing are the numbers of ChordKind and Voicing (chords.h); the root is a MIDI note 1..127.
-enum class PatAct : std::uint8_t { Show, Length, Note, Chord, Carrier, Level, Slice };
+// lvl <0-127> | slc <0-24> | mou <0-12, +128 gld>]`: the words after `pat`. Kind and voicing are the numbers of ChordKind and Voicing (chords.h); the root is a MIDI note 1..127.
+enum class PatAct : std::uint8_t { Show, Length, Note, Chord, Carrier, Level, Slice, Mouth };
 struct PatCommand {
   unsigned pattern = 0;  // 0..7
   PatAct act = PatAct::Show;
   unsigned step = 0;     // 0..15 (every act but Show and Length)
-  unsigned value = 0;    // Length 1..16; Note 0..127 (0 a rest); Chord the root; Carrier 0..6; Level 0..127; Slice 0..24 (0 none)
+  unsigned value = 0;    // Length 1..16; Note 0..127 (0 a rest); Chord the root; Carrier 0..6; Level 0..127; Slice 0..24 (0 none); Mouth 0..12 (+128 GLD on a vowel)
   unsigned kind = 0;     // Chord: ChordKind
   unsigned voicing = 0;  // Chord: Voicing
 };
@@ -423,6 +423,11 @@ inline bool parse_pat(const char* const* w, unsigned n, PatCommand& out) noexcep
   } else if (std::strcmp(w[2], "slc") == 0 && n == 4u) {
     c.act = PatAct::Slice;
     if (!number(w[3], 24u, c.value)) {
+      return false;
+    }
+  } else if (std::strcmp(w[2], "mou") == 0 && n == 4u) {
+    c.act = PatAct::Mouth;
+    if (!number(w[3], 140u, c.value) || (c.value & 0x7Fu) > 12u || (c.value >= 128u && (c.value & 0x7Fu) > 9u) || (c.value >= 128u && (c.value & 0x7Fu) == 0u)) {
       return false;
     }
   } else {

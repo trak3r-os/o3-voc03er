@@ -364,9 +364,9 @@ holds a sample asks first: F1 confirms, any other key cancels.
 
 *PATTERN playing with FOLLOW on: the bright frame is the playhead.*
 
-Eight patterns, A to H, of up to sixteen steps each. Each step has four lanes: **NOTE** (a chord or a note), **CARRIER** (what sounds on that
-step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL** and **SLICE** (which slice of the speaking slot fires). NOTE, INSTR (carrier), VOL (level)
-and FX (slice) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
+Eight patterns, A to H, of up to sixteen steps each. Each step has five lanes: **NOTE** (a chord or a note), **CARRIER** (what sounds on that
+step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL**, **SLICE** (which slice of the speaking slot fires) and **MOUTH** (TRACT mode's mouth). NOTE, INSTR (carrier), VOL (level)
+and FX (slice, then MOUTH on a second press) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
 
 The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). A palette
 pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays (on every lane, not only NOTE). The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
@@ -383,7 +383,7 @@ and writes nothing.
 | Key | What it does |
 |---|---|
 | F1 PATTERN | A to H |
-| F2 LANE | NOTE, CARRIER, LEVEL or SLICE |
+| F2 LANE | NOTE, CARRIER, LEVEL, SLICE or MOUTH |
 | F3 LENGTH | 1 to 16 steps |
 | F4 TEMPO | The tempo |
 | F5 VALUE | The cursor step's value in the lane; the encoder edits it |
@@ -392,6 +392,15 @@ and writes nothing.
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
+
+**The MOUTH lane.** Each step holds a mouth: FOLLOW (empty, the step leaves the mouth as it is), one of the nine vowels A, A-E, E, E-I, I,
+I-O, O, O-U, U, or a closure, LIPS, TIP or BACK. Palette row 0 is the strip (the nine vowels, then LIPS, TIP and BACK); row 1, columns 1 to 9,
+is the same vowels with GLD, a glide: the mouth slides to that vowel over the step's length instead of jumping there (the cell shows a `>`
+before it). A closure shuts the mouth at the step and opens it again when the note's gate ends (a step with no note: at the step's end). A
+palette pad writes the cursor step, moves on and, in TRACT, sounds the mouth while it is held; with a step pad held it writes that step;
+SHIFT + a palette pad only sounds; SHIFT + a step pad clears the step. Playing writes the mouth in every mode but it speaks in TRACT only
+(outside TRACT the lane is dim, it still edits and the strip says MOUTH SPEAKS IN TRACT). Stopping opens the mouth. A pad of PERFORM's MOUTH
+strip held while the pattern plays wins over the sequence. A GLD step's glide is capped at 500 ms by the voice.
 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY
@@ -426,7 +435,8 @@ Clock: set FOLLOW in Config, and FOLLOW PORT to the port the clock comes from. U
 
 A project is a folder under `Apps/o3_voc03er/` that holds one project file. It keeps the eight patterns, the song chain, the route, the
 vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, VOICING, the BEND ROW and its range,
-the pads layout (the three rows' plays and the two last-used chord pads), the preset's name, PATTERN's FOLLOW, and each slot's cuts,
+the pads layout (the three rows' plays and the two last-used chord pads), the preset's name, PATTERN's FOLLOW, the MOUTH lane, TRACT's
+PARAMS page (not CLOSE or MIX), and each slot's cuts,
 trim, speed, direction, level, TRIG, CHOKE and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
 writes the sounds into the project folder. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
 becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and CHOKE ON. The preset is kept by name: a
