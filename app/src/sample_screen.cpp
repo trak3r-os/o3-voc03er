@@ -189,6 +189,11 @@ void SampleScreen::write_slot(app::Context& ctx, unsigned loop, Field f, float v
   (void)ctx.engine().set_param(voice_, Vocoder::loop_param(loop, f), v);
 }
 
+bool SampleScreen::gate(unsigned slot) const noexcept { return g_sd.gate[slot & 3u] != 0u; }
+bool SampleScreen::choke_off(unsigned slot) const noexcept { return g_sd.choke_off[slot & 3u] != 0u; }
+void SampleScreen::set_gate(unsigned slot, bool on) noexcept { g_sd.gate[slot & 3u] = on ? 1u : 0u; }
+void SampleScreen::set_choke_off(unsigned slot, bool off) noexcept { g_sd.choke_off[slot & 3u] = off ? 1u : 0u; }
+
 void SampleScreen::set_values(app::Context& ctx, unsigned loop, unsigned speed, bool reverse, float level_db) noexcept {
   write_slot(ctx, loop, Field::Speed, static_cast<float>(speed < sm::kSpeedCount ? speed : 1u));
   write_slot(ctx, loop, Field::Dir, reverse ? 1.0f : 0.0f);

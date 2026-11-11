@@ -9,12 +9,15 @@
 #include <o3sdk/platform/host/dir_card.h>
 #include <o3sdk/sim/harness.h>
 
+#include <array>
 #include <filesystem>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace o3sdk;
 namespace fl = o3_voc03er::file;
@@ -76,6 +79,17 @@ TEST_CASE("file: the defaults of a new project and the line a load says") {
   CHECK(p.stat == 1);
   CHECK(p.tempo_mbpm == 120000u);
   CHECK(p.pattern == 0);
+  CHECK(p.voicing == 3);  // P3: the defaults of the 1.1 fields
+  CHECK(p.bend_row == 0);
+  CHECK(p.bend_range == 2);
+  CHECK(p.follow == 0);
+  CHECK(p.preset_len == 0);
+  CHECK(o3_voc03er::project_preset_index(p) == -1);
+  const o3_voc03er::pads::Layout dl = o3_voc03er::project_layout(p);
+  CHECK(dl.row[0] == o3_voc03er::pads::Plays::Note);
+  CHECK(dl.row[1] == o3_voc03er::pads::Plays::Triad);
+  CHECK(dl.row[2] == o3_voc03er::pads::Plays::Formant);
+  CHECK(o3_voc03er::stat_valid(p));
   char line[72];
   fl::loaded_note(line, sizeof line, 2, 13);
   CHECK(std::string(line) == "LOADED. SLOTS 2 RESTORED, 13 KEPT FOR LATER");
@@ -308,5 +322,158 @@ TEST_CASE("file: a LOAD goes on to its end when FILE is left at once (the job is
   h->run_ms(100);
   tap(*h, app::Button::F8);
   h->run_ms(100);
+  CHECK(h->runtime().frame_failures() == 0u);
+}
+
+namespace {
+
+// A project file of a made-up STAT 1.1 (and TRIG and CHOKE per slot) put on the card under `name`.
+Project p3_project() {
+  Project p = {};
+  fl::default_stat(p);
+  p.tempo_mbpm = 133500;
+  p.pattern = 3;
+  p.octave = 1;
+  p.chord = 2;
+  p.keys = 1;
+  p.voicing = 1;
+  p.bend_row = 1;
+  p.bend_range = 12;
+  p.follow = 1;
+  o3_voc03er::set_project_preset(p, 4);
+  o3_voc03er::pads::Layout l;
+  l.row[0] = o3_voc03er::pads::Plays::PianoTriad;
+  l.row[1] = o3_voc03er::pads::Plays::PianoTriad;
+  l.row[2] = o3_voc03er::pads::Plays::Bend;
+  l.last[0] = o3_voc03er::pads::Plays::Open;
+  l.last[1] = o3_voc03er::pads::Plays::Power;
+  o3_voc03er::set_project_layout(p, l);
+  p.slot[1].gate = 1;
+  p.slot[2].choke_off = 1;
+  p.slot[3].gate = 1;
+  p.slot[3].choke_off = 1;
+  return p;
+}
+
+bool put_project(const std::filesystem::path& card, const char* folder, const Project& p) {
+  const std::filesystem::path dir = card / "Apps" / "o3_voc03er" / folder;
+  std::filesystem::create_directories(dir);
+  alignas(4) static std::array<std::uint8_t, o3_voc03er::kProjectFileMax> buf;
+  const std::size_t n = o3_voc03er::write_project(p, buf.data(), buf.size());
+  if (n == 0) {
+    return false;
+  }
+  std::ofstream out(dir / "project.o3a", std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(n));
+  return out.good();
+}
+
+bool get_project(const std::filesystem::path& file, Project& into) {
+  std::ifstream in(file, std::ios::binary);
+  std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return !bytes.empty() && o3_voc03er::read_project(bytes.data(), bytes.size(), into);
+}
+
+}  // namespace
+
+TEST_CASE("file: P3 a load puts the layout, FOLLOW, BEND ROW, RANGE, VOICING, the preset and TRIG and CHOKE back, and the next save keeps them; NEW resets all of it") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-p3");
+  REQUIRE(card_dir.ok());
+  const std::filesystem::path card_root(card_dir.path());
+  const Project src = p3_project();
+  REQUIRE(put_project(card_root, "SRC", src));
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  const auto load_src = [&] {
+    tap(*h, app::Button::File);
+    h->run_ms(60);
+    tap(*h, app::Button::F1);  // LOAD asks
+    tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+    h->run_ms(300);
+    tap(*h, app::Button::F1);  // OPEN the one folder
+    h->run_ms(900);
+  };
+  const auto save_as = [&] {
+    tap(*h, app::Button::File);
+    h->run_ms(60);
+    tap(*h, app::Button::F3);  // SAVE AS: the name starts as PROJECT
+    h->run_ms(20);
+    tap(*h, app::Button::F7);
+    h->run_ms(400);
+  };
+  load_src();
+  save_as();
+  const std::filesystem::path out = card_root / "Apps" / "o3_voc03er" / "PROJECT" / "project.o3a";
+  REQUIRE(std::filesystem::exists(out));
+  Project got = {};
+  REQUIRE(get_project(out, got));
+  CHECK(got.stat == 1);
+  CHECK(got.tempo_mbpm == src.tempo_mbpm);
+  CHECK(got.pattern == src.pattern);
+  CHECK(got.octave == src.octave);
+  CHECK(got.chord == src.chord);
+  CHECK(got.keys == src.keys);
+  CHECK(got.voicing == src.voicing);
+  CHECK(got.bend_row == src.bend_row);
+  CHECK(got.bend_range == src.bend_range);
+  CHECK(got.follow == src.follow);
+  CHECK(got.preset_len == src.preset_len);
+  CHECK(std::memcmp(got.preset, src.preset, sizeof got.preset) == 0);
+  CHECK(std::memcmp(got.layout, src.layout, sizeof got.layout) == 0);
+  for (unsigned i = 0; i < o3_voc03er::route::kSlots; ++i) {
+    CHECK(got.slot[i].gate == src.slot[i].gate);
+    CHECK(got.slot[i].choke_off == src.slot[i].choke_off);
+  }
+  CHECK(h->runtime().frame_failures() == 0u);
+
+}
+
+TEST_CASE("file: P3 NEW puts every field of STAT 1.1 and TRIG and CHOKE back to its default, the layout included") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-p3-new");
+  REQUIRE(card_dir.ok());
+  const std::filesystem::path card_root(card_dir.path());
+  REQUIRE(put_project(card_root, "SRC", p3_project()));
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::File);
+  h->run_ms(60);
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+  h->run_ms(300);
+  tap(*h, app::Button::F1);  // OPEN the one folder
+  h->run_ms(900);
+  tap(*h, app::Button::F4);  // NEW asks
+  tap(*h, app::Button::F1);  // confirmed
+  h->run_ms(400);
+  tap(*h, app::Button::F2);  // SAVE: the project has no name, so the name entry opens
+  h->run_ms(20);
+  tap(*h, app::Button::F7);
+  h->run_ms(400);
+  const std::filesystem::path out = card_root / "Apps" / "o3_voc03er" / "PROJECT" / "project.o3a";
+  REQUIRE(std::filesystem::exists(out));
+  Project got = {};
+  REQUIRE(get_project(out, got));
+  Project want = {};
+  fl::default_stat(want);
+  CHECK(got.stat == 1);
+  CHECK(got.tempo_mbpm == want.tempo_mbpm);
+  CHECK(got.pattern == 0);
+  CHECK(got.octave == 0);
+  CHECK(got.chord == 0);
+  CHECK(got.keys == 0);
+  CHECK(got.voicing == 3);
+  CHECK(got.bend_row == 0);
+  CHECK(got.bend_range == 2);
+  CHECK(got.follow == 0);
+  CHECK(got.preset_len == 0);
+  CHECK(std::memcmp(got.layout, want.layout, sizeof got.layout) == 0);
+  for (unsigned i = 0; i < o3_voc03er::route::kSlots; ++i) {
+    CHECK(got.slot[i].gate == 0u);
+    CHECK(got.slot[i].choke_off == 0u);
+  }
   CHECK(h->runtime().frame_failures() == 0u);
 }

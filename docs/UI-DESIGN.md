@@ -605,7 +605,7 @@ screen it touches. The unit checks owed are named, not run here.
 FILE saves and loads the project file (`project.o3a` in a folder of `Apps/o3_voc03er/`), without the WAVs. F1 LOAD asks, then the kit's picker lists the project folders; F2 SAVE writes
 over the current project (the old file kept as `.bak`; with no project it is SAVE AS); F3 SAVE AS asks a name and makes a new folder (an existing name is refused, never overwritten);
 F4 NEW asks, then restores the defaults and leaves no current project; F5 SAVE WAVS came in U9c3. All are refused while a card job or a take runs. A new STAT chunk
-(1.0) holds tempo, swing, the pattern shown, octave, chord kind and pads mode; a file without it keeps the defaults. LOAD decodes the whole file into a copy first (a damaged file changes
+(1.0) holds tempo, swing, the pattern shown, octave, chord kind and pads mode; a file without it keeps the defaults. STAT 1.1 (P3, Q8) adds voicing, bend row and range, FOLLOW, the preset's name and the pads layout, and SLOT 1.1 adds TRIG and CHOKE per slot; a 1.0 file loads with their defaults and the layout of its KEYS or chord kind. LOAD decodes the whole file into a copy first (a damaged file changes
 nothing), then sends the unit's values 16 a frame, then the patterns, the route, the slots and STAT. A slot's cuts come back only onto a slot that already holds audio of the same length;
 the other records are kept for the next save and the next slice. NEW leaves the slots' audio (the cuts go back to even). Swing is written as 0 (the app has no swing control yet).
 Unit check owed: the restore on the unit (the frames it spans, the route change while a bar sounds).

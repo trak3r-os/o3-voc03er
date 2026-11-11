@@ -340,7 +340,7 @@ step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL** and **SLICE** (which slice of t
 and FX (slice) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
 
 The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). A palette
-pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays. The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
+pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays (on every lane, not only NOTE). The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
 (a step pad past LENGTH does nothing). The lower right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
 
 On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
@@ -393,10 +393,12 @@ Clock: set FOLLOW in Config, and FOLLOW PORT to the port the clock comes from. U
 ## 9. Projects and the card
 
 A project is a folder under `Apps/o3_voc03er/` that holds one project file. It keeps the eight patterns, the song chain, the route, the
-vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, the chord kind, the pad mode, and each
-slot's cuts, trim, speed, direction, level and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
-writes the sounds into the project folder. Not kept yet: VOICING, BEND ROW and its range, SAMPLE's TRIG and CHOKE, PATTERN's FOLLOW
-and the preset's name.
+vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, VOICING, the BEND ROW and its range,
+the pads layout (the three rows' plays and the two last-used chord pads), the preset's name, PATTERN's FOLLOW, and each slot's cuts,
+trim, speed, direction, level, TRIG, CHOKE and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
+writes the sounds into the project folder. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
+becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and CHOKE ON. The preset is kept by name: a
+name this build does not know opens as no preset. F4 NEW puts all of these back to their defaults.
 
 ![FILE: the list of projects](manual/img/file.png)
 

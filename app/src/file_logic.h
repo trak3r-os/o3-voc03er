@@ -92,7 +92,8 @@ inline bool restore_values(const ProjectSlot& rec, std::uint32_t live_length, Sl
   return true;
 }
 
-// The STAT fields of a project that was just made: the first boot's tempo, pattern A, octave 0, the first chord kind, pads.
+// The STAT fields of a project that was just made: the first boot's tempo, pattern A, octave 0, the first chord kind, pads; voicing SMOOTH, bend row off,
+// range 2, FOLLOW off, no preset, the default layout (A NOTE, B TRIAD, C FORMANT).
 inline void default_stat(Project& p) noexcept {
   p.stat = 1;
   p.tempo_mbpm = 120000u;
@@ -101,6 +102,12 @@ inline void default_stat(Project& p) noexcept {
   p.octave = 0;
   p.chord = 0;
   p.keys = 0;
+  p.voicing = 3;
+  p.bend_row = 0;
+  p.bend_range = 2;
+  p.follow = 0;
+  set_project_preset(p, kPresetCount);  // none
+  set_project_layout(p, pads::Layout{});
 }
 
 inline void cat(char* dst, std::size_t cap, const char* s) noexcept {

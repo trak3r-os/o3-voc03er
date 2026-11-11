@@ -68,6 +68,29 @@ Project full() {
   return p;
 }
 
+// A STAT that is valid and not the default in any 1.1 field.
+void with_stat(Project& p) {
+  p.stat = 1;
+  p.tempo_mbpm = 133500;
+  p.swing = 0;
+  p.pattern = 5;
+  p.octave = -2;
+  p.chord = 2;
+  p.keys = 1;
+  p.voicing = 1;
+  p.bend_row = 1;
+  p.bend_range = 12;
+  p.follow = 1;
+  set_project_preset(p, 1);  // CHOIR
+  pads::Layout l;
+  l.row[0] = pads::Plays::PianoOpen;
+  l.row[1] = pads::Plays::PianoOpen;
+  l.row[2] = pads::Plays::Bend;
+  l.last[0] = pads::Plays::Seventh;
+  l.last[1] = pads::Plays::Power;
+  set_project_layout(p, l);
+}
+
 Project small() {
   Project p = {};
   Step s;
@@ -99,6 +122,14 @@ bool same(const Project& a, const Project& b) {
       return false;
     }
   }
+  if (a.stat != b.stat) {
+    return false;
+  }
+  if (a.stat != 0u && (a.tempo_mbpm != b.tempo_mbpm || a.swing != b.swing || a.pattern != b.pattern || a.octave != b.octave || a.chord != b.chord || a.keys != b.keys ||
+                       a.voicing != b.voicing || a.bend_row != b.bend_row || a.bend_range != b.bend_range || a.follow != b.follow || a.preset_len != b.preset_len ||
+                       std::memcmp(a.preset, b.preset, sizeof a.preset) != 0 || std::memcmp(a.layout, b.layout, sizeof a.layout) != 0)) {
+    return false;
+  }
   if (a.speaks != b.speaks || a.sounds != b.sounds || a.live_src != b.live_src || a.engine_set != b.engine_set) {
     return false;
   }
@@ -111,7 +142,7 @@ bool same(const Project& a, const Project& b) {
     const ProjectSlot& x = a.slot[i];
     const ProjectSlot& y = b.slot[i];
     if (x.cuts.length != y.cuts.length || x.cuts.count != y.cuts.count || x.trim_start != y.trim_start || x.trim_end != y.trim_end || x.speed != y.speed ||
-        x.reverse != y.reverse || x.level_half != y.level_half || x.values != y.values || x.name_len != y.name_len || std::memcmp(x.name, y.name, sizeof x.name) != 0) {
+        x.reverse != y.reverse || x.level_half != y.level_half || x.values != y.values || x.gate != y.gate || x.choke_off != y.choke_off || x.name_len != y.name_len || std::memcmp(x.name, y.name, sizeof x.name) != 0) {
       return false;
     }
     for (unsigned k = 0; k < x.cuts.count; ++k) {
@@ -223,7 +254,12 @@ TEST_CASE("project: the worst case fits the buffer") {
     s.name_len = static_cast<std::uint8_t>(kWavNameMax);
     std::memset(s.name, 'x', kWavNameMax);
     s.values = 1;
+    s.gate = 1;
+    s.choke_off = 1;
   }
+  with_stat(p);
+  p.preset_len = static_cast<std::uint8_t>(kPresetNameMax);  // the longest name a file may hold
+  std::memset(p.preset, 'W', kPresetNameMax);
   p.chain.count = kChainMax;
   for (unsigned i = 0; i < kChainMax; ++i) {
     p.chain.entry[i] = {static_cast<std::uint8_t>(i % kBankPatterns), kChainRepeatMax};
@@ -370,7 +406,7 @@ TEST_CASE("project: a slot record a later minor made longer is skipped, and a re
   // One slot of 1000 samples, no cuts, name "b" and three bytes of a later minor after it.
   auto slot_chunk = [](unsigned rec_len, unsigned count_of_slots) {
     Bytes b;
-    put16(b, 0x0101);
+    put16(b, 0x0102);
     b.push_back(static_cast<std::uint8_t>(count_of_slots));
     put16(b, rec_len);
     put32(b, 1000);
@@ -382,15 +418,21 @@ TEST_CASE("project: a slot record a later minor made longer is skipped, and a re
     b.push_back(static_cast<std::uint8_t>(-4));  // level -4 half-dB
     b.push_back(1);   // name length
     b.push_back('b');
+    b.push_back(1);     // values (U9c4)
+    b.push_back(1);     // TRIG GATE (1.1)
+    b.push_back(1);     // CHOKE OFF (1.1)
     b.push_back(0xAA);  // a later minor's tail
     b.push_back(0xBB);
     b.push_back(0xCC);
     return b;
   };
   const Bytes f = write(small());
-  const unsigned base = 4 + 1 + 8 + 4 + 1;
+  const unsigned base = 4 + 1 + 8 + 4 + 1 + 3;  // the fields up to the name, then values, TRIG and CHOKE
   Project got = {};
   REQUIRE(read(rebuild(f, Edit{nullptr, "SLOT", slot_chunk(base + 3, 1), false}), got));
+  CHECK(got.slot[0].values == 1u);
+  CHECK(got.slot[0].gate == 1u);
+  CHECK(got.slot[0].choke_off == 1u);
   CHECK(got.slot[0].cuts.length == 1000u);
   CHECK(got.slot[0].speed == 1);
   CHECK(got.slot[0].reverse == 1);
@@ -447,6 +489,8 @@ TEST_CASE("project: values out of range are refused on both sides") {
   refused([](Project& p) { p.bank.pattern[0].step[0] = 0xFFFFFFFFu; });
   refused([](Project& p) { set_project_route(p, route::Route{route::kFirstSlot, route::kFirstSlot}); });  // a slot on both sides
   refused([](Project& p) { p.live_src = route::kLiveSrcCount; });
+  refused([](Project& p) { p.slot[0].gate = 2; });
+  refused([](Project& p) { p.slot[0].choke_off = 2; });
   refused([](Project& p) { p.engine_set |= std::uint64_t{1} << Vocoder::Load; });
   Project scratch = {};
   CHECK(!project_set_engine(scratch, Vocoder::Load, 1.0f));
@@ -471,7 +515,7 @@ TEST_CASE("project: which ids are state") {
 
 TEST_CASE("project: STAT (U9c2) round trip, a file without it, a tempo out of range") {
   Project p = full();
-  p.stat = 1;
+  with_stat(p);
   p.tempo_mbpm = 133500;
   p.swing = 3;
   p.pattern = 5;
@@ -553,4 +597,320 @@ TEST_CASE("project: U9c4 the captured trim, speed, reverse and level round-trip 
   CHECK(got.slot[0].reverse == 1u);
   CHECK(got.slot[0].level_half == -6);
   CHECK(got.slot[0].name_len == 1);
+}
+
+// ---- P3 + Q8: STAT 1.1 and SLOT 1.1 ----
+
+namespace {
+
+// A STAT payload as a 1.0 build wrote it: version, tempo, swing, pattern, octave, chord kind, pads mode.
+Bytes stat10(unsigned chord, unsigned keys) {
+  Bytes b;
+  put16(b, 0x0100);
+  put32(b, 98000);
+  b.push_back(0);
+  b.push_back(2);
+  b.push_back(static_cast<std::uint8_t>(-1));
+  b.push_back(static_cast<std::uint8_t>(chord));
+  b.push_back(static_cast<std::uint8_t>(keys));
+  return b;
+}
+
+// The 1.1 STAT as bytes (so a test can damage one byte): the 1.0 part, then voicing, bend row, range, FOLLOW, the name, the layout.
+Bytes stat11(unsigned version = 0x0101) {
+  Bytes b = stat10(1, 0);
+  b[0] = static_cast<std::uint8_t>(version >> 8);
+  b[1] = static_cast<std::uint8_t>(version);
+  b.push_back(2);   // voicing
+  b.push_back(1);   // bend row
+  b.push_back(5);   // range
+  b.push_back(1);   // FOLLOW
+  b.push_back(5);   // name length
+  for (const char ch : {'C', 'H', 'O', 'I', 'R'}) {
+    b.push_back(static_cast<std::uint8_t>(ch));
+  }
+  for (const unsigned v : {1u, 2u, 12u, 0u, 1u}) {  // A TRIAD, B 7TH, C BEND, last NOTE, TRIAD
+    b.push_back(static_cast<std::uint8_t>(v));
+  }
+  return b;
+}
+
+Project stat_base() {
+  Project p = small();
+  p.stat = 1;
+  p.tempo_mbpm = 120000;
+  p.voicing = 3;
+  p.bend_range = 2;
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("project: P3 the 1.1 STAT and SLOT fields round-trip one by one") {
+  Project p = full();
+  with_stat(p);
+  for (unsigned i = 0; i < route::kSlots; ++i) {
+    p.slot[i].gate = static_cast<std::uint8_t>(i & 1u);
+    p.slot[i].choke_off = static_cast<std::uint8_t>((i >> 1) & 1u);
+  }
+  const Bytes b = write(p);
+  REQUIRE(!b.empty());
+  Project q = {};
+  REQUIRE(read(b, q));
+  CHECK(same(p, q));
+  CHECK(q.voicing == 1);
+  CHECK(q.bend_row == 1);
+  CHECK(q.bend_range == 12);
+  CHECK(q.follow == 1);
+  REQUIRE(q.preset_len == 5);
+  CHECK(std::memcmp(q.preset, "CHOIR", 5) == 0);
+  CHECK(project_preset_index(q) == 1);
+  const pads::Layout l = project_layout(q);
+  CHECK(l.row[0] == pads::Plays::PianoOpen);
+  CHECK(l.row[1] == pads::Plays::PianoOpen);
+  CHECK(l.row[2] == pads::Plays::Bend);
+  CHECK(l.last[0] == pads::Plays::Seventh);
+  CHECK(l.last[1] == pads::Plays::Power);
+  CHECK(q.slot[1].gate == 1u);
+  CHECK(q.slot[2].choke_off == 1u);  // the empty slot's TRIG and CHOKE ride too
+  CHECK(q.slot[0].gate == 0u);
+  CHECK(write(q) == b);
+
+  // Each value of the small sets round-trips: every voicing, flag, range and preset of the table.
+  for (unsigned v = 0; v <= 3; ++v) {
+    Project r = p;
+    r.voicing = static_cast<std::uint8_t>(v);
+    Project g = {};
+    REQUIRE(read(write(r), g));
+    CHECK(g.voicing == v);
+  }
+  for (const unsigned range : {2u, 5u, 12u}) {
+    Project r = p;
+    r.bend_range = static_cast<std::uint8_t>(range);
+    Project g = {};
+    REQUIRE(read(write(r), g));
+    CHECK(g.bend_range == range);
+  }
+  for (unsigned i = 0; i < kPresetCount; ++i) {
+    Project r = p;
+    set_project_preset(r, i);
+    Project g = {};
+    REQUIRE(read(write(r), g));
+    CHECK(project_preset_index(g) == static_cast<int>(i));
+  }
+  Project none = p;
+  set_project_preset(none, kPresetCount);
+  Project g = {};
+  REQUIRE(read(write(none), g));
+  CHECK(g.preset_len == 0);
+  CHECK(project_preset_index(g) == -1);
+}
+
+TEST_CASE("project: P3 a preset is matched by name, an unknown name is none") {
+  Project p = stat_base();
+  p.preset_len = 5;
+  std::memcpy(p.preset, "NOPE!", 5);
+  Project g = {};
+  REQUIRE(read(write(p), g));  // a name a later build added is kept in the file and means no preset here
+  CHECK(g.preset_len == 5);
+  CHECK(project_preset_index(g) == -1);
+  Project h = stat_base();
+  h.preset_len = 4;
+  std::memcpy(h.preset, "ROBO", 4);  // a prefix of a name is not that name
+  CHECK(project_preset_index(h) == -1);
+  Project k = stat_base();
+  set_project_preset(k, 7);  // the last of the table: the name, not the index, is what the file holds
+  Bytes b = write(k);
+  Project r = {};
+  REQUIRE(read(b, r));
+  CHECK(project_preset_index(r) == 7);
+  CHECK(std::strlen(kPresets[7].name) == r.preset_len);
+}
+
+TEST_CASE("project: P3 a 1.0 STAT loads with the defaults of today and the layout its pads mode and chord kind meant") {
+  const Bytes base = write(stat_base());
+  // KEYS: a piano on A and B, FORMANT on C, whatever the chord kind.
+  {
+    Project got = {};
+    REQUIRE(read(rebuild(base, Edit{nullptr, "STAT", stat10(2, 1), false}), got));
+    CHECK(got.stat == 1);
+    CHECK(got.tempo_mbpm == 98000u);
+    CHECK(got.pattern == 2);
+    CHECK(got.octave == -1);
+    CHECK(got.keys == 1);
+    CHECK(got.voicing == 3);
+    CHECK(got.bend_row == 0);
+    CHECK(got.bend_range == 2);
+    CHECK(got.follow == 0);
+    CHECK(got.preset_len == 0);
+    CHECK(project_preset_index(got) == -1);
+    const pads::Layout l = project_layout(got);
+    CHECK(l.row[0] == pads::Plays::PianoNote);
+    CHECK(l.row[1] == pads::Plays::PianoNote);
+    CHECK(l.row[2] == pads::Plays::Formant);
+  }
+  // CHORDS: the layout of pads::layout_from_legacy for each chord kind.
+  for (unsigned kind = 0; kind < 4; ++kind) {
+    Project got = {};
+    REQUIRE(read(rebuild(base, Edit{nullptr, "STAT", stat10(kind, 0), false}), got));
+    const pads::Layout want = pads::layout_from_legacy(false, static_cast<ChordKind>(kind), false);
+    const pads::Layout l = project_layout(got);
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      CHECK(l.row[r] == want.row[r]);
+    }
+    CHECK(l.last[0] == want.last[0]);
+    CHECK(l.last[1] == want.last[1]);
+    CHECK(got.voicing == 3);
+    CHECK(got.bend_range == 2);
+  }
+  // The bottom row of kind 0 (TRIAD) is C TRIAD, B above, A above that: not what a previous project left.
+  Project got = {};
+  REQUIRE(read(rebuild(base, Edit{nullptr, "STAT", stat10(0, 0), false}), got));
+  CHECK(project_layout(got).row[2] == pads::Plays::Triad);
+}
+
+TEST_CASE("project: P3 a 1.0 SLOT record has TRIG ONE SHOT and CHOKE ON, a 1.0 chunk's extra bytes are not read as 1.1 fields") {
+  Bytes rec;
+  put16(rec, 0x0100);
+  rec.push_back(1);
+  put16(rec, 4 + 1 + 8 + 4 + 1 + 1 + 2);  // up to the name, values, and two bytes a 1.0 reader skips
+  put32(rec, 1000);
+  rec.push_back(0);
+  put32(rec, 0);
+  put32(rec, 0);
+  rec.push_back(1);
+  rec.push_back(0);
+  rec.push_back(0);
+  rec.push_back(1);
+  rec.push_back('b');
+  rec.push_back(1);  // values
+  rec.push_back(1);
+  rec.push_back(1);
+  Project got = {};
+  Project base = small();
+  base.slot[0].gate = 1;
+  base.slot[0].choke_off = 1;
+  REQUIRE(read(rebuild(write(base), Edit{nullptr, "SLOT", rec, false}), got));
+  CHECK(got.slot[0].values == 1u);
+  CHECK(got.slot[0].gate == 0u);
+  CHECK(got.slot[0].choke_off == 0u);
+}
+
+TEST_CASE("project: P3 a 1.2 file with bytes after the 1.1 fields still loads") {
+  const Project base = stat_base();
+  Bytes st = stat11(0x0102);
+  st.push_back(0xAB);  // what a later minor appended to STAT
+  st.push_back(0xCD);
+  Project got = {};
+  REQUIRE(read(rebuild(write(base), Edit{nullptr, "STAT", st, false}), got));
+  CHECK(got.voicing == 2);
+  CHECK(got.bend_row == 1);
+  CHECK(got.bend_range == 5);
+  CHECK(got.follow == 1);
+  CHECK(project_preset_index(got) == 1);
+  const pads::Layout l = project_layout(got);
+  CHECK(l.row[0] == pads::Plays::Triad);
+  CHECK(l.row[1] == pads::Plays::Seventh);
+  CHECK(l.row[2] == pads::Plays::Bend);
+
+  // The SLOT record the same way (the test above holds the 1.1 bytes and a 3-byte tail already; here the tail is longer and the slot has a name and cuts).
+  Project s = small();
+  s.slot[0].gate = 1;
+  s.slot[0].choke_off = 1;
+  Bytes sl;
+  put16(sl, 0x0103);
+  sl.push_back(1);
+  put16(sl, 4 + 1 + 8 + 4 + 5 + 3 + 6);
+  put32(sl, 1000);
+  sl.push_back(0);
+  put32(sl, 0);
+  put32(sl, 0);
+  sl.push_back(0);
+  sl.push_back(0);
+  sl.push_back(0);
+  sl.push_back(5);
+  for (const char ch : {'a', '.', 'w', 'a', 'v'}) {
+    sl.push_back(static_cast<std::uint8_t>(ch));
+  }
+  sl.push_back(1);  // values
+  sl.push_back(1);  // GATE
+  sl.push_back(1);  // CHOKE OFF
+  for (unsigned i = 0; i < 6; ++i) {
+    sl.push_back(0xEE);
+  }
+  Project g2 = {};
+  REQUIRE(read(rebuild(write(s), Edit{nullptr, "SLOT", sl, false}), g2));
+  CHECK(g2.slot[0].gate == 1u);
+  CHECK(g2.slot[0].choke_off == 1u);
+  CHECK(g2.slot[0].name_len == 5);
+}
+
+TEST_CASE("project: P3 a STAT field out of range refuses the file and leaves the destination untouched") {
+  const Project base = stat_base();
+  const Bytes f = write(base);
+  const Project sentinel = full();
+  // Offsets in the 1.1 STAT payload: 0 version(2), 2 tempo(4), 6 swing, 7 pattern, 8 octave, 9 chord, 10 keys, 11 voicing, 12 bend row, 13 range, 14 FOLLOW,
+  // 15 name length, 16..20 the name, 21..25 the layout.
+  const auto refused = [&](const char* what, unsigned at, unsigned value) {
+    Bytes st = stat11();
+    st[at] = static_cast<std::uint8_t>(value);
+    Project into = sentinel;
+    INFO(what);
+    CHECK(!read(rebuild(f, Edit{nullptr, "STAT", st, false}), into));
+    CHECK(same(into, sentinel));
+  };
+  refused("voicing 4", 11, 4);
+  refused("bend row 2", 12, 2);
+  refused("range 3", 13, 3);
+  refused("range 0", 13, 0);
+  refused("range 13", 13, 13);
+  refused("FOLLOW 2", 14, 2);
+  refused("name length 17", 15, 17);
+  refused("name length past the chunk", 15, 200);
+  refused("a name byte below the space", 16, 0x07);
+  refused("a name byte past the tilde", 16, 0x80);
+  refused("layout A 13", 21, static_cast<unsigned>(pads::kPlaysCount));
+  refused("layout last 255", 25, 255);
+  refused("layout A FORMANT (C only)", 21, static_cast<unsigned>(pads::Plays::Formant));
+  refused("layout A BEND (C only)", 21, static_cast<unsigned>(pads::Plays::Bend));
+  refused("layout B FORMANT", 22, static_cast<unsigned>(pads::Plays::Formant));
+  refused("layout C a piano value", 23, static_cast<unsigned>(pads::Plays::PianoNote));
+  refused("layout last A BEND", 24, static_cast<unsigned>(pads::Plays::Bend));
+  // A STAT cut short of its 1.1 fields (a 1.1 version over 1.0's length) is damaged, not a 1.0.
+  Bytes cut = stat11();
+  cut.resize(cut.size() - 3);
+  Project into = sentinel;
+  CHECK(!read(rebuild(f, Edit{nullptr, "STAT", cut, false}), into));
+  CHECK(same(into, sentinel));
+  // And the good one is accepted, so the offsets above are the right ones.
+  Project good = {};
+  REQUIRE(read(rebuild(f, Edit{nullptr, "STAT", stat11(), false}), good));
+  CHECK(good.voicing == 2);
+
+  // At write: the same values are refused, so a file never holds one.
+  alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
+  const auto wrefused = [&](auto&& damage) {
+    Project p = stat_base();
+    damage(p);
+    CHECK(write_project(p, buf.data(), buf.size()) == 0u);
+  };
+  wrefused([](Project& p) { p.voicing = 4; });
+  wrefused([](Project& p) { p.bend_row = 2; });
+  wrefused([](Project& p) { p.bend_range = 3; });
+  wrefused([](Project& p) { p.follow = 2; });
+  wrefused([](Project& p) { p.preset_len = static_cast<std::uint8_t>(kPresetNameMax + 1); });
+  wrefused([](Project& p) { p.preset_len = 1; p.preset[0] = '\n'; });
+  wrefused([](Project& p) { p.layout[0] = pads::kPlaysCount; });
+  wrefused([](Project& p) { p.layout[2] = static_cast<std::uint8_t>(pads::Plays::PianoNote); });
+}
+
+TEST_CASE("project: P3 a file without STAT keeps the header's rule, the 1.1 fields are not read") {
+  Project old = full();
+  old.stat = 0;
+  Project got = {};
+  REQUIRE(read(write(old), got));
+  CHECK(got.stat == 0);
+  CHECK(got.voicing == 0);
+  CHECK(got.bend_range == 0);
+  CHECK(got.preset_len == 0);
 }

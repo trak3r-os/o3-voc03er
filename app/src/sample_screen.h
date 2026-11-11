@@ -64,6 +64,11 @@ class SampleScreen final : public o3sdk::app::Screen {
   void set_even_code(unsigned slot, unsigned code) noexcept;
   // FILE's load puts a slot's SPEED (0 0.5X, 1 1X, 2 2X), DIR and LEVEL back by the path the screen's own keys take (write): the unit's Loop n Speed, Dir and Level.
   void set_values(o3sdk::app::Context& ctx, unsigned loop, unsigned speed, bool reverse, float level_db) noexcept;
+  // TRIG (true GATE, false ONE SHOT) and CHOKE (true OFF, false ON) of a slot 0..3, as the keys flip them (P3: the project keeps them per slot).
+  bool gate(unsigned slot) const noexcept;
+  bool choke_off(unsigned slot) const noexcept;
+  void set_gate(unsigned slot, bool on) noexcept;
+  void set_choke_off(unsigned slot, bool off) noexcept;
   void cuts_changed() noexcept;  // after any edit of a table: the next service() pass publishes the SPEAKS slot's cuts again
   Vocoder::LoopStatus status(unsigned slot) const noexcept { return view(slot); }
   bool pad_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;  // a pad press or release; false when `in` is no pad

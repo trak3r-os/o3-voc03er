@@ -275,10 +275,19 @@ void FileScreen::capture(app::Context& ctx) noexcept {
   p.octave = static_cast<std::int8_t>(perform_->octave());
   p.chord = static_cast<std::uint8_t>(perform_->chord_kind());
   p.keys = perform_->keys_mode() ? 1u : 0u;
+  // STAT 1.1. The chord kind and the pads mode above are still PERFORM's own bottom_ and keys_ (Q6 derives those two and the bend row from the layout).
+  p.voicing = static_cast<std::uint8_t>(perform_->voicing());
+  p.bend_row = perform_->strip_mode() ? 1u : 0u;
+  p.bend_range = static_cast<std::uint8_t>(perform_->bend_range());
+  p.follow = pattern_->follow() ? 1u : 0u;
+  set_project_preset(p, perform_->preset());
+  set_project_layout(p, perform_->layout());
   for (unsigned s = 0; s < route::kSlots; ++s) {
     const sample::SliceTable& t2 = sample_->table(s);
     const std::uint32_t len = t2.length != 0u ? t2.length : sample_->status(s).length;
     fl::merge_slot(p.slot[s], p.slot[s], t2, len);
+    p.slot[s].gate = sample_->gate(s) ? 1u : 0u;  // after merge_slot, which rebuilds the record
+    p.slot[s].choke_off = sample_->choke_off(s) ? 1u : 0u;
     if (len != 0u) {
       // What is live goes in the record: SAMPLE's speed, direction and level, SAMPLE EDIT's trim brackets.
       const Vocoder::LoopStatus st = sample_->status(s);
@@ -500,6 +509,18 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
     perform_->set_octave(g_proj.octave);
     perform_->set_chord_kind(g_proj.chord);
     perform_->set_keys(g_proj.keys != 0u);
+    // STAT 1.1 (a 1.0 file arrives here with the defaults of today and the legacy layout, read_stat's doing).
+    perform_->set_voicing(g_proj.voicing);
+    perform_->set_strip(ctx, g_proj.bend_row != 0u);
+    (void)perform_->set_bend_range(g_proj.bend_range);
+    pattern_->set_follow(g_proj.follow != 0u);
+    const int preset = project_preset_index(g_proj);
+    perform_->set_preset(preset < 0 ? perform::kNoPreset : static_cast<unsigned>(preset));
+    perform_->set_layout(project_layout(g_proj));
+  }
+  for (unsigned s = 0; s < route::kSlots; ++s) {  // TRIG and CHOKE ride with every record, audio or not (a record without them is ONE SHOT, CHOKE ON)
+    sample_->set_gate(s, g_proj.slot[s].gate != 0u);
+    sample_->set_choke_off(s, g_proj.slot[s].choke_off != 0u);
   }
   g_fd.stage = kMenu;
   if (!g_fd.reset_slots && wavs && fl::next_load_slot(g_proj, 0) < fl::kWavSlots) {

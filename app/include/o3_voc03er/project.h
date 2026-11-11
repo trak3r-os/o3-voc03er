@@ -12,11 +12,18 @@
 //   PTNS 1.0  u8 count, then per pattern u16 record length, u8 length (0..16, 0 reads as 16), 16 x u32 packed step (stepseq.h)
 //   CHAI 1.0  u8 count (0..16), u8 loop (0/1), then count x (u8 pattern 0..7, u8 repeats 1..kChainRepeatMax): the SONG chain
 //   ROUT 1.0  u8 speaks, u8 sounds (route.h values; the pair must be allowed), u8 live source (route::LiveSrc). Absent: the default route
-//   SLOT 1.0  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
+//   SLOT 1.1  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
 //             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL),
-//             then u8 values (appended: 1 = the trim, speed, reverse and level above were captured live and are restored; 0 or absent = a file from before, they are left alone)
+//             then u8 values (appended: 1 = the trim, speed, reverse and level above were captured live and are restored; 0 or absent = a file from before, they are left alone),
+//             then, appended in 1.1, u8 TRIG (SAMPLE's, 0 ONE SHOT, 1 GATE) and u8 CHOKE (1 = OFF, 0 = ON: the zero is the default). A record without them (1.0) is
+//             ONE SHOT and CHOKE ON, whatever the previous project left
 //   VALU 1.0  u16 count, then count x (u16 parameter id, f32 value): the engine's state, by id
-//   STAT 1.0  u32 tempo (milli-BPM), u8 swing (0: none yet), u8 current pattern 0..7, i8 octave, u8 chord kind 0..3, u8 pads mode (0 pads, 1 keys). Absent: those stay as they are
+//   STAT 1.1  u32 tempo (milli-BPM), u8 swing (0: none yet), u8 current pattern 0..7, i8 octave, u8 chord kind 0..3, u8 pads mode (0 pads, 1 keys) (all 1.0),
+//             then, appended in 1.1: u8 voicing 0..3, u8 bend row 0/1, u8 bend range (2, 5 or 12), u8 FOLLOW 0/1 (PATTERN's), u8 preset name length 0..16 and the
+//             name (matched against presets.h on load; length 0 or an unknown name is no preset: a name survives a reordered table, an index would not),
+//             then the pads' layout, 5 bytes: rows A, B, C and last[0..1] (pads::Plays values; each row must offer its value, see pads_logic.h `offered`).
+//             A 1.0 STAT sets the 1.1 fields to the defaults of today (voicing SMOOTH, bend row off, range 2, FOLLOW off, no preset) and the layout to
+//             pads::layout_from_legacy(pads mode, chord kind, false), not to what the previous project left. Absent STAT: those stay as they are
 //
 // Records inside PTNS and SLOT carry their own length, so a later minor appends fields to a record (read only when the record is long enough) and a later app
 // may hold more patterns or slots than this one reads. The WAV data is not in this file; the slot's `name` says which WAV of the project folder it came from.
@@ -35,6 +42,7 @@
 // the default): it can live in `O3SDK_BIG Project g_project;`. read_project stages the file on the stack (sizeof(Project), asserted below).
 // Contexts: main loop. No heap, no float arithmetic.
 
+#include <o3_voc03er/presets.h>
 #include <o3_voc03er/route.h>
 #include <o3_voc03er/stepseq.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
@@ -45,6 +53,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../../src/pads_logic.h"
 #include "../../src/sample_logic.h"
 
 namespace o3_voc03er {
@@ -78,7 +87,12 @@ struct ProjectSlot {
   std::uint8_t name_len = 0;     // 0: no WAV (an empty slot, or a take that was not saved)
   char name[kWavNameMax + 1] = {};  // the WAV's file name in the project folder, name_len bytes, printable, no '/' or '\\'
   std::uint8_t values = 0;       // 1: trim_*, speed, reverse and level_half were captured at save and are put back on load; 0: they are not (a file from before)
+  std::uint8_t gate = 0;         // SAMPLE's TRIG for this slot: 1 GATE, 0 ONE SHOT (the default); kept whether or not the slot holds audio (1.1)
+  std::uint8_t choke_off = 0;    // SAMPLE's CHOKE: 1 OFF, 0 ON (the default) (1.1)
 };
+
+inline constexpr std::size_t kPresetNameMax = 16;  // the longest preset name a file may hold (presets.h's are at most 8)
+inline constexpr unsigned kLayoutBytes = 5;        // rows A, B, C, then last[0], last[1]
 
 inline constexpr unsigned kEngineIds = 64;  // the unit's table is at most 64 parameters (the kit's limit): the ids a Project can hold
 
@@ -99,7 +113,58 @@ struct Project {
   std::int8_t octave = 0;
   std::uint8_t chord = 0;
   std::uint8_t keys = 0;
+  // STAT 1.1 (valid with `stat`; a 1.0 file gets the defaults of today, see the header; none of them is zero by default, so a Project that is to be written
+  // takes them from file::default_stat or a capture):
+  std::uint8_t voicing = 0;                        // 0..3 (the Voicing enum; 3 is SMOOTH)
+  std::uint8_t bend_row = 0;                       // 0/1: PERFORM's BEND ROW
+  std::uint8_t bend_range = 0;                     // 2, 5 or 12 semitones
+  std::uint8_t follow = 0;                         // 0/1: PATTERN's FOLLOW
+  std::uint8_t preset_len = 0;                     // 0: no preset
+  char preset[kPresetNameMax + 1] = {};            // the factory sound's name, preset_len bytes, printable
+  std::uint8_t layout[kLayoutBytes] = {};          // pads::Plays of rows A, B, C, then Layout::last[0], last[1]
 };
+
+// The layout a project holds, and the way back.
+inline pads::Layout project_layout(const Project& p) noexcept {
+  pads::Layout l;
+  for (unsigned i = 0; i < pads::kRows; ++i) {
+    l.row[i] = static_cast<pads::Plays>(p.layout[i]);
+  }
+  l.last[0] = static_cast<pads::Plays>(p.layout[3]);
+  l.last[1] = static_cast<pads::Plays>(p.layout[4]);
+  return l;
+}
+inline void set_project_layout(Project& p, const pads::Layout& l) noexcept {
+  for (unsigned i = 0; i < pads::kRows; ++i) {
+    p.layout[i] = static_cast<std::uint8_t>(l.row[i]);
+  }
+  p.layout[3] = static_cast<std::uint8_t>(l.last[0]);
+  p.layout[4] = static_cast<std::uint8_t>(l.last[1]);
+}
+
+// The preset a project names: its index in presets.h, or -1 for none (no name, or a name this build does not know).
+inline int project_preset_index(const Project& p) noexcept {
+  if (p.preset_len == 0u || p.preset_len > kPresetNameMax) {
+    return -1;
+  }
+  for (std::size_t i = 0; i < kPresetCount; ++i) {
+    const char* n = kPresets[i].name;
+    if (std::strlen(n) == p.preset_len && std::memcmp(n, p.preset, p.preset_len) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+// Names the preset `index` of presets.h (an index past the table: none).
+inline void set_project_preset(Project& p, unsigned index) noexcept {
+  p.preset_len = 0;
+  std::memset(p.preset, 0, sizeof p.preset);
+  if (index < kPresetCount) {
+    const std::size_t n = std::strlen(kPresets[index].name);
+    p.preset_len = static_cast<std::uint8_t>(n > kPresetNameMax ? kPresetNameMax : n);
+    std::memcpy(p.preset, kPresets[index].name, p.preset_len);
+  }
+}
 
 // The route a project holds (the default route when none is stored).
 constexpr route::Route project_route(const Project& p) noexcept {
@@ -151,13 +216,13 @@ inline bool project_set_engine(Project& p, unsigned id, float v) noexcept {
 namespace project_detail {
 
 constexpr std::size_t chunk_bytes(std::size_t payload) noexcept { return 8 + payload + (payload & 1u); }
-inline constexpr std::size_t kSlotRecMax = 4 + 1 + 8 * sample::kMaxSlices + 8 + 4 + kWavNameMax + 1;
+inline constexpr std::size_t kSlotRecMax = 4 + 1 + 8 * sample::kMaxSlices + 8 + 4 + kWavNameMax + 1 + 2;
 inline constexpr std::size_t kPtnsMax = 2 + 1 + kBankPatterns * (2 + 1 + 4 * kPatternSteps);
 inline constexpr std::size_t kChaiMax = 2 + 2 + 2 * kChainMax;
 inline constexpr std::size_t kRoutMax = 2 + 3;
 inline constexpr std::size_t kSlotMax = 2 + 1 + route::kSlots * (2 + kSlotRecMax);
 inline constexpr std::size_t kValuMax = 2 + 2 + 6 * kEngineIds;
-inline constexpr std::size_t kStatMax = 2 + 4 + 5;
+inline constexpr std::size_t kStatMax = 2 + 4 + 5 + 4 + 1 + kPresetNameMax + kLayoutBytes;
 inline constexpr std::size_t kWorst = o3sdk::formats::chunk::kHeaderBytes + o3sdk::formats::chunk::kCrcChunkBytes + chunk_bytes(kPtnsMax) + chunk_bytes(kChaiMax) +
                                       chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax) + chunk_bytes(kStatMax);
 
@@ -200,7 +265,7 @@ inline bool slot_valid(const ProjectSlot& s) noexcept {
   if (trimmed && !(s.trim_start < s.trim_end && s.trim_end <= t.length)) {
     return false;
   }
-  if (s.speed < -1 || s.speed > 1 || s.reverse > 1u || s.level_half < -48 || s.level_half > 24 || s.name_len > kWavNameMax) {
+  if (s.speed < -1 || s.speed > 1 || s.reverse > 1u || s.level_half < -48 || s.level_half > 24 || s.name_len > kWavNameMax || s.gate > 1u || s.choke_off > 1u) {
     return false;
   }
   for (unsigned i = 0; i < s.name_len; ++i) {
@@ -235,9 +300,28 @@ inline bool pattern_valid(const PatternData& p) noexcept {
 // STAT's fields: the tempo the engine takes (20 to 400 BPM), a pattern of the bank, an octave PERFORM can hold (clamped there), a chord kind and a mode flag.
 inline constexpr std::uint32_t kStatTempoMin = 20000u;
 inline constexpr std::uint32_t kStatTempoMax = 400000u;
+// The 1.1 fields: a voicing, two flags, a range PERFORM offers, a printable preset name and a layout whose every row offers its value.
+inline bool stat_layout_valid(const Project& p) noexcept {
+  for (unsigned i = 0; i < kLayoutBytes; ++i) {
+    if (p.layout[i] >= pads::kPlaysCount) {
+      return false;
+    }
+  }
+  const pads::Layout l = project_layout(p);
+  return pads::offered(pads::Row::A, l.row[0]) && pads::offered(pads::Row::B, l.row[1]) && pads::offered(pads::Row::C, l.row[2]) && pads::offered(pads::Row::A, l.last[0]) &&
+         pads::offered(pads::Row::B, l.last[1]);
+}
 inline bool stat_valid(const Project& p) noexcept {
+  if (p.preset_len > kPresetNameMax) {
+    return false;
+  }
+  for (unsigned i = 0; i < p.preset_len; ++i) {
+    if (p.preset[i] < 0x20 || p.preset[i] > 0x7E) {
+      return false;
+    }
+  }
   return p.stat == 1u && p.tempo_mbpm >= kStatTempoMin && p.tempo_mbpm <= kStatTempoMax && p.pattern < kBankPatterns && p.octave >= -8 && p.octave <= 8 && p.chord < 4u &&
-         p.keys < 2u;
+         p.keys < 2u && p.voicing <= 3u && p.bend_row <= 1u && (p.bend_range == 2u || p.bend_range == 5u || p.bend_range == 12u) && p.follow <= 1u && stat_layout_valid(p);
 }
 
 inline bool project_valid(const Project& p) noexcept {
@@ -264,11 +348,13 @@ inline bool project_valid(const Project& p) noexcept {
 
 // --- the file ---
 inline constexpr std::uint16_t kProjectChunkVersion = 0x0100;
+inline constexpr std::uint16_t kSlotVersion = 0x0101;  // SLOT 1.1: TRIG and CHOKE after `values`
+inline constexpr std::uint16_t kStatVersion = 0x0101;  // STAT 1.1: voicing, bend row and range, FOLLOW, preset, layout
 
 namespace project_detail {
 
 constexpr std::uint16_t slot_rec_bytes(const ProjectSlot& s) noexcept {
-  return static_cast<std::uint16_t>(4 + 1 + 8u * s.cuts.count + 8 + 4 + s.name_len + 1);
+  return static_cast<std::uint16_t>(4 + 1 + 8u * s.cuts.count + 8 + 4 + s.name_len + 1 + 2);
 }
 
 // The tail of a record: skips what a newer minor appended; false when the record's known fields ran past its length.
@@ -282,9 +368,13 @@ inline bool rec_done(o3sdk::formats::chunk::Fields& f, std::size_t left_at_start
 }
 
 // Opens a known chunk's payload: the version's major must be this one.
-inline bool open_chunk(const o3sdk::formats::chunk::Chunk& c, o3sdk::formats::chunk::Fields& f) noexcept {
+// `minor` (when given) gets the file's minor version.
+inline bool open_chunk(const o3sdk::formats::chunk::Chunk& c, o3sdk::formats::chunk::Fields& f, unsigned* minor = nullptr) noexcept {
   f = o3sdk::formats::chunk::Fields(c);
   const std::uint16_t v = f.u16();
+  if (minor != nullptr) {
+    *minor = v & 0xFFu;
+  }
   return f.ok() && (v >> 8) == (kProjectChunkVersion >> 8);
 }
 
@@ -355,7 +445,8 @@ inline bool read_rout(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
 
 inline bool read_slot(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
   o3sdk::formats::chunk::Fields f(c);
-  if (!open_chunk(c, f)) {
+  unsigned minor = 0;
+  if (!open_chunk(c, f, &minor)) {
     return false;
   }
   const unsigned count = f.u8();
@@ -391,8 +482,15 @@ inline bool read_slot(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
     if (!f.ok()) {
       return false;
     }
+    if (minor >= 1u && start - f.left() + 3u > rec_len) {
+      return false;  // a 1.1 record carries values, TRIG and CHOKE: one that is shorter is damaged
+    }
     if (start - f.left() < rec_len) {
       s.values = f.u8() == 1u ? 1u : 0u;  // appended in this minor: a record from before ends at the name; any other byte is not a flag
+    }
+    if (minor >= 1u && start - f.left() + 2u <= rec_len) {
+      s.gate = f.u8();  // appended in 1.1: a 1.0 record ends at `values` and keeps the defaults (ONE SHOT, CHOKE ON)
+      s.choke_off = f.u8();
     }
     if (!f.ok() || !slot_valid(s) || !rec_done(f, start, rec_len)) {
       return false;
@@ -406,7 +504,8 @@ inline bool read_slot(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
 
 inline bool read_stat(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
   o3sdk::formats::chunk::Fields f(c);
-  if (!open_chunk(c, f)) {
+  unsigned minor = 0;
+  if (!open_chunk(c, f, &minor)) {
     return false;
   }
   got.tempo_mbpm = f.u32();
@@ -416,7 +515,36 @@ inline bool read_stat(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
   got.chord = static_cast<std::uint8_t>(f.u8());
   got.keys = static_cast<std::uint8_t>(f.u8());
   got.stat = 1;
-  return f.ok() && stat_valid(got);
+  if (!f.ok()) {
+    return false;
+  }
+  if (minor >= 1u) {  // 1.1 (a later minor's own fields follow and are not read)
+    got.voicing = f.u8();
+    got.bend_row = f.u8();
+    got.bend_range = f.u8();
+    got.follow = f.u8();
+    got.preset_len = f.u8();
+    if (!f.ok() || got.preset_len > kPresetNameMax) {
+      return false;
+    }
+    for (unsigned k = 0; k < got.preset_len; ++k) {
+      got.preset[k] = static_cast<char>(f.u8());
+    }
+    for (std::uint8_t& b : got.layout) {
+      b = f.u8();
+    }
+    return f.ok() && stat_valid(got);
+  }
+  // 1.0: the defaults of today, and the layout the old mode and chord kind meant (not what the previous project left).
+  got.voicing = 3;
+  got.bend_row = 0;
+  got.bend_range = 2;
+  got.follow = 0;
+  got.preset_len = 0;
+  if (got.chord < 4u) {
+    set_project_layout(got, pads::layout_from_legacy(got.keys == 1u, static_cast<ChordKind>(got.chord), false));
+  }
+  return stat_valid(got);
 }
 
 inline bool read_valu(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
@@ -476,7 +604,7 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
   if (p.sounds != 0u && (!w.begin("ROUT") || !w.u16(ver) || !w.u8(p.speaks) || !w.u8(p.sounds) || !w.u8(p.live_src) || !w.end())) {
     return 0;
   }
-  if (!w.begin("SLOT") || !w.u16(ver) || !w.u8(static_cast<std::uint8_t>(route::kSlots))) {
+  if (!w.begin("SLOT") || !w.u16(kSlotVersion) || !w.u8(static_cast<std::uint8_t>(route::kSlots))) {
     return 0;
   }
   for (const ProjectSlot& s : p.slot) {
@@ -490,7 +618,7 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
     }
     if (!w.u32(s.trim_start) || !w.u32(s.trim_end) || !w.u8(static_cast<std::uint8_t>(s.speed)) || !w.u8(s.reverse) ||
         !w.u8(static_cast<std::uint8_t>(s.level_half)) || !w.u8(s.name_len) || !w.bytes(s.name, s.name_len) ||
-        !w.u8(s.values != 0u ? 1u : 0u)) {
+        !w.u8(s.values != 0u ? 1u : 0u) || !w.u8(s.gate) || !w.u8(s.choke_off)) {
       return 0;
     }
   }
@@ -513,8 +641,18 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
     return 0;
   }
   if (p.stat != 0u) {
-    if (!w.begin("STAT") || !w.u16(ver) || !w.u32(p.tempo_mbpm) || !w.u8(p.swing) || !w.u8(p.pattern) || !w.u8(static_cast<std::uint8_t>(p.octave)) || !w.u8(p.chord) ||
-        !w.u8(p.keys) || !w.end()) {
+    // The 1.0 fields keep the chord kind and the pads mode as an older build reads them (Q6 derives those two and the bend row from the layout).
+    if (!w.begin("STAT") || !w.u16(kStatVersion) || !w.u32(p.tempo_mbpm) || !w.u8(p.swing) || !w.u8(p.pattern) || !w.u8(static_cast<std::uint8_t>(p.octave)) ||
+        !w.u8(p.chord) || !w.u8(p.keys) || !w.u8(p.voicing) || !w.u8(p.bend_row) || !w.u8(p.bend_range) || !w.u8(p.follow) || !w.u8(p.preset_len) ||
+        !w.bytes(p.preset, p.preset_len)) {
+      return 0;
+    }
+    for (const std::uint8_t b : p.layout) {
+      if (!w.u8(b)) {
+        return 0;
+      }
+    }
+    if (!w.end()) {
       return 0;
     }
   }

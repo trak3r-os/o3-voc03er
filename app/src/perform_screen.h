@@ -29,6 +29,7 @@
 
 #include <o3_voc03er/input.h>
 #include <o3_voc03er/pad_map.h>
+#include <o3_voc03er/presets.h>
 #include <o3_voc03er/route.h>
 
 #include <o3_voc03er/units/vocoder/vocoder.h>
@@ -108,13 +109,23 @@ class PerformScreen final : public o3sdk::app::Screen {
   void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
   void set_chord_kind(unsigned k) noexcept { bottom_ = static_cast<decltype(bottom_)>(k & 3u); }
   void set_keys(bool on) noexcept { keys_ = on; }
+  // FILE (P3) restores these too. BEND ROW lets the held pads go first, as SHIFT + F7 does; the layout is taken as it is (the caller has checked it with
+  // pads::offered); the preset is an index of presets.h, anything past the table is none (the window shows ---).
+  void set_strip(o3sdk::app::Context& ctx, bool on) noexcept {
+    if (on != strip_) {
+      toggle_strip(ctx);
+    }
+  }
+  void set_layout(const pads::Layout& l) noexcept { layout_ = l; }
+  unsigned preset() const noexcept { return preset_; }
+  void set_preset(unsigned index) noexcept { preset_ = index < kPresetCount ? index : perform::kNoPreset; }
   // FILE's load marks the slots whose WAV is still on its way (bit n: slot n): PERFORM and FILE draw them grey (ornoir::kSlotWaiting). Main loop only.
   void set_slots_waiting(unsigned mask) noexcept { slots_waiting_ = static_cast<std::uint8_t>(mask & 0xFu); }
   unsigned slots_waiting() const noexcept { return slots_waiting_; }
   unsigned focus() const noexcept { return focus_; }
   bool keys_mode() const noexcept { return keys_; }
   // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play. PATTERN's palette writes from it (rows A and B); PERFORM's own pads
-  // follow it from Q6 on. Main loop only. Not saved yet (Q8 puts it in the project); init() sets the default: A NOTE, B TRIAD, C FORMANT.
+  // follow it from Q6 on. Main loop only. Saved in the project (STAT 1.1); init() sets the default: A NOTE, B TRIAD, C FORMANT.
   const pads::Layout& layout() const noexcept { return layout_; }
   bool set_plays(pads::Row row, pads::Plays value) noexcept { return pads::set_plays(layout_, row, value); }
   bool strip_mode() const noexcept { return strip_; }
