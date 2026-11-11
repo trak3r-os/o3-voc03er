@@ -24,7 +24,7 @@ namespace pl = perform;
 
 namespace {
 
-constexpr std::uint8_t kVelocity = 110;
+constexpr std::uint8_t kVelocity = PerformScreen::kAuditionVelocity;
 constexpr std::uint32_t kPeakHoldFrames = 20;
 
 // PERFORM's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just a cursor in the SRAM). Plain bytes: only zero
@@ -275,6 +275,55 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
     (void)e.note_on(voice_, g_pd.notes[pad][i], kVelocity, o3_voc03er::Vocoder::kNoteLocal);
   }
   ctx.redraw();
+}
+
+void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity) noexcept {
+  constexpr unsigned kAuditionPads = 24;  // the palette: rows A and B (and C, which PATTERN does not use)
+  if (pad >= kAuditionPads || note < 1u || note > 127u) {
+    return;
+  }
+  audition_release(ctx, pad);  // a second press of a pad that is still down: the first one ends
+  dsp::Engine& e = ctx.engine();
+  if (kind == 0u) {
+    g_pd.notes[pad][0] = static_cast<std::uint8_t>(note);
+    g_pd.count[pad] = 1;
+    for (unsigned i = 1; i < kChordMaxNotes; ++i) {
+      g_pd.notes[pad][i] = 0;
+    }
+  } else {
+    const Chord prev = chord_from(g_pd.last_notes, g_pd.last_count);
+    const Chord c = make_chord(static_cast<ChordKind>((kind > 4u ? 4u : kind) - 1u), note % 12u, static_cast<int>(note / 12u) - 4,
+                               round_param(e, voice_, Vocoder::Key), round_param(e, voice_, Vocoder::Scale), static_cast<Voicing>(voicing_),
+                               g_pd.last_count != 0u ? &prev : nullptr);
+    g_pd.count[pad] = c.count;
+    for (unsigned i = 0; i < kChordMaxNotes; ++i) {
+      g_pd.notes[pad][i] = i < c.count ? c.notes[i] : 0u;
+    }
+    g_pd.last_count = c.count;
+    std::memcpy(g_pd.last_notes, c.notes, sizeof g_pd.last_notes);
+  }
+  held_ |= std::uint64_t{1} << pad;
+  for (unsigned i = 0; i < g_pd.count[pad]; ++i) {
+    (void)e.note_on(voice_, g_pd.notes[pad][i], velocity, o3_voc03er::Vocoder::kNoteLocal);
+  }
+}
+
+void PerformScreen::audition_release(app::Context& ctx, unsigned pad) noexcept {
+  if (pad >= app::kPadCount || ((held_ >> pad) & 1u) == 0u) {
+    return;
+  }
+  held_ &= ~(std::uint64_t{1} << pad);
+  for (unsigned i = 0; i < g_pd.count[pad] && i < kChordMaxNotes; ++i) {
+    if (!note_in_use(g_pd.notes[pad][i], app::kPadCount)) {  // a note another held pad still holds stays on
+      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.notes[pad][i]));
+    }
+  }
+}
+
+void PerformScreen::audition_release_all(app::Context& ctx) noexcept {
+  for (unsigned p = 0; p < 24u; ++p) {
+    audition_release(ctx, p);
+  }
 }
 
 void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {

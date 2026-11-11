@@ -153,6 +153,21 @@ void PatternScreen::enter(app::Context& ctx) noexcept {
   ctx.redraw();
 }
 
+void PatternScreen::leave(app::Context& ctx) noexcept {
+  if (perform_ != nullptr) {
+    perform_->audition_release_all(ctx);
+  }
+  aud_ = 0;
+}
+
+void PatternScreen::audition(app::Context& ctx, unsigned pad, unsigned note, unsigned kind) noexcept {
+  if (perform_ == nullptr || pad >= pt::kPalettePads) {
+    return;
+  }
+  perform_->audition_press(ctx, pad, note, kind);
+  aud_ |= std::uint32_t{1} << pad;
+}
+
 std::uint64_t PatternScreen::repeat_buttons(const app::Context&) const noexcept {
   return (std::uint64_t{1} << static_cast<unsigned>(Button::Left)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Right));
 }
@@ -199,15 +214,20 @@ void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noe
 }
 
 // A palette pad writes into the cursor's step, and the cursor moves on. On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or
-// a chord of PATTERN's voicing); a pad that plays nothing (OFF, a piano gap, out of range) writes nothing, and SHIFT + a pad writes nothing yet (the
-// audition, Q3).
+// a chord of PATTERN's voicing); a pad that plays nothing (OFF, a piano gap, out of range) writes nothing, and sounds nothing. The pad sounds while it is
+// held (the audition, Q3); SHIFT + a pad sounds and writes nothing.
 void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) noexcept {
   PatternData& p = pattern_now();
   bool ok = false;
   switch (lane()) {
     case pt::Lane::Note: {
       const pads::PadPlay pp = pt::palette_play(pad, perform_ != nullptr ? perform_->octave() : 0, layout_now());
-      if (shift || pp.note < 1) {
+      if (pp.note < 1) {
+        return;
+      }
+      audition(ctx, pad, static_cast<unsigned>(pp.note), pp.kind);
+      if (shift) {
+        ctx.redraw();
         return;
       }
       const unsigned note = static_cast<unsigned>(pp.note);
@@ -414,6 +434,12 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     ctx.redraw();
   } else if (in.pad_press()) {
     pad(ctx, in.pad(), in.shift);
+  } else if (in.pad_release() && in.pad() < pt::kPalettePads && ((aud_ >> in.pad()) & 1u) != 0u) {
+    aud_ &= ~(std::uint32_t{1} << in.pad());
+    if (perform_ != nullptr) {
+      perform_->audition_release(ctx, in.pad());
+    }
+    ctx.redraw();
   }
 }
 
@@ -462,6 +488,9 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
       level = app::kLedOff;
     } else if (pt::palette_matches(lane(), pad, cur, oct, layout)) {
       level = app::kLedMid;
+    }
+    if (((aud_ >> pad) & 1u) != 0u) {
+      level = app::kLedOn;  // held and sounding, as PERFORM's held pads
     }
     leds.set(pad, level);
   }

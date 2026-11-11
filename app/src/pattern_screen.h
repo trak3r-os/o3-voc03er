@@ -14,6 +14,8 @@
 //   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: the pads of PERFORM's rows A and B, what
 //   they play there, at PERFORM's octave, lit like PERFORM's; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS
 //   slot's cuts 1..24, lit up to its count). A palette pad writes into the cursor's step and moves the cursor on; a pad that plays nothing writes nothing.
+//   On the NOTE lane a palette pad also sounds while it is held (PERFORM's local-note path, so the bar's note-offs do not cut it) and is lit; SHIFT +
+//   a palette pad sounds and writes nothing.
 //
 // Main loop only. The screen keeps a cursor and a few flags; HELP's labels are in the SDRAM (g_pd in the .cpp).
 
@@ -41,6 +43,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
   const o3sdk::ui::Theme* theme(const o3sdk::app::Context&) const noexcept override;
   void enter(o3sdk::app::Context& ctx) noexcept override;
+  void leave(o3sdk::app::Context& ctx) noexcept override;  // a palette pad still held lets go (a screen button can leave at any moment)
   std::uint64_t repeat_buttons(const o3sdk::app::Context&) const noexcept override;
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
   void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
@@ -66,6 +69,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   void show_pattern(o3sdk::app::Context& ctx, unsigned p) noexcept;
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
+  void audition(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind) noexcept;
   const pads::Layout& layout_now() const noexcept;  // PERFORM's (the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
 
@@ -84,6 +88,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   bool follow_ = false;
   std::uint8_t row_ = 0;     // F6: the row F7 changes, pads::Row A (0) or B (1) (the palette's two rows)
   std::uint64_t flash_until_ = 0;  // the chosen row's LEDs are off until then, a short off-on when F6 changes it (leds() checks it; main loop only)
+  std::uint32_t aud_ = 0;    // the palette pads held and sounding (bit pad 0..23, PerformScreen::audition_press); main loop only
   std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE
   bool key_tap_ = false;     // turn() came from a second tap on an F key, not from the encoder
 };

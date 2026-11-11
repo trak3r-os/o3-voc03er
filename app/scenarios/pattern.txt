@@ -34,7 +34,7 @@ wait 40
 padup 19
 wait 40
 snap 02_notes
-# SHIFT + a palette pad writes nothing (Q3 makes it sound): the cursor stays
+# SHIFT + a palette pad writes nothing (it sounds, Q3: see pattern_audition.txt): the cursor stays
 press shift
 paddown 5
 wait 40

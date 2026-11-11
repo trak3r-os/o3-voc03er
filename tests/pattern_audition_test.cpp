@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// PATTERN's audition (Q3 to Q5): a palette pad sounds while it is held. The observable is the output energy: the vocoder speaks while it hears the
+// modulator (a tone on the fake capture) and a carrier note is held, and falls silent once the note-off arrives.
+
+#include <doctest/doctest.h>
+
+#include <o3sdk/app/app.h>
+#include <o3sdk/app/pad_leds.h>
+#include <o3sdk/app/runtime.h>
+#include <o3sdk/platform/host/fake_capture.h>
+#include <o3sdk/sim/harness.h>
+
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+
+namespace app = o3sdk::app;
+namespace sim = o3sdk::sim;
+
+namespace {
+
+void tap(sim::Harness& h, app::Button b) {
+  h.press(b);
+  h.run_ms(5);
+  h.release(b);
+  h.run_ms(40);
+}
+
+struct Rig {
+  o3sdk::platform::host::FakeCapture cap;
+  std::unique_ptr<sim::Harness> h;
+  Rig() {
+    cap.input_tone(220.0f, -12.0f);
+    h = std::make_unique<sim::Harness>(::o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
+    REQUIRE(h->start());
+    h->record(true);
+    h->run_ms(100);
+    tap(*h, app::Button::Performance);  // PERFORM first, as from home
+    tap(*h, app::Button::Pattern);
+    h->run_ms(60);
+  }
+  unsigned led(unsigned p) const { return h->leds().level(p); }
+  std::size_t mark() const { return h->audio().size(); }
+  // The rms (fraction of full scale) of the samples recorded since `from`.
+  double rms_since(std::size_t from) const {
+    const std::vector<std::int16_t>& a = h->audio();
+    double s = 0.0;
+    std::size_t n = 0;
+    for (std::size_t i = from; i < a.size(); i += 2) {
+      s += static_cast<double>(a[i]) * static_cast<double>(a[i]);
+      ++n;
+    }
+    return n != 0 ? std::sqrt(s / static_cast<double>(n)) / 32768.0 : 0.0;
+  }
+  // The rms of the next `ms` milliseconds.
+  double listen(unsigned ms) {
+    const std::size_t from = mark();
+    h->run_ms(ms);
+    return rms_since(from);
+  }
+};
+
+constexpr double kSound = 1e-4;  // above: a note is sounding
+constexpr unsigned kNoteA = 5;   // a palette pad of row 0 (A NOTE, a single note)
+constexpr unsigned kNoteB = 7;
+constexpr unsigned kChordPad = 17;  // row 1 (B TRIAD): a chord
+
+}  // namespace
+
+TEST_CASE("audition: a palette pad sounds while held and lets go on the release, and its LED is on") {
+  Rig rig;
+  CHECK(rig.listen(200) < kSound);  // nothing sounds before
+  rig.h->pad_down(kNoteA);
+  CHECK(rig.listen(300) > kSound);
+  CHECK(rig.led(kNoteA) == app::kLedOn);
+  CHECK(rig.listen(300) > kSound);  // it holds
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(40);
+  CHECK(rig.led(kNoteA) != app::kLedOn);
+  rig.h->run_ms(700);  // the release tail
+  CHECK(rig.listen(200) < kSound);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("audition: a chord pad holds its chord, and the step it wrote is a chord") {
+  Rig rig;
+  rig.h->pad_down(kChordPad);
+  CHECK(rig.listen(300) > kSound);
+  rig.h->pad_up(kChordPad);
+  rig.h->run_ms(900);
+  CHECK(rig.listen(200) < kSound);
+  CHECK(rig.led(24) == app::kLedDim);  // step 1 holds the chord (the press wrote it)
+  CHECK(rig.led(25) == app::kLedMid);  // and the cursor moved on
+}
+
+TEST_CASE("audition: SHIFT + a palette pad sounds and writes nothing") {
+  Rig rig;
+  rig.h->press(app::Button::Shift);
+  rig.h->run_ms(5);
+  rig.h->pad_down(kNoteA);
+  CHECK(rig.listen(300) > kSound);
+  CHECK(rig.led(24) == app::kLedMid);  // the cursor stays on step 1, which stays empty
+  CHECK(rig.led(25) == app::kLedOff);
+  rig.h->pad_up(kNoteA);
+  rig.h->release(app::Button::Shift);
+  rig.h->run_ms(900);
+  CHECK(rig.listen(200) < kSound);
+  CHECK(rig.led(24) == app::kLedMid);
+}
+
+TEST_CASE("audition: leaving PATTERN with a pad held lets it go") {
+  Rig rig;
+  rig.h->pad_down(kNoteA);
+  CHECK(rig.listen(300) > kSound);
+  tap(*rig.h, app::Button::Performance);  // a screen button leaves at any moment
+  rig.h->run_ms(900);
+  CHECK(rig.listen(200) < kSound);
+  rig.h->pad_up(kNoteA);  // the late release is harmless
+  rig.h->run_ms(100);
+  CHECK(rig.listen(200) < kSound);
+  tap(*rig.h, app::Button::Pattern);  // and PATTERN comes back with no pad lit
+  CHECK(rig.led(kNoteA) != app::kLedOn);
+}
+
+TEST_CASE("audition: with the transport playing a step's note-off does not cut a held pad") {
+  Rig rig;
+  tap(*rig.h, app::Button::Performance);
+  tap(*rig.h, app::Button::Pattern);
+  rig.h->pad_down(kNoteA);  // step 1 gets a note; the cursor moves to step 2, which stays empty
+  rig.h->run_ms(20);
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(900);
+  tap(*rig.h, app::Button::Play);
+  // Step 1 sounds at the start of each bar and its note-off comes before the bar's second half: a quiet window of the bar.
+  const double first = rig.listen(150);
+  CHECK(first > kSound);  // the step's note
+  rig.h->run_ms(550);
+  const double quiet = rig.listen(500);  // nothing sounds in this window of the bar
+  CHECK(quiet < first * 0.1);
+  rig.h->pad_down(kNoteB);  // a different note held through the next bar's start and its note-off
+  rig.h->run_ms(100);
+  const double held = rig.listen(1500);
+  CHECK(held > quiet * 10.0 + kSound);
+  rig.h->pad_up(kNoteB);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}

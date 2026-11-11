@@ -1,0 +1,34 @@
+# PATTERN's audition (Q3): a palette pad sounds while held. A B-row chord pad held for a second (and written into step 1), then an A-row note held for
+# a second, then SHIFT + a note (sounds, writes nothing); the WAV holds the chord, the note and the SHIFT note with silence between.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern_audition.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+record on
+wait 300
+tap performance
+wait 100
+tap pattern
+wait 150
+snap 01_empty
+paddown 16
+wait 100
+snap 02_chord_held_lit
+wait 900
+padup 16
+wait 700
+snap 03_chord_written
+paddown 5
+wait 100
+snap 04_note_held_lit
+wait 900
+padup 5
+wait 700
+press shift
+paddown 7
+wait 100
+snap 05_shift_note_writes_nothing
+wait 600
+padup 7
+release shift
+wait 700
+snap 06_end
+wav pattern_audition
