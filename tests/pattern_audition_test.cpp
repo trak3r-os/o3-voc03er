@@ -7,6 +7,7 @@
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/pad_leds.h>
 #include <o3sdk/app/runtime.h>
+#include <o3_voc03er/units/vocoder/vocoder.h>
 #include <o3sdk/platform/host/fake_capture.h>
 #include <o3sdk/sim/harness.h>
 
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 
+using o3_voc03er::Vocoder;
 namespace app = o3sdk::app;
 namespace sim = o3sdk::sim;
 
@@ -223,5 +225,96 @@ TEST_CASE("octave: UP and DOWN move the palette by 12 and stop at PERFORM's clam
   CHECK(matches(26));
   tap(*rig.h, app::Button::Up);
   CHECK_FALSE(matches(26));
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+// Q5. LEVEL: the palette pad writes the level and sounds the cursor step's note at it; SLICE: it fires the slice on the SPEAKS slot.
+TEST_CASE("level: a palette pad sounds the cursor step's note at that level, louder when higher; a rest sounds nothing") {
+  Rig rig;
+  rig.h->pad_down(kNoteA);  // step 1 holds a note, the cursor moves on to step 2
+  rig.h->run_ms(20);
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(900);
+  tap(*rig.h, app::Button::Vol);
+  const auto select = [&](unsigned step_pad) {
+    rig.h->pad_down(step_pad);
+    rig.h->run_ms(20);
+    rig.h->pad_up(step_pad);
+    rig.h->run_ms(40);
+  };
+  const auto hear = [&](unsigned level_pad) {
+    select(24);
+    rig.h->pad_down(level_pad);
+    const double v = rig.listen(300);
+    CHECK(rig.led(level_pad) == app::kLedOn);
+    rig.h->pad_up(level_pad);
+    rig.h->run_ms(900);
+    return v;
+  };
+  const double low = hear(0);
+  const double high = hear(23);
+  CHECK(low > kSound);
+  CHECK(high > low);
+  select(26);  // step 3 is a rest: the level is written and nothing sounds
+  rig.h->pad_down(12);
+  CHECK(rig.listen(300) < kSound);
+  rig.h->pad_up(12);
+  rig.h->run_ms(100);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+namespace {
+constexpr std::uint16_t kTrigReader0 = Vocoder::region_param(0, Vocoder::RegionField::Trig);
+constexpr std::uint16_t kStartReader0 = Vocoder::region_param(0, Vocoder::RegionField::Start);
+float unit_param(sim::Harness& h, std::uint16_t id) {
+  float best = 0.0f;
+  for (unsigned u = 0; u < 8; ++u) {
+    const float v = h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    best = std::fabs(v) > std::fabs(best) ? v : best;
+  }
+  return best;
+}
+}  // namespace
+
+TEST_CASE("slice: a palette pad writes the slice and fires it on the SPEAKS slot; with SPEAKS on LIVE nothing fires") {
+  Rig rig;
+  // A 1 BAR take into slot 1 (even cuts), SPEAKS on that slot, as SAMPLE does it.
+  tap(*rig.h, app::Button::SampleRec);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::F3);
+  tap(*rig.h, app::Button::F4);
+  tap(*rig.h, app::Button::F4);
+  tap(*rig.h, app::Button::F4);
+  tap(*rig.h, app::Button::Rec);
+  rig.h->run_ms(9000);
+  tap(*rig.h, app::Button::Pattern);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::Fx);
+  CHECK(unit_param(*rig.h, kTrigReader0) == doctest::Approx(0.0f));
+  rig.h->pad_down(2);  // SPEAKS is LIVE: slice 3 has nothing to fire
+  rig.h->run_ms(100);
+  rig.h->pad_up(2);
+  rig.h->run_ms(60);
+  CHECK(unit_param(*rig.h, kTrigReader0) == doctest::Approx(0.0f));
+  tap(*rig.h, app::Button::SamplePlay);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::F2);  // SIDE: SPEAKS
+  tap(*rig.h, app::Button::F2);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::Pattern);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::Fx);
+  rig.h->pad_down(1);  // slice 2
+  rig.h->run_ms(60);
+  CHECK(unit_param(*rig.h, kTrigReader0) == doctest::Approx(1.0f));
+  const float s2 = unit_param(*rig.h, kStartReader0);
+  CHECK(rig.led(1) == app::kLedOn);
+  rig.h->pad_up(1);
+  rig.h->run_ms(300);
+  rig.h->pad_down(5);  // slice 6 starts later in the slot
+  rig.h->run_ms(60);
+  CHECK(unit_param(*rig.h, kStartReader0) > s2);
+  rig.h->pad_up(5);
+  rig.h->run_ms(60);
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }

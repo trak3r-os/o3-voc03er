@@ -33,12 +33,15 @@
 
 namespace o3_voc03er {
 
+class SampleScreen;
+
 class PatternScreen final : public o3sdk::app::Screen {
  public:
   // F8: the app's save of the bank (the same job FILE starts); it says what it did through the screen's line when it cannot (the card is busy).
   using SaveFn = bool (*)(void* user, o3sdk::app::Context& ctx) noexcept;
 
-  void init(o3sdk::dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user) noexcept;
+  void init(o3sdk::dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user,
+            SampleScreen* sample = nullptr) noexcept;
 
   const char* title() const noexcept override { return "PATTERN"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -70,7 +73,10 @@ class PatternScreen final : public o3sdk::app::Screen {
   void show_pattern(o3sdk::app::Context& ctx, unsigned p) noexcept;
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
-  void audition(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind) noexcept;
+  void audition(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity = PerformScreen::kAuditionVelocity,
+                unsigned voicing = PerformScreen::kCurrentVoicing) noexcept;
+  void audition_step(o3sdk::app::Context& ctx, unsigned pad, unsigned step) noexcept;  // LEVEL: the step's note or chord at the step's level
+  void audition_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept;                // SLICE: fires the slice on the SPEAKS slot
   const pads::Layout& layout_now() const noexcept;  // PERFORM's (the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
 
@@ -78,6 +84,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   Bank* bank_ = nullptr;
   StepSeq* seq_ = nullptr;
   PerformScreen* perform_ = nullptr;
+  SampleScreen* sample_ = nullptr;  // the SLICE audition fires a slice as SAMPLE's pads do
   SaveFn save_ = nullptr;
   void* save_user_ = nullptr;
   const char* note_ = nullptr;  // a moment's line (a static string), until note_until_

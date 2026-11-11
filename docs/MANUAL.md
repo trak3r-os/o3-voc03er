@@ -343,6 +343,9 @@ The pads: the top two rows are the lane's palette (chords or notes for NOTE, the
 pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays. The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
 (a step pad past LENGTH does nothing). The lower right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
 
+On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
+fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
+
 On the NOTE lane the palette is the chord grid's two lower rows: F6's kind on the lower row, the next kind above it. **Hold SHIFT and press
 a chord pad to write its root alone, a single note**: a bass line of sixteen notes is sixteen presses, with SHIFT held. With PADS on KEYS
 (PERFORM's F7) the palette is two octaves of single notes, the upper row an octave up, and no SHIFT is needed.

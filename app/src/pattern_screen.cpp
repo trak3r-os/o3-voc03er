@@ -3,6 +3,7 @@
 
 #include "midi_pattern_logic.h"
 #include "perform_logic.h"
+#include "sample_screen.h"
 #include "skin/ornoir.h"
 
 #include <o3_voc03er/input.h>
@@ -129,8 +130,9 @@ constexpr int kLaneStep = 60;
 
 }  // namespace
 
-void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user) noexcept {
+void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user, SampleScreen* sample) noexcept {
   voice_ = voice;
+  sample_ = sample;
   bank_ = bank;
   seq_ = seq;
   perform_ = perform;
@@ -158,16 +160,37 @@ void PatternScreen::leave(app::Context& ctx) noexcept {
   if (perform_ != nullptr) {
     perform_->audition_release_all(ctx);
   }
+  for (unsigned pad = 0; pad < pt::kPalettePads && sample_ != nullptr; ++pad) {
+    if (((aud_ >> pad) & 1u) != 0u) {
+      sample_->release_slice(ctx, pad);  // a GATE slice ends with the pad
+    }
+  }
   aud_ = 0;
   steps_held_ = 0;
 }
 
-void PatternScreen::audition(app::Context& ctx, unsigned pad, unsigned note, unsigned kind) noexcept {
+void PatternScreen::audition(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
   if (perform_ == nullptr || pad >= pt::kPalettePads) {
     return;
   }
-  perform_->audition_press(ctx, pad, note, kind);
+  perform_->audition_press(ctx, pad, note, kind, velocity, voicing);
   aud_ |= std::uint32_t{1} << pad;
+}
+
+// The LEVEL lane (Q5): the step's own note or chord, at the level just written (the sequencer's velocity rule). A rest sounds nothing.
+void PatternScreen::audition_step(app::Context& ctx, unsigned pad, unsigned step) noexcept {
+  const Step s = get_step(pattern_now(), step);
+  if (s.note >= 1u) {
+    audition(ctx, pad, s.note, s.kind, step_velocity(s), s.voicing);
+  }
+}
+
+// The SLICE lane (Q5): the slice just written, fired on the SPEAKS slot as SAMPLE's pads fire it. The pad's release lets a GATE slice go.
+void PatternScreen::audition_slice(app::Context& ctx, unsigned pad) noexcept {
+  if (sample_ != nullptr && pad < pt::kPalettePads) {
+    sample_->fire_slice(ctx, pad);
+    aud_ |= std::uint32_t{1} << pad;
+  }
 }
 
 std::uint64_t PatternScreen::repeat_buttons(const app::Context&) const noexcept {
@@ -223,8 +246,12 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
   const unsigned len = length_of(p);
   std::uint32_t targets = steps_held_ & ((std::uint32_t{1} << len) - 1u);  // a held step past LENGTH (it was cut short meanwhile) is not written
   const bool held = targets != 0u;
+  unsigned heard = cursor_ < len ? cursor_ : 0u;  // the step the LEVEL audition plays: the cursor's, or the first held one when the cursor's was let go
   if (!held) {
-    targets = std::uint32_t{1} << (cursor_ < len ? cursor_ : 0u);
+    targets = std::uint32_t{1} << heard;
+  } else if (((targets >> heard) & 1u) == 0u) {
+    for (heard = 0; ((targets >> heard) & 1u) == 0u; ++heard) {
+    }
   }
   pads::PadPlay pp;
   if (lane() == pt::Lane::Note) {
@@ -266,6 +293,11 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
         break;
       }
     }
+  }
+  if (ok && lane() == pt::Lane::Level) {
+    audition_step(ctx, pad, heard);
+  } else if (ok && lane() == pt::Lane::Slice) {
+    audition_slice(ctx, pad);
   }
   if (ok && !held) {
     cursor_ = static_cast<std::uint8_t>(pt::next_cursor(cursor_, len));
@@ -467,6 +499,9 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     aud_ &= ~(std::uint32_t{1} << in.pad());
     if (perform_ != nullptr) {
       perform_->audition_release(ctx, in.pad());
+    }
+    if (sample_ != nullptr) {
+      sample_->release_slice(ctx, in.pad());
     }
     ctx.redraw();
   }

@@ -77,6 +77,11 @@ class SampleScreen final : public o3sdk::app::Screen {
   // sequencer when the slot or its cuts changed.
   void service(o3sdk::app::Context& ctx) noexcept;
 
+  // PATTERN's SLICE audition (Q5): slice `pad` (0..23) of the slot that SPEAKS, fired as a pad of this screen fires it (reader, TRIG, CHOKE and the
+  // slot's loop as there). Nothing when SPEAKS is LIVE or the slot has no such slice. release_slice is the pad's release (it ends a GATE slice).
+  void fire_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void release_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept { release_pad(ctx, pad); }
+
   // The side's ink of a slot (SPEAKS, SOUNDS, or the neutral rule colour): the tint of its overview picture.
   o3sdk::ui::Rgb slot_ink(o3sdk::app::Context& ctx, unsigned slot) const noexcept;
 
@@ -86,7 +91,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void write(o3sdk::app::Context& ctx, Vocoder::LoopField f, float v) noexcept;
   void write_slot(o3sdk::app::Context& ctx, unsigned loop, Vocoder::LoopField f, float v) noexcept;
   void set_side(o3sdk::app::Context& ctx, int delta) noexcept;
-  void trigger(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void trigger(o3sdk::app::Context& ctx, unsigned slot, unsigned pad) noexcept;  // slice `pad` of `slot` (SAMPLE: the selected slot; fire_slice: SPEAKS)
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void stop_loop(o3sdk::app::Context& ctx, unsigned slot) noexcept;  // Play 0 on the slot's loop when it plays or waits (a slice owns the slot)
   void release_all(o3sdk::app::Context& ctx) noexcept;

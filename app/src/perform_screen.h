@@ -123,10 +123,12 @@ class PerformScreen final : public o3sdk::app::Screen {
   // `pad` 0..23 (it takes that pad's slot of the tables and its bit of held_; PERFORM is not on screen meanwhile, and its leave() lets the pads go),
   // `note` a MIDI note, `kind` 0 a single note, 1..4 a chord of that kind on the note (root pc = note % 12, the octave of kChordBaseNote, PERFORM's
   // voicing and the SMOOTH memory as press_pad uses them). No latch. Main loop only.
-  void audition_press(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity = kAuditionVelocity) noexcept;
+  void audition_press(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity = kAuditionVelocity,
+                      unsigned voicing = kCurrentVoicing) noexcept;
   void audition_release(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void audition_release_all(o3sdk::app::Context& ctx) noexcept;
-  static constexpr std::uint8_t kAuditionVelocity = 110;  // what PERFORM's pads play
+  static constexpr std::uint8_t kAuditionVelocity = 110;
+  static constexpr unsigned kCurrentVoicing = 4;  // audition_press: the chord uses PERFORM's voicing (0..3 is a voicing of its own, a step's)  // what PERFORM's pads play
 
  private:
   void release_all(o3sdk::app::Context& ctx) noexcept;

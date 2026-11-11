@@ -207,16 +207,17 @@ Vocoder::LoopStatus SampleScreen::view(unsigned loop) const noexcept {
   return st;
 }
 
-// A slice of the selected slot on a reader (sm::pick_reader). The reader plays the slot's cut at the slot's Speed, Dir and Level, on the slot's
+// A slice of `slot` (SAMPLE: the selected one; PATTERN's audition: the one that speaks) on a reader (sm::pick_reader). The reader plays the slot's cut at the slot's Speed, Dir and Level, on the slot's
 // side (a slot on no side speaks): those four are written first, then Start, Len and Trig 1, in that order, so the unit takes the span with the
 // trigger. A press is at most 7 writes (3 when the reader is the slot's own and its values already are the slot's): the unit drains 64 a block
 // (kMaxParamsPerBlock) and the ring holds 512, and the 24 slice pads give at most 24 * 7 in a frame, which the frame cadence does not allow.
-void SampleScreen::trigger(app::Context& ctx, unsigned pad) noexcept {
-  if (voc_ == nullptr || perform_ == nullptr || pad >= g_sd.table[slot_ & 3u].count) {
+void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad) noexcept {
+  slot &= 3u;
+  if (voc_ == nullptr || perform_ == nullptr || pad >= g_sd.table[slot].count) {
     return;
   }
   dsp::Engine& e = ctx.engine();
-  const sm::Cut cut = g_sd.table[slot_ & 3u].cut[pad];
+  const sm::Cut cut = g_sd.table[slot].cut[pad];
   sm::ReaderState rs[sm::kReaders];
   const route::Route rt = perform_->route_now(ctx);
   for (unsigned k = 0; k < sm::kReaders; ++k) {
@@ -227,14 +228,14 @@ void SampleScreen::trigger(app::Context& ctx, unsigned pad) noexcept {
     rs[k].region = g_sd.voice[k].active || st.region;
     rs[k].seq = g_sd.voice[k].seq;
   }
-  const int pick = sm::pick_reader(rs, slot_, g_sd.choke_off[slot_ & 3u] == 0u);
+  const int pick = sm::pick_reader(rs, slot, g_sd.choke_off[slot] == 0u);
   if (pick < 0) {
     say(ctx, "NO FREE READER");
     return;
   }
   const unsigned k = static_cast<unsigned>(pick);
-  const Vocoder::LoopStatus src = view(slot_);  // before reader k's values change (k may be borrowed)
-  const bool car = sm::slice_is_carrier(sm::side_of(rt, slot_));
+  const Vocoder::LoopStatus src = view(slot);  // before reader k's values change (k may be borrowed)
+  const bool car = sm::slice_is_carrier(sm::side_of(rt, slot));
   SliceVoice& v = g_sd.voice[k];
   if (!v.modified) {
     v.speed = static_cast<std::uint8_t>(round_param(e, voice_, Vocoder::loop_param(k, Field::Speed)));
@@ -255,26 +256,36 @@ void SampleScreen::trigger(app::Context& ctx, unsigned pad) noexcept {
   put(Field::Role, car ? 1.0f : 0.0f);
   // The slot's whole loop does not wait under the slice: a loop that plays (or waits for the bar) is turned off first, so LOOP reads OFF and the
   // pads own the slot until F5 starts it again. The unit would otherwise resume the loop where the slice paused it.
-  stop_loop(ctx, slot_);
-  if (g_sd.choke_off[slot_ & 3u] == 0u) {  // CHOKE ON: a slice of this slot on a borrowed reader (CHOKE was off) fades out
+  stop_loop(ctx, slot);
+  if (g_sd.choke_off[slot] == 0u) {  // CHOKE ON: a slice of this slot on a borrowed reader (CHOKE was off) fades out
     for (unsigned j = 0; j < sm::kReaders; ++j) {
-      if (j != k && g_sd.voice[j].active && g_sd.voice[j].slot == slot_) {
+      if (j != k && g_sd.voice[j].active && g_sd.voice[j].slot == slot) {
         g_sd.voice[j].gate = false;
         (void)e.set_param(voice_, Vocoder::region_param(j, Vocoder::RegionField::Trig), 0.0f);
       }
     }
   }
-  (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Start), static_cast<float>(sm::region_start(slot_, Loop::kMaxSamples, cut)));
+  (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Start), static_cast<float>(sm::region_start(slot, Loop::kMaxSamples, cut)));
   (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Len), static_cast<float>(cut.len));
   (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Trig), 1.0f);
   v.active = true;
   v.seen = false;
-  v.gate = g_sd.gate[slot_ & 3u] != 0u;
-  v.slot = slot_;
+  v.gate = g_sd.gate[slot] != 0u;
+  v.slot = static_cast<std::uint8_t>(slot);
   v.pad = static_cast<std::uint8_t>(pad);
   v.seq = ++g_sd.seq;
   v.started_ms = ctx.uptime_ms();
   ctx.redraw();
+}
+
+void SampleScreen::fire_slice(app::Context& ctx, unsigned pad) noexcept {
+  if (perform_ == nullptr) {
+    return;
+  }
+  const std::uint8_t sp = perform_->route_now(ctx).speaks;
+  if (route::is_slot(sp)) {
+    trigger(ctx, static_cast<unsigned>(sp - route::kFirstSlot), pad);
+  }
 }
 
 // Turns the slot's own loop off when it plays or waits for the bar (the unit's Play 0 leaves a sounding region alone). Reads the unit's status,
@@ -484,7 +495,7 @@ bool SampleScreen::pad_input(app::Context& ctx, const app::Input& in) noexcept {
   if (in.press(Button::Shift) && perform_ != nullptr) {  // PERFORM's latch of the held chord pad
     perform_->input(ctx, in);
   } else if (in.pad_press() && !sm::chord_pad(in.pad())) {
-    trigger(ctx, in.pad());
+    trigger(ctx, slot_, in.pad());
   } else if (in.pad_release() && !sm::chord_pad(in.pad())) {
     release_pad(ctx, in.pad());
   } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr && sm::chord_pad(in.pad())) {

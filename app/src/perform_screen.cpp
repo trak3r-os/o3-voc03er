@@ -277,7 +277,7 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   ctx.redraw();
 }
 
-void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity) noexcept {
+void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
   constexpr unsigned kAuditionPads = 24;  // the palette: rows A and B (and C, which PATTERN does not use)
   if (pad >= kAuditionPads || note < 1u || note > 127u) {
     return;
@@ -293,7 +293,7 @@ void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned not
   } else {
     const Chord prev = chord_from(g_pd.last_notes, g_pd.last_count);
     const Chord c = make_chord(static_cast<ChordKind>((kind > 4u ? 4u : kind) - 1u), note % 12u, static_cast<int>(note / 12u) - 4,
-                               round_param(e, voice_, Vocoder::Key), round_param(e, voice_, Vocoder::Scale), static_cast<Voicing>(voicing_),
+                               round_param(e, voice_, Vocoder::Key), round_param(e, voice_, Vocoder::Scale), static_cast<Voicing>(voicing < kCurrentVoicing ? voicing : voicing_),
                                g_pd.last_count != 0u ? &prev : nullptr);
     g_pd.count[pad] = c.count;
     for (unsigned i = 0; i < kChordMaxNotes; ++i) {

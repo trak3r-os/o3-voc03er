@@ -178,6 +178,8 @@ the playhead); columns 8 to 11 of those rows are patterns A to H (`kLedMid` the 
 palette: NOTE the chord grid's two lower rows or two octaves of keys, CARRIER six pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4), LEVEL 24 steps of
 velocity, SLICE slices 1 to 24. A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
 the cursor there (SHIFT + step pad: a rest in the lane).
+On LEVEL the palette pad also sounds the cursor step's note or chord at that level while held (a rest sounds nothing); on SLICE it fires the
+slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silent.
 
 - F1 PATTERN (A to H) · F2 LANE (also NOTE, INSTR, VOL, FX; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's
   value in the lane, the encoder edits it) · F6 CLEAR LANE (action, F1 confirms) · F7 FOLLOW (the cursor rides the playhead) · F8 SAVE (FILE's save, here).
