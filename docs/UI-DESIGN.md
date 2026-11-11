@@ -81,7 +81,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | INSERT | PATTERN: pastes the copied step at the cursor, the rest moving right (SHIFT: pastes the pattern). SAMPLE EDIT: inserts a cut at the cursor | PATTERN, SAMPLE EDIT |
 | DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the cut at the cursor (SHIFT: the slot's sample, F1 confirms); PERFORM the latched chord; SAMPLE every sounding slice (SHIFT: and the latched chord); SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
 | SHIFT | Held: with a pad latches it (a chord stays while the hands leave); with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP. Four combinations and the kit's two, no more | everywhere |
-| UP / DOWN | Which: the slot (SAMPLE, SAMPLE EDIT, SAMPLE REC), the lane (PATTERN), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM the chord type of the bottom row (section 7) | everywhere |
+| UP / DOWN | Which: the slot (SAMPLE, SAMPLE EDIT, SAMPLE REC), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM the chord type of the bottom row (section 7); on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
 | LEFT / RIGHT | Where: the octave of the keys or the chord grid (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the take's length (SAMPLE REC); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
 | Encoder | The latched F value; in a list the row; in SAMPLE EDIT the cursor, a sample fine, SHIFT coarse (a 64th of the sample) | everywhere |
 
@@ -179,7 +179,7 @@ palette: NOTE the chord grid's two lower rows or two octaves of keys, CARRIER si
 velocity, SLICE slices 1 to 24. A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
 the cursor there (SHIFT + step pad: a rest in the lane).
 
-- F1 PATTERN (A to H) · F2 LANE (also NOTE, INSTR, VOL, FX and UP / DOWN) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's
+- F1 PATTERN (A to H) · F2 LANE (also NOTE, INSTR, VOL, FX; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's
   value in the lane, the encoder edits it) · F6 CLEAR LANE (action, F1 confirms) · F7 FOLLOW (the cursor rides the playhead) · F8 SAVE (FILE's save, here).
 
 Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cpp`): a step is one 32-bit word (note, kind, voicing, carrier, level,

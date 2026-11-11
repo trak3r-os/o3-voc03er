@@ -337,10 +337,10 @@ holds a sample asks first: F1 confirms, any other key cancels.
 
 Eight patterns, A to H, of up to sixteen steps each. Each step has four lanes: **NOTE** (a chord or a note), **CARRIER** (what sounds on that
 step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL** and **SLICE** (which slice of the speaking slot fires). NOTE, INSTR (carrier), VOL (level)
-and FX (slice) pick the lane; so do F2 and UP and DOWN.
+and FX (slice) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
 
 The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). A palette
-pad writes into the step under the cursor and moves the cursor on. The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
+pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays. The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
 (a step pad past LENGTH does nothing). The lower right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
 
 On the NOTE lane the palette is the chord grid's two lower rows: F6's kind on the lower row, the next kind above it. **Hold SHIFT and press

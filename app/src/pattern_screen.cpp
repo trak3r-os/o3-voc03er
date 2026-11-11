@@ -150,6 +150,7 @@ const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { retu
 void PatternScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
   armed_ = 0;
+  steps_held_ = 0;
   ctx.redraw();
 }
 
@@ -158,6 +159,7 @@ void PatternScreen::leave(app::Context& ctx) noexcept {
     perform_->audition_release_all(ctx);
   }
   aud_ = 0;
+  steps_held_ = 0;
 }
 
 void PatternScreen::audition(app::Context& ctx, unsigned pad, unsigned note, unsigned kind) noexcept {
@@ -213,46 +215,60 @@ void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noe
   ctx.redraw();
 }
 
-// A palette pad writes into the cursor's step, and the cursor moves on. On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or
-// a chord of PATTERN's voicing); a pad that plays nothing (OFF, a piano gap, out of range) writes nothing, and sounds nothing. The pad sounds while it is
-// held (the audition, Q3); SHIFT + a pad sounds and writes nothing.
+// A palette pad writes into the cursor's step, and the cursor moves on. With step pads held (Q4) it writes every held step instead and the cursor stays.
+// On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or a chord of PATTERN's voicing); a pad that plays nothing (OFF, a piano
+// gap, out of range) writes nothing and sounds nothing. The pad sounds while it is held (the audition, Q3); SHIFT + a pad sounds and writes nothing.
 void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) noexcept {
   PatternData& p = pattern_now();
-  bool ok = false;
-  switch (lane()) {
-    case pt::Lane::Note: {
-      const pads::PadPlay pp = pt::palette_play(pad, perform_ != nullptr ? perform_->octave() : 0, layout_now());
-      if (pp.note < 1) {
-        return;
-      }
-      audition(ctx, pad, static_cast<unsigned>(pp.note), pp.kind);
-      if (shift) {
-        ctx.redraw();
-        return;
-      }
-      const unsigned note = static_cast<unsigned>(pp.note);
-      ok = pp.kind == 0u ? set_note(p, cursor_, note)
-                         : set_chord(p, cursor_, note, static_cast<ChordKind>(pp.kind - 1u), static_cast<Voicing>(perform_ != nullptr ? perform_->voicing() : 3u));
-      break;
+  const unsigned len = length_of(p);
+  std::uint32_t targets = steps_held_ & ((std::uint32_t{1} << len) - 1u);  // a held step past LENGTH (it was cut short meanwhile) is not written
+  const bool held = targets != 0u;
+  if (!held) {
+    targets = std::uint32_t{1} << (cursor_ < len ? cursor_ : 0u);
+  }
+  pads::PadPlay pp;
+  if (lane() == pt::Lane::Note) {
+    pp = pt::palette_play(pad, perform_ != nullptr ? perform_->octave() : 0, layout_now());
+    if (pp.note < 1) {
+      return;
     }
-    case pt::Lane::Carrier:
-      ok = pad < pt::kCarrierPads && set_carrier(p, cursor_, pad);
-      break;
-    case pt::Lane::Level:
-      ok = set_level(p, cursor_, pt::level_of_pad(pad));
-      break;
-    case pt::Lane::Slice: {
-      const pt::SliceWrite w = pt::slice_write(p, cursor_, pad, seq_ != nullptr ? seq_->slice_count() : 0u);
-      if (w == pt::SliceWrite::NoSlices) {
-        say(ctx, "SPEAKS HAS NO SLICES");
-        return;
-      }
-      ok = w == pt::SliceWrite::Written;
-      break;
+    audition(ctx, pad, static_cast<unsigned>(pp.note), pp.kind);
+    if (shift) {
+      ctx.redraw();
+      return;
     }
   }
-  if (ok) {
-    cursor_ = static_cast<std::uint8_t>(pt::next_cursor(cursor_, length_of(p)));
+  bool ok = false;
+  for (unsigned i = 0; i < len; ++i) {
+    if (((targets >> i) & 1u) == 0u) {
+      continue;
+    }
+    switch (lane()) {
+      case pt::Lane::Note: {
+        const unsigned note = static_cast<unsigned>(pp.note);
+        ok |= pp.kind == 0u ? set_note(p, i, note)
+                            : set_chord(p, i, note, static_cast<ChordKind>(pp.kind - 1u), static_cast<Voicing>(perform_ != nullptr ? perform_->voicing() : 3u));
+        break;
+      }
+      case pt::Lane::Carrier:
+        ok |= pad < pt::kCarrierPads && set_carrier(p, i, pad);
+        break;
+      case pt::Lane::Level:
+        ok |= set_level(p, i, pt::level_of_pad(pad));
+        break;
+      case pt::Lane::Slice: {
+        const pt::SliceWrite w = pt::slice_write(p, i, pad, seq_ != nullptr ? seq_->slice_count() : 0u);
+        if (w == pt::SliceWrite::NoSlices) {
+          say(ctx, "SPEAKS HAS NO SLICES");
+          return;
+        }
+        ok |= w == pt::SliceWrite::Written;
+        break;
+      }
+    }
+  }
+  if (ok && !held) {
+    cursor_ = static_cast<std::uint8_t>(pt::next_cursor(cursor_, len));
   }
   ctx.redraw();
 }
@@ -270,6 +286,7 @@ void PatternScreen::pad(app::Context& ctx, unsigned pad, bool shift) noexcept {
   }
   if (step >= 0) {
     cursor_ = static_cast<std::uint8_t>(step);
+    steps_held_ |= static_cast<std::uint16_t>(1u << step);
     if (shift) {
       (void)pt::rest_lane(pattern_now(), cursor_, lane());
     }
@@ -395,10 +412,20 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     turn(ctx, focus_, in.delta());
     return;
   }
-  if (in.press(Button::Up) || in.press(Button::Down)) {
-    const unsigned l = lane_;
-    lane_ = static_cast<std::uint8_t>(in.press(Button::Up) ? (l > 0u ? l - 1u : 0u) : (l + 1u < pt::kLanes ? l + 1u : pt::kLanes - 1u));
-    ctx.redraw();
+  if (in.press(Button::Up) || in.press(Button::Down)) {  // the octave PERFORM and SAMPLE share (the palette's notes move by 12)
+    if (perform_ != nullptr) {
+      perform_->step_octave(ctx, in.press(Button::Up) ? 1 : -1);
+      const int o = perform_->octave();
+      std::size_t n = 0;
+      static constexpr char kHead[] = "OCTAVE ";
+      for (; kHead[n] != '\0'; ++n) {
+        oct_say_[n] = kHead[n];
+      }
+      oct_say_[n++] = o < 0 ? '-' : '+';
+      oct_say_[n++] = static_cast<char>('0' + (o < 0 ? -o : o));
+      oct_say_[n] = '\0';
+      say(ctx, oct_say_);
+    }
   } else if (in.press(Button::Note)) {
     set_lane(ctx, pt::Lane::Note);
   } else if (in.press(Button::Instr)) {
@@ -434,6 +461,8 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     ctx.redraw();
   } else if (in.pad_press()) {
     pad(ctx, in.pad(), in.shift);
+  } else if (in.pad_release() && pt::step_of_pad(in.pad()) >= 0) {
+    steps_held_ &= static_cast<std::uint16_t>(~(1u << pt::step_of_pad(in.pad())));
   } else if (in.pad_release() && in.pad() < pt::kPalettePads && ((aud_ >> in.pad()) & 1u) != 0u) {
     aud_ &= ~(std::uint32_t{1} << in.pad());
     if (perform_ != nullptr) {
@@ -520,8 +549,8 @@ void PatternScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
 // HELP: every button input() answers has a row (tests/pattern_screen_test.cpp holds it), the pads in three groups.
 void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Up, "LANE BEFORE", nullptr},
-      {Button::Down, "LANE AFTER", nullptr},
+      {Button::Up, "OCTAVE UP", nullptr},
+      {Button::Down, "OCTAVE DOWN", nullptr},
       {Button::Left, "CURSOR BACK, HOLD REPEATS", nullptr},
       {Button::Right, "CURSOR ON, HOLD REPEATS", nullptr},
       {Button::Note, "NOTE LANE", nullptr},
@@ -545,7 +574,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Pattern, "THIS SCREEN", nullptr},
   };
   static constexpr app::HelpPadGroup kGroups[] = {
-      {"PALETTE", "WRITES THE CURSOR'S STEP, CURSOR MOVES ON", Color::Accent},
+      {"PALETTE", "WRITES THE CURSOR'S STEP, OR EVERY HELD STEP", Color::Accent},
       {"STEPS", "MOVES THE CURSOR; SHIFT: A REST IN THE LANE", Color::Play},
       {"PATTERNS", "A TO H: SHOW IT, PLAY IT NEXT", Color::Sel},
   };

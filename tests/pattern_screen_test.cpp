@@ -431,10 +431,8 @@ TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and 
   tap(*rig.h, app::Button::F2);  // a tap steps it: CARRIER
   CHECK(rig.count(0, 23, app::kLedOff) == 17u);
   tap(*rig.h, app::Button::Down);
-  tap(*rig.h, app::Button::Down);
-  CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // UP and DOWN move the lane too
   tap(*rig.h, app::Button::Up);
-  CHECK(rig.count(0, 23, app::kLedOff) == 0u);  // LEVEL again: all 24 lit
+  CHECK(rig.count(0, 23, app::kLedOff) == 17u);  // UP and DOWN are the octave now: the lane stays CARRIER
 }
 
 TEST_CASE("pattern: with SPEAKS on LIVE the SLICE lane is dark and writes nothing") {

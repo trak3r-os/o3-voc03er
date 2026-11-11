@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// PATTERN's audition (Q3 to Q5): a palette pad sounds while it is held. The observable is the output energy: the vocoder speaks while it hears the
+// PATTERN's audition and held steps (Q3 to Q5): a palette pad sounds while it is held. The observable is the output energy: the vocoder speaks while it hears the
 // modulator (a tone on the fake capture) and a carrier note is held, and falls silent once the note-off arrives.
 
 #include <doctest/doctest.h>
@@ -143,5 +143,85 @@ TEST_CASE("audition: with the transport playing a step's note-off does not cut a
   const double held = rig.listen(1500);
   CHECK(held > quiet * 10.0 + kSound);
   rig.h->pad_up(kNoteB);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+// Q4. A step pad held while a palette pad is pressed: every held step takes it and the cursor stays.
+TEST_CASE("held steps: a palette pad writes every held step and the cursor does not advance") {
+  Rig rig;
+  rig.h->pad_down(24);  // steps 1 and 2 held; the cursor is on the last, step 2
+  rig.h->pad_down(25);
+  rig.h->run_ms(40);
+  rig.h->pad_down(kNoteA);
+  CHECK(rig.listen(300) > kSound);  // it still sounds
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(40);
+  CHECK(rig.led(24) == app::kLedDim);  // step 1 holds a note
+  CHECK(rig.led(25) == app::kLedMid);  // step 2 too, and the cursor is still on it
+  CHECK(rig.led(26) == app::kLedOff);  // it did not move on
+  rig.h->pad_up(24);
+  rig.h->pad_up(25);
+  rig.h->run_ms(40);
+  rig.h->pad_down(kNoteB);  // nothing held now: the old behaviour, a write on the cursor (step 2) and the cursor moves on
+  rig.h->run_ms(40);
+  rig.h->pad_up(kNoteB);
+  rig.h->run_ms(40);
+  CHECK(rig.led(26) == app::kLedMid);
+  CHECK(rig.led(25) == app::kLedDim);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+// UP and DOWN are PERFORM's octave: the palette's notes move by 12 (a step written at octave N matches pad 5 only at octave N), and they stop at its clamp.
+TEST_CASE("octave: UP and DOWN move the palette by 12 and stop at PERFORM's clamp") {
+  Rig rig;
+  const auto select = [&](unsigned step_pad) {
+    rig.h->pad_down(step_pad);
+    rig.h->run_ms(20);
+    rig.h->pad_up(step_pad);
+    rig.h->run_ms(40);
+  };
+  const auto matches = [&](unsigned step_pad) {  // the cursor on that step: does the palette pad 5 light as its note?
+    select(step_pad);
+    return rig.led(kNoteA) == app::kLedMid;
+  };
+  rig.h->pad_down(kNoteA);  // step 1 at octave 0
+  rig.h->run_ms(20);
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(40);
+  CHECK(matches(24));
+  tap(*rig.h, app::Button::Up);
+  CHECK_FALSE(matches(24));  // the palette went up: pad 5 is 12 above step 1's note
+  tap(*rig.h, app::Button::Down);
+  CHECK(matches(24));
+  // Up to the top: octave 2. A step written there matches while UP stays pressed on; one more UP changes nothing.
+  for (int i = 0; i < 5; ++i) {
+    tap(*rig.h, app::Button::Up);
+  }
+  select(25);
+  rig.h->pad_down(kNoteA);  // step 2 at octave 2
+  rig.h->run_ms(20);
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(40);
+  CHECK(matches(25));
+  tap(*rig.h, app::Button::Up);
+  CHECK(matches(25));  // clamped at +2
+  tap(*rig.h, app::Button::Down);
+  CHECK_FALSE(matches(25));
+  tap(*rig.h, app::Button::Up);
+  CHECK(matches(25));
+  // And the bottom: -3, five octaves below +2.
+  for (int i = 0; i < 6; ++i) {
+    tap(*rig.h, app::Button::Down);
+  }
+  select(26);
+  rig.h->pad_down(kNoteA);  // step 3 at octave -3
+  rig.h->run_ms(20);
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(40);
+  CHECK(matches(26));
+  tap(*rig.h, app::Button::Down);
+  CHECK(matches(26));
+  tap(*rig.h, app::Button::Up);
+  CHECK_FALSE(matches(26));
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
