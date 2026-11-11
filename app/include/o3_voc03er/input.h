@@ -200,11 +200,11 @@ inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noex
   out = v;
   return true;
 }
-// `tract <param> <value>`: a parameter of the tract unit (units/tract) by its word (the unit's table order is the id: vowel 0 .. slide 10) and a
+// `tract <param> <value>`: a parameter of the tract unit (units/tract) by its word (the unit's table order is the id: vowel 0 .. accent 11) and a
 // value, a decimal number ("0.5", "-1", "30") or, for CLOSE and SIZE, the name of the choice (open lips tip back; big large normal small tiny).
 // The range is the unit's own: the app checks it against the table (param_in_range) and refuses what is outside.
-inline constexpr unsigned kTractParamCount = 11;
-inline constexpr const char* kTractWords[kTractParamCount] = {"vowel", "tongue", "jaw", "lips", "close", "glide", "size", "res", "hiss", "mix", "slide"};
+inline constexpr unsigned kTractParamCount = 12;
+inline constexpr const char* kTractWords[kTractParamCount] = {"vowel", "tongue", "jaw", "lips", "close", "glide", "size", "res", "hiss", "mix", "slide", "accent"};
 inline constexpr const char* kTractCloseWords[4] = {"open", "lips", "tip", "back"};
 inline constexpr const char* kTractSizeWords[5] = {"big", "large", "normal", "small", "tiny"};
 struct TractCommand {

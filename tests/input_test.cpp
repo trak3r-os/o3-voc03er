@@ -280,3 +280,32 @@ TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and lea
   CHECK(bad({"A", "len"}));
   CHECK(bad({"A", "1", "jump", "3"}));
 }
+
+TEST_CASE("parse_tract names every tract parameter, ACCENT last, and reads a number or a choice") {
+  using o3_voc03er::parse_tract;
+  using o3_voc03er::TractCommand;
+  TractCommand c;
+  REQUIRE(parse_tract("vowel", "0.5", c));
+  CHECK(c.id == 0u);
+  CHECK(c.value == doctest::Approx(0.5f));
+  REQUIRE(parse_tract("close", "back", c));
+  CHECK(c.id == 4u);
+  CHECK(c.value == doctest::Approx(3.0f));
+  REQUIRE(parse_tract("size", "tiny", c));
+  CHECK(c.id == 6u);
+  CHECK(c.value == doctest::Approx(4.0f));
+  REQUIRE(parse_tract("slide", "120", c));
+  CHECK(c.id == 10u);
+  CHECK(c.value == doctest::Approx(120.0f));
+  REQUIRE(parse_tract("accent", "0.25", c));  // id 11, the MOUTH line's (V3b); the app checks the unit's 0..1 range
+  CHECK(c.id == 11u);
+  CHECK(c.value == doctest::Approx(0.25f));
+  const TractCommand before = c;
+  CHECK_FALSE(parse_tract("mouth", "1", c));
+  CHECK_FALSE(parse_tract("accent", "x", c));
+  CHECK_FALSE(parse_tract("accent", "1e3", c));
+  CHECK_FALSE(parse_tract("close", "nose", c));
+  CHECK_FALSE(parse_tract(nullptr, "1", c));
+  CHECK(c.id == before.id);
+  CHECK(c.value == before.value);
+}

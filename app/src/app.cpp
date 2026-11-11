@@ -90,7 +90,7 @@ void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
-    {"tract", "tract <vowel|tongue|jaw|lips|close|glide|size|res|hiss|mix|slide> <v>", &tract_command},
+    {"tract", "tract <param> <v>: a wrong call lists the 12 params and their ranges", &tract_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
 };
@@ -590,10 +590,11 @@ class MyApp final : public app::App {
 
   // `tract <param> <value>` (main loop): a parameter of the tract unit by word (parse_tract), a number inside its range or a choice's name.
   void tract(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    static_assert(o3_voc03er::kTractParamCount == static_cast<unsigned>(o3_voc03er::TractUnit::kParamCount), "the console names every tract parameter");
     o3_voc03er::TractCommand c;
     if (ctx_ == nullptr || args.argc != 3u || !o3_voc03er::parse_tract(args.arg(1), args.arg(2), c) ||
         !o3sdk::core::param_in_range(tract_.info().params[c.id], c.value)) {
-      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 0..2000> <value>").nl();
+      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 0..2000|accent 0..1> <value>").nl();
       return;
     }
     (void)ctx_->engine().set_param(tract_id_, static_cast<std::uint16_t>(c.id), c.value);
