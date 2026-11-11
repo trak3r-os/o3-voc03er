@@ -102,6 +102,9 @@ tap config
 release shift
 wait 50
 snap 13_help_note
+tap f2
+wait 50
+snap 13b_help_note_pads
 tap config
 wait 50
 
@@ -128,5 +131,23 @@ tap config
 release shift
 wait 50
 snap 15_perform_keys_bend
+tap f8
+wait 50
+
+# Back to CHORDS with BEND ROW still on and F6 on OPEN (issue #4): the chord rows 2 to 0 play OPEN, POWER, TRIAD, the strip is row 3.
+tap f6
+wait 50
+turn 2
+wait 50
+tap f7
+wait 50
+turn 1
+wait 50
+press shift
+tap config
+release shift
+wait 50
+tap f2
+snap 16_perform_chords_open_bend
 tap f8
 wait 50

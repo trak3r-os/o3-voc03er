@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- CHORDS pads, one rule for every row (issue #4): the bottom row plays F6's kind and each row above plays the next kind in the order
+  TRIAD, 7TH, OPEN, POWER, round. F6 TRIAD, the default, keeps the grid as it was; F6 7TH, OPEN or POWER no longer play one kind on two
+  rows. With BEND ROW on, the three chord rows play F6's kind and the next two. PERFORM's HELP names each row's kind.
+- PATTERN's NOTE palette follows the same rule: F6's kind on the lower row, the next kind above it. The pad labels name the kind.
+
+### Added
+
+- PATTERN: SHIFT + a chord pad on the NOTE lane writes its root alone, a single note (issue #2). A single-note step lights its column in
+  both palette rows. With PADS on KEYS the palette is single notes already.
+
+### Fixed
+
+- PATTERN: a step pad past LENGTH no longer moves the cursor off the pattern.
+
 ## v0.2.0 (pre-release)
 
 A sound release: TALK is reworked to behave like a talkbox, and BANDS is darker. It is a pre-release and needs more testing.

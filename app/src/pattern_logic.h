@@ -56,8 +56,9 @@ constexpr unsigned note_of_pad(unsigned pad, int octave, bool keys) noexcept {
   const int n = 48 + 12 * octave + up + static_cast<int>(col);
   return n < 1 ? 1u : n > 127 ? 127u : static_cast<unsigned>(n);
 }
-// The chord kind of the NOTE palette's row (the chord grid's two lower rows: SEVENTH then the bottom row's kind).
-constexpr ChordKind kind_of_pad(unsigned pad, ChordKind bottom) noexcept { return o3sdk::app::pad_row(pad) == 0u ? ChordKind::Seventh : bottom; }
+// The chord kind of the NOTE palette's row: the chord grid's two lower rows (kind_for_row), so the lower palette row plays F6's kind and the
+// upper one the next kind after it.
+constexpr ChordKind kind_of_pad(unsigned pad, ChordKind bottom) noexcept { return kind_for_row(o3sdk::app::pad_row(pad) % 2u + 2u, bottom); }
 
 // Does the palette pad hold what the step stores? (LED mid on it.)
 constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, bool keys, ChordKind bottom) noexcept {
@@ -68,6 +69,9 @@ constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octav
       }
       if (keys) {
         return s.kind == 0u && s.note == note_of_pad(pad, octave, true);
+      }
+      if (s.kind == 0u) {
+        return s.note == note_of_pad(pad, octave, false);  // a single note (SHIFT + a chord pad): its column, lit in both rows
       }
       return s.kind == static_cast<unsigned>(kind_of_pad(pad, bottom)) + 1u && s.note == note_of_pad(pad, octave, false);
     case Lane::Carrier:

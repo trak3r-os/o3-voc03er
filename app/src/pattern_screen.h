@@ -63,7 +63,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void show_pattern(o3sdk::app::Context& ctx, unsigned p) noexcept;
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
-  void write_palette(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;

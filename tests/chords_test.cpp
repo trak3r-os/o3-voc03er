@@ -100,14 +100,66 @@ TEST_CASE("chords: a root out of the scale takes the quality of the nearest note
   CHECK(std::strcmp(make_chord(ChordKind::Triad, 7, 0, 2, 6, Voicing::Close).name, "G") == 0);
 }
 
-TEST_CASE("chords: the pad's row picks the kind") {
-  CHECK(kind_for_row(0, ChordKind::Open) == ChordKind::Power);
-  CHECK(kind_for_row(1, ChordKind::Open) == ChordKind::Open);
-  CHECK(kind_for_row(2, ChordKind::Open) == ChordKind::Seventh);
-  CHECK(kind_for_row(3, ChordKind::Open) == ChordKind::Open);
+TEST_CASE("chords: the pad's row picks the kind, F6's on the bottom and the next ones above") {
+  // F6 TRIAD keeps the layout the grid always had: POWER, OPEN, 7TH, TRIAD from the top.
+  CHECK(kind_for_row(0, ChordKind::Triad) == ChordKind::Power);
+  CHECK(kind_for_row(1, ChordKind::Triad) == ChordKind::Open);
+  CHECK(kind_for_row(2, ChordKind::Triad) == ChordKind::Seventh);
   CHECK(kind_for_row(3, ChordKind::Triad) == ChordKind::Triad);
+  // F6 OPEN: OPEN on the bottom, then POWER, TRIAD, 7TH.
+  CHECK(kind_for_row(3, ChordKind::Open) == ChordKind::Open);
+  CHECK(kind_for_row(2, ChordKind::Open) == ChordKind::Power);
+  CHECK(kind_for_row(1, ChordKind::Open) == ChordKind::Triad);
+  CHECK(kind_for_row(0, ChordKind::Open) == ChordKind::Seventh);
+  // BEND ROW: the strip takes row 3, the chord rows start one up.
+  CHECK(kind_for_row(2, ChordKind::Seventh, 2) == ChordKind::Seventh);
+  CHECK(kind_for_row(1, ChordKind::Seventh, 2) == ChordKind::Open);
+  CHECK(kind_for_row(0, ChordKind::Seventh, 2) == ChordKind::Power);
+  // No F6 value gives two rows the same kind, with or without the strip; every kind is on the grid without it.
+  for (unsigned b = 0; b < kChordKinds; ++b) {
+    const auto bottom = static_cast<ChordKind>(b);
+    for (unsigned lowest = 2; lowest <= 3; ++lowest) {
+      unsigned seen = 0;
+      for (unsigned r = 0; r <= lowest; ++r) {
+        const unsigned bit = 1u << static_cast<unsigned>(kind_for_row(r, bottom, lowest));
+        CHECK((seen & bit) == 0u);
+        seen |= bit;
+      }
+      CHECK(seen == (lowest == 3u ? 0xFu : seen));
+    }
+  }
   const Chord c = chord_for_pad(2, 2, 0, 0, kMajor, Voicing::Close);
   CHECK(std::strcmp(c.name, "Dm7") == 0);
+}
+
+TEST_CASE("chords: all 48 pads, before and after issue #4, for every F6 value") {
+  // Before: the top three rows were fixed (POWER, OPEN, 7TH from the top) and only the bottom row followed F6, so F6 7TH, OPEN or POWER
+  // played one kind on two rows. After: kind_for_row. The grid is C major, octave 0, CLOSE; a pad is (row 0..3 from the top, column 0..11).
+  constexpr ChordKind kBefore[3] = {ChordKind::Power, ChordKind::Open, ChordKind::Seventh};
+  for (unsigned b = 0; b < kChordKinds; ++b) {
+    const auto bottom = static_cast<ChordKind>(b);
+    CAPTURE(b);
+    unsigned before_dups = 0;
+    for (unsigned col = 0; col < 12; ++col) {
+      CAPTURE(col);
+      Chord after[4];
+      Chord before[4];
+      for (unsigned row = 0; row < 4; ++row) {
+        after[row] = chord_for_pad(row, col, 0, 0, kMajor, Voicing::Close, nullptr, bottom);
+        before[row] = make_chord(row < 3 ? kBefore[row] : bottom, col, 0, 0, kMajor, Voicing::Close);
+        if (bottom == ChordKind::Triad) {
+          CHECK(std::strcmp(after[row].name, before[row].name) == 0);  // F6 TRIAD, the default, is the grid it always was
+        }
+      }
+      for (unsigned r = 0; r < 4; ++r) {
+        for (unsigned q = r + 1; q < 4; ++q) {
+          CHECK(std::strcmp(after[r].name, after[q].name) != 0);  // no two pads of a column play the same chord
+          before_dups += std::strcmp(before[r].name, before[q].name) == 0 ? 1u : 0u;
+        }
+      }
+    }
+    CHECK(before_dups == (bottom == ChordKind::Triad ? 0u : 12u));  // the old grid doubled one row in every column
+  }
 }
 
 TEST_CASE("chords: OPEN and WIDE voicings") {

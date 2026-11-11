@@ -24,7 +24,6 @@ inline constexpr const char* kKindNames[4] = {"TRIAD", "7TH", "OPEN", "POWER"}; 
 using o3_voc03er::kModeNames;  // modes.h: the one table of modes
 // The Voicing enum's order (chords.h): the setting is its index (PARAMS' VOICING, the Sounds readout).
 inline constexpr const char* kVoicingNames[4] = {"CLOSE", "OPEN", "WIDE", "SMOOTH"};
-inline constexpr const char* kRowNames[4] = {"POWER", "OPEN", "7TH", ""};  // the bottom row's name is the kind's
 
 inline constexpr unsigned kLabelChars = 11;  // a pad's label: a chord's name fits kChordNameMax (12) with its terminator
 
@@ -240,28 +239,8 @@ constexpr int piano_note(const PianoPad& p, int octave) noexcept {
   return n >= 0 && n <= 127 ? n : -1;
 }
 
-// With BEND ROW on in CHORDS the chord rows move up one: the row above the strip (2) plays `bottom` (F6 CHORD's kind), the two above it 7TH and
-// OPEN, or the next ones (POWER, TRIAD) when `bottom` is one of them. Row 3 is the strip (it returns `bottom`, unused).
-constexpr ChordKind bend_row_kind(unsigned row, ChordKind bottom) noexcept {
-  if (row >= 2u) {
-    return bottom;
-  }
-  const ChordKind cand[4] = {ChordKind::Seventh, ChordKind::Open, ChordKind::Power, ChordKind::Triad};
-  unsigned seen = 0;
-  const unsigned want = row == 1u ? 0u : 1u;  // row 1 takes the first candidate, row 0 the second
-  for (unsigned i = 0; i < 4; ++i) {
-    if (cand[i] == bottom) {
-      continue;
-    }
-    if (seen == want) {
-      return cand[i];
-    }
-    ++seen;
-  }
-  return bottom;
-}
-// The ChordKind of a chord row (the strip up or not).
-constexpr ChordKind row_kind(unsigned row, ChordKind bottom, bool strip) noexcept { return strip ? bend_row_kind(row, bottom) : kind_for_row(row, bottom); }
+// The ChordKind of a chord row: kind_for_row (chords.h), whose lowest chord row is 3, or 2 with BEND ROW's strip on the bottom row.
+constexpr ChordKind row_kind(unsigned row, ChordKind bottom, bool strip) noexcept { return kind_for_row(row, bottom, strip ? 2u : 3u); }
 
 // The local bend (semitones) after one encoder detent: range / 8, SHIFT coarse range / 2, held inside +-range.
 constexpr float bend_step(float st, int delta, bool coarse, unsigned range) noexcept {
@@ -359,7 +338,7 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
   }
   static constexpr const char* kHints[7] = {
       "F1 MODE: BANDS, TALK, TUNE OR ROBOT",    "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
-      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: THE KIND ON THE BOTTOM ROW",
+      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: BOTTOM ROW; NEXT KINDS ABOVE",
       "F7 PADS: CHORDS OR KEYS. SHIFT: BEND ROW",
   };
   static constexpr const char* kF8[kModePages] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};

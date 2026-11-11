@@ -418,11 +418,15 @@ page CARRIER; SPREAD is also PERFORM's F8 in BANDS, because it is the one that i
 The first thing a new user reaches. KEY and SCALE are the TUNE parameters, so the chords and the pitch correction agree by construction.
 
 **The grid** (PADS = CHORDS): the 12 columns are the 12 roots, C at the left of the octave LEFT / RIGHT chose; the row is the chord's kind.
-Row 3 (bottom): the triad the scale gives on that root (major, minor or diminished, by the scale: a chord is never out of key unless the root
-is). Row 2: the seventh the scale gives. Row 1: the open chord, root, fifth, ninth (sus2-like, the airy vocoder pad). Row 0 (top): the power
-chord, root, fifth, octave (the classic robot fifth). A root outside the scale still plays (its nearest diatonic quality) and is lit dimmer.
-F6 CHORD picks what the bottom chord row is (TRIAD, 7TH, OPEN, POWER; on SAMPLE it is F1; UP / DOWN on PERFORM do the same), so a kind is one press away when fewer rows are chords: the
-SAMPLE split, or the bend strip of section 7b. TRIAD is the default.
+The kinds: TRIAD, the triad the scale gives on that root (major, minor or diminished, by the scale: a chord is never out of key unless the root
+is); 7TH, the seventh the scale gives; OPEN, root, fifth, ninth (sus2-like, the airy vocoder pad); POWER, root, fifth, octave (the classic
+robot fifth). A root outside the scale still plays (its nearest diatonic quality) and is lit dimmer.
+**One rule for every row** (issue #4, 2026-11-11): F6 CHORD picks the kind of the lowest chord row (on SAMPLE it is F1; UP / DOWN on PERFORM do
+the same), and each row above it plays the next kind in the order TRIAD, 7TH, OPEN, POWER, round (`kind_for_row`, `chords.h`). TRIAD is the
+default, which gives the grid it always had: TRIAD, 7TH, OPEN, POWER from the bottom. No F6 value makes two rows play the same kind, and every
+kind is on the full grid, so a kind is one press away when fewer rows are chords: the SAMPLE split, PATTERN's NOTE
+palette (the same two), or the bend strip of section 7b (F6's kind and the next two). The issue's own candidates were rejected: a ladder of
+voicings per row would take over PARAMS' VOICING, and a fixed POWER top row duplicates the bottom row when F6 is POWER.
 
 **Voicing** (PARAMS, page SHAPE): CLOSE (as stacked), OPEN (the third up an octave), WIDE (across two octaves), SMOOTH (the inversion nearest the chord before:
 voice-leading for free, the default). The chord's notes become `note_on`s to the unit, up to five, inside its eight voices.
@@ -444,7 +448,7 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
 `dsp::Ramp` once a block, so a stepped input arrives as a glide; the cost is a multiply a voice a block [est].
 
 - **The encoder.** On PERFORM the encoder bends once it is free: PERFORMANCE pressed while PERFORM is up frees it, and a tap on any F key takes it back (a second tap on the focused F key keeps stepping its value). Boot focus is F6. A detent is range / 8, SHIFT coarse range / 2, held to +-range. An encoder has no spring, so the bend returns to 0 about 120 ms after the last detent. BEND RANGE (+-2, +-5, +-12 semitones, default +-2) is set with the console command `voc bendrange <2|5|12>`. SAMPLE keeps its own encoder.
-- **The pad strip.** BEND ROW (SHIFT + F7), on either F7 value: the bottom row becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. In CHORDS the chord rows move up one and the row above the strip plays F6 CHORD's kind, so no kind is lost: the three rows are that kind, 7TH and OPEN, or the next ones when that kind is one of them. In KEYS the piano does not move (row 3 was free). LEDs: the middle pair `kLedDim`, the held pad `kLedOn`.
+- **The pad strip.** BEND ROW (SHIFT + F7), on either F7 value: the bottom row becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. In CHORDS the chord rows move up one and the row above the strip plays F6 CHORD's kind, the two above it the next two kinds (the rule of section 7). In KEYS the piano does not move (row 3 was free). LEDs: the middle pair `kLedDim`, the held pad `kLedOn`.
 - **BND- and BND+ (KEYS, row 0).** While held, the local bend grows linearly to -BEND RANGE or +BEND RANGE in 400 ms (the main loop's `uptime_ms`, written only when it changes); on release it returns to 0 through the unit's ramp. The last pressed of these and the strip wins. It sums with the MIDI wheel (clamped +-12).
 - **MOD (KEYS, col 9) and `Vib` (id 43).** The unit adds a vibrato to the bend: about 5.5 Hz, +-0.5 semitone at depth 1. At Vib 0 the output is bit-identical to Bend 0 and the phase resets. Held, the MOD pad raises the depth linearly to 1 in 400 ms; released, it falls to 0 in 400 ms. MIDI CC1 writes Vib too (when it is not learned): the larger of the pad's and the wheel's depth wins.
 

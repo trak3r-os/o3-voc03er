@@ -5,7 +5,7 @@
 // (tests/chords_test.cpp). The caller keeps the previous chord and hands it back for SMOOTH.
 //
 // The pad: the column is the root (pitch class 0 = C at the left; the MIDI root is kChordBaseNote + 12 * octave + column, the pad map's
-// bottom row), the row is the kind. KEY and SCALE are the vocoder's own (units/vocoder/scale.h, the table Autotune snaps to).
+// bottom row), the row is the kind (kind_for_row: F6's kind on the lowest chord row, the next kinds above it). KEY and SCALE are the vocoder's own (units/vocoder/scale.h, the table Autotune snaps to).
 //
 // Quality: the stack of thirds of the scale on the root's degree. The 7-note scales (MAJOR, MINOR, DORIAN) are their own parent; the others
 // take the diatonic parent of their notes (CHROM and MAJ-P: MAJOR; MIN-P and BLUES: MINOR), so every kind has a quality. A root that is
@@ -40,9 +40,17 @@ struct Chord {
   char name[kChordNameMax] = {};  // "Dm7", "C5", "Bm7b5", "C#sus2"
 };
 
-// Which kind a pad row plays: row 0 (top) POWER, row 1 OPEN, row 2 SEVENTH, row 3 (bottom) `bottom` (the UP / DOWN choice).
-constexpr ChordKind kind_for_row(unsigned row, ChordKind bottom) noexcept {
-  return row == 0u ? ChordKind::Power : row == 1u ? ChordKind::Open : row == 2u ? ChordKind::Seventh : bottom;
+inline constexpr unsigned kChordKinds = 4;
+// The kind `steps` places after `k` in the order TRIAD, 7TH, OPEN, POWER, round.
+constexpr ChordKind next_kind(ChordKind k, unsigned steps = 1u) noexcept {
+  return static_cast<ChordKind>((static_cast<unsigned>(k) % kChordKinds + steps) % kChordKinds);
+}
+// Which kind a pad row plays, one rule for every row (issue #4): the lowest chord row plays `bottom` (F6 CHORD, the UP / DOWN choice) and each
+// row above it the next kind in the order TRIAD, 7TH, OPEN, POWER, round. So F6 TRIAD gives, from the bottom, TRIAD, 7TH, OPEN, POWER, and no
+// F6 value makes two rows play the same kind. `lowest` is the lowest row that plays chords: 3 (the bottom row), or 2 when BEND ROW's strip
+// takes row 3; a row below it is not a chord row and returns `bottom` (unused). A strip on the top row needs nothing: rows 3 to 1 keep theirs.
+constexpr ChordKind kind_for_row(unsigned row, ChordKind bottom, unsigned lowest = 3u) noexcept {
+  return row >= lowest ? bottom : next_kind(bottom, lowest - row);
 }
 
 namespace chords_detail {

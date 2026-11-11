@@ -124,7 +124,7 @@ now.
 | F3 SOUNDS | A list: SYNTH, NOISE, LIVE, or SLOT 1 to 4 |
 | F4 KEY | The root of the key. Chords and pitch correction share it |
 | F5 SCALE | The scale: the chords and TUNE stay in it |
-| F6 CHORD | What the bottom pad row plays: TRIAD, 7TH, OPEN or POWER |
+| F6 CHORD | The kind on the bottom pad row: TRIAD, 7TH, OPEN or POWER. The rows above play the next kinds |
 | F7 PADS | CHORDS or KEYS (below) |
 | F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED |
 | SHIFT + F1 | FREEZE the vowel |
@@ -140,9 +140,12 @@ now.
 
 *PERFORM in TALK: the voiceprint is now a smooth curve, the shape of the mouth.*
 
-**The pads in CHORDS.** The twelve columns are the twelve roots, C at the left. The bottom row plays the chord kind F6 names, the row above
-it the seventh chord, then an open airy chord, then at the top the power chord (root, fifth, octave), the classic robot fifth. LEFT and
-RIGHT move the octave.
+**The pads in CHORDS.** The twelve columns are the twelve roots, C at the left. The bottom row plays the chord kind F6 names, and each row
+above it plays the next kind in this order, going round: TRIAD, 7TH (the seventh chord), OPEN (root, fifth, ninth: open and airy), POWER
+(root, fifth, octave: the classic robot fifth). With F6 on TRIAD, the default, the rows are TRIAD, 7TH, OPEN and POWER from the bottom; with
+F6 on POWER they are POWER, TRIAD, 7TH and OPEN. All four kinds are always on the grid, and no two rows play the same one. The screen names
+each row's kind beside it. With BEND ROW on, the strip takes the bottom row and the three rows above play F6's kind and the next two. LEFT
+and RIGHT move the octave.
 
 **The pads in KEYS.** A piano: white keys on the third row, black keys above them. The top row has controls: OCT- and OCT+, VOL- and VOL+,
 ROOT- and ROOT+, MOD (adds a little vibrato while held) and BND- and BND+ (bend while held). The row under the white keys is a formant
@@ -233,7 +236,7 @@ It plays no synth. SPEED is how fast it pulls: at the fastest it steps from note
 *ROBOT: BANDS with a fast leveller after it. The voice is flattened and hard.*
 
 **ROBOT.** BANDS with a fast leveller after it. Loud and soft syllables come out at about the same level, which gives the flat, mechanical
-voice. Hold a fifth, or the top pad row, for the classic robot sound.
+voice. Hold a fifth, or a pad of the POWER row (the top row while F6 is on TRIAD), for the classic robot sound.
 
 ## 6. Samples and slices
 
@@ -330,9 +333,13 @@ Eight patterns, A to H, of up to sixteen steps each. Each step has four lanes: *
 step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL** and **SLICE** (which slice of the speaking slot fires). NOTE, INSTR (carrier), VOL (level)
 and FX (slice) pick the lane; so do F2 and UP and DOWN.
 
-The pads: the top two rows are the lane's palette (the chord grid for NOTE, the carriers for CARRIER, steps of level, slices). A palette
-pad writes into the step under the cursor and moves the cursor on. The lower two rows, columns 1 to 8, are the sixteen steps. The lower
-right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
+The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). A palette
+pad writes into the step under the cursor and moves the cursor on. The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
+(a step pad past LENGTH does nothing). The lower right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
+
+On the NOTE lane the palette is the chord grid's two lower rows: F6's kind on the lower row, the next kind above it. **Hold SHIFT and press
+a chord pad to write its root alone, a single note**: a bass line of sixteen notes is sixteen presses, with SHIFT held. With PADS on KEYS
+(PERFORM's F7) the palette is two octaves of single notes, the upper row an octave up, and no SHIFT is needed.
 
 | Key | What it does |
 |---|---|

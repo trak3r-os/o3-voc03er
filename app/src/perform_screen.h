@@ -10,7 +10,7 @@
 //               cursor, the key again or F1 takes the row, F8 backs out; F4..F7, SHIFT, PERFORMANCE and the screen buttons close it, the pads sound as ever.
 //               A dimmed row (a second LIVE source) arms a capture. REC records the live source for two bars into the first empty slot, which then takes
 //               the side that held LIVE (route.h; the capture is a state machine run by update()).
-//   pads          F7: CHORDS (rows POWER, OPEN, 7TH and the bottom row's kind) or KEYS (a chromatic keyboard). SHIFT + F7 toggles BEND ROW (kept when F7
+//   pads          F7: CHORDS (F6's kind on the bottom row, the next kinds above: kind_for_row) or KEYS (a chromatic keyboard). SHIFT + F7 toggles BEND ROW (kept when F7
 //                 moves): the bottom row is a bend strip; the chord rows move up one, or the keyboard keeps the three rows above it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
 //                 about 120 ms after the last one. A tap on an F key takes the encoder back. MIDI pitch bend adds to it (set_wheel)

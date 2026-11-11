@@ -1436,13 +1436,6 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Left, "OCTAVE DOWN (HOLD: REPEAT)", nullptr},
       {Button::Right, "OCTAVE UP (HOLD: REPEAT)", nullptr},
   };
-  static constexpr app::HelpPadGroup kChordGroups[] = {
-      {"POWER", "ROOT, FIFTH, OCTAVE", ui::Color::Vol},
-      {"OPEN", "ROOT, FIFTH, NINTH: SUS2", ui::Color::Instr},
-      {"7TH", "THE SEVENTH CHORDS OF THE SCALE", ui::Color::Fx},
-      {"BOTTOM ROW", "F6, UP OR DOWN CHOOSE ITS KIND", ui::Color::Play},
-      {"PAD LEDS", "KEY COLUMN BRIGHTEST, SCALE DIM, OUTSIDE IT DARK", ui::Color::TextDim},
-  };
   static constexpr app::HelpPadGroup kKeyGroups[] = {
       {"WHITE KEYS", "C TO G, THE CURRENT OCTAVE", ui::Color::Vol},
       {"BLACK KEYS", "THE SEMITONES; NO KEY ON A GAP", ui::Color::Fx},
@@ -1451,14 +1444,17 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {"FORMANT", "A TAP SETS IT, -12 TO +12, AND IT STAYS; LIT ON", ui::Color::Play},
   };
   static constexpr const char* kKindText[4] = {"ROOT, THIRD, FIFTH OF THE SCALE", "THE SEVENTH CHORDS OF THE SCALE", "ROOT, FIFTH, NINTH: SUS2", "ROOT, FIFTH, OCTAVE"};
-  static constexpr ui::Color kRowColor[3] = {ui::Color::Vol, ui::Color::Instr, ui::Color::Fx};
+  static constexpr ui::Color kRowColor[4] = {ui::Color::Vol, ui::Color::Instr, ui::Color::Fx, ui::Color::Play};
   const ChordKind bottom = static_cast<ChordKind>(bottom_ & 3u);
-  if (strip_ && !keys_) {  // the rows moved up one: the legend names their kinds now, then the strip
-    for (unsigned r = 0; r < 3; ++r) {
-      const unsigned kind = static_cast<unsigned>(pl::row_kind(r, bottom, true));
-      help_groups_[r] = {pl::kKindNames[kind], r == 2u ? "F6, UP OR DOWN CHOOSE ITS KIND" : kKindText[kind], kRowColor[r]};
+  if (!keys_) {  // the legend names each chord row's kind (F6's on the lowest chord row, the next ones above), then the strip if it is on
+    const unsigned lowest = strip_ ? 2u : 3u;
+    for (unsigned r = 0; r <= lowest; ++r) {
+      const unsigned kind = static_cast<unsigned>(pl::row_kind(r, bottom, strip_));
+      help_groups_[r] = {pl::kKindNames[kind], r == lowest ? "F6, UP OR DOWN CHOOSE ITS KIND" : kKindText[kind], kRowColor[r]};
     }
-    help_groups_[3] = {"BEND ROW", "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0", ui::Color::Play};
+    if (strip_) {
+      help_groups_[3] = {"BEND ROW", "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0", ui::Color::Play};
+    }
     help_groups_[4] = {"PAD LEDS", "KEY COLUMN BRIGHTEST, SCALE DIM, OUTSIDE IT DARK", ui::Color::TextDim};
   }
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
@@ -1488,19 +1484,16 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       help_groups_[3] = kKeyGroups[4];
       h.groups = help_groups_;
     }
-  } else if (strip_) {
+  } else {
     h.groups = help_groups_;
     h.group_count = 5;
-  } else {
-    h.groups = kChordGroups;
-    h.group_count = sizeof kChordGroups / sizeof kChordGroups[0];
   }
   if (keys_) {
     h.pads = strip_ ? "A PIANO: WHITE KEYS, BLACK ABOVE, CONTROLS ON TOP. THE BOTTOM ROW BENDS: PRESS, RELEASE TO 0."
                     : "A PIANO: WHITE KEYS, BLACK ABOVE, THE CONTROLS ON TOP. NO LATCH HERE.";
   } else {
     h.pads = strip_ ? "COLUMN: ROOT. BOTTOM ROW BENDS: PRESS, RELEASE TO 0. THE CHORD ROWS ARE ABOVE IT."
-                    : "COLUMN: ROOT. ROW: KIND. THE QUALITY COMES FROM KEY AND SCALE; - IS MINOR.";
+                    : "COLUMN: ROOT. ROW: KIND, F6'S AT THE BOTTOM AND THE NEXT ONES ABOVE. - IS MINOR.";
   }
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     if (pl::on_strip(pad, strip_)) {  // the strip, whichever page: -5 .. +5, the pair at 0

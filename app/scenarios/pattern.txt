@@ -34,6 +34,14 @@ wait 40
 padup 19
 wait 40
 snap 02_notes
+# one note alone on the cursor's step (SHIFT + a chord pad, issue #2): its column lights in both palette rows
+press shift
+paddown 5
+wait 40
+padup 5
+release shift
+wait 100
+snap 02b_one_note
 # a rest on step 3 (SHIFT + the step pad)
 press shift
 paddown 26
