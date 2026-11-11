@@ -7,3 +7,7 @@ foreach(_dir IN LISTS _unit_dirs)
     add_subdirectory(${_dir})
   endif()
 endforeach()
+
+# The tract (o3-sdk/extras/tract): a vocal-tract effect DSP shared with o3-303. Opt-in on the sdk's side: its CMake never adds it, so it is
+# added here, into a binary directory of this build. The library is unit_tract_dsp.
+add_subdirectory(${O3SDK_DIR}/extras/tract ${CMAKE_BINARY_DIR}/extras_tract)
