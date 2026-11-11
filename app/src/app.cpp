@@ -158,6 +158,7 @@ class MyApp final : public app::App {
     file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain, &sample_load_, g_loop_mem);
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this, &sample_);
     song_.init(voice, &g_chain, &carriers_, &perform_);
+    pattern_.set_song(&song_);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
     (void)ctx.midi().route(voice, 0);
@@ -675,6 +676,8 @@ class MyApp final : public app::App {
       w.num(rk, st.reverse ? 1u : 0u);
       w.num(lk, static_cast<std::uint32_t>((st.level_db + 24.0f) * 2.0f + 0.5f));
     }
+    w.num("pat_playing", carriers_.playing_pattern());  // the pattern the sequencer plays now, and the one PATTERN shows (last: the line is cut at the caller's size)
+    w.num("pat_shown", pattern_.shown());
     return w.size();
   }
 

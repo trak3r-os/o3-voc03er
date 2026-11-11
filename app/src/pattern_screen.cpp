@@ -4,6 +4,7 @@
 #include "midi_pattern_logic.h"
 #include "perform_logic.h"
 #include "sample_screen.h"
+#include "song_screen.h"
 #include "skin/ornoir.h"
 
 #include <o3_voc03er/input.h>
@@ -207,9 +208,12 @@ void PatternScreen::set_lane(app::Context& ctx, pt::Lane lane) noexcept {
   ctx.redraw();
 }
 
-void PatternScreen::show_pattern(app::Context& ctx, unsigned p) noexcept {
+void PatternScreen::show_pattern(app::Context& ctx, unsigned p, bool by_hand) noexcept {
   shown_ = static_cast<std::uint8_t>(p & 7u);
-  if (seq_ != nullptr) {
+  // A SONG chain that plays owns the request: it re-asks for each lap's pattern only when a lap ends, so a hand request here would play for one
+  // lap against the chain (or keep the chain's last lap from ending it). The screen still shows and edits the pattern picked.
+  const bool owned = by_hand && song_ != nullptr && song_->playing_chain();
+  if (seq_ != nullptr && !owned) {
     seq_->request_pattern(shown_);  // it starts when the playing one ends (or at the next Play)
   }
   if (cursor_ >= length_of(pattern_now())) {
@@ -326,7 +330,7 @@ void PatternScreen::pad(app::Context& ctx, unsigned pad, bool shift) noexcept {
   }
   const int pat = pt::pattern_of_pad(pad);
   if (pat >= 0) {
-    show_pattern(ctx, static_cast<unsigned>(pat));
+    show_pattern(ctx, static_cast<unsigned>(pat), true);
   }
 }
 
@@ -337,7 +341,7 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
   switch (key) {
     case 0: {  // PATTERN
       const int n = static_cast<int>(shown_) + delta;
-      show_pattern(ctx, tap ? (shown_ + 1u) & 7u : static_cast<unsigned>(n < 0 ? 0 : (n > 7 ? 7 : n)));
+      show_pattern(ctx, tap ? (shown_ + 1u) & 7u : static_cast<unsigned>(n < 0 ? 0 : (n > 7 ? 7 : n)), true);
       break;
     }
     case 1: {  // LANE

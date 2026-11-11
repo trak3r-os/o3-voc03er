@@ -50,6 +50,8 @@
 
 ### Fixed
 
+- PATTERN: a pattern picked by hand (a pattern pad, the PATTERN key) while a SONG chain plays no longer asks the sequencer for it. The pick used
+  to play for one lap against the chain, and on the chain's last lap it kept the chain from ending. PATTERN still shows and edits the pick.
 - SAMPLE, SAMPLE EDIT and SAMPLE REC treat a slot whose WAV is still on its way after a project open as taken, as PERFORM does: they say
   LOADING, REC and DELETE refuse it (REC could record into it, and the landing then overwrote the take or was overwritten), and SAMPLE
   EDIT's edits (COPY, TRIM, NORMALISE, SAVE WAV) wait until the last WAV has landed (COPY took the slot for an empty target).

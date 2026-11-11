@@ -9,8 +9,10 @@
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/sim/harness.h>
 
+#include "../app/src/pattern_logic.h"
 #include "../app/src/song_logic.h"
 
+#include <cstdlib>
 #include <string>
 
 namespace app = o3sdk::app;
@@ -285,5 +287,58 @@ TEST_CASE("song: the chain plays on and stops at its end when SONG is left; PLAY
   tap(h, app::Button::Play);
   h.run_ms(12000);
   CHECK(h.engine().playing());  // a plain PLAY: no chain behind it
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// LE3: PATTERN's hand pick while the chain walks used to land as a request that the chain's own next-lap request did not replace until a lap later: the
+// pick played for one lap against the chain (and a pick on the last lap kept the chain from ending). The chain owns what plays; PATTERN shows the pick.
+TEST_CASE("song: a pattern picked by hand in PATTERN while the chain plays changes the view, not what plays") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  const auto num = [&](const char* key) {
+    char line[1024];
+    const std::size_t n = h.runtime().state_line(line, sizeof line);
+    const std::string s = " " + std::string(line, n);
+    const std::string k = std::string(" ") + key + "=";
+    const std::size_t at = s.find(k);
+    REQUIRE(at != std::string::npos);
+    return static_cast<unsigned>(std::strtoul(s.c_str() + at + k.size(), nullptr, 10));
+  };
+  tap(h, app::Button::Song);
+  h.run_ms(60);
+  tap(h, app::Button::Insert);
+  tap(h, app::Button::Insert);
+  tap(h, app::Button::Insert);  // A A A, the cursor on the last
+  h.turn(2);                    // C
+  h.run_ms(20);
+  tap(h, app::Button::Up);
+  h.turn(1);                    // B
+  h.run_ms(20);
+  tap(h, app::Button::Up);      // row 0, A
+  REQUIRE(num("chain") == 3u);
+  tap(h, app::Button::Play);
+  h.run_ms(300);
+  REQUIRE(h.engine().playing());
+  CHECK(num("pat_playing") == 0u);
+
+  tap(h, app::Button::Pattern);
+  h.pad_down(o3_voc03er::pattern::pad_of_pattern(5));  // F, by hand, during the first lap
+  h.run_ms(20);
+  h.pad_up(o3_voc03er::pattern::pad_of_pattern(5));
+  h.run_ms(20);
+  CHECK(num("pat_shown") == 5u);  // the screen follows the hand
+
+  std::string seen;  // the patterns that played, in order, until the chain's end stops the transport
+  for (unsigned t = 0; t < 600 && h.engine().playing(); ++t) {
+    h.run_ms(20);
+    const char c = static_cast<char>('A' + num("pat_playing"));
+    if (seen.empty() || seen.back() != c) {
+      seen += c;
+    }
+  }
+  CHECK(seen == "ABC");
+  CHECK_FALSE(h.engine().playing());
+  CHECK(num("pat_shown") == 5u);
   CHECK(h.runtime().frame_failures() == 0u);
 }

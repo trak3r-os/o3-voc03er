@@ -34,6 +34,7 @@
 namespace o3_voc03er {
 
 class SampleScreen;
+class SongScreen;
 
 class PatternScreen final : public o3sdk::app::Screen {
  public:
@@ -61,7 +62,9 @@ class PatternScreen final : public o3sdk::app::Screen {
   pattern::Lane lane() const noexcept { return static_cast<pattern::Lane>(lane_); }
   unsigned cursor() const noexcept { return cursor_; }
   unsigned shown() const noexcept { return shown_; }
-  void show(o3sdk::app::Context& ctx, unsigned p) noexcept { show_pattern(ctx, p); }  // FILE (U9c2): the pattern a loaded project was on
+  void show(o3sdk::app::Context& ctx, unsigned p) noexcept { show_pattern(ctx, p, false); }  // FILE (U9c2): the pattern a loaded project was on
+  // LE3: the SONG screen, whose chain owns what plays while it walks: a pattern picked by hand then only changes what PATTERN shows and edits.
+  void set_song(const SongScreen* song) noexcept { song_ = song; }
   bool follow() const noexcept { return follow_; }
   void set_follow(bool on) noexcept { follow_ = on; }  // FILE (P3) puts a loaded project's FOLLOW back
   // M3 (main loop): a MIDI note of the carrier, recorded as the pads do (the note and its velocity as LEVEL, a single note). While the transport plays it
@@ -74,7 +77,7 @@ class PatternScreen final : public o3sdk::app::Screen {
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
-  void show_pattern(o3sdk::app::Context& ctx, unsigned p) noexcept;
+  void show_pattern(o3sdk::app::Context& ctx, unsigned p, bool by_hand) noexcept;  // by_hand: a chain that plays keeps its own request
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void audition(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity = PerformScreen::kAuditionVelocity,
@@ -96,6 +99,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint8_t cursor_ = 0;  // 0..15
   std::uint8_t lane_ = 0;    // pattern::Lane
   std::uint8_t focus_ = 4;   // the F key the encoder drives (F5, VALUE)
+  const SongScreen* song_ = nullptr;  // read on the main loop only
   std::uint8_t shown_ = 0;   // the pattern on the screen, 0..7
   bool follow_ = false;
   std::uint8_t row_ = 0;     // F6: the row F7 changes, pads::Row A (0) or B (1) (the palette's two rows)
