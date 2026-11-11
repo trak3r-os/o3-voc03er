@@ -716,6 +716,11 @@ void FileScreen::next_wav_load(app::Context& ctx) noexcept {
   end_wav_loads(ctx);
 }
 
+// Threading (LE5): both steps of an open run on the main loop, in App::update's order (file_.service, then sample_.service), so `Done` and `wl_settle` cannot
+// change between them: external() reads the job's own state (written by tick_external a line above) and wl_settle is only written here. The one value
+// the audio side writes is the slot's length, which Vocoder publishes as one relaxed atomic word (status_[slot]); it is read once into `len` and every
+// later use below (seen, slot_fits, restore_values) takes that copy, so the pair "length and cuts" cannot tear. A length that lands after `Done` (the
+// unit drains the writes at its next block) is simply not seen yet, and wl_deadline ends the wait; the record's cuts then stay the even ones.
 void FileScreen::tick_wav_load(app::Context& ctx) noexcept {
   const unsigned s = g_fd.wav_cur;
   if (!g_fd.wl_settle) {
