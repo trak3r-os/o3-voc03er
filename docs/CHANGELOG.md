@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 (pre-release)
+
+A mode release: TRACT, a fifth mode that plays a mouth after the carrier, with a MOUTH lane in the pattern; PERFORM plays a layout of
+rows; and a long list of fixes. It is a pre-release and needs more testing, most of all TRACT by ear. (There is no v0.3.0.)
+
+### What a unit has shown
+
+Read on a unit on the candidate `v0.2.0-40-g7327b2a` (TRACT V1 to V3b; v0.4.0 adds only the documents and the console's `tract accent`):
+it boots and draws; BANDS idle 92.0k cycles a block (35 %); TRACT idle 52.4k (20 %, the mouth at rest with no carrier); the highest read
+since boot 115.1k (44.0 %, at a mode change); no underrun and no block shed. Not tried on a unit yet: TRACT by ear (the words, WOB, the
+closures, the accent), the CPU while the mouth moves with eight notes and four loops, a project with a mouth line saved and opened on the card.
 
 ### Changed
 

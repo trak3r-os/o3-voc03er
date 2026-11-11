@@ -103,7 +103,7 @@ Then read [the first five minutes](docs/MANUAL.md#3-the-first-five-minutes). Aft
 
 ## Status
 
-This is a pre-release (v0.2.0), and it needs more testing. What a unit has shown so far (`docs/PLAN.md`, sections 4 to 4l): the render
+This is a pre-release (v0.4.0), and it needs more testing. What a unit has shown so far (`docs/PLAN.md`, sections 4 to 4l): the render
 stays under its CPU limit with no underruns on the readings taken, with BANDS, eight carrier notes and four loops running; a project saves
 and loads again on the unit, samples included; and MIDI over USB works. What has not been tried on a unit is listed in
 [the changelog](docs/CHANGELOG.md). A host test is not a test on the unit, and the sound is judged by ear on the unit.
