@@ -13,7 +13,11 @@
 #include <o3sdk/sim/harness.h>
 #include <o3sdk/sim/scenario.h>
 
+#include <unistd.h>
+
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
@@ -184,16 +188,52 @@ void put_load_wavs(const std::filesystem::path& root) {
 }
 }  // namespace
 
+namespace {
+// O3_VOC03ER_SCENARIO_SHARD="i/n" (tests/CMakeLists.txt runs three ctests): this process takes the i-th of n shares of the scenarios, by their
+// sorted names. Unset or malformed: everything.
+// O3_VOC03ER_SCENARIO_LIST=<file>: instead of running, append the name of each scenario this share takes to that file (o3_voc03er_shard_coverage).
+struct ScenarioShard {
+  unsigned i = 0;
+  unsigned n = 1;
+  ScenarioShard() {
+    const char* v = std::getenv("O3_VOC03ER_SCENARIO_SHARD");
+    unsigned a = 0;
+    unsigned b = 0;
+    if (v != nullptr && std::sscanf(v, "%u/%u", &a, &b) == 2 && b >= 2u && a < b) {
+      i = a;
+      n = b;
+    }
+  }
+};
+}  // namespace
+
 TEST_CASE("app: the scenarios run as they are, write their pictures and the audio is not silent") {
   const std::filesystem::path dir = APP_SCENARIO_DIR;
-  const std::filesystem::path out = std::filesystem::temp_directory_path() / "o3_voc03er_scenarios";
+  const ScenarioShard shard;
+  const char* const list_file = std::getenv("O3_VOC03ER_SCENARIO_LIST");
+  // One directory per process: the shares run side by side.
+  const std::filesystem::path out = std::filesystem::temp_directory_path() / ("o3_voc03er_scenarios_" + std::to_string(static_cast<long>(getpid())));
   std::filesystem::create_directories(out);
-  std::size_t count = 0;
+  std::vector<std::filesystem::path> files;
   for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-    if (entry.path().extension() != ".txt") {
+    if (entry.path().extension() == ".txt") {
+      files.push_back(entry.path());
+    }
+  }
+  std::sort(files.begin(), files.end());  // directory_iterator has no order; the shares must agree on one
+  std::size_t count = 0;
+  bool ran_boot = false;
+  for (std::size_t k = 0; k < files.size(); ++k) {
+    const std::filesystem::directory_entry entry(files[k]);
+    if (k % shard.n != shard.i) {
+      continue;
+    }
+    if (list_file != nullptr) {  // list mode (the coverage guard, tests/CMakeLists.txt): name the scenario this share takes and run nothing
+      std::ofstream(list_file, std::ios::app) << entry.path().filename().string() << '\n';
       continue;
     }
     ++count;
+    ran_boot = ran_boot || entry.path().filename() == "boot.txt";
     INFO(entry.path().filename().string());
     std::ifstream in(entry.path());
     std::stringstream text;
@@ -215,9 +255,14 @@ TEST_CASE("app: the scenarios run as they are, write their pictures and the audi
     CHECK(h->display().peak_frame_words() < 2048u);
     CHECK(card.violations() == 0u);
   }
-  CHECK(count >= 2u);
-  CHECK(std::filesystem::exists(out / "boot.wav"));
-  CHECK(std::filesystem::exists(out / "01_boot.png"));
+  if (list_file == nullptr) {
+    CHECK(count >= 1u);
+    if (ran_boot) {  // boot.txt is in one share only
+      CHECK(std::filesystem::exists(out / "boot.wav"));
+      CHECK(std::filesystem::exists(out / "01_boot.png"));
+    }
+    std::filesystem::remove_all(out);
+  }
 }
 
 namespace {
