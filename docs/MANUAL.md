@@ -34,7 +34,7 @@ to go back). It is one instrument built on one idea: **something speaks, somethi
 
 ![PERFORM in BANDS with a chord held: the voice on the left, the voiceprint in the middle, the synth and its chord on the right](manual/img/hero.png)
 
-*PERFORM while a chord is held. SPEAKS is at the left, the voiceprint in the middle, SOUNDS at the right, the pads' chord grid under them.*
+*PERFORM while a chord is held. SPEAKS is at the left, the voiceprint in the middle, SOUNDS at the right, a drawing of the pads under them.*
 
 What you can do with it:
 
@@ -85,9 +85,9 @@ time, the live source is LINE with its gain at 0, so a quiet source is not boost
 **2. Check that the voice arrives.** Play something into the jack, or press MASTER and pick MIC on F1 and speak. The IN meter at the left
 moves and the voiceprint in the middle flickers. Nothing sounds yet: the synth has no note.
 
-**3. Press one pad on the bottom row.** A chord speaks your words. The screen names the chord and lights its notes. The next pad to the
-right is another chord. Hold the pad while you sing. The wide pad row at the bottom is one chord per key: C major, D minor, and so on,
-all in the key and scale that F4 and F5 say.
+**3. Press one pad of the middle row of the three.** A chord speaks your words. The screen names the chord and lights its notes. The next
+pad to the right is another chord. Hold the pad while you sing. That row, B, is one chord per key: C major, D minor, and so on, all in the key
+and scale that F4 and F5 say. The row above it, A, plays single notes, and the pads layout (section 4, PERFORM) says how to change both.
 
 **4. Free your hands.** Hold a chord pad and press SHIFT: the chord is latched and keeps sounding after you let go. A new latch replaces
 the old one. DELETE lets it go. (SHIFT first and then a pad latches nothing.)
@@ -140,21 +140,32 @@ now.
 
 *PERFORM in TALK: the voiceprint is now a smooth curve, the shape of the mouth.*
 
-**The pads.** The top pad row is always the controls: OCT- and OCT+, VOL- and VOL+, ROOT- and ROOT+, MOD (adds a little vibrato while
-held) and BND- and BND+ (bend while held). Below it are three rows, A, B and C from the top, and the twelve columns are the twelve roots,
-C at the left. F6 chooses a row and F7 chooses what it plays:
+**The pads layout.** This is the one place that explains the pads; PATTERN, SAMPLE, SAMPLE REC, SAMPLE EDIT and PARAMS play the same layout and
+point here. The top pad row is always the controls: OCT- and OCT+, VOL- and VOL+, ROOT- and ROOT+, MOD (adds a little vibrato while held) and
+BND- and BND+ (bend while held). Below it are three rows, A, B and C from the top, and the twelve columns are the twelve roots, C at the left, in
+the key and scale of F4 and F5. Each row has a PLAYS value. F6 ROW chooses the row (the row's pads flash once) and F7 PLAYS chooses what it
+plays, in this order:
+
+- **Rows A and B:** NOTE, TRIAD, 7TH, OPEN, POWER, PIANO NOTE, PIANO TRIAD, PIANO 7TH, PIANO OPEN, PIANO POWER, OFF.
+- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, OFF.
+
+A tap on F7 steps on and wraps round; the encoder stops at the ends.
 
 - NOTE: one note per pad. TRIAD, 7TH (the seventh chord), OPEN (root, fifth, ninth: open and airy) and POWER (root, fifth, octave: the
-  classic robot fifth): a chord per pad.
-- PIANO NOTE, PIANO TRIAD, PIANO 7TH, PIANO OPEN and PIANO POWER (rows A and B only): a piano. A is the black keys and B the white keys;
-  choosing one on either row sets both, and choosing a plain value on one of them splits the piano again.
+  classic robot fifth): a chord per pad, the one the scale gives on that root.
+- The PIANO values (rows A and B only): a piano. A is the black keys and B the white keys, each key a note or a chord of the kind named;
+  choosing a piano value on either row sets both, and choosing a plain value on one of them splits the piano again.
 - FORMANT and BEND (row C only): FORMANT is a strip of semitones: a tap sets the formant and nothing is held. BEND is the pitch-bend strip:
   the middle pair is zero, each pad outwards is a semitone, and it springs back when you let go.
 - OFF: the row is dark and silent.
 
-The default is A NOTE, B TRIAD and C FORMANT. Each row that plays notes sits an octave above the one under it, so a note on row B is
-one octave over the same pad on row C. SHIFT tapped while a pad is held latches it, on any row that plays notes; DELETE lets it go. The
-screen names each row's value beside it. LEFT and RIGHT move the octave.
+The default is A NOTE, B TRIAD and C FORMANT. **Each row that plays notes sits one octave above the playing rows under it**, so a note on row
+B is one octave over the same pad on row C, and a joined piano counts as one row. LEFT and RIGHT move the octave of all of them. VOICING SMOOTH
+keeps to the pad's own octave: a progression along a row still moves smoothly, and a row higher sounds higher.
+
+**The shortcut:** while you hold a pad of A, B or C, F7 changes that pad's row at once, and F6 follows it. SHIFT tapped while a pad is held
+latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it. **The layout is saved with the
+project** (section 9) and F4 NEW puts it back to the default.
 
 ![PERFORM with a piano on rows A and B: two keys held, the control row drawn above the piano](manual/img/perform-keys.png)
 
@@ -169,6 +180,7 @@ source and a slot have no pitch of their own to move.
 
 PARAMS shows three pages of eight values on the F keys, with the voiceprint small above so you see each change. Press PARAMS again, or
 UP and DOWN, to change page.
+The pads play PERFORM's layout here too.
 
 ![PARAMS, page CARRIER: the synth's eight values](manual/img/params.png)
 
@@ -180,7 +192,7 @@ UP and DOWN, to change page.
 VOICING: how a chord's notes are laid out.*
 
 VOICING has four settings. CLOSE stacks the notes as written. OPEN lifts the third an octave. WIDE spreads the chord over two octaves.
-SMOOTH, the default, picks the arrangement nearest the chord before, so a progression moves without jumps.
+SMOOTH, the default, picks the arrangement nearest the chord before, within the pad's octave, so a progression moves without jumps.
 
 ![PARAMS, page TUNE](manual/img/params-tune.png)
 
@@ -242,7 +254,7 @@ It plays no synth. SPEED is how fast it pulls: at the fastest it steps from note
 *ROBOT: BANDS with a fast leveller after it. The voice is flattened and hard.*
 
 **ROBOT.** BANDS with a fast leveller after it. Loud and soft syllables come out at about the same level, which gives the flat, mechanical
-voice. Hold a fifth, or a pad of the POWER row (the top row while F6 is on TRIAD), for the classic robot sound.
+voice. Hold a fifth, or set a row to POWER (F6 then F7) and press one of its pads, for the classic robot sound.
 
 ## 6. Samples and slices
 
@@ -258,6 +270,7 @@ or it can sound, so a recording can be the voice or the instrument.
 
 SAMPLE REC makes a take with every setting visible. REC starts it at the next bar line (at once if the transport is stopped); REC again ends
 it at the bar. LENGTH can end it by itself.
+The pads play PERFORM's layout (section 4, PERFORM), so you can play the synth under the take.
 
 | Key | What it does |
 |---|---|
@@ -276,10 +289,12 @@ bar and throws it away. DELETE with no take running empties the slot.
 
 ![SAMPLE: four slots on the left, the selected slot's waveform and cuts, the slices on the pads](manual/img/sample.png)
 
-*SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom rows are the chords. One slice is sounding.*
+*SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom two rows play PERFORM's rows A and B. One slice is sounding.*
 
-The top two pad rows are the slices of the selected slot. The bottom two rows are chords. **Hold a slice and a chord together, and the
-slice sings that chord.** Holding a chord pad and pressing SHIFT latches it, so one hand can play slices over it. Four slices can sound at once.
+The top two pad rows are the slices of the selected slot. The bottom two rows play PERFORM's layout (section 4, PERFORM), row A on the upper one and row B
+on the lower one, at PERFORM's octave (LEFT and RIGHT move it). A pad sounds while it is held, and
+leaving the screen lets everything go. **Hold a slice and a layout pad together, and the slice sings that note or chord.** There is no latch on
+this screen: the hand holds the pad. Four slices can sound at once.
 
 A slice pad plays its own cut once, from its start cut to its end cut, and then stops. A new hit on it starts it again from its start cut.
 A slice turns the slot's whole loop off, so LOOP reads OFF until F5 starts it again; a slice from PATTERN's SLICE lane or from MIDI does
@@ -287,7 +302,8 @@ the same.
 
 | Key | What it does |
 |---|---|
-| F1 CHORD | The chord kind, shared with PERFORM |
+| F1 PLAYS | What the row plays, as on PERFORM's F7. It sets the row that SHIFT + F1 chose (A at first), or, while you hold a pad of the bottom rows, that pad's row |
+| SHIFT + F1 ROW | The other row, A or B: its pads go dark for a moment |
 | F2 SIDE | Which side the slot is on: SPEAKS, SOUNDS or NONE |
 | F3 SPEED | 0.5X, 1X or 2X |
 | F4 DIR | FWD or REV |
@@ -296,7 +312,7 @@ the same.
 | F7 CHOKE | ON (the default): a hit fades out the slot's sounding slice and starts the new one. OFF: up to four slices overlap |
 | F8 LEVEL | -24 to +12 dB |
 
-UP and DOWN pick the slot. DELETE silences every sounding slice.
+UP and DOWN pick the slot. The layout is PERFORM's: F1 PLAYS and SHIFT + F1 ROW change the same values F7 and F6 do there.
 
 ### SAMPLE EDIT
 
@@ -305,8 +321,8 @@ UP and DOWN pick the slot. DELETE silences every sounding slice.
 *SAMPLE EDIT: the take across the screen, cuts as numbered marks, trim as brackets.*
 
 SAMPLE EDIT shows the take across the whole screen. Cuts are marks numbered 1 to 24. The encoder moves the cursor; LEFT and RIGHT jump
-from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice with the chord of the bottom
-rows.
+from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice; the bottom rows play
+PERFORM's rows A and B.
 
 | Key | What it does |
 |---|---|
@@ -351,9 +367,10 @@ pad writes into the step under the cursor and moves the cursor on; with one or m
 On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
 fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
 
-On the NOTE lane the palette is PERFORM's rows A and B as they play (F6 chooses A or B here, F7 what it plays). **Hold SHIFT and press
-a chord pad to write its root alone, a single note**: a bass line of sixteen notes is sixteen presses, with SHIFT held. With a piano
-on PERFORM's rows A and B the palette is the piano, and no SHIFT is needed.
+On the NOTE lane the palette is PERFORM's rows A and B as they play (the pads layout, section 4, PERFORM; F6 chooses A or B here, F7 what it plays).
+A pad writes what PERFORM would play there: a note, a chord of the row's kind, a piano key, or nothing when the row is OFF. **For a bass line of
+single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held; SHIFT + a palette pad sounds
+and writes nothing.
 
 | Key | What it does |
 |---|---|
@@ -362,8 +379,10 @@ on PERFORM's rows A and B the palette is the piano, and no SHIFT is needed.
 | F3 LENGTH | 1 to 16 steps |
 | F4 TEMPO | The tempo |
 | F5 VALUE | The cursor step's value in the lane; the encoder edits it |
-| F6 CLR LANE | Clears the lane. F1 confirms |
-| F7 FOLLOW | The cursor rides the playhead |
+| F6 ROW | NOTE lane: which of PERFORM's rows the palette shows, A or B. The row flashes. Dim on the other lanes |
+| F7 PLAYS | NOTE lane: what that row plays (PERFORM's values for rows A and B). Dim on the other lanes |
+| SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
+| SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one

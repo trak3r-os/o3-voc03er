@@ -171,7 +171,7 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     }
   }
   h.summary = "THREE PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE. PARAMS OR UP AND DOWN\n"
-              "TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. THE PADS PLAY CHORDS.";
+              "TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. THE PADS PLAY PERFORM'S LAYOUT.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = pr::focusable(page_, i) ? "TAP: FOCUS, THEN STEP" : nullptr;  // a blank key has no row
   }

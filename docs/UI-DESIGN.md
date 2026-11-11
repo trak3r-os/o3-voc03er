@@ -79,10 +79,10 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | REC | PERFORM: capture (section 2). SAMPLE REC: start the take at the bar, again to stop at the bar. SAMPLE and SAMPLE EDIT: arm the selected slot (SAMPLE REC opens armed). PATTERN: write arm, the pads record into the step under the playhead | all but the lists |
 | COPY | PATTERN: copies the step under the cursor (SHIFT: the whole pattern). SAMPLE EDIT: copies the slot, sample and cuts, to the next empty slot (F1 confirms) | PATTERN, SAMPLE EDIT |
 | INSERT | PATTERN: pastes the copied step at the cursor, the rest moving right (SHIFT: pastes the pattern). SAMPLE EDIT: inserts a cut at the cursor | PATTERN, SAMPLE EDIT |
-| DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the cut at the cursor (SHIFT: the slot's sample, F1 confirms); PERFORM the latched chord; SAMPLE every sounding slice (SHIFT: and the latched chord); SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
-| SHIFT | Held: with a pad latches it (a chord stays while the hands leave); with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP. Four combinations and the kit's two, no more | everywhere |
-| UP / DOWN | Which: the slot (SAMPLE, SAMPLE EDIT, SAMPLE REC), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM the chord type of the bottom row (section 7); on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
-| LEFT / RIGHT | Where: the octave of the keys or the chord grid (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the take's length (SAMPLE REC); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
+| DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the cut at the cursor (SHIFT: the slot's sample, F1 confirms); PERFORM the latched pad; SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
+| SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE, SHIFT + F1 is ROW; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP. Four combinations and the kit's two, no more | everywhere |
+| UP / DOWN | Which: the slot (SAMPLE, SAMPLE EDIT, SAMPLE REC), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
+| LEFT / RIGHT | Where: the octave of the pads (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the take's length (SAMPLE REC); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
 | Encoder | The latched F value; in a list the row; in SAMPLE EDIT the cursor, a sample fine, SHIFT coarse (a 64th of the sample) | everywhere |
 
 ## 4. The screens
@@ -94,7 +94,7 @@ explains it: a row for every button the screen answers (a button with no row dra
 
 Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN meter with a CLIP lamp, the capture chip ("REC: CAPTURE MIC > SLOT 2").
 Middle: the voiceprint with the MODE word over it. Right, SOUNDS: the carrier chip, the chord being played in big type ("Dm7", "C5") with its
-notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the chord grid or the keys, with the octave.
+notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the layout's rows A, B and C and the controls row, with the octave.
 
 - F1 MODE (BANDS, TALK, TUNE, ROBOT) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 ROW
   (A, B or C: the pad row F7 sets, section 7) · F7 PLAYS (what that row plays, section 7) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
@@ -116,14 +116,16 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
 Left: the four slots as a column (the selected framed: name, length, 0.5X / 1X / 2X, FWD / REV, the side it is on in that side's ink). Middle:
 the selected slot's overview waveform with its cuts, the play line moving, the sounding slices lit. Right: SOUNDS as on PERFORM, the chord.
 
-- F1 CHORD (the same value as PERFORM's F6; MODE stays on PERFORM and PARAMS) · F2 SIDE (SPEAKS, SOUNDS, NONE: which picker this slot goes to; the pickers of PERFORM see the same thing) · F3 SPEED (0.5X, 1X, 2X)
+- F1 PLAYS (what the chosen row plays, PERFORM's PLAYS values; SHIFT + F1 ROW chooses A or B; MODE stays on PERFORM and PARAMS) · F2 SIDE (SPEAKS, SOUNDS, NONE: which picker this slot goes to; the pickers of PERFORM see the same thing) · F3 SPEED (0.5X, 1X, 2X)
   · F4 DIR (FWD, REV) · F5 LOOP (the whole slot plays round, from the bar: ON, OFF) · F6 TRIG (GATE: a slice stops at the pad's release; ONE SHOT:
   to its end) · F7 CHOKE (ON: a new slice of this slot cuts the one sounding; OFF: they overlap) · F8 LEVEL (-24 to +12 dB). UP / DOWN the slot.
-- **Pads, the split.** The top two rows (pads 0 to 23) are slices 1 to 24 of the selected slot. The bottom two rows are the chord grid's two
-  lower rows (the 12 roots as triads and as sevenths, section 7) or, with PADS = KEYS, a two-octave keyboard. A slice held with a chord pad is the
-  gesture of the instrument: the slice sings that chord. SHIFT + a chord pad latches it so one hand plays slices over it. The split, not a
-  toggle, because the two things are played together; a toggle would cost a press per phrase. The octave or the chord row moves with LEFT / RIGHT.
-- LEDs: a slice that exists `kLedDim`, the one sounding `kLedOn`, the SLICE lane's `kLedMid` on its step; the chord rows as section 7. An empty
+- **Pads, the split.** The top two rows (pads 0 to 23) are slices 1 to 24 of the selected slot. The bottom two rows (pads 24 to 47) play PERFORM's
+  layout rows A and B (section 7), at PERFORM's octave, through PERFORM's audition entry like PATTERN's palette; a pad sounds while it is held
+  and a layout change or leaving the screen lets the notes go. A slice held with a layout pad is the gesture of the instrument: the slice sings
+  that note or chord; there is no latch on this screen. The split, not a toggle, because the two things are played together; a toggle would
+  cost a press per phrase. F1 sets the row SHIFT + F1 chose (the row flashes), or, with a layout pad held, that pad's row. LEFT / RIGHT is the octave.
+  Pad 24 maps to audition id 0 and so on: the entry's 24 ids hold the 24 pads without widening.
+- LEDs: a slice that exists `kLedDim`, the one sounding `kLedOn`, the SLICE lane's `kLedMid` on its step; the layout rows as on PATTERN's palette (root low, scale dim, held on, dark while ROW flashes). An empty
   slot: the top rows dark and the screen says "EMPTY: SAMPLE REC OR SAMPLE LOAD".
 - Polyphony: four slice voices in all, the four loop readers (section 8). A fifth press takes the oldest, with the reader's 64-sample level
   ramp, so it cannot click. CHOKE ON (the default) gives a slot one voice, the sliced-vocal feel.
@@ -138,11 +140,11 @@ so what was sung is heard at once.
 - F1 SOURCE (LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB; a line source starts at gain 0) · F2 GAIN · F3 LENGTH (FREE, 1, 2, 4, 8 BARS; also
   LEFT / RIGHT) · F4 AFTER (the side the slot takes: SPEAKS, SOUNDS, NONE) · F5 AUTOPLAY (ON, OFF) · F6 MONITOR (the kit's: the dry input to the output while
   recording) · F7 SLOT (1 to 4; also UP / DOWN) · F8 blank. DELETE discards the take.
-- Pads: the chord grid or the keys, so the carrier is played while recording (the take is the input, not the output). While recording the whole
+- Pads: PERFORM's layout (section 7), so the carrier is played while recording (the take is the input, not the output). While recording the whole
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
 Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
-Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SIDE moves the slot (it leaves the other side first); it refuses only an empty slot or a route `allowed` rejects, and says why. F1 shares PERFORM's chord kind; LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. Only pads of the lower two rows reach the chord; F6 and F7 came in U5b.
+Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SIDE moves the slot (it leaves the other side first); it refuses only an empty slot or a route `allowed` rejects, and says why. The pads play PERFORM's layout (section 7); LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. F6 and F7 came in U5b.
 A refused AFTER leaves the slot on no side and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
 again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
 
@@ -150,7 +152,7 @@ again. Leaving the screen cancels an armed take and stops a running one at the b
 
 The overview waveform across the screen, tall, the cuts as marks numbered 1 to 24, the trim as two brackets, the cursor a bright line with its
 time under it. The encoder moves the cursor; LEFT / RIGHT jump cut to cut; INSERT makes a cut at the cursor, DELETE removes the one at it. A pad
-of the top rows auditions that slice through the vocoder with the chord of the bottom rows (the same split as SAMPLE).
+of the top rows auditions that slice through the vocoder, and a pad of the bottom rows plays PERFORM's rows A and B (the same split as SAMPLE).
 
 - F1 CUT EVEN (OFF, 8, 16, 24 equal parts; turning re-cuts) · F2 CUT BEATS (OFF, 4, 8, 16 a bar, on the bars the take was recorded on; dimmed for
   a loaded WAV) · F3 CUT HITS (0 to 100: the sensitivity of the onset detector, 0 off; the cuts follow it as it turns; the first tap from 0 lands at 50, then by 10, and 100 wraps to 0) · F4 START and F5 END (the
@@ -172,10 +174,9 @@ one is refused on the strip, with the slot as it was.
 ### PATTERN
 
 Sixteen steps as cells with four lanes under each (NOTE, CARRIER, LEVEL, SLICE), the playhead in the voice ink, the cursor framed, the lane in
-force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing, from the grid) or single notes
-(from the keys). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
+force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever PERFORM's rows A and B play there (section 7). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
 the playhead); columns 8 to 11 of those rows are patterns A to H (`kLedMid` the current, `kLedOn` the one playing); rows 0 and 1 are the lane's
-palette: NOTE the chord grid's two lower rows or two octaves of keys, CARRIER six pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4), LEVEL 24 steps of
+palette: NOTE PERFORM's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER six pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4), LEVEL 24 steps of
 velocity, SLICE slices 1 to 24. A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
 the cursor there (SHIFT + step pad: a rest in the lane).
 On LEVEL the palette pad also sounds the cursor step's note or chord at that level while held (a rest sounds nothing); on SLICE it fires the
@@ -291,7 +292,7 @@ is refused whole and the app's state is untouched. The CRC does not cover the mi
 
 Left out of `VALU`, as actions or as state another chunk owns: Freeze (9), the loops' Rec, Play and Role (10..21), their Speed, Dir and Level (22..33; in `SLOT`),
 CarSrc and ModSrc (34, 47; in `ROUT`), the R n Start, Len and Trig (49..60), Load (61). The largest file is 2008 bytes (`kProjectFileMax` is 2560).
-Not in the file: the WAV data, the octave, tempo and swing, the current pattern and cursor, the chord kind and the pads' mode.
+Not in the file: the WAV data, the octave, tempo and swing, the current pattern and cursor. (STAT 1.1 keeps the pads layout; the 1.0 chord kind, pads mode and bend row are written derived from it.)
 
 ### SONG (U9)
 
@@ -302,9 +303,9 @@ from the cursor while this screen is up. Before U9 the one-line screen of sectio
 
 ## 5. The skin
 
-**OR NOIR, the only skin, chosen by the maintainer on 2026-11-06 ("me gusta el OR NOIR", "solo ese, por defecto").** Its idea, frames, tokens and costs are the OR NOIR section of `docs/ui-skins.html`, which replaces 5.1, the token table of 5.2 and the look of 5.3 below: gold speaks, chrome sounds, on a black wall of round LEDs, the voiceprint as sixteen upright columns of dots. There is no skin byte and no seam: the screens draw OR NOIR directly. What still stands below: the rule of the two inks, what each mode's voiceprint shows and where its values come from, the grid and type of 5.4, the budget of 5.5, the memory of 5.6. Text uses `>`, since the faces hold U+0020 to U+007E only. F6 on PERFORM is CHORD (section 4), whatever the pictures show.
+**OR NOIR, the only skin, chosen by the maintainer on 2026-11-06 ("me gusta el OR NOIR", "solo ese, por defecto").** Its idea, frames, tokens and costs are the OR NOIR section of `docs/ui-skins.html`, which replaces 5.1, the token table of 5.2 and the look of 5.3 below: gold speaks, chrome sounds, on a black wall of round LEDs, the voiceprint as sixteen upright columns of dots. There is no skin byte and no seam: the screens draw OR NOIR directly. What still stands below: the rule of the two inks, what each mode's voiceprint shows and where its values come from, the grid and type of 5.4, the budget of 5.5, the memory of 5.6. Text uses `>`, since the faces hold U+0020 to U+007E only. F6 on PERFORM is ROW and F7 PLAYS (sections 4 and 7), whatever the pictures show.
 
-**The F row, by the maintainer on 2026-11-06.** The metal is gold, not steel: pale gold, gold and brass (`Fx` is brass). Each key's name sits on a gold bar under its value window, y 453 to 478, right above the physical key, so the name is below y 452 and the kit's strip hides it for about 3 seconds at a time, while the value stays. That frees 15 px above: the chord grid's cells are 27 px high, with their names in the Label face, and one line under the grid, y 403, holds the pads' gestures on the left and, on the right, what the F key under the encoder does. This replaces the F row of 5.4 and the picture in `docs/ui-skins.html`.
+**The F row, by the maintainer on 2026-11-06.** The metal is gold, not steel: pale gold, gold and brass (`Fx` is brass). Each key's name sits on a gold bar under its value window, y 453 to 478, right above the physical key, so the name is below y 452 and the kit's strip hides it for about 3 seconds at a time, while the value stays. That frees 15 px above: the pad drawing's cells are 27 px high, with their names in the Label face, and one line under the grid, y 403, holds the pads' gestures on the left and, on the right, what the F key under the encoder does. This replaces the F row of 5.4 and the picture in `docs/ui-skins.html`.
 
 ### 5.1 Point of view
 
@@ -417,7 +418,7 @@ page CARRIER; SPREAD is also PERFORM's F8 in BANDS, because it is the one that i
 
 ## 7. Chords from the pads
 
-The first thing a new user reaches. KEY and SCALE are the TUNE parameters, so the chords and the pitch correction agree by construction.
+The first thing a new user reaches, and the one place the pads are explained: the other sections point here. KEY and SCALE are the TUNE parameters, so the chords and the pitch correction agree by construction.
 
 **The layout** (Q6, `pads_logic.h`, `docs/REVIEW-2026-11-11.md` section 3): the 12 columns are the 12 roots, C at the left of the octave LEFT / RIGHT chose.
 Row 0 is the controls on every layout (below). Rows 1, 2 and 3 are A, B and C, each with a PLAYS value, and what a pad plays is
@@ -434,9 +435,9 @@ they had are kept) and a grid value on either splits them, the other row getting
 C is held, F7 changes that pad's row at once and F6's row moves to it. SHIFT + F7 is empty. Each row that plays notes sits one octave above
 the playing rows under it (`row_octave`, the joined piano counting as one row). The project keeps the layout (STAT 1.1); a 1.1 file loads
 through it alone, and saving also writes the 1.0 chord kind, pads mode and bend row derived from it (`legacy_fields`) for an older build.
-The old F6 CHORD, `kind_for_row` rule (issue #4) and PADS = KEYS are gone from PERFORM; SAMPLE still uses them until Q7.
+The old F6 CHORD, `kind_for_row` rule (issue #4) and PADS = KEYS are gone from every screen: SAMPLE plays rows A and B (Q7), SAMPLE REC, SAMPLE EDIT and PARAMS the whole layout.
 
-**Voicing** (PARAMS, page SHAPE): CLOSE (as stacked), OPEN (the third up an octave), WIDE (across two octaves), SMOOTH (the inversion nearest the chord before:
+**Voicing** (PARAMS, page SHAPE): CLOSE (as stacked), OPEN (the third up an octave), WIDE (across two octaves), SMOOTH (the inversion nearest the chord before, within the pad's octave:
 voice-leading for free, the default). The chord's notes become `note_on`s to the unit, up to five, inside its eight voices.
 
 **LEDs**: roots in the scale `kLedDim`, roots out of it off (visible by their silence in the row), the held or latched pad `kLedOn`, the other
@@ -462,7 +463,7 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
 
 ### The SHIFT row of PERFORM
 
-Asked by the maintainer on 2026-11-06 ("mete todos"): FORMANT, FREEZE, GATE, ARP, GLIDE and presets, with no new pad modes, since the maintainer wants few. They live on a second row of the F keys, on both F7 values. While SHIFT is held the F row shows this row, names and values. SHIFT + an F key focuses its value, the same rule as the plain row: the encoder moves it, a second SHIFT + tap steps it, and the row stays shown while one of its values has the focus.
+Asked by the maintainer on 2026-11-06 ("mete todos"): FORMANT, FREEZE, GATE, ARP, GLIDE and presets, with no new pad modes, since the maintainer wants few. They live on a second row of the F keys. While SHIFT is held the F row shows this row, names and values. SHIFT + an F key focuses its value, the same rule as the plain row: the encoder moves it, a second SHIFT + tap steps it, and the row stays shown while one of its values has the focus.
 
 | Key | Value | What it does |
 |---|---|---|
@@ -549,8 +550,8 @@ No manual, the unit just switched on. PERFORM comes up: LIVE > SYNTH, BANDS, lay
 boot, section 11).
 
 **To a vocoded chord.** Play something into the line jack, or pick MIC on MASTER and speak: the IN meter moves and the voiceprint flickers in the voice ink; nothing sounds yet, the carrier has no note. Press
-one pad of the bottom row: a C major chord speaks your words; the screen says "C" and lights its three notes; the next pad to the right is D minor.
-Zero button presses. SHIFT + that pad latches it; both hands are free for the microphone. The top row is the robot fifth.
+one pad of row B: a C major chord speaks your words; the screen says "C" and lights its three notes; the next pad to the right is D minor.
+Zero button presses. SHIFT + that pad latches it; both hands are free for the microphone. Row A above it plays the single note; a row set to POWER is the robot fifth.
 
 **To a recorded loop as the carrier.** REC (1): the chip reads "CAPTURE MIC > SLOT 1, 2 BARS"; sing; the take ends at the bar by itself, the slot
 plays looped and takes SPEAKS (the side that held LIVE), so you hear it through the chord you hold. F3 SOUNDS (2), DOWN to SLOT 1 (3), F3 again
@@ -558,7 +559,7 @@ plays looped and takes SPEAKS (the side that held LIVE), so you hear it through 
 visible, for a take of a chosen length into a chosen slot.)
 
 **To slices.** SAMPLE EDIT (1): the take across the screen. F2 CUT BEATS (2), turn to 16 (3): sixteen marks. SAMPLE PLAY (4): the top two rows
-light; a pad plays its slice through the chord held on the bottom rows; hold a slice and change the chord under it. F2 SIDE is already SPEAKS;
+light; a pad plays its slice through the note or chord held on the bottom rows (PERFORM's rows A and B); hold a slice and change the pad under it. F2 SIDE is already SPEAKS;
 on PERFORM F3 SOUNDS to NOISE makes the same slices whisper. Four presses; a WAV instead of a take is SAMPLE LOAD, UP / DOWN, F1 OPEN, three more.
 
 **To an external carrier.** On PERFORM, F3 SOUNDS: the picker lists SYNTH, NOISE, LIVE "MIC (SAME AS SPEAKS)", SLOT 1. With the microphone on

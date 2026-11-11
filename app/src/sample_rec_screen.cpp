@@ -455,7 +455,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
     }
   }
   h.summary = "REC ARMS AT THE NEXT BAR LINE; REC AGAIN OR THE LENGTH ENDS IT AT A BAR.\n"
-              "THE TAKE LOOPS WHERE AFTER SAYS. THE PADS PLAY CHORDS UNDER IT.";
+              "THE TAKE LOOPS WHERE AFTER SAYS. THE PADS PLAY PERFORM'S LAYOUT.";
   h.fkey[0] = "THE INPUT SOURCE";
   h.fkey[1] = "INPUT GAIN";
   h.fkey[2] = "FREE, 1 TO 8 BARS";
@@ -655,7 +655,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   if (note_ != nullptr) {
     r.text(96, 346, note_, Color::Accent, Face::Label);
   }
-  r.text(96, 384, "PADS: THE CHORDS OF PERFORM", Color::TextDim, Face::Micro);
+  r.text(96, 384, "PADS: PERFORM'S LAYOUT", Color::TextDim, Face::Micro);
 }
 
 }  // namespace o3_voc03er
