@@ -16,6 +16,7 @@
 #include "tract_skip.h"
 
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -661,10 +662,19 @@ TEST_CASE("pattern: the MOUTH lane's writes, values, rests and the clipboard (th
   // the encoder: a vowel keeps GLD, a closure is not a vowel, the range is 0..12
   CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 1));
   CHECK(get_mouth(p, 1) == 4u + kMouthGld);
-  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 20));
-  CHECK(get_mouth(p, 1) == 12u);  // BACK: GLD is dropped on a closure (the file refuses it)
+  // the walk: 0 FOLLOW, 1..9 vowels, 10..12 closures, 13..20 the words, 21..26 the WOB rates; a vowel keeps GLD, everything else drops it
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 8));  // vowel 4 + GLD -> 12 BACK
+  CHECK(get_mouth(p, 1) == 12u);
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 1));  // 13: the first word, WOW
+  CHECK(get_mouth(p, 1) == o3_voc03er::mouth_word_byte(0));
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 7));  // 20: GA
+  CHECK(get_mouth(p, 1) == o3_voc03er::mouth_word_byte(7));
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 1));  // 21: the first WOB, 1/4
+  CHECK(get_mouth(p, 1) == o3_voc03er::mouth_wob_byte(0));
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, 20));  // clamped at 26: 1/16T
+  CHECK(get_mouth(p, 1) == o3_voc03er::mouth_wob_byte(5));
   CHECK_FALSE(pt::step_value(p, 1, pt::Lane::Mouth, 1));
-  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, -20));
+  CHECK(pt::step_value(p, 1, pt::Lane::Mouth, -40));
   CHECK(get_mouth(p, 1) == 0u);
   // COPY and INSERT carry the byte, DELETE clears it, a whole pattern carries all four
   pt::Clip c;
@@ -838,5 +848,270 @@ TEST_CASE("pattern: the MOUTH lane draws inside the display list's limit, in and
   set_mode(*rig.h, 4.0f);
   rig.h->run_ms(100);
   CHECK(rig.h->display().peak_frame_words() < 2048u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+// ---- TRACT V3b: the words, the WOB rates and FILL on the MOUTH lane -------------------------------------------------------------------------
+
+TEST_CASE("pattern: the WORDS page maps row 0 to the words and row 1 to the WOB rates, the rest is dark (the logic)") {
+  using o3_voc03er::mouth_word_byte;
+  using o3_voc03er::mouth_wob_byte;
+  const auto W = pt::MouthPage::Words;
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(pt::mouth_of_pad(c, W) == (c < 8u ? mouth_word_byte(c) : std::uint8_t{0}));
+    CHECK(pt::mouth_of_pad(12u + c, W) == (c < 6u ? mouth_wob_byte(c) : std::uint8_t{0}));
+  }
+  CHECK(pt::mouth_of_pad(24, W) == 0u);  // a step pad is no palette pad
+  // the VOWELS page is as it was
+  CHECK(pt::mouth_of_pad(0) == 1u);
+  CHECK(pt::mouth_of_pad(14) == (3u | o3_voc03er::kMouthGld));
+  CHECK(pt::mouth_of_pad(14, pt::MouthPage::Vowels) == pt::mouth_of_pad(14));
+  // the pad that holds a word is mid on the WORDS page and on no other
+  CHECK(pt::palette_matches(pt::Lane::Mouth, 5, o3_voc03er::Step{}, 0, pd::Layout{}, mouth_word_byte(5), W));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Mouth, 5, o3_voc03er::Step{}, 0, pd::Layout{}, mouth_word_byte(5)));
+  CHECK(pt::palette_matches(pt::Lane::Mouth, 12u + 3u, o3_voc03er::Step{}, 0, pd::Layout{}, mouth_wob_byte(3), W));
+  // the cells' texts
+  char t[6];
+  const char* const words[8] = {"WOW", "YEA", "YOI", "WAH", "OW", "BA", "DA", "GA"};
+  for (unsigned w = 0; w < 8; ++w) {
+    pt::mouth_text(t, mouth_word_byte(w));
+    CHECK(std::string(t) == words[w]);
+  }
+  const char* const rates[6] = {"~4", "~8", "~16", "~32", "~8T", "~16T"};
+  for (unsigned r = 0; r < 6; ++r) {
+    pt::mouth_text(t, mouth_wob_byte(r));
+    CHECK(std::string(t) == rates[r]);
+  }
+  // writing a word or a WOB through a pad
+  o3_voc03er::PatternData p{};
+  CHECK(pt::mouth_write(p, 0, 7, W));
+  CHECK(o3_voc03er::get_mouth(p, 0) == mouth_word_byte(7));
+  CHECK(pt::mouth_write(p, 1, 12u + 5u, W));
+  CHECK(o3_voc03er::get_mouth(p, 1) == mouth_wob_byte(5));
+  CHECK_FALSE(pt::mouth_write(p, 2, 8, W));  // dark on this page
+  CHECK(o3_voc03er::get_mouth(p, 2) == 0u);
+  CHECK(std::string(pt::kWobPlays) == "WOB PLAYS WITH THE LINE");
+  CHECK(std::string(pt::kFilled) == "MOUTH FILLED: F7 AGAIN, SHIFT + F6 CLEARS");
+  CHECK(std::string(pt::kFillPrompt) == "FILL MOUTH LANE: F1 CONFIRMS");
+}
+
+TEST_CASE("pattern: the encoder walks the 27 MOUTH values up and back down, GLD only on a vowel") {
+  using o3_voc03er::get_mouth;
+  o3_voc03er::PatternData p{};
+  for (unsigned expect = 1; expect <= 26; ++expect) {
+    CHECK(pt::step_value(p, 0, pt::Lane::Mouth, 1));
+    const std::uint8_t m = get_mouth(p, 0);
+    CHECK(o3_voc03er::mouth_valid(m));
+    if (expect >= 21u) {
+      CHECK(o3_voc03er::mouth_is_wob(m));
+      CHECK(o3_voc03er::mouth_arg(m) == expect - 21u);
+    } else if (expect >= 13u) {
+      CHECK(o3_voc03er::mouth_is_word(m));
+      CHECK(o3_voc03er::mouth_arg(m) == expect - 13u);
+    } else {
+      CHECK(m == expect);
+    }
+  }
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Mouth, 1));
+  for (unsigned down = 0; down < 26; ++down) {
+    CHECK(pt::step_value(p, 0, pt::Lane::Mouth, -1));
+    CHECK(o3_voc03er::mouth_valid(get_mouth(p, 0)));
+  }
+  CHECK(get_mouth(p, 0) == 0u);
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Mouth, -1));
+  // a vowel with GLD loses it on the way to a word and does not get it back
+  CHECK(o3_voc03er::set_mouth(p, 0, 2u | o3_voc03er::kMouthGld));
+  CHECK(pt::step_value(p, 0, pt::Lane::Mouth, 11));  // 13: WOW
+  CHECK(get_mouth(p, 0) == o3_voc03er::mouth_word_byte(0));
+  CHECK(pt::step_value(p, 0, pt::Lane::Mouth, -11));
+  CHECK(get_mouth(p, 0) == 2u);
+}
+
+TEST_CASE("pattern: FILL's random walk is seeded, valid, moves by two at most and stops at LENGTH (the logic)") {
+  using o3_voc03er::get_mouth;
+  o3_voc03er::PatternData a{}, b{}, c{};
+  pt::fill_mouth(a, 16, pt::fill_seed(0, 0));
+  pt::fill_mouth(b, 16, pt::fill_seed(0, 0));
+  pt::fill_mouth(c, 16, pt::fill_seed(1, 0));
+  bool same_ab = true, same_ac = true;
+  for (unsigned i = 0; i < 16; ++i) {
+    same_ab = same_ab && get_mouth(a, i) == get_mouth(b, i);
+    same_ac = same_ac && get_mouth(a, i) == get_mouth(c, i);
+  }
+  CHECK(same_ab);
+  CHECK_FALSE(same_ac);
+  // many seeds: every byte is FOLLOW or a vowel (GLD allowed), and the walk is at most two vowels a step across a FOLLOW too
+  for (std::uint32_t n = 0; n < 200; ++n) {
+    o3_voc03er::PatternData p{};
+    pt::fill_mouth(p, 16, pt::fill_seed(n, n % 8u));
+    int last = -1;
+    for (unsigned i = 0; i < 16; ++i) {
+      const std::uint8_t m = get_mouth(p, i);
+      REQUIRE(o3_voc03er::mouth_valid(m));
+      if (m == 0u) {
+        continue;
+      }
+      REQUIRE(o3_voc03er::mouth_is_vowel(m));
+      const int v = static_cast<int>(o3_voc03er::mouth_value(m));
+      if (last >= 0) {
+        CHECK(std::abs(v - last) <= 2);
+      }
+      last = v;
+    }
+  }
+  // LENGTH 8: steps 8..15 are left as they were
+  o3_voc03er::PatternData q{};
+  REQUIRE(o3_voc03er::set_mouth(q, 12, 3));
+  pt::fill_mouth(q, 8, pt::fill_seed(4, 2));
+  CHECK(get_mouth(q, 12) == 3u);
+  for (unsigned i = 8; i < 16; ++i) {
+    if (i != 12u) {
+      CHECK(get_mouth(q, i) == 0u);
+    }
+  }
+  // the seeds: never 0, and distinct over the first counters of a pattern
+  for (std::uint32_t n = 0; n < 64; ++n) {
+    CHECK(pt::fill_seed(n, 0) != 0u);
+    for (std::uint32_t m = n + 1; m < 64; ++m) {
+      CHECK(pt::fill_seed(n, 0) != pt::fill_seed(m, 0));
+    }
+  }
+  // empty / own output
+  o3_voc03er::PatternData e{};
+  CHECK(pt::mouth_lane_empty(e));
+  pt::fill_mouth(e, 16, pt::fill_seed(0, 0));
+  CHECK_FALSE(pt::mouth_lane_empty(e));
+  std::uint8_t out[16];
+  for (unsigned i = 0; i < 16; ++i) {
+    out[i] = get_mouth(e, i);
+  }
+  CHECK(pt::mouth_lane_is(e, out));
+  (void)o3_voc03er::set_mouth(e, 3, 9);
+  CHECK_FALSE(pt::mouth_lane_is(e, out));
+}
+
+namespace {
+// The MOUTH lane with the vocoder in TRACT, palette page VOWELS.
+void to_mouth(Rig& rig) {
+  set_mode(*rig.h, 4.0f);
+  tap(*rig.h, app::Button::Fx);
+  tap(*rig.h, app::Button::Fx);
+}
+// Is the step pad's LED as the line `want` says, step 1..n-1 (step 0 is the cursor)?
+bool steps_show(Rig& rig, const o3_voc03er::PatternData& want, unsigned from, unsigned to) {
+  for (unsigned i = from; i < to; ++i) {
+    const std::uint8_t exp = want.mouth[i] != 0u ? app::kLedDim : app::kLedOff;
+    if (rig.led(step_pad(i)) != exp) {
+      MESSAGE("step " << i << ": led " << static_cast<unsigned>(rig.led(step_pad(i))) << ", want " << static_cast<unsigned>(exp) << " (mouth byte " << static_cast<unsigned>(want.mouth[i]) << ")");
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+TEST_CASE("pattern: F6 SET flips the MOUTH palette VOWELS and WORDS") {
+  Rig rig;
+  to_mouth(rig);
+  CHECK(rig.count(0, 23, app::kLedOff) == 3u);  // VOWELS
+  tap(*rig.h, app::Button::F6);
+  CHECK(rig.count(0, 23, app::kLedOff) == 10u);  // WORDS: 8 + 6 lit
+  CHECK(rig.led(7) == app::kLedDim);
+  CHECK(rig.led(8) == app::kLedOff);
+  CHECK(rig.led(17) == app::kLedDim);
+  CHECK(rig.led(18) == app::kLedOff);
+  tap(*rig.h, app::Button::F6);
+  CHECK(rig.count(0, 23, app::kLedOff) == 3u);  // back
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: a WORDS pad writes the step and moves on; a WOB pad writes it and leaves VOWEL alone") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  to_mouth(rig);
+  tap(*rig.h, app::Button::F6);
+  pad(*rig.h, 5);  // BA into step 1
+  CHECK(rig.led(24) == app::kLedDim);
+  CHECK(rig.led(25) == app::kLedMid);
+  rig.h->run_ms(500);  // the audition runs its course
+  const float v0 = tract_value(*rig.h, TractUnit::Vowel);
+  pad(*rig.h, 14);  // the 1/16 WOB into step 2: sounds nothing
+  rig.h->run_ms(100);
+  CHECK(tract_value(*rig.h, TractUnit::Vowel) == doctest::Approx(v0));
+  CHECK(rig.led(25) == app::kLedDim);
+  CHECK(rig.led(26) == app::kLedMid);
+  pad(*rig.h, 24);  // back on step 1: BA is mid on the WORDS page
+  CHECK(rig.led(5) == app::kLedMid);
+  CHECK(rig.led(14) != app::kLedMid);
+  pad(*rig.h, 25);
+  CHECK(rig.led(14) == app::kLedMid);
+  CHECK(rig.led(5) != app::kLedMid);
+  // a dark pad writes nothing
+  pad(*rig.h, 26);
+  pad(*rig.h, 9);
+  CHECK(rig.led(26) == app::kLedMid);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: F7 FILL writes a seeded line at once over an empty lane, again re-rolls it, and LENGTH is respected") {
+  Rig rig;
+  to_mouth(rig);
+  o3_voc03er::PatternData want{};
+  pt::fill_mouth(want, 16, pt::fill_seed(0, 0));
+  tap(*rig.h, app::Button::F7);
+  CHECK(steps_show(rig, want, 1, 16));
+  tap(*rig.h, app::Button::F7);  // its own output: no question, a new line
+  o3_voc03er::PatternData want2{};
+  pt::fill_mouth(want2, 16, pt::fill_seed(1, 0));
+  CHECK(steps_show(rig, want2, 1, 16));
+  // LENGTH 8: only the first eight are filled
+  shift_tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F1);  // the lane is empty
+  CHECK(rig.count(36, 43, app::kLedOff) == 8u);
+  tap(*rig.h, app::Button::F3);
+  rig.h->turn(-8);
+  rig.h->run_ms(60);
+  o3_voc03er::PatternData want3{};
+  pt::fill_mouth(want3, 8, pt::fill_seed(2, 0));
+  tap(*rig.h, app::Button::F7);
+  CHECK(steps_show(rig, want3, 1, 8));
+  CHECK(rig.led(36) == app::kLedOff);
+  CHECK(rig.led(43) == app::kLedOff);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: F7 FILL over a hands-written lane asks, F1 fills and another key cancels") {
+  Rig rig;
+  to_mouth(rig);
+  pad(*rig.h, 2);  // E into step 1
+  pad(*rig.h, 4);  // I into step 2
+  tap(*rig.h, app::Button::F7);  // asks
+  CHECK(rig.led(24) == app::kLedDim);
+  CHECK(rig.led(26) == app::kLedMid);  // nothing is filled yet: the cursor on the empty step 3, the rest dark
+  CHECK(rig.led(27) == app::kLedOff);
+  tap(*rig.h, app::Button::F2);  // any other key cancels
+  CHECK(rig.led(27) == app::kLedOff);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::F1);  // confirms
+  o3_voc03er::PatternData want{};
+  pt::fill_mouth(want, 16, pt::fill_seed(0, 0));  // the cancelled ask did not count as a fill
+  CHECK(steps_show(rig, want, 3, 16));
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: SHIFT + F6 empties the MOUTH lane and F7 fills it again without asking") {
+  Rig rig;
+  to_mouth(rig);
+  pad(*rig.h, 3);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::F1);
+  shift_tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F1);
+  CHECK(rig.count(36, 43, app::kLedOff) == 8u);
+  CHECK(rig.count(26, 31, app::kLedOff) == 6u);  // the cursor is on step 2
+  tap(*rig.h, app::Button::F7);  // empty: at once
+  o3_voc03er::PatternData want{};
+  pt::fill_mouth(want, 16, pt::fill_seed(1, 0));
+  CHECK(steps_show(rig, want, 2, 16));
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }

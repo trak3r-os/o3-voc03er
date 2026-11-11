@@ -146,6 +146,9 @@ class PerformScreen final : public o3sdk::app::Screen {
   bool mouth_active(const o3sdk::dsp::Engine& e) const noexcept;  // the unit is in TRACT mode
   void mouth_sound(o3sdk::app::Context& ctx, std::uint8_t mouth) noexcept;
   void mouth_sound_release(o3sdk::app::Context& ctx) noexcept;
+  // V3b: one point of a WORD's audition (stepseq.h kWords): SLIDE, then VOWEL, and CLOSE; `step_ms` is a sixteenth. mouth_word_end puts SLIDE back to 0.
+  void mouth_word_point(o3sdk::app::Context& ctx, float step_ms, const WordPoint& w) noexcept;
+  void mouth_word_end(o3sdk::app::Context& ctx) noexcept;
 
   // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): the hint line's moment of text.
   void notice(o3sdk::app::Context& ctx, const char* text) noexcept { show_flash(ctx, text, ""); }

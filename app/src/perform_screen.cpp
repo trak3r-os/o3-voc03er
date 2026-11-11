@@ -354,6 +354,27 @@ void PerformScreen::mouth_sound(app::Context& ctx, std::uint8_t mouth) noexcept 
 
 void PerformScreen::mouth_sound_release(app::Context& ctx) noexcept { write_close(ctx); }  // the strip's closure still held, else open
 
+void PerformScreen::mouth_word_point(app::Context& ctx, float step_ms, const WordPoint& w) noexcept {
+  if (tract_ == dsp::kNoUnit || !mouth_active(ctx.engine())) {
+    return;
+  }
+  dsp::Engine& e = ctx.engine();
+  if (w.vowel != 0u) {
+    (void)e.set_param(tract_, TractUnit::Slide, w.over == 0u ? kSlideMinMs : slide_for(step_ms * static_cast<float>(w.over) * 0.01f));
+    (void)e.set_param(tract_, TractUnit::Vowel, static_cast<float>(w.vowel - 1u) * (1.0f / 8.0f));
+  }
+  if (w.close >= 0) {
+    (void)e.set_param(tract_, TractUnit::Close, static_cast<float>(w.close));
+  }
+}
+
+void PerformScreen::mouth_word_end(app::Context& ctx) noexcept {
+  if (tract_ != dsp::kNoUnit) {
+    (void)ctx.engine().set_param(tract_, TractUnit::Slide, 0.0f);
+  }
+  write_close(ctx);  // a word that ended closed lets go (a strip pad still held keeps its closure)
+}
+
 void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
   constexpr unsigned kAuditionPads = 24;  // the palette: rows A and B (and C, which PATTERN does not use)
   if (pad >= kAuditionPads || note < 1u || note > 127u) {

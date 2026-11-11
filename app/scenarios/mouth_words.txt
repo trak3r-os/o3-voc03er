@@ -1,0 +1,174 @@
+# WORDS, WOB, ACCENT and FILL on the MOUTH lane (TRACT V3b, docs/REVIEW-2026-11-11.md section 4): in TRACT a note on steps 1 to 8 (NOTE lane), step 1 at level 127 (the
+# ACCENT: LEVEL lane, VALUE key F5, the tap steps one, then 26 detents, 100 to 127), then the MOUTH lane's two palettes, flipped by F6 SET. VOWELS: the nine vowels and three closures on row 0,
+# the vowels with GLD on row 1. WORDS: row 0 the 8 words (WOW YEAH YOI WAH OW BA DA GA, pads 0..7), row 1 the 6 WOB rates (1/4 1/8 1/16 1/32 1/8T 1/16T, pads 12..17), the
+# rest dark. The line: WOW, YEAH, I, a WOB 1/16 (pad 14: it sounds nothing, it moves the tube between its neighbours I and O while the line plays), O, then BA DA GA.
+# Played, the words move the tube through their gesture points, the WOB wobbles it between I and O on the transport's sixteenths, and step 1's accent opens the jaw.
+# F7 FILL then asks over a hands-written lane (F1 fills, another key cancels), writes a seeded random walk of vowels, and SHIFT + F6 empties the lane. The simulator shows
+# the screens, the LEDs and that the unit plays; the words, the WOB at each rate, the click at the accented step and the CPU while the shape moves are for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/mouth_words.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+# TRACT: F1 steps BANDS, TALK, TUNE, ROBOT, TRACT (the first tap takes the focus)
+tap f1
+tap f1
+tap f1
+tap f1
+tap f1
+wait 600
+expect state voc_mode=tract
+tap pattern
+wait 150
+tap note
+wait 100
+# a note on each of steps 1 to 8 (row A, one pad a note; the cursor steps on by itself)
+paddown 0
+wait 40
+padup 0
+wait 60
+paddown 2
+wait 40
+padup 2
+wait 60
+paddown 4
+wait 40
+padup 4
+wait 60
+paddown 5
+wait 40
+padup 5
+wait 60
+paddown 7
+wait 40
+padup 7
+wait 60
+paddown 9
+wait 40
+padup 9
+wait 60
+paddown 11
+wait 40
+padup 11
+wait 60
+paddown 12
+wait 40
+padup 12
+wait 60
+# step 1 at level 127: the LEVEL lane (Vol), the step, VALUE (F5, which already has the focus: its tap steps 100 to 101) and 26 more
+tap vol
+wait 100
+paddown 24
+wait 40
+padup 24
+wait 60
+tap f5
+wait 60
+turn 26
+wait 150
+snap 01_accent
+# the MOUTH lane: SLICE first, then MOUTH; the cursor stays on step 1
+tap fx
+wait 100
+tap fx
+wait 200
+snap 02_vowels_page
+# F6 SET: the WORDS page
+tap f6
+wait 150
+snap 03_words_page
+# WOW and YEAH on steps 1 and 2 (WORDS pads 0 and 1; a word sounds as it is written)
+paddown 0
+wait 40
+padup 0
+wait 60
+wait 300
+paddown 1
+wait 40
+padup 1
+wait 60
+wait 300
+# I on step 3 (VOWELS pad 4)
+tap f6
+wait 60
+paddown 4
+wait 40
+padup 4
+wait 60
+# the WOB 1/16 on step 4 (WORDS pad 14): nothing sounds, the strip says WOB PLAYS WITH THE LINE
+tap f6
+wait 60
+paddown 14
+wait 40
+padup 14
+wait 60
+snap 04_wob_written
+# O on step 5 (VOWELS pad 6)
+tap f6
+wait 60
+paddown 6
+wait 40
+padup 6
+wait 60
+# BA, DA, GA on steps 6 to 8 (WORDS pads 5, 6, 7)
+tap f6
+wait 60
+paddown 5
+wait 40
+padup 5
+wait 60
+wait 300
+paddown 6
+wait 40
+padup 6
+wait 60
+wait 300
+paddown 7
+wait 40
+padup 7
+wait 60
+wait 300
+snap 05_line_words_page
+tap f6
+wait 150
+snap 06_line_vowels_page
+# played: the words, the WOB between I and O and the accent; Stop opens the tube
+tap play
+wait 0
+wait 4500
+snap 07_playing
+wav mouth_words
+tap play
+wait 400
+# F7 FILL over this hands-written lane asks first; another key cancels
+tap f7
+wait 100
+snap 08_fill_asks
+tap f2
+wait 100
+snap 09_fill_cancelled
+# F7 and F1: a seeded random walk of vowels over the line's 16 steps
+tap f7
+wait 60
+tap f1
+wait 150
+snap 10_filled
+# F7 again is its own output: no question, a new line
+tap f7
+wait 150
+snap 11_filled_again
+# played, the filled line
+tap play
+wait 0
+wait 2500
+wav mouth_fill
+tap play
+wait 300
+# SHIFT + F6 empties the lane (F1 confirms)
+press shift
+tap f6
+wait 100
+release shift
+wait 50
+tap f1
+wait 150
+snap 12_cleared

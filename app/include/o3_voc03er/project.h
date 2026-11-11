@@ -12,8 +12,8 @@
 //   PTNS 1.0  u8 count, then per pattern u16 record length, u8 length (0..16, 0 reads as 16), 16 x u32 packed step (stepseq.h)
 //   CHAI 1.0  u8 count (0..16), u8 loop (0/1), then count x (u8 pattern 0..7, u8 repeats 1..kChainRepeatMax): the SONG chain
 //   ROUT 1.0  u8 speaks, u8 sounds (route.h values; the pair must be allowed), u8 live source (route::LiveSrc). Absent: the default route
-//   MOUT 1.0  (TRACT V3, after PTNS; written only when a step has a mouth byte) u8 count (8), then per pattern its 16 mouth bytes (stepseq.h mouth_valid: 0 FOLLOW,
-//             1..9 the vowels, 10..12 the closures, bit 7 GLD on a vowel). Absent: every step FOLLOWs. A count other than 8 or a byte that is not valid refuses the file
+//   MOUT 1.1  (TRACT V3, after PTNS; written only when a step has a mouth byte; 1.1 since V3b, 1.0 loads) u8 count (8), then per pattern its 16 mouth bytes (stepseq.h
+//             mouth_valid: 0 FOLLOW, 1..9 the vowels, 10..12 the closures, 13 and 14 a WORD and a WOB with their number in bits 4..6, bit 7 GLD on a vowel). Absent: every step FOLLOWs. A count other than 8 or a byte that is not valid refuses the file
 //   TRCT 1.0  (TRACT V3, after STAT; written when the capture holds the tract) 8 x f32: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS (kTractSaved, the unit's own
 //             units). Not CLOSE (an action), MIX (the mode owns it) or SLIDE (the sequencer's). Absent: the unit's defaults. A value out of its range, or not a
 //             number, refuses the file
@@ -387,6 +387,7 @@ inline bool project_valid(const Project& p) noexcept {
 
 // --- the file ---
 inline constexpr std::uint16_t kProjectChunkVersion = 0x0100;
+inline constexpr std::uint16_t kMoutVersion = 0x0101;  // MOUT 1.1 (V3b): WORD and WOB values may be in it; a 0x0100 file loads (any minor of major 1 does)
 inline constexpr std::uint16_t kSlotVersion = 0x0101;  // SLOT 1.1: TRIG and CHOKE after `values`
 inline constexpr std::uint16_t kStatVersion = 0x0101;  // STAT 1.1: voicing, bend row and range, FOLLOW, preset, layout
 
@@ -669,7 +670,7 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
     return 0;
   }
   if (any_mouth) {
-    if (!w.begin("MOUT") || !w.u16(ver) || !w.u8(static_cast<std::uint8_t>(kBankPatterns))) {
+    if (!w.begin("MOUT") || !w.u16(kMoutVersion) || !w.u8(static_cast<std::uint8_t>(kBankPatterns))) {
       return 0;
     }
     for (const PatternData& pd : p.bank.pattern) {

@@ -387,8 +387,8 @@ and writes nothing.
 | F3 LENGTH | 1 to 16 steps |
 | F4 TEMPO | The tempo |
 | F5 VALUE | The cursor step's value in the lane; the encoder edits it |
-| F6 ROW | NOTE lane: which of PERFORM's rows the palette shows, A or B. The row flashes. Dim on the other lanes |
-| F7 PLAYS | NOTE lane: what that row plays (PERFORM's values for rows A and B). Dim on the other lanes |
+| F6 ROW | NOTE lane: which of PERFORM's rows the palette shows, A or B. The row flashes. MOUTH lane: SET, the palette VOWELS or WORDS. Dim on the other lanes |
+| F7 PLAYS | NOTE lane: what that row plays (PERFORM's values for rows A and B). MOUTH lane: FILL. Dim on the other lanes |
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
@@ -401,6 +401,14 @@ palette pad writes the cursor step, moves on and, in TRACT, sounds the mouth whi
 SHIFT + a palette pad only sounds; SHIFT + a step pad clears the step. Playing writes the mouth in every mode but it speaks in TRACT only
 (outside TRACT the lane is dim, it still edits and the strip says MOUTH SPEAKS IN TRACT). Stopping opens the mouth. A pad of PERFORM's MOUTH
 strip held while the pattern plays wins over the sequence. A GLD step's glide is capped at 500 ms by the voice.
+
+The MOUTH lane's second palette, **WORDS** (F6 SET flips it): row 0 is eight words, WOW, YEAH, YOI, WAH, OW, BA, DA and GA, each a short gesture of
+the mouth that fits the step (BA, DA and GA close the mouth on their consonant); row 1, columns 1 to 6, is WOB, a wobble between the neighbouring
+vowels at 1/4, 1/8, 1/16, 1/32, 1/8T or 1/16T, running with the line until the next mouth step. A word pad is heard once when you press it; a WOB
+pad sounds nothing (the strip says WOB PLAYS WITH THE LINE). A step with a note and a LEVEL above 100 opens the jaw a little more (an accent, up to
+half at 127). **F7 FILL** writes a random line of vowels, some FOLLOW, some glided, over LENGTH; if the lane holds something you wrote it asks
+first (F1 confirms, any other key leaves it), and pressing F7 again rolls another. SHIFT + F6 empties the lane. A project saved with a word or a
+WOB does not open in the build before this one.
 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY

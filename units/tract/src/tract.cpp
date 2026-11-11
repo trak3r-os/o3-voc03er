@@ -27,9 +27,12 @@ constexpr o3sdk::core::ParamDesc kParams[TractUnit::kParamCount] = {
     {"HISS", "%", nullptr, nullptr, 0.0f, 1.0f, 0.3f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"MIX", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"SLIDE", "ms", nullptr, nullptr, 0.0f, 2000.0f, 0.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
+    {"ACCENT", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"TRACT", o3sdk::dsp::UnitKind::Effect, kParams, TractUnit::kParamCount, nullptr, 0};
+
+float clamp1(float x) noexcept { return x < -1.0f ? -1.0f : (x > 1.0f ? 1.0f : x); }
 
 float abs_f(float x) noexcept { return x < 0.0f ? -x : x; }
 
@@ -51,6 +54,8 @@ int round_index(float v, int hi) noexcept {
 }  // namespace
 
 TractUnit::TractUnit() noexcept : proc_(o3sdk::extras::tract::Processor::Quality::Full) {}
+
+float TractUnit::bent_jaw() const noexcept { return clamp1(values_[Jaw] + values_[Accent]); }
 
 const o3sdk::dsp::UnitInfo& TractUnit::info() const noexcept { return kInfo; }
 
@@ -83,7 +88,8 @@ void TractUnit::set(std::uint16_t id, float v) noexcept {
     case Tongue:
     case Jaw:
     case Lips:
-      proc_.set_bend(values_[Tongue], values_[Jaw], values_[Lips]);
+    case Accent:  // the jaw opens by ACCENT more, within the Processor's own range
+      proc_.set_bend(values_[Tongue], bent_jaw(), values_[Lips]);
       break;
     case Close: {
       const int c = round_index(v, 3);

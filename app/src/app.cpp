@@ -550,7 +550,7 @@ class MyApp final : public app::App {
     }
     ov::PatCommand c;
     if (!ov::parse_pat(args.argv + 1, args.argc - 1u, c)) {
-      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car follow|synth|noise|s1..s4|lvl v|slc n|mou 0..12 (+128 gld)]]").nl();
+      out.text("usage: pat [A-H [len n|<step> note n|chord root kind voic|car follow|synth|noise|s1..s4|lvl v|slc n|mou 0..255 (the mouth byte: 1..9 vowel, 10..12 closure, 13+16w word, 14+16r wob, +128 gld on a vowel)]]").nl();
       return;
     }
     ov::PatternData& pd = g_bank.pattern[c.pattern];

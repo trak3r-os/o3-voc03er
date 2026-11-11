@@ -24,6 +24,9 @@
   for a moment). The chord page and the latch of a chord on SAMPLE are gone (a chord is held with the hand, as on PATTERN's
   palette), and SAMPLE no longer handles DELETE. SAMPLE EDIT's lower pads play the same rows.
 
+- The MOUTH line's slide arrives by the end of the step (V3b): a GLD vowel writes SLIDE as the move's length / 3 (the voice's glide is one pole), and Stop
+  writes SLIDE 0 and ACCENT 0 even while a pad of PERFORM's MOUTH strip is held; only CLOSE stays the pad's.
+
 ### Added
 
 - TRACT, a fifth mode (V1, console only): the vocoder runs the carrier alone (BANDS, TALK and TUNE idle) and the carrier bus, after the
@@ -55,6 +58,17 @@
   defaults; out of range refuses the file; CLOSE, MIX and SLIDE are not saved); they carry the chunk version 0x0100, the file, PTNS and STAT keep
   their versions, and an older build skips both. F4 NEW resets them. Unit check owed: the sequenced phrase by ear, no click at a slid step, the
   closures and GLD, a sequenced mode change with 8 notes and 4 loops, a save and an open of a project with a mouth line on the card.
+- Words, WOB, ACCENT and FILL on the MOUTH line (V3b): the mouth byte gains WORD (13, bits 4 to 6 pick WOW, YEAH, YOI, WAH, OW, BA, DA or GA) and WOB
+  (14, bits 4 to 6 pick the rate 1/4, 1/8, 1/16, 1/32, 1/8T or 1/16T); 15 stays refused, GLD stays on vowels. A word is a short gesture of the
+  mouth (a few points on the tick grid, with closures for BA, DA and GA); WOB moves the mouth between the neighbouring vowels, synced to the
+  transport, and the rate's note length is one half-cycle. The tract unit gains ACCENT (id 11, 0 to 1, default 0, 0 bit-exact): the jaw opens by
+  that much more; the hook writes 0.5 * (level - 100) / 27 on a step that has a note and a level above 100, only when it changes, and Stop writes 0.
+  PATTERN's MOUTH lane: F6 SET flips the strip between VOWELS and WORDS (WORDS: row 0 the eight words, row 1 the six WOB rates; a WORD pad is
+  heard once from the main loop, a WOB pad sounds nothing and the strip says WOB PLAYS WITH THE LINE) and F7 FILL writes a seeded random walk of
+  vowels over LENGTH (it asks first, F1 confirms, unless the lane is empty or is the last fill's own output; F7 again rolls another). CLEAR LANE
+  on this lane is SHIFT + F6, as on the others. Console: `pat <A-H> <step> mou <0-255>` takes the raw byte (valid bytes only). The file always
+  writes MOUT 0x0101 (a 0x0100 file loads as before); a V3 build refuses a 0x0101 file that holds a WORD or a WOB. Unit check owed: the words by
+  ear, WOB at each rate, no click at an accented step, CPU while the shape moves (WOB 1/32, 8 notes, 4 loops), FILL by hand.
 - The project keeps more (P3, Q8): STAT 1.1 adds VOICING, the BEND ROW and its range, FOLLOW, the preset (by name, so a reordered
   table does not move it), and the pads layout (rows A, B, C and the two last-used chord pads); SLOT 1.1 adds TRIG and CHOKE per slot.
   A v0.2.0 project loads with SMOOTH, bend row off, range 2, FOLLOW off, no preset, ONE SHOT and CHOKE ON, and its KEYS or chord kind

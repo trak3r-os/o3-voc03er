@@ -224,6 +224,13 @@ TEST_CASE("parse_pat reads a pattern letter, a step and one lane") {
   CHECK(c.value == 129u);
   REQUIRE(parse({"A", "1", "mou", "137"}));  // U with GLD
   CHECK(c.value == 137u);
+  REQUIRE(parse({"A", "1", "mou", "13"}));  // WORD 0 (WOW)
+  CHECK(c.value == 13u);
+  REQUIRE(parse({"A", "1", "mou", "125"}));  // WORD 7 (GA): 13 + 7 * 16
+  CHECK(c.value == 125u);
+  REQUIRE(parse({"A", "1", "mou", "14"}));  // WOB rate 0 (1/4)
+  REQUIRE(parse({"A", "1", "mou", "94"}));  // WOB rate 5 (1/16T): 14 + 5 * 16
+  CHECK(c.value == 94u);
 }
 
 TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and leaves the command alone") {
@@ -247,12 +254,15 @@ TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and lea
   CHECK(bad({"A", "1", "note", "0"}));  // a rest is spelled out
   CHECK(bad({"A", "1", "note"}));
   CHECK(bad({"A", "1", "note", "60", "x"}));
-  CHECK(bad({"A", "1", "mou", "13"}));
-  CHECK(bad({"A", "1", "mou", "127"}));
+  CHECK(bad({"A", "1", "mou", "15"}));   // 15 is refused
+  CHECK(bad({"A", "1", "mou", "127"}));  // WORD with bits 4..6 = 7 and the value 15
+  CHECK(bad({"A", "1", "mou", "110"}));  // WOB rate 6 (14 + 6 * 16)
+  CHECK(bad({"A", "1", "mou", "142"}));  // GLD on a WOB
+  CHECK(bad({"A", "1", "mou", "141"}));  // GLD on a WORD
+  CHECK(bad({"A", "1", "mou", "17"}));   // bits 4..6 set on a vowel
   CHECK(bad({"A", "1", "mou", "128"}));  // GLD on FOLLOW
   CHECK(bad({"A", "1", "mou", "138"}));  // GLD on a closure
-  CHECK(bad({"A", "1", "mou", "140"}));
-  CHECK(bad({"A", "1", "mou", "141"}));
+  CHECK(bad({"A", "1", "mou", "256"}));
   CHECK(bad({"A", "1", "mou", "-1"}));
   CHECK(bad({"A", "1", "mou"}));
   CHECK(bad({"A", "17", "mou", "1"}));

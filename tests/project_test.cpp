@@ -42,9 +42,11 @@ Project full() {
       s.level = static_cast<std::uint8_t>(1 + i);
       s.slice = static_cast<std::uint8_t>(i % (kSliceMax + 1u));
       CHECK(set_step(pd, i, s));
-      // A mouth line on every pattern: FOLLOW, the nine vowels with and without GLD, the three closures.
-      static const std::uint8_t kLine[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 128 + 1, 128 + 5, 128 + 9};
-      CHECK(set_mouth(pd, i, kLine[(i + b) % 16]));
+      // A mouth line on every pattern: FOLLOW, the nine vowels with and without GLD, the three closures, the 8 words, the 6 WOB rates (V3b); the 8 lines of
+      // 16 together walk the 30 values.
+      static const std::uint8_t kLine[30] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,   128 + 1, 128 + 5, 128 + 9, 0x0D, 0x1D, 0x2D,
+                                             0x3D, 0x4D, 0x5D, 0x6D, 0x7D, 0x0E, 0x1E, 0x2E, 0x3E, 0x4E, 0x5E};
+      CHECK(set_mouth(pd, i, kLine[(i + 16 * b) % 30]));
     }
   }
   with_trct(p);
@@ -110,6 +112,8 @@ Project small() {
   CHECK(set_step(p.bank.pattern[1], 3, s));
   CHECK(set_mouth(p.bank.pattern[1], 3, 128 + 3));
   CHECK(set_mouth(p.bank.pattern[6], 15, 11));
+  CHECK(set_mouth(p.bank.pattern[2], 0, mouth_word_byte(5)));
+  CHECK(set_mouth(p.bank.pattern[2], 1, mouth_wob_byte(4)));
   with_trct(p);
   p.chain.count = 1;
   p.chain.entry[0] = {1, 2};
@@ -530,7 +534,12 @@ TEST_CASE("project: values out of range are refused on both sides") {
   refused([](Project& p) { p.slot[0].gate = 2; });
   refused([](Project& p) { p.slot[0].choke_off = 2; });
   refused([](Project& p) { p.engine_set |= std::uint64_t{1} << Vocoder::Load; });
-  refused([](Project& p) { p.bank.pattern[0].mouth[0] = 13; });
+  refused([](Project& p) { p.bank.pattern[0].mouth[0] = 15; });
+  refused([](Project& p) { p.bank.pattern[0].mouth[0] = 0x6E; });   // WOB rate 6
+  refused([](Project& p) { p.bank.pattern[0].mouth[0] = 0x7E; });   // WOB rate 7
+  refused([](Project& p) { p.bank.pattern[0].mouth[1] = 0x8D; });   // GLD on a word
+  refused([](Project& p) { p.bank.pattern[0].mouth[1] = 0x8E; });   // GLD on a WOB
+  refused([](Project& p) { p.bank.pattern[0].mouth[2] = 0x1B; });   // a closure with an argument
   refused([](Project& p) { p.bank.pattern[7].mouth[15] = 0x8A; });  // GLD on a closure
   refused([](Project& p) { p.bank.pattern[3].mouth[2] = 0x80; });   // GLD on FOLLOW
   refused([](Project& p) { p.bank.pattern[3].mouth[2] = 0x11; });   // bit 4
@@ -1006,10 +1015,12 @@ TEST_CASE("project: V3 the MOUT chunk is written after PTNS, only when a step ha
       CHECK(ptns);
       CHECK(c.size == 2u + 1u + kBankPatterns * kPatternSteps);
       CHECK(c.data[0] == 0x01);
-      CHECK(c.data[1] == 0x00);
+      CHECK(c.data[1] == 0x01);  // MOUT 1.1 since V3b, whatever the bytes
       CHECK(c.data[2] == kBankPatterns);
       CHECK(c.data[3 + 1 * kPatternSteps + 3] == 128 + 3);
       CHECK(c.data[3 + 6 * kPatternSteps + 15] == 11);
+      CHECK(c.data[3 + 2 * kPatternSteps + 0] == 0x5D);  // WORD 5
+      CHECK(c.data[3 + 2 * kPatternSteps + 1] == 0x4E);  // WOB rate 4
       CHECK(c.data[3] == 0);
     } else if (chunk::id_is(c, "TRCT")) {
       trct = true;
@@ -1071,14 +1082,24 @@ TEST_CASE("project: V3 a MOUT with the wrong count, a bad byte, a wrong major or
   b = good;
   b.resize(2);
   refused(b);
-  for (const std::uint8_t bad : {std::uint8_t{13}, std::uint8_t{15}, std::uint8_t{0x8A}, std::uint8_t{0x80}, std::uint8_t{0x21}, std::uint8_t{0xFF}}) {
+  for (const std::uint8_t bad : {std::uint8_t{15}, std::uint8_t{0x6E}, std::uint8_t{0x7E}, std::uint8_t{0x8D}, std::uint8_t{0x8E}, std::uint8_t{0x1B}, std::uint8_t{0x8A},
+                                 std::uint8_t{0x80}, std::uint8_t{0x21}, std::uint8_t{0xFF}}) {
     b = good;
     b[3 + 5 * kPatternSteps + 7] = bad;
     refused(b);
   }
+  // a V3 build's MOUT (minor 0) loads
+  b = good;
+  b[1] = 0x00;
+  Edit v3;
+  v3.replace = "MOUT";
+  v3.with = b;
+  Project old = {};
+  REQUIRE(read(rebuild(f, v3), old));
+  CHECK(same(old, p));
   // and a newer minor with more bytes after the known ones is read as far as it is known
   b = good;
-  b[1] = 0x01;
+  b[1] = 0x02;
   b.push_back(0xAA);
   b.push_back(0xBB);
   Edit e;

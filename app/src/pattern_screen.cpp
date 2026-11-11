@@ -126,6 +126,9 @@ O3SDK_BIG PatternHelp g_pd = {};
 O3SDK_BIG pt::Clip g_clip = {};
 constexpr std::uint8_t kArmLane = 1;     // CLEAR LANE (SHIFT + F6)
 constexpr std::uint8_t kArmPattern = 2;  // SHIFT + DELETE
+constexpr std::uint8_t kArmFill = 3;     // F7 FILL on the MOUTH lane over a lane that holds something of the hands'
+constexpr std::uint8_t kNoWord = 0xFF;
+constexpr const char* kPageNames[2] = {"VOWELS", "WORDS"};
 
 constexpr int kGridX = 124;
 constexpr int kCellW = 40;
@@ -150,6 +153,9 @@ void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScr
   follow_ = false;
   row_ = 0;
   flash_until_ = 0;
+  page_ = 0;
+  fill_count_ = 0;  // a fresh run: the first fill is fill #0 again
+  fill_has_ = 0;
 }
 
 const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
@@ -157,6 +163,7 @@ const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { retu
 void PatternScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
   armed_ = 0;
+  wob_said_ = false;
   steps_held_ = 0;
   ctx.redraw();
 }
@@ -175,6 +182,7 @@ void PatternScreen::leave(app::Context& ctx) noexcept {
     perform_->mouth_sound_release(ctx);  // a closure still held ends with the screen
   }
   mouth_aud_ = 0;
+  word_end(ctx);  // a word still sounding ends with the screen
   steps_held_ = 0;
 }
 
@@ -291,11 +299,18 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
     }
   }
   if (lane() == pt::Lane::Mouth) {  // a dark pad (row 1 past the nine vowels) writes nothing and sounds nothing
-    const std::uint8_t m = pt::mouth_of_pad(pad);
+    const std::uint8_t m = pt::mouth_of_pad(pad, mouth_page());
     if (m == 0u) {
       return;
     }
-    if (perform_ != nullptr && perform_->mouth_active(ctx.engine())) {  // it sounds while held: a vowel sets VOWEL, a closure holds CLOSE
+    if (mouth_is_wob(m)) {  // a WOB wobbles the line between its neighbours: nothing to hear from a pad
+      if (!wob_said_) {
+        wob_said_ = true;
+        say(ctx, pt::kWobPlays);
+      }
+    } else if (mouth_is_word(m)) {  // a word plays once, from update()
+      word_start(ctx, mouth_arg(m));
+    } else if (perform_ != nullptr && perform_->mouth_active(ctx.engine())) {  // it sounds while held: a vowel sets VOWEL, a closure holds CLOSE
       perform_->mouth_sound(ctx, m);
       aud_ |= std::uint32_t{1} << pad;
       if (mouth_is_closure(m)) {
@@ -335,7 +350,7 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
         break;
       }
       case pt::Lane::Mouth:
-        ok |= pt::mouth_write(p, i, pad);
+        ok |= pt::mouth_write(p, i, pad, mouth_page());
         break;
     }
   }
@@ -453,12 +468,16 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
         say(ctx, "PATTERN EMPTIED");
         return;
       }
+      if (what == kArmFill) {
+        fill_now(ctx);
+        return;
+      }
       for (unsigned i = 0; i < kPatternSteps; ++i) {
         (void)pt::rest_lane(p, i, lane());
       }
       say(ctx, "LANE CLEARED");
     } else {
-      say(ctx, "NOT CLEARED");
+      say(ctx, what == kArmFill ? "NOT FILLED" : "NOT CLEARED");
     }
     return;
   }
@@ -475,6 +494,15 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     }
     if (k == 7u) {  // SAVE
       say(ctx, save_ != nullptr && save_(save_user_, ctx) ? "SAVING" : "CARD BUSY");
+      return;
+    }
+    if ((k == kKeyRow || k == kKeyPlays) && lane() == pt::Lane::Mouth) {  // SET and FILL: actions of the key, no focus for the encoder
+      if (k == kKeyRow) {
+        page_ ^= 1u;
+        ctx.redraw();
+      } else {
+        fill_press(ctx);
+      }
       return;
     }
     if ((k == kKeyRow || k == kKeyPlays) && lane() != pt::Lane::Note) {
@@ -561,7 +589,76 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
 }
 
+// ---- the MOUTH lane's F6 / F7 (V3b) ----------------------------------------------------------------------------------------------------
+
+// F7 FILL. A lane that is empty, or that is the last fill's own output on this pattern, is filled at once (F7 again re-rolls); anything else asks first.
+void PatternScreen::fill_press(app::Context& ctx) noexcept {
+  const PatternData& p = pattern_now();
+  const unsigned pi = shown_ & 7u;
+  const bool own = ((fill_has_ >> pi) & 1u) != 0u && pt::mouth_lane_is(p, fill_out_[pi]);
+  if (!own && !pt::mouth_lane_empty(p)) {
+    armed_ = kArmFill;
+    ctx.redraw();
+    return;
+  }
+  fill_now(ctx);
+}
+
+// The seed is the screen's count of fills plus the pattern's index (pt::fill_seed): the same pattern's next fill differs, and a fresh run of the app
+// starts the count again, so the first fill of a pattern is the same on every boot. Steps 0..LENGTH-1 only; the 16 bytes left are kept as "own output".
+void PatternScreen::fill_now(app::Context& ctx) noexcept {
+  PatternData& p = pattern_now();
+  const unsigned pi = shown_ & 7u;
+  pt::fill_mouth(p, length_of(p), pt::fill_seed(fill_count_++, pi));
+  for (unsigned i = 0; i < kPatternSteps; ++i) {
+    fill_out_[pi][i] = get_mouth(p, i);
+  }
+  fill_has_ = static_cast<std::uint8_t>(fill_has_ | (1u << pi));
+  say(ctx, pt::kFilled);
+}
+
+// The WORD audition: the word's points are played from the main loop against uptime_ms, a point when its tick (of the sixteenth's 240) at the tempo has
+// passed. update() runs once a frame, so a point lands within a frame (about 16 ms) of its time: enough to hear a word, which the sequencer plays to the
+// frame on the audio side. Nothing outside TRACT.
+void PatternScreen::word_start(app::Context& ctx, unsigned word) noexcept {
+  if (perform_ == nullptr || !perform_->mouth_active(ctx.engine()) || word >= kMouthWords) {
+    return;
+  }
+  if (word_ != kNoWord) {
+    word_end(ctx);
+  }
+  word_ = static_cast<std::uint8_t>(word);
+  word_next_ = 0;
+  word_t0_ = ctx.uptime_ms();
+  word_pump(ctx);
+}
+
+void PatternScreen::word_pump(app::Context& ctx) noexcept {
+  if (word_ == kNoWord || perform_ == nullptr) {
+    return;
+  }
+  const std::uint32_t mbpm = ctx.engine().own_tempo();
+  const float step_ms = mbpm != 0u ? 15000000.0f / static_cast<float>(mbpm) : 2000.0f;  // a sixteenth
+  const float elapsed = static_cast<float>(ctx.uptime_ms() - word_t0_);
+  const Word& w = kWords[word_];
+  while (word_next_ < w.count && elapsed * static_cast<float>(dsp::kTicksPerSixteenth) >= static_cast<float>(w.pt[word_next_].tick) * step_ms) {
+    perform_->mouth_word_point(ctx, step_ms, w.pt[word_next_]);
+    ++word_next_;
+  }
+  if (word_next_ >= w.count && elapsed >= step_ms) {  // every word ends inside its sixteenth
+    word_end(ctx);
+  }
+}
+
+void PatternScreen::word_end(app::Context& ctx) noexcept {
+  if (word_ != kNoWord && perform_ != nullptr) {
+    perform_->mouth_word_end(ctx);
+  }
+  word_ = kNoWord;
+}
+
 void PatternScreen::update(app::Context& ctx) noexcept {
+  word_pump(ctx);
   if (follow_ && seq_ != nullptr && ctx.engine().playing()) {
     const unsigned s = seq_->playing_step();
     if (s < kPatternSteps && s < length_of(pattern_now())) {
@@ -606,7 +703,8 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
     } else if (lane() == pt::Lane::Carrier && pad >= pt::kCarrierPads) {
       level = app::kLedOff;
     } else if (lane() == pt::Lane::Mouth) {  // the strip and its GLD row; the dark pads off
-      level = pt::mouth_of_pad(pad) == 0u ? app::kLedOff : (pt::palette_matches(lane(), pad, cur, oct, layout, curm) ? app::kLedMid : app::kLedDim);
+      level = pt::mouth_of_pad(pad, mouth_page()) == 0u ? app::kLedOff
+                                                           : (pt::palette_matches(lane(), pad, cur, oct, layout, curm, mouth_page()) ? app::kLedMid : app::kLedDim);
     } else if (pt::palette_matches(lane(), pad, cur, oct, layout)) {
       level = app::kLedMid;
     }
@@ -629,11 +727,15 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   }
 }
 
-void PatternScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
+void PatternScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     out.label[i] = kKeyNames[i];
   }
-  if (lane() != pt::Lane::Note) {  // ROW and PLAYS are the NOTE lane's
+  if (lane() == pt::Lane::Mouth) {  // F6 SET shows its page, F7 is FILL; both dim outside TRACT, where the lane does not speak
+    out.label[kKeyRow] = kPageNames[page_ & 1u];
+    out.label[kKeyPlays] = "FILL";
+    out.dim = tract_on(ctx) ? std::uint8_t{0} : static_cast<std::uint8_t>((1u << kKeyRow) | (1u << kKeyPlays));
+  } else if (lane() != pt::Lane::Note) {  // ROW and PLAYS are the NOTE lane's
     out.dim = static_cast<std::uint8_t>((1u << kKeyRow) | (1u << kKeyPlays));
   }
 }
@@ -690,8 +792,9 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[3] = "THE BAR'S BPM";
   h.fkey[4] = "THE CURSOR STEP'S VALUE";
   const bool note_lane = lane() == pt::Lane::Note;
-  h.fkey[5] = note_lane ? "PAD ROW A OR B" : "NOTE LANE ONLY";
-  h.fkey[6] = note_lane ? "WHAT THE ROW PLAYS" : "NOTE LANE ONLY";
+  const bool mouth_lane = lane() == pt::Lane::Mouth;
+  h.fkey[5] = note_lane ? "PAD ROW A OR B" : (mouth_lane ? "SET: VOWELS OR WORDS PALETTE" : "NOTE LANE ONLY");
+  h.fkey[6] = note_lane ? "WHAT THE ROW PLAYS" : (mouth_lane ? "FILL: A RANDOM VOWEL LINE (F1 IF IT HOLDS STEPS)" : "NOTE LANE ONLY");
   h.fkey[7] = "SAVES THE PATTERNS";
   h.fkey_shift[5] = kShiftNames[5];
   h.fkey_shift[6] = kShiftNames[6];
@@ -722,7 +825,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
         break;
       case pt::Lane::Mouth: {  // the strip: "A", "AE" .. "U", "LIP", "TIP", "BCK"; row 1 the same with ">" (GLD); two pads dark
         char t[6];
-        pt::mouth_text(t, pt::mouth_of_pad(i));
+        pt::mouth_text(t, pt::mouth_of_pad(i, mouth_page()));
         cat(l, sizeof g_pd.name[i], t);
         break;
       }
@@ -799,6 +902,14 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     keys[kKeyRow].dim = keys[kKeyPlays].dim = !note_lane;  // the NOTE lane's palette; dim elsewhere
     keys[kKeyRow].hot = keys[kKeyRow].hot && note_lane;
     keys[kKeyPlays].hot = keys[kKeyPlays].hot && note_lane;
+    if (lane() == pt::Lane::Mouth) {  // SET (the palette's page) and FILL: actions, no encoder focus
+      keys[kKeyRow].name = "SET";
+      keys[kKeyRow].value[0] = '\0';
+      cat(keys[kKeyRow].value, sizeof keys[kKeyRow].value, kPageNames[page_ & 1u]);
+      keys[kKeyPlays].name = "FILL";
+      keys[kKeyPlays].value[0] = '\0';
+      keys[kKeyRow].dim = keys[kKeyPlays].dim = mouth_dim;
+    }
   }
   if (ctx.panel().shift()) {  // the SHIFT row replaces the plain one (names and values)
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
@@ -884,7 +995,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     }
   }
   if (armed_ != 0u) {
-    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, armed_ == kArmPattern ? pt::kClearPatternPrompt : pt::kClearPrompt[lane_ % pt::kLanes], Color::Accent,
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, armed_ == kArmPattern ? pt::kClearPatternPrompt : (armed_ == kArmFill ? pt::kFillPrompt : pt::kClearPrompt[lane_ % pt::kLanes]), Color::Accent,
            Face::Label);
   } else if (note_ != nullptr) {
     r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, note_, Color::Accent, Face::Label);

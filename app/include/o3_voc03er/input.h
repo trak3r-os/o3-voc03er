@@ -5,6 +5,7 @@
 // starts at, the input peak meter that forgets the previous source after a switch, and the console's `voc` command.
 
 #include <o3_voc03er/modes.h>
+#include <o3_voc03er/stepseq.h>
 
 #include <o3sdk/hal/capture.h>
 
@@ -325,7 +326,7 @@ inline bool parse_loop(const char* num, const char* act, LoopCommand& out, const
 }
 
 // `pat [A-H] [len <n>] | [A-H <step 1-16> note <1-127|rest> | chord <root> <tri|sev|open|pow> [close|open|wide|smooth] | car <follow|synth|noise|s1..s4> |
-// lvl <0-127> | slc <0-24> | mou <0-12, +128 gld>]`: the words after `pat`. Kind and voicing are the numbers of ChordKind and Voicing (chords.h); the root is a MIDI note 1..127.
+// lvl <0-127> | slc <0-24> | mou <0-255: the step's mouth byte, see stepseq.h>]`: the words after `pat`. Kind and voicing are the numbers of ChordKind and Voicing (chords.h); the root is a MIDI note 1..127.
 enum class PatAct : std::uint8_t { Show, Length, Note, Chord, Carrier, Level, Slice, Mouth };
 struct PatCommand {
   unsigned pattern = 0;  // 0..7
@@ -427,7 +428,7 @@ inline bool parse_pat(const char* const* w, unsigned n, PatCommand& out) noexcep
     }
   } else if (std::strcmp(w[2], "mou") == 0 && n == 4u) {
     c.act = PatAct::Mouth;
-    if (!number(w[3], 140u, c.value) || (c.value & 0x7Fu) > 12u || (c.value >= 128u && (c.value & 0x7Fu) > 9u) || (c.value >= 128u && (c.value & 0x7Fu) == 0u)) {
+    if (!number(w[3], 255u, c.value) || !mouth_valid(c.value)) {  // the raw byte: value, WORD or WOB argument, GLD (stepseq.h)
       return false;
     }
   } else {

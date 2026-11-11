@@ -20,9 +20,9 @@
 // The MOUTH lane (TRACT V3) is a byte a step beside the step word, in PatternData::mouth (16 bytes a pattern, so a copy, a clear and a file carry it
 // with the pattern; the step word is untouched):
 //   bits 0..3 value  0 FOLLOW (the step writes nothing), 1..9 the vowels A, A-E, E, E-I, I, I-O, O, O-U, U (the tract's VOWEL is (value - 1) / 8),
-//                    10 LIPS, 11 TIP, 12 BACK (closures); 13..15 are refused on load (kept free for V3b)
-//   bits 4..6        zero
-//   bit 7 GLD        a vowel slides to the step's vowel over the step's length instead of GLIDE's time; refused on a closure and on FOLLOW
+//                    10 LIPS, 11 TIP, 12 BACK (closures), 13 WORD, 14 WOB (V3b); 15 is refused on load
+//   bits 4..6        zero, except WORD (the word 0..7: WOW YEAH YOI WAH OW BA DA GA) and WOB (the rate 0..5: 1/4 1/8 1/16 1/32 1/8T 1/16T)
+//   bit 7 GLD        a vowel slides to the step's vowel over the step's length instead of GLIDE's time; refused on every other value
 // Read with a relaxed atomic byte load, written by the main loop (single writer), as the step words are.
 //
 // Threads: the main loop edits through the functions below (relaxed atomic word stores, single writer); the render context reads in
@@ -114,6 +114,10 @@ inline Step get_step(const PatternData& p, unsigned i) noexcept {
 inline constexpr unsigned kMouthVowels = 9;       // values 1..9: A, A-E, E, E-I, I, I-O, O, O-U, U
 inline constexpr unsigned kMouthLips = 10;        // values 10..12: the closures
 inline constexpr unsigned kMouthBack = 12;
+inline constexpr unsigned kMouthWord = 13;        // V3b: bits 4..6 the word
+inline constexpr unsigned kMouthWob = 14;         // V3b: bits 4..6 the rate
+inline constexpr unsigned kMouthWords = 8;
+inline constexpr unsigned kMouthWobRates = 6;
 inline constexpr std::uint8_t kMouthGld = 0x80;
 inline constexpr std::uint8_t kMouthValueMask = 0x0F;
 constexpr unsigned mouth_value(std::uint8_t m) noexcept { return m & kMouthValueMask; }
@@ -124,14 +128,94 @@ constexpr bool mouth_is_closure(std::uint8_t m) noexcept { return mouth_value(m)
 constexpr unsigned mouth_close(std::uint8_t m) noexcept { return mouth_value(m) - kMouthLips + 1u; }
 // The tract's VOWEL (0..1) of a vowel byte: value 1 is A at 0, value 9 is U at 1.
 constexpr float mouth_vowel(std::uint8_t m) noexcept { return static_cast<float>(mouth_value(m) - 1u) * (1.0f / 8.0f); }
-// A byte the lane holds: bits 4..6 zero, a value 0..12, GLD on a vowel only.
+constexpr bool mouth_is_word(std::uint8_t m) noexcept { return mouth_value(m) == kMouthWord; }
+constexpr bool mouth_is_wob(std::uint8_t m) noexcept { return mouth_value(m) == kMouthWob; }
+// The word or the rate of a WORD or WOB byte (bits 4..6).
+constexpr unsigned mouth_arg(std::uint8_t m) noexcept { return (m >> 4) & 7u; }
+constexpr std::uint8_t mouth_word_byte(unsigned word) noexcept { return static_cast<std::uint8_t>(kMouthWord | ((word & 7u) << 4)); }
+constexpr std::uint8_t mouth_wob_byte(unsigned rate) noexcept { return static_cast<std::uint8_t>(kMouthWob | ((rate & 7u) << 4)); }
+// A byte the lane holds: a value 0..14; bits 4..6 zero but for WORD (0..7) and WOB (0..5); GLD on a vowel only.
 constexpr bool mouth_valid(unsigned m) noexcept {
-  if (m > 0xFFu || (m & 0x70u) != 0u) {
+  if (m > 0xFFu) {
     return false;
   }
   const std::uint8_t b = static_cast<std::uint8_t>(m);
-  return mouth_value(b) <= kMouthBack && (!mouth_gld(b) || mouth_is_vowel(b));
+  if (mouth_value(b) > kMouthWob || (mouth_gld(b) && !mouth_is_vowel(b))) {
+    return false;
+  }
+  return mouth_arg(b) == 0u || mouth_is_word(b) || (mouth_is_wob(b) && mouth_arg(b) < kMouthWobRates);
 }
+
+// --- the words, WOB and ACCENT (V3b): pure tables and functions the hook and the screen share ---
+// A word is a gesture inside one step (a sixteenth, 240 ticks): up to 4 points, each at a tick after the step's start. A point with a vowel writes SLIDE, then
+// VOWEL; one with a closure (close >= 0) writes CLOSE (0 is the release). `over` is the slide's length in percent of the step: 0 is a jump (SLIDE kSlideMinMs).
+// The unit's ear decides these numbers: retune here only.
+struct WordPoint {
+  std::uint16_t tick;   // 0..239 after the step's start
+  std::uint8_t over;    // percent of the step the move to `vowel` takes; 0: a jump
+  std::uint8_t vowel;   // a vowel value 1..9 (A = 1, E = 3, I = 5, O = 7, U = 9), 0: no vowel event
+  std::int8_t close;    // 0..3: a CLOSE event, -1: none
+};
+struct Word {
+  std::uint8_t count;
+  WordPoint pt[4];
+};
+inline constexpr Word kWords[kMouthWords] = {
+    {3, {{0, 0, 9, -1}, {24, 40, 1, -1}, {144, 40, 9, -1}, {}}},    // WOW: U, A at 10 % over 40 %, U at 60 % over 40 %
+    {3, {{0, 0, 5, -1}, {36, 30, 3, -1}, {120, 40, 1, -1}, {}}},    // YEAH: I, E at 15 % over 30 %, A at 50 % over 40 %
+    {3, {{0, 0, 5, -1}, {36, 35, 7, -1}, {132, 40, 5, -1}, {}}},    // YOI: I, O at 15 % over 35 %, I at 55 % over 40 %
+    {2, {{0, 0, 9, -1}, {24, 50, 1, -1}, {}, {}}},                  // WAH: U, A at 10 % over 50 %
+    {2, {{0, 0, 1, -1}, {72, 60, 9, -1}, {}, {}}},                  // OW: A, U at 30 % over 60 %
+    {2, {{0, 0, 1, 1}, {36, 0, 0, 0}, {}, {}}},                     // BA: LIPS closed over A, released at 15 %
+    {2, {{0, 0, 1, 2}, {36, 0, 0, 0}, {}, {}}},                     // DA: TIP
+    {2, {{0, 0, 1, 3}, {36, 0, 0, 0}, {}, {}}},                     // GA: BACK
+};
+// A WOB's half period in ticks, per rate: the note length of 1/4, 1/8, 1/16, 1/32, 1/8T, 1/16T (kPpqn = 960 divides for the triplets: 320 and 160).
+inline constexpr std::uint16_t kWobHalfTicks[kMouthWobRates] = {960, 480, 240, 120, 320, 160};
+
+// The two places a WOB wobbles between: the vowels (values 1..9) before and after the run of WOB steps that holds step `i`, in the line's first `len` steps
+// (both scans wrap within it). Before is the last plain vowel step (GLD or not) before the run, after the first one past it. With one vowel step in the
+// line the other place is U (A if it is U); with none, A and U.
+struct WobPlaces {
+  std::uint8_t before;
+  std::uint8_t after;
+};
+constexpr WobPlaces wob_places(const std::uint8_t* mouth, unsigned len, unsigned i) noexcept {
+  if (len == 0u || len > kPatternSteps) {
+    return {1, 9};
+  }
+  unsigned first = i % len;  // the run's first step
+  unsigned last = first;     // and its last
+  unsigned n = 1;
+  while (n < len && mouth_is_wob(mouth[(first + len - 1u) % len])) {
+    first = (first + len - 1u) % len;
+    ++n;
+  }
+  while (n < len && mouth_is_wob(mouth[(last + 1u) % len])) {
+    last = (last + 1u) % len;
+    ++n;
+  }
+  int b = -1;
+  int a = -1;
+  for (unsigned k = 1; k < len && b < 0; ++k) {
+    const unsigned at = (first + len - k) % len;
+    b = mouth_is_vowel(mouth[at]) ? static_cast<int>(at) : -1;
+  }
+  for (unsigned k = 1; k < len && a < 0; ++k) {
+    const unsigned at = (last + k) % len;
+    a = mouth_is_vowel(mouth[at]) ? static_cast<int>(at) : -1;
+  }
+  if (b < 0 && a < 0) {
+    return {1, 9};
+  }
+  if (b >= 0 && a >= 0 && b != a) {
+    return {static_cast<std::uint8_t>(mouth_value(mouth[b])), static_cast<std::uint8_t>(mouth_value(mouth[a]))};
+  }
+  const std::uint8_t v = static_cast<std::uint8_t>(mouth_value(mouth[b >= 0 ? b : a]));  // the only vowel step
+  return {v, static_cast<std::uint8_t>(v == kMouthVowels ? 1u : kMouthVowels)};
+}
+// ACCENT (the tract unit's id 11) for a note's velocity: LEVEL above 100 opens the jaw, 127 by half.
+constexpr float accent_of(unsigned velocity) noexcept { return velocity > kLevelDefault ? 0.5f * static_cast<float>(velocity - kLevelDefault) * (1.0f / 27.0f) : 0.0f; }
 // SLIDE for a move that must arrive within `ms`: the tube's glide is one pole (time constant = the glide), so a third of the time reaches 95 %. The
 // tract's Processor clamps its glide to 5..500 ms, and so does this.
 inline constexpr float kSlideMinMs = 5.0f;
@@ -305,8 +389,9 @@ inline unsigned step_notes(const Step& s, unsigned key, unsigned scale, std::uin
 // --- the file ---
 // BANK: u16 version (0x0100), u8 pattern count (8), then per pattern u8 length (1..16) and 16 u32 steps. A BANK with a wrong count, a length or a
 // step field out of range refuses the whole file; no BANK is a v1 file, which loads into pattern A only.
-// MOUT (V3, written only when a step has a mouth byte): u16 version (0x0100), u8 pattern count (8), then per pattern its 16 mouth bytes. A MOUT with a
-// wrong count or a byte mouth_valid refuses the file; no MOUT means every step FOLLOWs.
+// MOUT (V3, written only when a step has a mouth byte): u16 version, u8 pattern count (8), then per pattern its 16 mouth bytes. A MOUT with a
+// wrong count or a byte mouth_valid refuses the file; no MOUT means every step FOLLOWs. V3b writes version 0x0101 (WORD and WOB values); a 0x0100 file
+// (a V3 build's) loads, since the reader takes any minor of major 1; a V3 build refuses a 0x0101 file that holds a WORD or a WOB (its mouth_valid says no).
 inline std::size_t write_bank(const Bank& b, std::uint8_t* out, std::size_t cap) noexcept {
   namespace chunk = o3sdk::formats::chunk;
   const Pattern a = to_legacy(b.pattern[0]);  // the old reader's view of pattern A
@@ -338,7 +423,7 @@ inline std::size_t write_bank(const Bank& b, std::uint8_t* out, std::size_t cap)
     any_mouth = any_mouth || mouths_used(p) != 0u;
   }
   if (any_mouth) {
-    if (!w.begin("MOUT") || !w.u16(0x0100) || !w.u8(kBankPatterns)) {
+    if (!w.begin("MOUT") || !w.u16(0x0101) || !w.u8(kBankPatterns)) {
       return 0;
     }
     for (const PatternData& p : b.pattern) {
@@ -446,14 +531,27 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
 //            CHOKE are the pads' and do not apply. A slice above the count, or no source, emits nothing. At a Stop one Trig 0 releases the
 //            reader that fired, only if a slice fired since the last Stop.
 //   LEVEL    the notes' velocity: the last note sets the level of the SYNTH and NOISE carriers (one gain, 100 and up are full). A slice has no level.
-//   MOUTH    (V3, once set_tract() names the tract unit; events go out in every mode, the unit is a bypass outside TRACT) at most 3 Param events
-//            a step, all on the step's frame or on its gate's end: a vowel writes VOWEL at the step's frame; with GLD it writes SLIDE (the step's
-//            length / 3: the tube's glide is one pole, so a third of the time reaches 95 %) first, and the next plain vowel writes SLIDE 0 first; a closure writes CLOSE 1..3 at the step's frame and CLOSE 0 at the
-//            gate's end (a step with no note: at the step's end, the next edge, unless the next step is a closure too); FOLLOW writes nothing. The
-//            hook never writes GLIDE. A Stop (and so a pattern change that lands on it) writes CLOSE 0 and SLIDE 0 once, if the line wrote since the
-//            last one. While set_mouth_hold(true) (a PERFORM strip pad, vowel or closure, is held: the pad owns the tract) it emits no mouth event, and
-//            at a Stop CLOSE stays the pad's but SLIDE 0 still goes out, or the GLIDE knob would stay dead.
-// An event budget for a block (the vocoder's; the mouth's events go to the tract unit, whose own 32 are far from used): a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate, one CarSrc and the 3 region events:
+//   MOUTH    (V3, once set_tract() names the tract unit; events go out in every mode, the unit is a bypass outside TRACT): a vowel writes VOWEL at the
+//            step's frame; with GLD it writes SLIDE (the step's length / 3: the tube's glide is one pole, so a third of the time reaches 95 %, and the
+//            same rule is every SLIDE below) first, and the next plain vowel writes SLIDE 0 first; a closure writes CLOSE 1..3 at the step's frame and
+//            CLOSE 0 at the gate's end (a step with no note: at the step's end, the next edge, unless the next step is a closure too); FOLLOW writes
+//            nothing. The hook never writes GLIDE or JAW.
+//            A WORD (V3b) plays its table (kWords) inside its step: each point on its own frame (a for_each_step grid with the point's tick as offset,
+//            so the result does not depend on the block size) writes SLIDE then VOWEL, or CLOSE; a word ends where its last point leaves the mouth.
+//            A WOB (V3b) wobbles VOWEL between wob_places(): at each half-period edge of its rate (the transport's tick mod the half period, so
+//            consecutive WOB steps are one wobble and it lands the same against the bar every lap) SLIDE = half period / 3, then VOWEL = the
+//            after place on even halves and the before place on odd ones; a run's first step, if it is not on an edge, writes the current half's target
+//            with SLIDE = the time left to the edge / 3. Two WOB steps with a rate between them each use their own rate.
+//            A Stop (and so a pattern change that lands on it) writes CLOSE 0, SLIDE 0 and ACCENT 0 once, if the line wrote them since the last one.
+//            While set_mouth_hold(true) (a PERFORM strip pad, vowel or closure, is held: the pad owns the tract) it emits no mouth event (words and
+//            WOBs included) and at a Stop CLOSE stays the pad's, but SLIDE 0 still goes out, or the GLIDE knob would stay dead.
+//   ACCENT   (V3b) not a mouth event, the hold does not suppress it: a step with a note writes ACCENT = accent_of(velocity) (LEVEL above 100 opens
+//            the jaw, 127 by half) when it differs from the last value written; a Stop writes 0.
+// MOUTH event budget: at most 4 events on one frame (ACCENT, CLOSE 0, SLIDE, VOWEL; a BA, DA or GA after a closure skips CLOSE 0, its own CLOSE
+// replaces it) and at most 10 for the tract in one step (the longest table, three slid points, is 6, with ACCENT and CLOSE 0: 8). The tract's list is
+// kMaxEventsPerUnit = 32 a block (engine.h) and its block is 64 frames (1.3 ms, 6 ticks at 300 BPM): a block holds one step edge and one point or
+// edge of a table (two points are 24 ticks apart at least), 8 events at the most, so the list never fills.
+// An event budget for a block (the vocoder's; the mouth's events go to the tract unit, a list of its own): a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate, one CarSrc and the 3 region events:
 // 14 of kMaxEventsPerUnit (32, of which the notes injected by the main loop take at most kMaxInjectPerUnit = 16, so 16 are left); a block holds
 // at most one step edge.
 // PATTERN CHANGE: request_pattern() only stores the wish; the hook takes it when the playing pattern reaches its end (and at a Play). A LENGTH
@@ -566,7 +664,9 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       pos_ = 0;
       take_next();
       note_lap();
+      slot_[0] = slot_[1] = MouthSlot{};
     }
+    bool stepped = false;
     int on_frame = -1;
     int close_frame = -1;  // the frame a closure began at in this block (its gate's end is after it)
     dsp::for_each_step(t, dsp::kTicksPerSixteenth, 0, 0, [&](std::uint32_t frame, std::uint64_t k) {
@@ -623,10 +723,13 @@ class StepSeq final : public o3sdk::dsp::Clocked {
         sounding_ = true;
         on_frame = static_cast<int>(frame);
       }
-      if (mouth_step(ctx, t, static_cast<std::uint16_t>(frame), get_mouth(p, i), count != 0u)) {
+      stepped = true;
+      accent_step(ctx, static_cast<std::uint16_t>(frame), step_velocity(s), count != 0u);
+      if (mouth_step(ctx, t, static_cast<std::uint16_t>(frame), k, p, i, len, count != 0u)) {
         close_frame = static_cast<int>(frame);
       }
     });
+    mouth_points(ctx, t, stepped);
     // The gate: 180 ticks after each step edge.
     dsp::for_each_step(t, dsp::kTicksPerSixteenth, kGateTicks, 0, [&](std::uint32_t frame, std::uint64_t) {
       if (sounding_ && (on_frame < 0 || static_cast<int>(frame) >= on_frame)) {
@@ -650,53 +753,169 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     }
   }
   // The tract unit's parameter ids the hook writes (TractUnit's enum, restated: the app layer's header does not include the unit's).
-  enum class TractParam : std::uint16_t { Vowel = 0, Close = 4, Slide = 10 };
-  // One Param event for the tract unit; false (nothing emitted) with no unit or while a strip pad is held.
-  bool mouth_emit(o3sdk::dsp::BlockContext& ctx, TractParam id, float v, std::uint16_t frame) noexcept {
-    if (tract_ == o3sdk::dsp::kNoUnit || mouth_hold_.load(std::memory_order_relaxed)) {
+  enum class TractParam : std::uint16_t { Vowel = 0, Close = 4, Slide = 10, Accent = 11 };
+  // What the last two steps started that outlives their first frame: a word's later points and a WOB's edges fall in later blocks. Render context only.
+  struct MouthSlot {
+    enum Kind : std::uint8_t { None, Word, Wob };
+    std::uint64_t k = 0;  // the step's index on the transport's grid (it starts at tick k * 240)
+    Kind kind = None;
+    std::uint8_t arg = 0;  // the word, or the rate
+    std::uint8_t before = 1;
+    std::uint8_t after = 9;
+  };
+  // One Param event for the tract unit, whatever the hold; false with no unit.
+  bool tract_emit(o3sdk::dsp::BlockContext& ctx, TractParam id, float v, std::uint16_t frame) noexcept {
+    if (tract_ == o3sdk::dsp::kNoUnit) {
       return false;
     }
-    mouth_dirty_ = true;
     (void)ctx.emit(tract_, o3sdk::dsp::param_change(static_cast<std::uint16_t>(id), v, frame));
     return true;
   }
-  // The MOUTH lane's events for the step starting at `frame` (see the header comment). Returns true when it began a closure.
-  bool mouth_step(o3sdk::dsp::BlockContext& ctx, const o3sdk::dsp::Transport& t, std::uint16_t frame, std::uint8_t m, bool has_note) noexcept {
+  // One mouth event; false (nothing emitted) with no unit or while a strip pad is held.
+  bool mouth_emit(o3sdk::dsp::BlockContext& ctx, TractParam id, float v, std::uint16_t frame) noexcept {
+    if (mouth_hold_.load(std::memory_order_relaxed) || !tract_emit(ctx, id, v, frame)) {
+      return false;
+    }
+    mouth_dirty_ = true;
+    return true;
+  }
+  static float step_ms(const o3sdk::dsp::Transport& t) noexcept {
+    const float bpm = t.tempo_bpm();
+    return bpm > 0.0f ? 15000.0f / bpm : 2000.0f;  // a sixteenth, in ms
+  }
+  // SLIDE, then VOWEL: a move to a vowel value 1..9 (`slide` is already the arrival time / 3).
+  void mouth_move(o3sdk::dsp::BlockContext& ctx, std::uint16_t frame, float slide, unsigned vowel) noexcept {
+    if (mouth_emit(ctx, TractParam::Slide, slide, frame)) {
+      slid_ = true;
+    }
+    (void)mouth_emit(ctx, TractParam::Vowel, static_cast<float>(vowel - 1u) * (1.0f / 8.0f), frame);
+  }
+  // ACCENT of a step with a note, only when it changes (see the header comment).
+  void accent_step(o3sdk::dsp::BlockContext& ctx, std::uint16_t frame, unsigned velocity, bool has_note) noexcept {
+    if (!has_note) {
+      return;
+    }
+    const float a = accent_of(velocity);
+    if (a != accent_ && tract_emit(ctx, TractParam::Accent, a, frame)) {
+      accent_ = a;
+    }
+  }
+  // The MOUTH lane's events for the step k starting at `frame` (see the header comment). Returns true when it began a closure.
+  bool mouth_step(o3sdk::dsp::BlockContext& ctx, const o3sdk::dsp::Transport& t, std::uint16_t frame, std::uint64_t k, const PatternData& p, unsigned i, unsigned len,
+                  bool has_note) noexcept {
+    slot_[1] = slot_[0];
+    slot_[0] = MouthSlot{};
+    slot_[0].k = k;
     if (tract_ == o3sdk::dsp::kNoUnit || mouth_hold_.load(std::memory_order_relaxed)) {
       return false;
     }
+    const std::uint8_t m = get_mouth(p, i);
     const bool closure = mouth_is_closure(m);
-    if (closing_ && !closure && mouth_emit(ctx, TractParam::Close, 0.0f, frame)) {  // a closure with no gate end yet ends with its step
-      closing_ = false;
+    const bool word = mouth_is_word(m);
+    const bool own_close = word && kWords[mouth_arg(m)].pt[0].close >= 0;  // its own CLOSE replaces the end of a closure
+    if (closing_ && !closure) {  // a closure with no gate end yet ends with its step
+      if (own_close || mouth_emit(ctx, TractParam::Close, 0.0f, frame)) {
+        closing_ = false;
+      }
     }
     if (mouth_is_vowel(m)) {
       if (mouth_gld(m)) {
-        const float bpm = t.tempo_bpm();
-        const float ms = bpm > 0.0f ? 15000.0f / bpm : 2000.0f;  // a sixteenth, in ms
-        (void)mouth_emit(ctx, TractParam::Slide, slide_for(ms), frame);
-        slid_ = true;
-      } else if (slid_ && mouth_emit(ctx, TractParam::Slide, 0.0f, frame)) {
-        slid_ = false;
+        mouth_move(ctx, frame, slide_for(step_ms(t)), mouth_value(m));
+      } else {
+        if (slid_ && mouth_emit(ctx, TractParam::Slide, 0.0f, frame)) {
+          slid_ = false;
+        }
+        (void)mouth_emit(ctx, TractParam::Vowel, mouth_vowel(m), frame);
       }
-      (void)mouth_emit(ctx, TractParam::Vowel, mouth_vowel(m), frame);
     } else if (closure) {
       (void)mouth_emit(ctx, TractParam::Close, static_cast<float>(mouth_close(m)), frame);
       closing_ = true;
       close_gate_ = has_note;
       return true;
+    } else if (word) {
+      slot_[0].kind = MouthSlot::Word;
+      slot_[0].arg = static_cast<std::uint8_t>(mouth_arg(m));
+      word_point(ctx, t, frame, kWords[slot_[0].arg].pt[0]);
+    } else if (mouth_is_wob(m)) {
+      std::uint8_t line[kPatternSteps];
+      for (unsigned n = 0; n < kPatternSteps; ++n) {
+        line[n] = get_mouth(p, n);
+      }
+      const WobPlaces pl = wob_places(line, len, i);
+      slot_[0].kind = MouthSlot::Wob;
+      slot_[0].arg = static_cast<std::uint8_t>(mouth_arg(m));
+      slot_[0].before = pl.before;
+      slot_[0].after = pl.after;
+      const std::uint32_t half = kWobHalfTicks[slot_[0].arg];
+      const std::uint64_t tick = k * o3sdk::dsp::kTicksPerSixteenth;
+      const std::uint32_t rem = static_cast<std::uint32_t>(tick % half);
+      const bool continued = slot_[1].kind == MouthSlot::Wob && slot_[1].k + 1u == k;
+      if (rem == 0u || !continued) {  // an edge, or the first step of the run
+        wob_move(ctx, t, frame, slot_[0], (tick / half) & 1u, rem == 0u ? half : half - rem);
+      }
     }
     return false;
   }
-  // A Stop: CLOSE 0 (not under a held strip pad: the pad owns it) and SLIDE 0 (always), once, when the line wrote since the last one.
+  // One point of a word at `frame`.
+  void word_point(o3sdk::dsp::BlockContext& ctx, const o3sdk::dsp::Transport& t, std::uint16_t frame, const WordPoint& w) noexcept {
+    if (w.vowel != 0u) {
+      mouth_move(ctx, frame, w.over == 0u ? kSlideMinMs : slide_for(step_ms(t) * static_cast<float>(w.over) * 0.01f), w.vowel);
+    }
+    if (w.close >= 0) {
+      (void)mouth_emit(ctx, TractParam::Close, static_cast<float>(w.close), frame);
+    }
+  }
+  // A WOB's move to the half `odd` (even: the after place) that must arrive within `ticks`.
+  void wob_move(o3sdk::dsp::BlockContext& ctx, const o3sdk::dsp::Transport& t, std::uint16_t frame, const MouthSlot& s, std::uint64_t odd, std::uint32_t ticks) noexcept {
+    const float tick_ms = step_ms(t) * (1.0f / static_cast<float>(o3sdk::dsp::kTicksPerSixteenth));
+    mouth_move(ctx, frame, slide_for(tick_ms * static_cast<float>(ticks)), odd != 0u ? s.before : s.after);
+  }
+  // The later points of the words and the edges inside the WOB steps of the last two steps (the previous one only in a block where a step started:
+  // its last points can fall after the new step's first frame). A grid per point or per rate, each with the transport's own for_each_step.
+  void mouth_points(o3sdk::dsp::BlockContext& ctx, const o3sdk::dsp::Transport& t, bool stepped) noexcept {
+    namespace dsp = o3sdk::dsp;
+    for (unsigned n = 0; n < (stepped ? 2u : 1u); ++n) {
+      const MouthSlot sl = slot_[n];
+      if (sl.kind == MouthSlot::Word) {
+        const Word& w = kWords[sl.arg];
+        for (unsigned j = 1; j < w.count; ++j) {
+          const WordPoint& pt = w.pt[j];
+          dsp::for_each_step(t, dsp::kTicksPerSixteenth, pt.tick, 0, [&](std::uint32_t frame, std::uint64_t k) {
+            if (k == sl.k) {
+              word_point(ctx, t, static_cast<std::uint16_t>(frame), pt);
+            }
+          });
+        }
+      } else if (sl.kind == MouthSlot::Wob) {
+        const std::uint32_t half = kWobHalfTicks[sl.arg];
+        if (half % dsp::kTicksPerSixteenth == 0u) {
+          continue;  // every edge is a step's first frame: the step wrote it
+        }
+        dsp::for_each_step(t, half, 0, 0, [&](std::uint32_t frame, std::uint64_t h) {
+          const std::uint64_t tick = h * half;
+          if (tick / dsp::kTicksPerSixteenth == sl.k && tick != sl.k * dsp::kTicksPerSixteenth) {
+            wob_move(ctx, t, static_cast<std::uint16_t>(frame), sl, h & 1u, half);
+          }
+        });
+      }
+    }
+  }
+  // A Stop: CLOSE 0 (not under a held strip pad: the pad owns it), SLIDE 0 and ACCENT 0, once, when the line wrote them since the last one.
   void mouth_stop(o3sdk::dsp::BlockContext& ctx) noexcept {
-    if (!mouth_dirty_ || tract_ == o3sdk::dsp::kNoUnit) {
+    slot_[0] = slot_[1] = MouthSlot{};
+    if (tract_ == o3sdk::dsp::kNoUnit) {
       return;
     }
-    if (!mouth_hold_.load(std::memory_order_relaxed)) {
-      (void)ctx.emit(tract_, o3sdk::dsp::param_change(static_cast<std::uint16_t>(TractParam::Close), 0.0f, 0));
+    if (mouth_dirty_) {
+      if (!mouth_hold_.load(std::memory_order_relaxed)) {
+        (void)tract_emit(ctx, TractParam::Close, 0.0f, 0);
+      }
+      (void)tract_emit(ctx, TractParam::Slide, 0.0f, 0);
+      mouth_dirty_ = false;
     }
-    (void)ctx.emit(tract_, o3sdk::dsp::param_change(static_cast<std::uint16_t>(TractParam::Slide), 0.0f, 0));
-    mouth_dirty_ = false;
+    if (accent_ != 0.0f && tract_emit(ctx, TractParam::Accent, 0.0f, 0)) {
+      accent_ = 0.0f;
+    }
     closing_ = false;
     slid_ = false;
   }
@@ -723,6 +942,8 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   bool close_gate_ = false;   // ...and it ends at its gate (the step had a note) rather than at the step's end
   bool slid_ = false;         // SLIDE is above 0 (a GLD step wrote it, no plain vowel has written 0 since)
   bool mouth_dirty_ = false;  // the line wrote since the last Stop
+  float accent_ = 0.0f;       // the last ACCENT written (0 after a Stop)
+  MouthSlot slot_[2];         // the step that started last, and the one before
   std::uint8_t fired_ = kNoReader;  // the reader a lane slice was fired on since the last Stop
   // Shared with the main loop (relaxed, single writer each): next_ and key_ / scale_ / picked_ are written by the main loop, cur_ and step_ by
   // the render context.

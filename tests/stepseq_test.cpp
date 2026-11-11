@@ -141,6 +141,11 @@ struct Rig {
 
 // The engine starts the transport one block after play(): every step lands kBlock samples after its grid point.
 bool near(std::uint64_t at, double want) { const double a = static_cast<double>(at) - static_cast<double>(kBlock); return a + 1.0 >= want && a <= want + 1.0; }
+// The tract spy counts the samples rendered (the start's zero-frame call adds none), so its `at` is the grid's own sample, with no lag.
+bool at_near(std::uint64_t at, double want, double tol = 1.0) {
+  const double a = static_cast<double>(at);
+  return a + tol >= want && a <= want + tol;
+}
 
 Step chord_step(unsigned root, ChordKind k, Voicing v) {
   Step s;
@@ -667,8 +672,8 @@ TEST_CASE("slice hook: Stop releases the reader that fired, once, even after the
 
 namespace {
 
-// A second instrument standing in for the tract unit: it writes down the Param events the hook sends it (VOWEL 0, CLOSE 4, SLIDE 10).
-constexpr unsigned kTractRows = 11;
+// A second instrument standing in for the tract unit: it writes down the Param events the hook sends it (VOWEL 0, CLOSE 4, SLIDE 10, ACCENT 11).
+constexpr unsigned kTractRows = 12;
 constexpr std::array<o3sdk::core::ParamDesc, kTractRows> make_tract_rows() {
   std::array<o3sdk::core::ParamDesc, kTractRows> rows{};
   for (auto& r : rows) {
@@ -687,10 +692,11 @@ class TractSpy final : public dsp::Unit {
     for (std::uint32_t i = 0; i < a.event_count; ++i) {
       const dsp::Event& e = a.events[i];
       if (e.kind == dsp::EventKind::Param && block_ != 0) {  // block 0 carries the engine's stored values, not the hook's events
-        seen.push_back({block_ * kBlock + e.frame, e.kind, e.note, e.velocity, e.value, e.param, e.flags});
+        seen.push_back({pos_ + e.frame, e.kind, e.note, e.velocity, e.value, e.param, e.flags});  // pos_: the render's samples so far, whatever the block size
       }
     }
     ++block_;
+    pos_ += a.frames;
     for (std::uint32_t i = 0; i < a.frames; ++i) {
       a.out_l[i] = 0.0f;
       a.out_r[i] = 0.0f;
@@ -698,15 +704,17 @@ class TractSpy final : public dsp::Unit {
   }
   std::vector<Seen> seen;
   std::uint64_t block_ = 0;
+  std::uint64_t pos_ = 0;
 
  private:
   dsp::UnitInfo info_;
 };
 
-// The ids of TractUnit's VOWEL, CLOSE and SLIDE as the hook writes them (tract_mode_test checks the unit's own enum against these).
+// The ids of TractUnit's VOWEL, CLOSE, SLIDE and ACCENT as the hook writes them (tract_mode_test checks the unit's own enum against these).
 constexpr std::uint16_t kVowelId = 0;
 constexpr std::uint16_t kCloseId = 4;
 constexpr std::uint16_t kSlideId = 10;
+constexpr std::uint16_t kAccentId = 11;
 
 struct MouthRig {
   explicit MouthRig(bool named = true) {
@@ -777,7 +785,7 @@ TEST_CASE("mouth hook: a vowel writes VOWEL on the step's frame, (value-1)/8, an
   for (unsigned i = 0; i < 3; ++i) {
     CHECK(v[i].param == kVowelId);
     CHECK(v[i].value == want[i]);
-    CHECK(near(v[i].at, at[i] * kSixteenth));
+    CHECK(at_near(v[i].at, at[i] * kSixteenth));
   }
   CHECK(rig.of(dsp::EventKind::Param).empty());  // the vocoder's own spy saw no mouth event
 }
@@ -801,7 +809,7 @@ TEST_CASE("mouth hook: GLD writes SLIDE (a sixteenth in ms / 3) before VOWEL, th
     INFO("event " << i);
     CHECK(v[i].param == id[i]);
     CHECK(v[i].value == doctest::Approx(val[i]).epsilon(0.001));  // the tempo reaches the hook as mbpm, a sixteenth is 125 ms to a rounding
-    CHECK(near(v[i].at, at[i] * kSixteenth));
+    CHECK(at_near(v[i].at, at[i] * kSixteenth));
   }
   for (const Seen& s : v) {
     CHECK(s.param != 5);  // the hook never writes GLIDE
@@ -826,7 +834,7 @@ TEST_CASE("mouth hook: a closure with a note writes CLOSE n on the step and CLOS
     INFO("event " << i);
     CHECK(v[i].param == kCloseId);
     CHECK(v[i].value == val[i]);
-    CHECK(near(v[i].at, at[i] * kSixteenth));
+    CHECK(at_near(v[i].at, at[i] * kSixteenth));
   }
 }
 
@@ -847,7 +855,7 @@ TEST_CASE("mouth hook: a closure with no note ends at the step's end, the next e
     INFO("event " << i);
     CHECK(v[i].param == kCloseId);
     CHECK(v[i].value == val[i]);
-    CHECK(near(v[i].at, at[i] * kSixteenth));
+    CHECK(at_near(v[i].at, at[i] * kSixteenth));
   }
 }
 
@@ -1008,6 +1016,446 @@ TEST_CASE("mouth hook: the mouth line runs in the step's own pattern, each patte
   CHECK(rig.ev()[0].value == 1.0f);  // B's U
 }
 
+// ---- Words, WOB and ACCENT on the MOUTH lane (V3b) -----------------------------------------------------------------------------
+
+namespace {
+
+// One expected tract event: the parameter, the value, and where it lands in sixteenths after the grid's start (120 BPM).
+struct Want {
+  std::uint16_t id;
+  float v;
+  double at;
+};
+
+// The events a word writes in step `step`, from its table.
+std::vector<Want> word_events(unsigned word, double step) {
+  std::vector<Want> w;
+  for (unsigned j = 0; j < kWords[word].count; ++j) {
+    const WordPoint& p = kWords[word].pt[j];
+    const double at = step + p.tick / 240.0;
+    if (p.vowel != 0) {
+      w.push_back({kSlideId, p.over == 0 ? kSlideMinMs : slide_for(125.0f * static_cast<float>(p.over) * 0.01f), at});
+      w.push_back({kVowelId, static_cast<float>(p.vowel - 1) / 8.0f, at});
+    }
+    if (p.close >= 0) {
+      w.push_back({kCloseId, static_cast<float>(p.close), at});
+    }
+  }
+  return w;
+}
+
+// The events a WOB run over steps first..last (inclusive) of `rate` writes between the vowels with VOWEL values before and after, worked out from the
+// ticks alone: an edge at every multiple of the half period, even halves going to `after`; a run that starts off an edge first writes the half it is in,
+// arriving at the next edge.
+std::vector<Want> wob_events(unsigned rate, unsigned first, unsigned last, float before, float after) {
+  const unsigned half = kWobHalfTicks[rate];
+  const float tick_ms = 125.0f / 240.0f;
+  std::vector<Want> w;
+  const unsigned t0 = first * 240u;
+  const unsigned t1 = (last + 1u) * 240u;
+  if (t0 % half != 0u) {
+    w.push_back({kSlideId, slide_for(tick_ms * static_cast<float>(half - t0 % half)), t0 / 240.0});
+    w.push_back({kVowelId, (t0 / half) % 2u != 0u ? before : after, t0 / 240.0});
+  }
+  for (unsigned t = (t0 + half - 1u) / half * half; t < t1; t += half) {
+    w.push_back({kSlideId, slide_for(tick_ms * static_cast<float>(half)), t / 240.0});
+    w.push_back({kVowelId, (t / half) % 2u != 0u ? before : after, t / 240.0});
+  }
+  return w;
+}
+
+// The tract's events for a line `setup` wrote into a rig, rendered in blocks of `frames`; `at` is counted from the grid's start.
+template <typename F>
+std::vector<Seen> run_line(F setup, double sixteenths, unsigned frames = kBlock, std::uint32_t mbpm = 0) {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  if (mbpm != 0u) {
+    REQUIRE(rig.e.set_tempo(mbpm));
+  }
+  setup(rig);
+  REQUIRE(rig.e.play());
+  float l[kBlock], r[kBlock];
+  const unsigned total = static_cast<unsigned>(sixteenths * kSixteenth) + frames;
+  for (unsigned done = 0; done < total; done += frames) {
+    rig.e.render(nullptr, nullptr, l, r, frames);
+  }
+  std::vector<Seen> v = rig.ev();
+  return v;
+}
+
+void check_line(const std::vector<Seen>& v, const std::vector<Want>& want, double tol = 1.0) {
+  REQUIRE(v.size() == want.size());
+  for (std::size_t i = 0; i < want.size(); ++i) {
+    INFO("event " << i);
+    CHECK(v[i].param == want[i].id);
+    CHECK(v[i].value == doctest::Approx(want[i].v).epsilon(0.001));  // the tempo reaches the hook as mbpm, to a rounding
+    CHECK(at_near(v[i].at, want[i].at * kSixteenth, tol));
+  }
+}
+
+// I at step 0, steps first..last WOB of `rate`, O at step 8: the neighbours are I (VOWEL 0.5) and O (0.75).
+void wob_line(MouthRig& r, unsigned rate, unsigned first = 4, unsigned last = 7) {
+  PatternData& a = r.bank.pattern[0];
+  REQUIRE(set_mouth(a, 0, 5));
+  for (unsigned i = first; i <= last; ++i) {
+    REQUIRE(set_mouth(a, i, mouth_wob_byte(rate)));
+  }
+  REQUIRE(set_mouth(a, 8, 7));
+}
+
+std::vector<Want> wob_line_events(unsigned rate, unsigned first = 4, unsigned last = 7) {
+  std::vector<Want> w = {{kVowelId, 0.5f, 0.0}};
+  const std::vector<Want> e = wob_events(rate, first, last, 0.5f, 0.75f);
+  w.insert(w.end(), e.begin(), e.end());
+  w.push_back({kSlideId, 0.0f, 8.0});  // the plain O ends the slide
+  w.push_back({kVowelId, 0.75f, 8.0});
+  return w;
+}
+
+}  // namespace
+
+TEST_CASE("mouth hook: every word writes its table, point by point, on the frames of its ticks") {
+  for (unsigned w = 0; w < kMouthWords; ++w) {
+    INFO("word " << w);
+    const std::vector<Seen> v = run_line([w](MouthRig& r) { REQUIRE(set_mouth(r.bank.pattern[0], 0, mouth_word_byte(w))); }, 2.0);
+    check_line(v, word_events(w, 0.0));
+  }
+  // WOW by hand: U at the step, A at 24 ticks over 40 % of 125 ms, U at 144 ticks.
+  const std::vector<Seen> v = run_line([](MouthRig& r) { REQUIRE(set_mouth(r.bank.pattern[0], 0, mouth_word_byte(0))); }, 2.0);
+  REQUIRE(v.size() == 6);
+  CHECK(v[0].param == kSlideId);
+  CHECK(v[0].value == kSlideMinMs);
+  CHECK(v[1].value == 1.0f);
+  CHECK(v[2].value == doctest::Approx(50.0f / 3.0f).epsilon(0.001));
+  CHECK(v[3].value == 0.0f);
+  CHECK(at_near(v[3].at, 0.1 * kSixteenth));
+  CHECK(v[5].value == 1.0f);
+  CHECK(at_near(v[5].at, 0.6 * kSixteenth));
+}
+
+TEST_CASE("mouth hook: a word does not depend on the block size") {
+  for (unsigned w : {0u, 4u, 6u}) {
+    INFO("word " << w);
+    for (unsigned frames : {64u, 48u, 33u, 17u, 7u}) {
+      INFO("block " << frames);
+      check_line(run_line([w](MouthRig& r) { REQUIRE(set_mouth(r.bank.pattern[0], 0, mouth_word_byte(w))); }, 2.0, frames), word_events(w, 0.0), 2.0);
+    }
+  }
+}
+
+TEST_CASE("mouth hook: a word after a closure keeps its own CLOSE and skips CLOSE 0") {
+  const std::vector<Seen> v = run_line(
+      [](MouthRig& r) {
+        REQUIRE(set_mouth(r.bank.pattern[0], 0, 10));                  // LIPS, a rest: it would end at step 1's edge
+        REQUIRE(set_mouth(r.bank.pattern[0], 1, mouth_word_byte(5)));  // BA
+      },
+      3.0);
+  check_line(v, {{kCloseId, 1.0f, 0.0}, {kSlideId, kSlideMinMs, 1.0}, {kVowelId, 0.0f, 1.0}, {kCloseId, 1.0f, 1.0}, {kCloseId, 0.0f, 1.0 + 36.0 / 240.0}});
+}
+
+TEST_CASE("mouth hook: a WOB wobbles between its neighbours at every rate, one half period a move") {
+  for (unsigned rate = 0; rate < kMouthWobRates; ++rate) {
+    INFO("rate " << rate);
+    check_line(run_line([rate](MouthRig& r) { wob_line(r, rate); }, 9.5), wob_line_events(rate));
+  }
+  // 1/16 by hand: the half period is a step, 125 ms, SLIDE 125/3, O on the even steps and I on the odd ones.
+  const std::vector<Seen> v = run_line([](MouthRig& r) { wob_line(r, 2); }, 9.5);
+  REQUIRE(v.size() == 11);
+  CHECK(v[1].param == kSlideId);
+  CHECK(v[1].value == doctest::Approx(125.0f / 3.0f).epsilon(0.001));
+  CHECK(v[2].value == 0.75f);
+  CHECK(v[4].value == 0.5f);
+}
+
+TEST_CASE("mouth hook: a WOB does not depend on the block size, and a run that starts off an edge arrives at the next one") {
+  for (unsigned frames : {64u, 33u, 7u}) {
+    INFO("block " << frames);
+    check_line(run_line([](MouthRig& r) { wob_line(r, 4); }, 9.5, frames), wob_line_events(4), 2.0);
+    check_line(run_line([](MouthRig& r) { wob_line(r, 4, 5, 7); }, 9.5, frames), wob_line_events(4, 5, 7), 2.0);  // step 5 is 240 ticks into a 320 half
+  }
+}
+
+TEST_CASE("mouth hook: a WOB keeps its phase against the bar, lap after lap") {
+  const std::vector<Seen> v = run_line([](MouthRig& r) { wob_line(r, 4); }, 16.0 + 9.5);
+  const std::vector<Want> lap = wob_line_events(4);
+  std::vector<Want> two = lap;
+  for (Want w : lap) {
+    w.at += 16.0;  // 3840 ticks: twelve halves, the same parity
+    two.push_back(w);
+  }
+  check_line(v, two);
+}
+
+TEST_CASE("mouth hook: a WOB run takes two steps' rates one each, and a line with no vowel wobbles between A and U") {
+  const std::vector<Seen> v = run_line(
+      [](MouthRig& r) {
+        PatternData& a = r.bank.pattern[0];
+        REQUIRE(set_mouth(a, 2, mouth_wob_byte(2)));  // 1/16: one move
+        REQUIRE(set_mouth(a, 3, mouth_wob_byte(0)));  // 1/4: tick 720 is 3/4 of the way into a half: no edge inside the step
+      },
+      4.5);
+  REQUIRE(v.size() >= 2);
+  CHECK(v[0].param == kSlideId);
+  CHECK(v[1].param == kVowelId);
+  CHECK(v[1].value == 1.0f);  // tick 480 / 240 = 2: even, the after place, U
+  CHECK(at_near(v[1].at, 2.0 * kSixteenth));
+}
+
+TEST_CASE("wob_places: the vowels around a run, wrapping, one vowel, none, and only inside LENGTH") {
+  std::uint8_t m[kPatternSteps] = {};
+  const std::uint8_t wob = mouth_wob_byte(2);
+  m[14] = 5;
+  m[15] = wob;
+  m[0] = wob;
+  m[1] = 0x87;  // O, slid
+  WobPlaces p = wob_places(m, 16, 15);
+  CHECK(p.before == 5u);
+  CHECK(p.after == 7u);
+  p = wob_places(m, 16, 0);  // the same run from its other step
+  CHECK(p.before == 5u);
+  CHECK(p.after == 7u);
+  m[12] = 10;  // a closure is not a vowel
+  m[13] = mouth_word_byte(3);  // nor is a word
+  p = wob_places(m, 16, 15);
+  CHECK(p.before == 5u);
+  // One vowel step: both places are it, the other one is U (A if it is U).
+  std::uint8_t one[kPatternSteps] = {};
+  one[3] = 3;
+  one[9] = wob;
+  p = wob_places(one, 16, 9);
+  CHECK(p.before == 3u);
+  CHECK(p.after == 9u);
+  one[3] = 9;
+  p = wob_places(one, 16, 9);
+  CHECK(p.before == 9u);
+  CHECK(p.after == 1u);
+  // None: A and U.
+  std::uint8_t none[kPatternSteps] = {};
+  none[4] = wob;
+  p = wob_places(none, 16, 4);
+  CHECK(p.before == 1u);
+  CHECK(p.after == 9u);
+  // A line shorter than the pattern: steps beyond LENGTH are not neighbours.
+  std::uint8_t cut[kPatternSteps] = {};
+  cut[2] = 5;
+  cut[5] = wob;
+  cut[12] = 7;
+  p = wob_places(cut, 16, 5);
+  CHECK(p.before == 5u);
+  CHECK(p.after == 7u);
+  p = wob_places(cut, 8, 5);
+  CHECK(p.before == 5u);
+  CHECK(p.after == 9u);
+  // A whole line of WOB has no vowel at all.
+  std::uint8_t all[kPatternSteps];
+  for (std::uint8_t& b : all) {
+    b = wob;
+  }
+  p = wob_places(all, 16, 7);
+  CHECK(p.before == 1u);
+  CHECK(p.after == 9u);
+}
+
+TEST_CASE("mouth hook: words and a WOB are the strip's while a pad is held, and a hold that starts mid-word cuts it short") {
+  {
+    MouthRig rig;
+    REQUIRE(rig.ok);
+    PatternData& a = rig.bank.pattern[0];
+    REQUIRE(set_mouth(a, 0, mouth_word_byte(1)));
+    wob_line(rig, 3, 4, 7);
+    REQUIRE(set_mouth(a, 0, mouth_word_byte(1)));
+    rig.seq.set_mouth_hold(true);
+    REQUIRE(rig.e.play());
+    rig.run_samples(10 * kSixteenth);
+    CHECK(rig.ev().empty());
+    REQUIRE(rig.e.stop());
+    rig.run(4);
+    CHECK(rig.ev().empty());
+  }
+  {
+    MouthRig rig;
+    REQUIRE(rig.ok);
+    REQUIRE(set_mouth(rig.bank.pattern[0], 0, mouth_word_byte(0)));
+    REQUIRE(rig.e.play());
+    rig.run_samples(0.05 * kSixteenth);  // the first point is out, the next is at tick 24
+    REQUIRE(rig.ev().size() == 2);
+    rig.seq.set_mouth_hold(true);
+    rig.run_samples(2 * kSixteenth);
+    CHECK(rig.ev().size() == 2);
+  }
+}
+
+TEST_CASE("mouth hook: ACCENT follows a note's LEVEL above 100, only when it changes") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  const unsigned note[8] = {1, 1, 1, 1, 0, 1, 1, 1};
+  const unsigned level[8] = {127, 127, 114, 100, 127, 0, 101, 100};
+  for (unsigned i = 0; i < 8; ++i) {
+    if (note[i] != 0u) {
+      REQUIRE(set_note(a, i, 60));
+    }
+    REQUIRE(set_level(a, i, level[i]));
+  }
+  REQUIRE(rig.e.play());
+  rig.run_samples(8.5 * kSixteenth);
+  const std::vector<Seen>& v = rig.ev();
+  const double at[5] = {0, 2, 3, 6, 7};  // 1 repeats 0; 4 is a rest; 5 is the default, already 0
+  const float val[5] = {0.5f, 0.5f * 14.0f / 27.0f, 0.0f, 0.5f * 1.0f / 27.0f, 0.0f};
+  REQUIRE(v.size() == 5);
+  for (unsigned i = 0; i < 5; ++i) {
+    INFO("event " << i);
+    CHECK(v[i].param == kAccentId);
+    CHECK(v[i].value == doctest::Approx(val[i]).epsilon(0.0001));
+    CHECK(at_near(v[i].at, at[i] * kSixteenth));
+  }
+}
+
+TEST_CASE("mouth hook: a Stop writes ACCENT 0 once, and only if an ACCENT is on") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  REQUIRE(set_note(rig.bank.pattern[0], 0, 60));
+  REQUIRE(set_level(rig.bank.pattern[0], 0, 127));
+  REQUIRE(set_note(rig.bank.pattern[0], 1, 60));  // the default level: 0
+  REQUIRE(rig.e.play());
+  rig.run_samples(1.5 * kSixteenth);
+  REQUIRE(rig.ev().size() == 2);  // 0.5, then 0 at step 1
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  CHECK(rig.ev().size() == 2);  // already 0: nothing at the Stop
+  REQUIRE(rig.e.play());
+  rig.run_samples(0.5 * kSixteenth);
+  REQUIRE(rig.ev().size() == 3);
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  REQUIRE(rig.ev().size() == 4);
+  CHECK(rig.ev()[3].param == kAccentId);
+  CHECK(rig.ev()[3].value == 0.0f);
+  rig.run(12);
+  CHECK(rig.ev().size() == 4);
+}
+
+TEST_CASE("mouth hook: the hold does not suppress ACCENT, and a Stop under a hold still writes ACCENT 0") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_level(a, 0, 127));
+  REQUIRE(set_note(a, 1, 62));
+  REQUIRE(set_level(a, 1, 114));
+  REQUIRE(set_mouth(a, 0, 5));  // the lane itself is the pad's
+  rig.seq.set_mouth_hold(true);
+  REQUIRE(rig.e.play());
+  rig.run_samples(2.5 * kSixteenth);
+  REQUIRE(rig.ev().size() == 2);
+  CHECK(rig.ev()[0].param == kAccentId);
+  CHECK(rig.ev()[0].value == 0.5f);
+  CHECK(rig.ev()[1].value == doctest::Approx(0.5f * 14.0f / 27.0f).epsilon(0.0001));
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  REQUIRE(rig.ev().size() == 3);
+  CHECK(rig.ev()[2].param == kAccentId);
+  CHECK(rig.ev()[2].value == 0.0f);
+}
+
+TEST_CASE("mouth hook: ACCENT comes first on its frame, with no tract unit it writes nothing") {
+  {
+    MouthRig rig;
+    REQUIRE(rig.ok);
+    REQUIRE(set_note(rig.bank.pattern[0], 0, 60));
+    REQUIRE(set_level(rig.bank.pattern[0], 0, 127));
+    REQUIRE(set_mouth(rig.bank.pattern[0], 0, 5));
+    REQUIRE(rig.e.play());
+    rig.run_samples(1.5 * kSixteenth);
+    REQUIRE(rig.ev().size() == 2);
+    CHECK(rig.ev()[0].param == kAccentId);
+    CHECK(rig.ev()[1].param == kVowelId);
+    CHECK(rig.ev()[0].at == rig.ev()[1].at);
+  }
+  {
+    MouthRig rig(false);
+    REQUIRE(rig.ok);
+    REQUIRE(set_note(rig.bank.pattern[0], 0, 60));
+    REQUIRE(set_level(rig.bank.pattern[0], 0, 127));
+    REQUIRE(rig.e.play());
+    rig.run_samples(2 * kSixteenth);
+    REQUIRE(rig.e.stop());
+    rig.run(4);
+    CHECK(rig.ev().empty());
+  }
+}
+
+TEST_CASE("mouth hook: every SLIDE is the move's length / 3, at any tempo") {
+  // GLD: a sixteenth / 3 (60 BPM: 250 ms, 240 BPM: 62.5 ms).
+  for (std::uint32_t mbpm : {60000u, 240000u}) {
+    INFO("mbpm " << mbpm);
+    const float step = 15000.0f / (static_cast<float>(mbpm) * 0.001f);
+    const std::vector<Seen> v = run_line([](MouthRig& r) { REQUIRE(set_mouth(r.bank.pattern[0], 0, kGld | 3)); }, 0.5, kBlock, mbpm);
+    REQUIRE(v.size() >= 1);
+    CHECK(v[0].param == kSlideId);
+    CHECK(v[0].value == doctest::Approx(step / 3.0f).epsilon(0.001));
+    // A word: its second point (WOW's A: 40 % of the step).
+    const std::vector<Seen> w = run_line([](MouthRig& r) { REQUIRE(set_mouth(r.bank.pattern[0], 0, mouth_word_byte(0))); }, 1.0, kBlock, mbpm);
+    REQUIRE(w.size() >= 4);
+    CHECK(w[2].param == kSlideId);
+    CHECK(w[2].value == doctest::Approx(step * 0.4f / 3.0f).epsilon(0.001));
+  }
+}
+
+TEST_CASE("mouth hook: the event budget: 4 on a frame, 10 in a step, 8 in a block, and the tract ends clear") {
+  const unsigned m[16] = {kGld | 3, mouth_word_byte(0), 10, mouth_word_byte(5), mouth_word_byte(1), mouth_wob_byte(5), mouth_wob_byte(5), 5,
+                          mouth_wob_byte(3), 11, mouth_word_byte(6), mouth_wob_byte(4), mouth_wob_byte(4), 9, 12, mouth_word_byte(2)};
+  for (std::uint32_t mbpm : {60000u, 120000u, 300000u}) {
+    INFO("mbpm " << mbpm);
+    MouthRig rig;
+    REQUIRE(rig.ok);
+    REQUIRE(rig.e.set_tempo(mbpm));
+    PatternData& a = rig.bank.pattern[0];
+    for (unsigned i = 0; i < kPatternSteps; ++i) {
+      REQUIRE(set_mouth(a, i, m[i]));
+      if (i != 9u) {
+        REQUIRE(set_note(a, i, 48u + i));
+      }
+      REQUIRE(set_level(a, i, i % 2u == 0u ? 127u : 101u));  // ACCENT moves on every step with a note
+    }
+    REQUIRE(rig.e.play());
+    const double spp = kSixteenth * 120000.0 / mbpm;  // samples a step
+    rig.run_samples(40.0 * spp);
+    const std::vector<Seen> v = rig.ev();
+    REQUIRE(v.size() > 60);
+    std::vector<unsigned> per_block(v.back().at / kBlock + 1u, 0u);
+    std::vector<unsigned> per_step(static_cast<std::size_t>(static_cast<double>(v.back().at) / spp) + 2u, 0u);
+    unsigned run = 0;
+    for (std::size_t i = 0; i < v.size(); ++i) {
+      run = i != 0u && v[i].at == v[i - 1].at ? run + 1u : 1u;
+      CHECK(run <= 4u);
+      ++per_block[v[i].at / kBlock];
+      ++per_step[static_cast<std::size_t>(static_cast<double>(v[i].at) / spp + 0.003)];
+    }
+    for (unsigned n : per_block) {
+      CHECK(n <= 8u);
+    }
+    for (unsigned n : per_step) {
+      CHECK(n <= 10u);
+    }
+    REQUIRE(rig.e.stop());
+    rig.run(4);
+    float close = -1.0f, slide = -1.0f, accent = -1.0f;
+    for (const Seen& s : rig.ev()) {
+      if (s.param == kCloseId) {
+        close = s.value;
+      } else if (s.param == kSlideId) {
+        slide = s.value;
+      } else if (s.param == kAccentId) {
+        accent = s.value;
+      }
+    }
+    CHECK(close == 0.0f);
+    CHECK(slide == 0.0f);
+    CHECK(accent == 0.0f);
+  }
+}
+
 // ---- The MOUT chunk of the bank file (V3) --------------------------------------------------------------------------------------
 
 namespace {
@@ -1049,10 +1497,21 @@ std::vector<std::uint8_t> with_mout(unsigned mouts, unsigned count, F fill, std:
   return std::vector<std::uint8_t>(out, out + n);
 }
 
-// Every valid mouth byte appears: 0, the nine vowels plain and slid, the three closures.
+// Every valid mouth byte appears: 0, the nine vowels plain and slid, the three closures, the eight words, the six WOB rates (36 in all).
 unsigned any_valid_mouth(unsigned p, unsigned i) {
-  static const unsigned v[22] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 129, 130, 131, 132, 133, 134, 135, 136, 137};
-  return v[(p * 5u + i) % 22u];
+  static const unsigned v[36] = {0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  129, 130, 131, 132, 133,
+                                 134, 135, 136, 137, 0x0D, 0x1D, 0x2D, 0x3D, 0x4D, 0x5D, 0x6D, 0x7D, 0x0E, 0x1E, 0x2E, 0x3E, 0x4E, 0x5E};
+  return v[(p * 5u + i) % 36u];
+}
+
+// The version of the MOUT chunk in a bank file (0 when there is none): the id, the u32 length, then the u16.
+std::uint16_t mout_version(const std::vector<std::uint8_t>& f) {
+  for (std::size_t i = 12; i + 10 <= f.size(); ++i) {
+    if (f[i] == 'M' && f[i + 1] == 'O' && f[i + 2] == 'U' && f[i + 3] == 'T') {
+      return static_cast<std::uint16_t>((f[i + 8] << 8) | f[i + 9]);
+    }
+  }
+  return 0;
 }
 
 }  // namespace
@@ -1075,7 +1534,18 @@ TEST_CASE("mouth: the pattern carries its mouth bytes through copy, clear and co
   REQUIRE(set_note(a, 3, 60));
   CHECK(get_mouth(a, 3) == 130u);
   CHECK(!set_mouth(a, 16, 1));  // a step out of range
-  CHECK(!set_mouth(a, 0, 13));  // values 13..15 wait for V3b
+  CHECK(!set_mouth(a, 0, 15));  // 15 is nothing
+  CHECK(!set_mouth(a, 0, 0x6E));  // WOB rate 6
+  CHECK(!set_mouth(a, 0, 0x7E));  // WOB rate 7
+  CHECK(!set_mouth(a, 0, 0x8D));  // GLD on a word
+  CHECK(!set_mouth(a, 0, 0x9E));  // GLD on a WOB
+  CHECK(!set_mouth(a, 0, 0x80 | 0x0F));
+  CHECK(set_mouth(a, 4, 0x7D));   // GA
+  CHECK(set_mouth(a, 5, 0x5E));   // WOB 1/16T
+  CHECK(get_mouth(a, 4) == 0x7Du);
+  CHECK(mouths_used(a) == 4u);
+  CHECK(set_mouth(a, 4, 0));
+  CHECK(set_mouth(a, 5, 0));
   CHECK(!set_mouth(a, 0, 0x8A));  // GLD on a closure
   CHECK(!set_mouth(a, 0, 0x80));  // GLD on FOLLOW
   CHECK(!set_mouth(a, 0, 0x11));  // bits 4..6 are zero
@@ -1091,6 +1561,7 @@ TEST_CASE("bank file: the MOUT chunk round trips every valid byte, and the file 
   }
   const std::vector<std::uint8_t> f = bytes_of(b);
   CHECK(f.size() <= kBankFileMax);
+  CHECK(mout_version(f) == 0x0101u);  // V3b writes the minor that says words and WOB may be in it
   Bank got = {};
   REQUIRE(read_bank(f.data(), f.size(), got));
   CHECK(same_bank(b, got));
@@ -1133,11 +1604,19 @@ TEST_CASE("bank file: a MOUT chunk that is wrong refuses the file whole") {
   CHECK(refused(with_mout(1, 7, [](unsigned, unsigned) { return 0u; })));            // a wrong pattern count
   CHECK(refused(with_mout(2, kBankPatterns, [](unsigned, unsigned) { return 0u; })));  // two MOUT chunks
   CHECK(refused(with_mout(1, kBankPatterns, [](unsigned, unsigned) { return 0u; }, 0x0200)));  // a major version this reader does not know
-  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 6 && i == 9 ? 13u : 0u; })));    // 13..15 wait for V3b
-  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 2 && i == 0 ? 15u : 0u; })));
+  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 2 && i == 0 ? 15u : 0u; }, 0x0101)));
+  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 6 && i == 9 ? 0x6Eu : 0u; }, 0x0101)));  // WOB rate 6
+  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 6 && i == 9 ? 0x7Eu : 0u; }, 0x0101)));  // WOB rate 7
+  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 1 && i == 2 ? 0x8Du : 0u; }, 0x0101)));  // GLD on a word
+  CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 1 && i == 2 ? 0x9Eu : 0u; }, 0x0101)));  // GLD on a WOB
   CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 0 && i == 15 ? 0x8Au : 0u; })));  // GLD on a closure
   CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 7 && i == 7 ? 0x80u : 0u; })));   // GLD on FOLLOW
   CHECK(refused(with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 3 && i == 1 ? 0x21u : 0u; })));   // a bit in 4..6
+  // A 0x0100 MOUT loads (V3's own files); a word in it is as good as in a 0x0101 one: the reader takes any minor of its major.
+  const auto v0 = with_mout(1, kBankPatterns, [](unsigned p, unsigned i) { return p == 4 && i == 4 ? 0x0Du : 0u; }, 0x0100);
+  Bank t0 = {};
+  CHECK(read_bank(v0.data(), v0.size(), t0));
+  CHECK(get_mouth(t0.pattern[4], 4) == 0x0Du);
   const auto cut = [&] {
     std::vector<std::uint8_t> v = ok;
     v.resize(v.size() - 9);

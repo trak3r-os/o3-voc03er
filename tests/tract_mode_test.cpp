@@ -230,7 +230,7 @@ TEST_CASE("tract mode: modes 0..3 are sample-identical to the tree before TRACT"
   CHECK(d == 0xA9A804A5u);
 }
 
-TEST_CASE("tract mode: the tables agree: five modes, TRACT is the fifth, the tube's table is eleven ids") {
+TEST_CASE("tract mode: the tables agree: five modes, TRACT is the fifth, the tube's table is twelve ids") {
   static Vocoder vo;
   vo.prepare(kFs);
   static TractUnit tu;
@@ -241,12 +241,14 @@ TEST_CASE("tract mode: the tables agree: five modes, TRACT is the fifth, the tub
   CHECK(vo.info().params[Vocoder::Mode].max == 4.0f);
   CHECK(Vocoder::kParamCount == 64);  // the kit's limit: the tube's knobs are the new unit's
   CHECK(tu.info().param_count == TractUnit::kParamCount);
-  CHECK(TractUnit::kParamCount == 11);
+  CHECK(TractUnit::kParamCount == 12);
   CHECK(tu.info().kind == dsp::UnitKind::Effect);
   CHECK(tu.info().params[TractUnit::Mix].def == 0.0f);
   CHECK(tu.info().params[TractUnit::Glide].def == 30.0f);
   CHECK(tu.info().params[TractUnit::Slide].def == 0.0f);
   CHECK(tu.info().params[TractUnit::Slide].max == 2000.0f);
+  CHECK(tu.info().params[TractUnit::Accent].def == 0.0f);
+  CHECK(tu.info().params[TractUnit::Accent].max == 1.0f);
 }
 
 TEST_CASE("tract mode: PERFORM has a page of its own for TRACT (F8 VOWEL); ROBOT keeps BANDS' page") {
@@ -534,10 +536,54 @@ TEST_CASE("tract unit: SLIDE above 0 is the glide and wins over GLIDE; a GLIDE t
   CHECK(trace({{TractUnit::Slide, 400.0f}}, {{TractUnit::Slide, 0.0f}}) != glide400);  // the default GLIDE (30 ms) rules again
 }
 
-TEST_CASE("tract unit: the ids the step hook writes are the unit's VOWEL, CLOSE and SLIDE") {
-  CHECK(TractUnit::Vowel == 0);  // stepseq.h's TractParam restates them, and stepseq_test.cpp's kVowelId, kCloseId, kSlideId
+TEST_CASE("tract unit: ACCENT opens the jaw by its value, clamped, and a JAW turn leaves it alone") {
+  using P = std::pair<std::uint16_t, float>;
+  // MIX 1 and the given values, the hold and a few blocks more, then VOWEL 0 -> 1 and 24 blocks of the move, as the left plane.
+  auto trace = [](std::initializer_list<P> setup) {
+    Tube t;
+    std::vector<float> x;
+    float out[64];
+    std::vector<dsp::Event> ev;
+    ev.push_back(dsp::param_change(TractUnit::Mix, 1.0f));
+    for (const P& p : setup) {
+      ev.push_back(dsp::param_change(p.first, p.second));
+    }
+    t.block(out, 64, true, ev.data(), static_cast<std::uint32_t>(ev.size()));
+    for (int b = 0; b < 14; ++b) {
+      t.block(out, 64, true);
+    }
+    const dsp::Event move = dsp::param_change(TractUnit::Vowel, 1.0f);
+    t.block(out, 64, true, &move, 1);
+    x.insert(x.end(), out, out + 64);
+    for (int b = 0; b < 24; ++b) {
+      t.block(out, 64, true);
+      x.insert(x.end(), out, out + 64);
+    }
+    return x;
+  };
+  const auto plain = trace({});
+  const auto jaw5 = trace({{TractUnit::Jaw, 0.5f}});
+  CHECK(jaw5 != plain);  // the jaw is audible in this rig, so the equalities below mean something
+  // ACCENT 0 is the tube of V3, sample for sample, whatever the JAW; and an ACCENT that came back to 0 is too.
+  CHECK(trace({{TractUnit::Accent, 0.0f}}) == plain);
+  CHECK(trace({{TractUnit::Jaw, 0.5f}, {TractUnit::Accent, 0.0f}}) == jaw5);
+  CHECK(trace({{TractUnit::Accent, 0.4f}, {TractUnit::Accent, 0.0f}}) == plain);
+  // ACCENT adds to JAW: JAW 0.2 and ACCENT 0.3 bend as JAW 0.5 does, and the order of the two does not matter.
+  CHECK(trace({{TractUnit::Jaw, 0.2f}, {TractUnit::Accent, 0.3f}}) == jaw5);
+  CHECK(trace({{TractUnit::Accent, 0.3f}, {TractUnit::Jaw, 0.2f}}) == jaw5);  // a JAW turn leaves ACCENT where it was
+  CHECK(trace({{TractUnit::Accent, 0.5f}}) == jaw5);
+  CHECK(trace({{TractUnit::Accent, 0.3f}, {TractUnit::Jaw, 0.2f}}) != trace({{TractUnit::Jaw, 0.2f}}));
+  // Clamped to the Processor's own range: JAW 0.8 + ACCENT 0.5 is JAW 1, and a negative JAW is opened by it, not past it.
+  CHECK(trace({{TractUnit::Jaw, 0.8f}, {TractUnit::Accent, 0.5f}}) == trace({{TractUnit::Jaw, 1.0f}}));
+  CHECK(trace({{TractUnit::Jaw, -0.5f}, {TractUnit::Accent, 0.25f}}) == trace({{TractUnit::Jaw, -0.25f}}));
+  CHECK(trace({{TractUnit::Jaw, 1.0f}, {TractUnit::Accent, 1.0f}}) == trace({{TractUnit::Jaw, 1.0f}}));
+}
+
+TEST_CASE("tract unit: the ids the step hook writes are the unit's VOWEL, CLOSE, SLIDE and ACCENT") {
+  CHECK(TractUnit::Vowel == 0);  // stepseq.h's TractParam restates them, and stepseq_test.cpp's kVowelId, kCloseId, kSlideId, kAccentId
   CHECK(TractUnit::Close == 4);
   CHECK(TractUnit::Slide == 10);
+  CHECK(TractUnit::Accent == 11);
   CHECK(TractUnit::Glide != TractUnit::Slide);
 }
 

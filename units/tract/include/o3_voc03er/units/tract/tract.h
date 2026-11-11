@@ -19,7 +19,10 @@
 //   9 Mix     0..1 (default 0): 0 is a bit-exact bypass (no state runs), 1 the tube alone
 //  10 Slide   ms, 0..2000 (default 0): the sequencer's own glide (the MOUTH line writes it, a slid step's length). 0 means GLIDE rules; above 0 the
 //             unit glides with SLIDE instead, so a step's glide never fights the GLIDE knob (a GLIDE turn never changes SLIDE, and the hook never
-//             writes GLIDE). The Processor clamps the glide it is given to 5..500 ms: a slide longer than 500 ms is 500
+//             writes GLIDE). The Processor clamps the glide it is given to 5..500 ms: a slide longer than 500 ms is 500. The glide is one pole (its
+//             time is the time constant), so a move that must arrive within T ms is written as T / 3 (95 %)
+//  11 Accent  0..1 (default 0): the jaw opens by this much more, the bend takes JAW + ACCENT clamped to -1..+1 (the MOUTH line writes it on an accented
+//             step; JAW keeps the knob's value and the hook never writes it). 0 is bit-exact with a build without it
 //
 // Two things the wrapper adds to the Processor:
 //  * MIX rises only after a hold of kEnterHoldMs (12 ms, a little more than the vocoder's 10 ms mode crossfade): the app writes MIX 1 together with
@@ -43,7 +46,7 @@ namespace o3_voc03er {
 
 class TractUnit final : public o3sdk::dsp::Unit {
  public:
-  enum Param : std::uint16_t { Vowel, Tongue, Jaw, Lips, Close, Glide, Size, Res, Hiss, Mix, Slide, kParamCount };
+  enum Param : std::uint16_t { Vowel, Tongue, Jaw, Lips, Close, Glide, Size, Res, Hiss, Mix, Slide, Accent, kParamCount };
 
   static constexpr float kEnterHoldMs = 12.0f;        // MIX 0 -> above 0 waits this long (the vocoder's crossfade is 10 ms)
   static constexpr float kSilent = 1.0e-4f;           // -80 dB: under it the input, and the tube's output, count as silent
@@ -70,6 +73,7 @@ class TractUnit final : public o3sdk::dsp::Unit {
 
   o3sdk::extras::tract::Processor proc_;
   alignas(8) float mono_[kMaxFrames] = {};
+  float bent_jaw() const noexcept;  // JAW + ACCENT, clamped
   float values_[kParamCount] = {};
   float fs_ = 44100.0f;
   float mix_ = 0.0f;                 // the MIX the app asked for

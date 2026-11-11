@@ -87,6 +87,13 @@ class PatternScreen final : public o3sdk::app::Screen {
                 unsigned voicing = PerformScreen::kCurrentVoicing) noexcept;
   void audition_step(o3sdk::app::Context& ctx, unsigned pad, unsigned step) noexcept;  // LEVEL: the step's note or chord at the step's level
   void audition_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept;                // SLICE: fires the slice on the SPEAKS slot
+  // V3b, the MOUTH lane (F6 SET flips the palette page, F7 FILL writes a random walk; main loop only).
+  void fill_press(o3sdk::app::Context& ctx) noexcept;  // F7: fills, or asks first when the lane holds something that is not the last fill's own output
+  void fill_now(o3sdk::app::Context& ctx) noexcept;
+  void word_start(o3sdk::app::Context& ctx, unsigned word) noexcept;  // a WORD pad sounds: its points are played from update() (word_pump)
+  void word_pump(o3sdk::app::Context& ctx) noexcept;
+  void word_end(o3sdk::app::Context& ctx) noexcept;
+  pattern::MouthPage mouth_page() const noexcept { return static_cast<pattern::MouthPage>(page_); }
   const pads::Layout& layout_now() const noexcept;  // PERFORM's (the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
 
@@ -111,7 +118,18 @@ class PatternScreen final : public o3sdk::app::Screen {
   char oct_say_[12] = {};         // "OCTAVE +1", the strip's line for UP and DOWN (say() keeps the pointer)
   std::uint32_t mouth_aud_ = 0;  // the MOUTH palette's closure pads held and sounding (bit pad; a subset of aud_); main loop only
   std::uint32_t aud_ = 0;    // the palette pads held and sounding (bit pad 0..23, PerformScreen::audition_press); main loop only
-  std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE
+  std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE, kArmFill FILL over a lane that holds something
+  std::uint8_t page_ = 0;    // F6 SET on the MOUTH lane: the palette's page, pattern::MouthPage (VOWELS 0, WORDS 1)
+  // FILL (F7): the screen's count of fills (it seeds them with the pattern's index, so every press differs) and, per pattern, the 16 bytes the last fill left,
+  // which is how a second press tells its own output (no question asked) from a lane the hands wrote (F1 confirms). Main loop only.
+  std::uint32_t fill_count_ = 0;
+  std::uint8_t fill_has_ = 0;  // bit pattern: fill_out_[pattern] holds a fill's output
+  std::uint8_t fill_out_[kBankPatterns][kPatternSteps] = {};
+  // The WORD audition (a WORD pad pressed in TRACT): the word, the next point to play and the uptime the pad was pressed; main loop only (update() plays it).
+  std::uint8_t word_ = 0xFF;  // 0xFF: none
+  std::uint8_t word_next_ = 0;
+  std::uint64_t word_t0_ = 0;
+  bool wob_said_ = false;  // the strip said "WOB PLAYS WITH THE LINE" since the screen was entered
   bool key_tap_ = false;     // turn() came from a second tap on an F key, not from the encoder
 };
 
