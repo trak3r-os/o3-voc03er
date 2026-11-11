@@ -82,9 +82,6 @@ void SongScreen::halt() noexcept {
   }
 }
 
-// Leaving: the chain stops advancing, the transport stays as it is.
-void SongScreen::leave(app::Context&) noexcept { halt(); }
-
 void SongScreen::say(app::Context& ctx, const char* text) noexcept {
   note_ = text;
   note_until_ = ctx.uptime_ms() + kNoteMs;
@@ -124,7 +121,9 @@ bool SongScreen::start(app::Context& ctx) noexcept {
   return true;
 }
 
-void SongScreen::update(app::Context& ctx) noexcept {
+// The player's per-pass part, from App::update every pass of the main loop, on whichever screen is up: a screen button leaves SONG at any moment
+// (the kit gives App::input the key first), and a chain that only SONG's update walked would stop mid-song. PLAY stops it (!playing() below).
+void SongScreen::service(app::Context& ctx) noexcept {
   if (chain_ != nullptr && seq_ != nullptr) {
     dsp::Engine& e = ctx.engine();
     if (player_.active && !e.playing()) {
@@ -161,6 +160,10 @@ void SongScreen::update(app::Context& ctx) noexcept {
       }
     }
   }
+}
+
+// What drawing needs: the note's expiry and the redraw (the lit row and the lap move with the transport).
+void SongScreen::update(app::Context& ctx) noexcept {
   if (note_ != nullptr && ctx.uptime_ms() >= note_until_) {
     note_ = nullptr;
   }
@@ -276,7 +279,7 @@ void SongScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
   };
   h.summary = "THE CHAIN: UP TO 16 ROWS OF A PATTERN AND ITS REPEATS. PLAY RUNS IT FROM THE\n"
-              "CURSOR; A CHANGE LANDS AT THE PATTERN'S END. LEAVING KEEPS THE PATTERN PLAYING.";
+              "CURSOR AND IT PLAYS ON WHEN YOU LEAVE; PLAY STOPS IT. A CHANGE LANDS AT THE PATTERN'S END.";
   h.fkey[0] = "ADD AFTER THE CURSOR";
   h.fkey[1] = "ENCODER: THE REPEATS";
   h.fkey[2] = "PLAY THE CHAIN AGAIN";

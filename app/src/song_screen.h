@@ -9,12 +9,12 @@
 //   F3 LOOP CHAIN   toggles (the chain goes back to its first entry when it ends).          F8 BACK   PERFORM.
 //   PLAY   the app's (app.cpp hands it to start() while this screen is up and the transport is stopped): the chain plays from the cursor's row.
 //
-// How a chain change lands: the step sequencer counts every pattern it takes (StepSeq::laps()); update() walks song_logic.h's player on that
+// How a chain change lands: the step sequencer counts every pattern it takes (StepSeq::laps()); service() walks song_logic.h's player on that
 // count and, each time a lap begins, asks StepSeq::request_pattern for the pattern of the lap after it. That is the PATTERN screen's own request,
 // so the change lands on the pattern's last step as a manual one does: no timing path of its own, nothing added to the render but one byte
 // store per pattern end. The row playing is drawn lit (it leads the audio by one step: the sequencer counts at a pattern's last step); the
 // cursor is free. At the end of a chain that does not loop the transport stops a step's seven eighths after the last lap's end was seen.
-// Leaving the screen ends the walking, cancels the request pending and leaves the transport playing the pattern it plays.
+// Leaving the screen does not end the walking: App::update calls service() every pass, so the chain plays on under any screen; PLAY stops it.
 //
 // Main loop only. The state is about 64 bytes of SRAM_U; the chain and the player's counters are not shared with the render context.
 
@@ -39,12 +39,13 @@ class SongScreen final : public o3sdk::app::Screen {
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
   const o3sdk::ui::Theme* theme(const o3sdk::app::Context&) const noexcept override;
   void enter(o3sdk::app::Context& ctx) noexcept override;
-  void leave(o3sdk::app::Context& ctx) noexcept override;
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
   void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
   void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;
   void help(const o3sdk::app::Context& ctx, o3sdk::app::Help& help) const noexcept override;
   void update(o3sdk::app::Context& ctx) noexcept override;
+  // Every pass of the main loop, from App::update, whichever screen is up: the chain's walking (laps, advance, the stop at its end).
+  void service(o3sdk::app::Context& ctx) noexcept;
 
   // PLAY while this screen is up (app.cpp): with the transport stopped and the chain not empty, queue the cursor's entry and start the
   // transport; true when it did. Otherwise false and the app's PLAY does what it does everywhere.

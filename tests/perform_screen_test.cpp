@@ -9,6 +9,7 @@
 #include <o3sdk/sim/harness.h>
 
 #include <o3_voc03er/route.h>
+#include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <cmath>
 #include <cstddef>
@@ -399,4 +400,42 @@ TEST_CASE("perform: REC captures the live source into the first empty slot and t
   const float mod2 = unit_param(h, kModSrc);
   CHECK(mod2 == doctest::Approx(3.0f));  // SPEAKS holds SLOT 1 (the cancelled one stayed empty, or was the first)
   CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// Finding 2 of the review: the kit hands App::input the key first, so a screen button can leave PERFORM with a take in hand. The capture's tick is App::update's
+// (PerformScreen::service), not PERFORM's update(): the take ends on PATTERN as it does on PERFORM (the same run as the test above, with the screen left).
+TEST_CASE("perform: a REC take goes on to its end when PERFORM is left (the capture is the app's service, not the screen's update)") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::Rec);
+  h.run_ms(300);
+  tap(h, app::Button::Pattern);  // leaves PERFORM with the take armed
+  h.run_ms(9000);
+  CHECK(unit_param(h, kModSrc) == doctest::Approx(3.0f));  // SPEAKS holds SLOT 1: the take finished with no PERFORM under it
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// Finding 10: a second tap on F1 MODE steps round (ROBOT to BANDS); the encoder stops at the ends.
+TEST_CASE("perform: F1 MODE taps wrap round, the encoder clamps") {
+  auto h = std::make_unique<sim::Harness>(::o3sdk_app());
+  REQUIRE(h->start());
+  h->run_ms(100);
+  constexpr std::uint16_t kMode = o3_voc03er::Vocoder::Mode;
+  tap(*h, app::Button::F1);  // the first tap takes the focus and changes nothing
+  h->run_ms(20);
+  h->turn(-8);  // the encoder clamps at the first mode ...
+  h->run_ms(20);
+  CHECK(unit_param(*h, kMode) == doctest::Approx(0.0f));
+  h->turn(8);  // ... and at the last (ROBOT)
+  h->run_ms(20);
+  CHECK(unit_param(*h, kMode) == doctest::Approx(3.0f));
+  h->turn(1);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kMode) == doctest::Approx(3.0f));
+  tap(*h, app::Button::F1);  // a tap at ROBOT goes round to the first mode, where it used to stop
+  h->run_ms(20);
+  CHECK(unit_param(*h, kMode) == doctest::Approx(0.0f));
+  tap(*h, app::Button::F1);
+  h->run_ms(20);
+  CHECK(unit_param(*h, kMode) == doctest::Approx(1.0f));
 }

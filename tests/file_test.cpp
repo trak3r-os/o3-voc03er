@@ -264,3 +264,49 @@ TEST_CASE("file: U9c4 level steps, captured values and their restore") {
   old.cuts.length = 1000;
   CHECK_FALSE(fl::restore_values(old, 1000, back));
 }
+
+TEST_CASE("file: a LOAD goes on to its end when FILE is left at once (the job is the app's service, not the screen's update)") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-leave");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::F1);  // two taps of PERFORM's mode key: BANDS to TALK
+  tap(*h, app::Button::F1);
+  h->run_ms(700);
+  REQUIRE(state(*h).find("voc_mode=talk") != std::string::npos);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F2);  // SAVE AS: the name starts as PROJECT
+  h->run_ms(20);
+  tap(*h, app::Button::F7);
+  h->run_ms(300);
+  REQUIRE(std::filesystem::exists(std::filesystem::path(card_dir.path()) / "Apps" / "o3_voc03er" / "PROJECT" / "project.o3a"));
+  tap(*h, app::Button::F8);
+  tap(*h, app::Button::F1);  // the live mode moves off TALK; the file still holds TALK
+  h->run_ms(600);
+  REQUIRE(state(*h).find("voc_mode=talk") == std::string::npos);
+
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+  h->run_ms(300);
+  // OPEN and leave in the same moment: the screen sees the load start, then it is gone.
+  h->press(app::Button::F1);
+  h->press(app::Button::Performance);
+  h->run_ms(5);
+  h->release(app::Button::F1);
+  h->release(app::Button::Performance);
+  h->run_ms(1500);
+  CHECK(state(*h).find("voc_mode=talk") != std::string::npos);
+  CHECK(h->runtime().frame_failures() == 0u);
+
+  // FILE is free again after the job: a second visit works as a fresh one.
+  tap(*h, app::Button::File);
+  h->run_ms(100);
+  tap(*h, app::Button::F8);
+  h->run_ms(100);
+  CHECK(h->runtime().frame_failures() == 0u);
+}

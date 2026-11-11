@@ -249,3 +249,41 @@ TEST_CASE("song: INSERT builds a chain, PLAY runs it and stops at its end, an em
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
   CHECK(h.runtime().frame_failures() == 0u);
 }
+
+// Finding 7 of the review: the kit hands App::input the key first, so a screen button can leave SONG at any moment. The chain's walking is App::update's
+// (SongScreen::service), not SONG's update(): it plays on and stops at its end under another screen, and PLAY there stops it for good.
+TEST_CASE("song: the chain plays on and stops at its end when SONG is left; PLAY on another screen stops it") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Song);
+  h.run_ms(60);
+  tap(h, app::Button::Insert);
+  tap(h, app::Button::Insert);
+  h.run_ms(60);
+  tap(h, app::Button::Up);
+  tap(h, app::Button::Play);  // from row 0: two laps, then the end
+  h.run_ms(300);
+  REQUIRE(h.engine().playing());
+  tap(h, app::Button::Performance);  // leaves SONG with the chain walking
+  h.run_ms(300);
+  CHECK(h.engine().playing());
+  h.run_ms(12000);
+  CHECK_FALSE(h.engine().playing());  // the chain ended under PERFORM and stopped the transport
+
+  // PLAY on PERFORM while the chain walks stops it, and the stale player must not stop the next PLAY at the chain's end.
+  tap(h, app::Button::Song);
+  h.run_ms(60);
+  tap(h, app::Button::Play);
+  h.run_ms(300);
+  REQUIRE(h.engine().playing());
+  tap(h, app::Button::Performance);
+  h.run_ms(100);
+  tap(h, app::Button::Play);
+  h.run_ms(100);
+  CHECK_FALSE(h.engine().playing());
+  tap(h, app::Button::Play);
+  h.run_ms(12000);
+  CHECK(h.engine().playing());  // a plain PLAY: no chain behind it
+  CHECK(h.runtime().frame_failures() == 0u);
+}

@@ -64,6 +64,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;
   void help(const o3sdk::app::Context& ctx, o3sdk::app::Help& help) const noexcept override;
   void update(o3sdk::app::Context& ctx) noexcept override;
+  // Every pass of the main loop, from App::update, whichever screen is up: advances a REC capture (a screen button can leave PERFORM at any moment).
+  void service(o3sdk::app::Context& ctx) noexcept;
 
   // PERFORMANCE pressed while this screen is up: the encoder is free (it bends) / app.cpp's pitch bend: the wheel's semitones.
   void free_encoder(o3sdk::app::Context& ctx) noexcept;
@@ -118,7 +120,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   void press_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void latch(o3sdk::app::Context& ctx, bool on) noexcept;
-  void turn(o3sdk::app::Context& ctx, int delta, bool coarse) noexcept;
+  void turn(o3sdk::app::Context& ctx, int delta, bool coarse, bool tap = false) noexcept;
   void shift_key(o3sdk::app::Context& ctx, unsigned key) noexcept;
   void toggle_strip(o3sdk::app::Context& ctx) noexcept;
   void apply_bend(o3sdk::app::Context& ctx) noexcept;
@@ -177,7 +179,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   // The pickers: 0 closed, 1 SPEAKS, 2 SOUNDS (its rows are g_pd.pick). Main loop only.
   std::uint8_t pick_ = 0;
   std::uint8_t pick_cursor_ = 0;
-  // The capture (REC): Starting (Rec written, waiting for the unit to show it), Active (armed or recording). Main loop only, advanced by update().
+  // The capture (REC): Starting (Rec written, waiting for the unit to show it), Active (armed or recording). Main loop only, advanced by service() (App::update, every pass).
   enum class Cap : std::uint8_t { Idle, Starting, Active };
   Cap cap_ = Cap::Idle;
   std::uint8_t cap_slot_ = 0;

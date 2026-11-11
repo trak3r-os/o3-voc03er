@@ -51,6 +51,7 @@ struct FileData {
   char pending[40];
   const char* note;
   std::uint64_t note_until;
+  bool note_unseen;  // the note was set while another screen was up (a job ended after FILE was left): enter() keeps it
   char note_buf[72];
   // SAVE WAVS and the WAVs of a LOAD (U9c3).
   std::uint32_t lens[fl::kWavSlots];  // the length of each slot at F5 (0: no audio, no WAV)
@@ -118,29 +119,32 @@ const char* FileScreen::note() const noexcept { return g_fd.note != nullptr ? g_
 void FileScreen::say(app::Context& ctx, const char* text) noexcept {
   g_fd.note = text;
   g_fd.note_until = ctx.uptime_ms() + kNoteMs;
+  g_fd.note_unseen = ctx.screen() != this;
   ctx.redraw();
 }
 
+// A job in hand (a save, a load, a restore, a WAV run) goes on while FILE is not the screen: service() advances it from App::update every pass, and enter() leaves
+// its state as it is. What a job said when it ended while FILE was away is still on the strip now.
 void FileScreen::enter(app::Context& ctx) noexcept {
-  g_fd.stage = kMenu;
-  g_fd.ask = kNone;
-  g_fd.note = nullptr;
+  if (g_fd.stage < kSaving) {
+    g_fd.stage = kMenu;
+    g_fd.ask = kNone;
+  }
+  if (g_fd.note_unseen && g_fd.note != nullptr) {
+    g_fd.note_until = ctx.uptime_ms() + kNoteMs;
+  } else {
+    g_fd.note = nullptr;
+  }
+  g_fd.note_unseen = false;
   ctx.redraw();
 }
 
-void FileScreen::leave(app::Context& ctx) noexcept {
-  if (g_fd.stage == kLoading || g_fd.stage == kSaving) {
-    ctx.files().cancel();  // the buffers are ours again when the job has ended; a half-read file is never decoded
+// Leaving gives nothing up: a card job, a restore and a WAV run are not FILE's screen but the app's work (a screen button can leave at any moment), and they end in
+// service(). Only the menu's own state goes.
+void FileScreen::leave(app::Context&) noexcept {
+  if (g_fd.stage < kSaving) {
+    g_fd.stage = kMenu;
   }
-  if (g_fd.stage == kRestoring) {
-    g_fd.next = kEngineIds;  // the rest of a restore is done on the spot (a few dozen values; a full ring leaves the rest as it is)
-    apply(ctx, false);       // the slots' WAVs are not read after a screen that was left
-  }
-  if (wav_stage()) {
-    abort_wavs(ctx);
-  }
-  set_waiting(0);
-  g_fd.stage = kMenu;
   g_fd.ask = kNone;
   picker_.close();
   names_.close();
@@ -355,6 +359,7 @@ void FileScreen::start_new(app::Context& ctx) noexcept {
   g_fd.stage = kRestoring;
 }
 
+// What drawing needs: the note's expiry and the picker's listing. The jobs are not advanced here but in service().
 void FileScreen::update(app::Context& ctx) noexcept {
   if (g_fd.note != nullptr && ctx.uptime_ms() >= g_fd.note_until) {
     g_fd.note = nullptr;
@@ -363,10 +368,10 @@ void FileScreen::update(app::Context& ctx) noexcept {
   if (picker_.active()) {
     picker_.update(ctx);
   }
-  tick(ctx);
 }
 
-void FileScreen::tick(app::Context& ctx) noexcept {
+// The jobs' advance, from App::update every pass of the main loop whichever screen is up.
+void FileScreen::service(app::Context& ctx) noexcept {
   app::Files& files = ctx.files();
   if (g_fd.stage == kWavList) {
     tick_wav_list(ctx);
@@ -733,7 +738,7 @@ void FileScreen::end_wav_loads(app::Context& ctx) noexcept {
   say(ctx, g_fd.note_buf);
 }
 
-// F8 or leaving the screen: the job in hand is given up (the kit removes a half WAV; a copy into a slot is finished and sent), the rest of the run is not started.
+// F8: the job in hand is given up (the kit removes a half WAV; a copy into a slot is finished and sent), the rest of the run is not started.
 void FileScreen::abort_wavs(app::Context& ctx) noexcept {
   if (g_fd.stage == kWavList || g_fd.stage == kWavSave) {
     ctx.files().cancel();

@@ -555,6 +555,11 @@ void PerformScreen::update(app::Context& ctx) noexcept {
     flash_[0] = '\0';
     ctx.redraw();
   }
+}
+
+// The capture's per-pass part, from App::update every pass of the main loop: a screen button leaves PERFORM at any moment (the kit gives App::input the key first),
+// and a take that only PERFORM's update advanced would run on to its 16 s limit on PATTERN, SONG, MASTER or FILE. Not in update(): it never ticks twice in a pass.
+void PerformScreen::service(app::Context& ctx) noexcept {
   if (cap_ != Cap::Idle) {
     capture_tick(ctx);
   }
@@ -862,7 +867,7 @@ void PerformScreen::bottom_kind(app::Context& ctx, int delta) noexcept {
   ctx.redraw();
 }
 
-void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
+void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) noexcept {
   dsp::Engine& e = ctx.engine();
   const unsigned mode = pl::mode_index(e.param(voice_, Vocoder::Mode));
   if (sfocus_ == 1u || sfocus_ == 2u) {  // SHIFT + F2 GATE, F3 ARP: the unit's enums, stepped round
@@ -915,7 +920,10 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse) noexcept {
   }
   switch (focus_) {
     case 0:
-      (void)e.set_param(voice_, Vocoder::Mode, static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, static_cast<int>(kModeCount) - 1)));
+      // A tap of the key steps round (ROBOT to BANDS: a tap has no end to stop at); a detent of the encoder stops at the ends.
+      (void)e.set_param(voice_, Vocoder::Mode,
+                        tap ? static_cast<float>(pl::step_wrapped(mode, delta, kModeCount))
+                            : static_cast<float>(pl::step_clamped(static_cast<int>(mode), delta, 0, static_cast<int>(kModeCount) - 1)));
       break;
     case 1:
       if (delta != 0) {
@@ -1002,7 +1010,7 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       focus_ = k;
       ctx.redraw();
     } else if (k == focus_) {
-      turn(ctx, 1, false);  // a second tap steps the value on
+      turn(ctx, 1, false, true);  // a second tap steps the value on
     } else {
       close_picker(ctx);
       focus_ = k;
@@ -1413,7 +1421,7 @@ void PerformScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 // on this screen has a row, and tests/perform_screen_test.cpp holds that. The legend carries the groups of the page in force only.
 void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
+      {Button::Params, "PARAMS: THREE PAGES", nullptr},
       {Button::Performance, "AGAIN: FREES THE ENCODER", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
@@ -1421,7 +1429,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::SampleLoad, "SAMPLE LOAD", nullptr},
       {Button::SamplePlay, "SAMPLE: THE SLOTS", nullptr},
       {Button::SampleEdit, "SAMPLE EDIT: THE CUTS", nullptr},
-      {Button::SampleRec, "SAMPLE REC (SLICE U4)", nullptr},
+      {Button::SampleRec, "SAMPLE REC: A TAKE", nullptr},
       {Button::Song, "SONG", nullptr},
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
       {Button::Note, "PATTERN: NOTE LANE", nullptr},

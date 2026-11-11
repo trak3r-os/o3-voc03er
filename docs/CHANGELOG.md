@@ -27,6 +27,14 @@
   the slot's whole loop and lets it resume one slice behind: it turns the loop off, LOOP reads OFF, and F5 starts it again. The same holds
   for a slice from PATTERN's SLICE lane or from MIDI. SAMPLE's play line shows what is left of each sounding slice.
 - PATTERN: a step pad past LENGTH no longer moves the cursor off the pattern.
+- Work no longer stops when a screen button leaves its screen:
+  - A save, an open or a WAV run on FILE goes on to its end; it used to be cancelled silently, and an open left part of the old
+    project's values. What it said is on the strip at the next visit.
+  - A take recorded with REC on PERFORM ends at its bars on any screen and the slot takes its side; it used to record on to its 16 s
+    limit on PATTERN, SONG, MASTER or FILE.
+  - The SONG chain plays on under any screen; PLAY stops it.
+- PERFORM: a tap on F1 MODE steps round (ROBOT back to BANDS); it used to stop at ROBOT. The encoder still stops at the ends.
+- The boot screen and the header strip read the project's version (it said 0.1.0). PERFORM's HELP no longer names a development slice.
 - The manual: what a project keeps (the patterns, the chain, the route, the vocoder settings, the tempo, the current pattern, the
   octave, the chord kind, the pad mode, the slot data) and what it does not keep yet; PATTERN's F8 SAVE writes the patterns, not the
   project; a chord latches when SHIFT is pressed while a chord pad is held, not the other way round; QUALITY is TALK's detail, not

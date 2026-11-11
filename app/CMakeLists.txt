@@ -10,3 +10,5 @@ o3sdk_app(o3_voc03er SOURCES src/app.cpp src/skin/ornoir.cpp src/perform_screen.
 )
 # <o3_voc03er/pad_map.h>: the pure parts of the app, which the tests include.
 target_include_directories(app_o3_voc03er PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# The version the boot screen and the header strip show: the project's (the top CMakeLists.txt), so a release bump is made once.
+target_compile_definitions(app_o3_voc03er PRIVATE O3_VOC03ER_VERSION="${PROJECT_VERSION}")

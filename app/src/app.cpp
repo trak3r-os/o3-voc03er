@@ -119,7 +119,7 @@ using o3_voc03er::source_name;
 class MyApp final : public app::App {
  public:
   const app::AppInfo& info() const noexcept override {
-    static constexpr app::AppInfo kInfo{"O3-VOC03ER", "0.1.0"};  // upper case: it is shown in the header strip and on the boot screen
+    static constexpr app::AppInfo kInfo{"O3-VOC03ER", O3_VOC03ER_VERSION};  // upper case: it is shown in the header strip and on the boot screen
     return kInfo;
   }
 
@@ -175,6 +175,11 @@ class MyApp final : public app::App {
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
     sample_.service(ctx);  // slice voices end and tables follow lengths whichever screen is up
+    // The screens' work that must not stop when one leaves (a screen button can leave at any moment; the kit gives App::input the key first). FILE's goes before
+    // this pass's own job below starts, so that its job is settled (or still running) when files.busy() is read.
+    file_.service(ctx);     // a save, a load, a restore and a WAV run
+    perform_.service(ctx);  // PERFORM's REC capture
+    song_.service(ctx);     // the SONG chain's walking
     {  // M3: the carrier's MIDI notes (the unit's ring) record on PATTERN only, as the pads write there; on any other screen they are dropped
       o3_voc03er::Vocoder::NoteIn in;
       while (voc_.take_note_in(in)) {
@@ -198,7 +203,7 @@ class MyApp final : public app::App {
       settle(ctx, st.phase == app::Files::Status::Done);
       return;
     }
-    if (files.busy() || !files.available() || files.card() != app::Files::Card::Ready) {
+    if (files.busy() || file_.busy() || !files.available() || files.card() != app::Files::Card::Ready) {
       return;
     }
     // At start, as soon as the card is ready (the simulator and the unit mount it after setup()): the pattern, then the octave. A first run
@@ -276,7 +281,7 @@ class MyApp final : public app::App {
       return true;
     }
     if (in.press(app::Button::SampleLoad)) {  // the WAV picker; F8 returns to the screen it was opened from
-      if (ctx.screen() != &sample_load_) {
+      if (ctx.screen() != &sample_load_ && !file_.busy()) {  // not while FILE's job is in hand: a WAV run reads through this screen's loader (its enter() resets it)
         sample_load_.set_back(ctx.screen());
         ctx.show(sample_load_);
       }
@@ -337,7 +342,7 @@ class MyApp final : public app::App {
   // FILE's save, and PATTERN's F8 (through save_bank_cb): the bank to the card; false when a file job is still running.
   bool save_bank(app::Context& ctx) noexcept {
     app::Files& files = ctx.files();
-    if (op_ != Op::None || files.busy()) {
+    if (op_ != Op::None || files.busy() || file_.busy()) {  // FILE's job goes on under any screen: its restore and its WAV run hold no card job between two steps
       return false;
     }
     files.set_quiet(false);  // the user asked: the strip says SAVED, NO CARD, ...

@@ -119,7 +119,7 @@ now.
 
 | Key | What it does |
 |---|---|
-| F1 MODE | BANDS, TALK, TUNE or ROBOT (section 5). It steps one way: to go back, tap F1 to focus it and turn the encoder down |
+| F1 MODE | BANDS, TALK, TUNE or ROBOT (section 5). A tap steps round, from ROBOT back to BANDS; the encoder stops at the ends |
 | F2 SPEAKS | A list: LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB, or SLOT 1 to 4. UP and DOWN move, F1 takes the row, F8 backs out |
 | F3 SOUNDS | A list: SYNTH, NOISE, LIVE, or SLOT 1 to 4 |
 | F4 KEY | The root of the key. Chords and pitch correction share it |
@@ -370,7 +370,8 @@ leaves it as it is). A different pattern starts when the one that plays ends.
 
 SONG chains patterns: up to sixteen rows, each a pattern letter and a number of repeats. UP and DOWN move the cursor; the encoder changes the
 row's letter, and after F2 its repeats (1 to 64). F1 ADD or INSERT adds a row after the cursor, DELETE removes one. PLAY with SONG open
-starts from the cursor's row. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
+starts from the cursor's row. The chain plays on when you leave SONG, so you can play over it from PERFORM; PLAY stops it. A change lands
+at the end of the pattern that plays. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
 ## 8. MIDI
 
 MIDI notes play the synth beside the pads and share its voices. They also feed TUNE when NOTES IN is on. Pitch bend moves the synth; the
@@ -404,11 +405,14 @@ and the preset's name.
 | F3 SAVE AS | Saves under a new name |
 | F4 NEW | Starts an empty project |
 | F5 SAVE WAVS | Writes each slot's sound next to the project file. A slot can take a while on a slow card |
-| F8 BACK | Leaves FILE |
+| F8 BACK | Leaves FILE. During SAVE WAVS or an open's WAVs it gives the run up: a half-written WAV is removed, the rest are not written |
 
 ![SAVE AS: a name typed with the pads' keyboard on screen](manual/img/file-name.png)
 
 *SAVE AS: the name is typed with the on-screen keys. F1 changes the type, F7 accepts, F8 cancels.*
+
+A save or an open goes on when another button leaves FILE, and what it said is on the strip at your next visit. SAMPLE LOAD does not
+open while FILE's job runs.
 
 Nothing is saved by itself: FILE saves only when you tell it. The app also keeps two small files of its own in `Apps/o3_voc03er/`, `pattern.o3a` (the working patterns) and
 `config.o3a` (settings); the previous copy of the patterns is kept beside it as `pattern.o3a.bak`. A damaged project file is refused
