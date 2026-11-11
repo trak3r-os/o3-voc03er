@@ -325,6 +325,44 @@ TEST_CASE("file: a LOAD goes on to its end when FILE is left at once (the job is
   CHECK(h->runtime().frame_failures() == 0u);
 }
 
+TEST_CASE("file: LE1 SAMPLE LOAD pressed while FILE runs a job is refused where the user is, and works again when the job ends") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-busy");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F2);  // SAVE AS PROJECT
+  h->run_ms(20);
+  tap(*h, app::Button::F7);
+  h->run_ms(300);
+  REQUIRE(std::filesystem::exists(std::filesystem::path(card_dir.path()) / "Apps" / "o3_voc03er" / "PROJECT" / "project.o3a"));
+  tap(*h, app::Button::F8);
+  h->run_ms(40);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+  h->run_ms(300);
+  // OPEN, and in a later pass SAMPLE LOAD: the job is in hand, so the key opens nothing (the state line names the screen SAMPLE_LOAD).
+  h->press(app::Button::F1);  // events are taken in order: OPEN starts the job, then SAMPLE LOAD finds it in hand
+  h->press(app::Button::SampleLoad);
+  h->run_ms(1);
+  h->release(app::Button::F1);
+  h->release(app::Button::SampleLoad);
+  CHECK(state(*h).find("screen=SAMPLE_LOAD") == std::string::npos);
+  CHECK(state(*h).find("file_note=FILE_IS_BUSY") != std::string::npos);
+  CHECK(state(*h).find("screen=SAMPLE_LOAD") == std::string::npos);
+  CHECK(state(*h).find("screen=FILE") != std::string::npos);
+  h->run_ms(1500);
+  CHECK(h->runtime().frame_failures() == 0u);
+  tap(*h, app::Button::SampleLoad);
+  h->run_ms(100);
+  CHECK(state(*h).find("screen=SAMPLE_LOAD") != std::string::npos);
+}
+
 namespace {
 
 // A project file of a made-up STAT 1.1 (and TRIG and CHOKE per slot) put on the card under `name`.

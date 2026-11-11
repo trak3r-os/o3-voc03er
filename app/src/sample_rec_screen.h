@@ -52,6 +52,9 @@ class SampleRecScreen final : public o3sdk::app::Screen {
   bool autoplay() const noexcept { return autoplay_; }
   bool recording() const noexcept { return phase_ != Phase::Idle; }
 
+  // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
+  void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
+
  private:
   enum class Phase : std::uint8_t { Idle, Starting, Active };
 

@@ -56,6 +56,7 @@
   - A take recorded with REC on PERFORM ends at its bars on any screen and the slot takes its side; it used to record on to its 16 s
     limit on PATTERN, SONG, MASTER or FILE.
   - The SONG chain plays on under any screen; PLAY stops it.
+- SAMPLE LOAD pressed while FILE runs a save, an open or a WAV run says FILE IS BUSY on the screen that is up; it used to do nothing.
 - PERFORM: a tap on F1 MODE steps round (ROBOT back to BANDS); it used to stop at ROBOT. The encoder still stops at the ends.
 - The boot screen and the header strip read the project's version (it said 0.1.0). PERFORM's HELP no longer names a development slice.
 - The manual: what a project keeps (the patterns, the chain, the route, the vocoder settings, the tempo, the current pattern, the

@@ -91,6 +91,9 @@ class SampleScreen final : public o3sdk::app::Screen {
   // The side's ink of a slot (SPEAKS, SOUNDS, or the neutral rule colour): the tint of its overview picture.
   o3sdk::ui::Rgb slot_ink(o3sdk::app::Context& ctx, unsigned slot) const noexcept;
 
+  // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
+  void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
+
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;

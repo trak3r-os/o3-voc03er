@@ -58,6 +58,9 @@ class SongScreen final : public o3sdk::app::Screen {
   unsigned playing_row() const noexcept { return player_.active ? player_.entry : kChainMax; }
   unsigned playing_lap() const noexcept { return player_.lap; }
 
+  // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
+  void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
+
  private:
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void sync_ahead() noexcept;  // the request for the lap after the one in progress (after every edit and every lap)

@@ -43,6 +43,9 @@ class MasterScreen final : public o3sdk::app::Screen {
 
   unsigned focus() const noexcept { return focus_; }
 
+  // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
+  void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
+
  private:
   master::Avail avail(const o3sdk::app::Context& ctx) const noexcept;
   // The value of key `k` in display units (a percent, tenths of a dB, a source's index).

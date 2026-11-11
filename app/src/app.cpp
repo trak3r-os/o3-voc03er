@@ -281,9 +281,13 @@ class MyApp final : public app::App {
       return true;
     }
     if (in.press(app::Button::SampleLoad)) {  // the WAV picker; F8 returns to the screen it was opened from
-      if (ctx.screen() != &sample_load_ && !file_.busy()) {  // not while FILE's job is in hand: a WAV run reads through this screen's loader (its enter() resets it)
-        sample_load_.set_back(ctx.screen());
-        ctx.show(sample_load_);
+      if (ctx.screen() != &sample_load_) {
+        if (file_.busy()) {  // not while FILE's job is in hand: a WAV run reads through this screen's loader (its enter() resets it); the screen up says why
+          say_file_busy(ctx);
+        } else {
+          sample_load_.set_back(ctx.screen());
+          ctx.show(sample_load_);
+        }
       }
       ctx.redraw();
       return true;
@@ -337,6 +341,32 @@ class MyApp final : public app::App {
       }
     }
     return false;
+  }
+
+  // The refusal of a key App::input handles itself, on the line of the screen that is up (each screen draws its own; the kit's strip is not the app's to write).
+  void say_file_busy(app::Context& ctx) noexcept {
+    static constexpr const char* kText = "FILE IS BUSY";
+    const app::Screen* s = ctx.screen();
+    if (s == &perform_) {
+      perform_.notice(ctx, kText);
+    } else if (s == &pattern_) {
+      pattern_.notice(ctx, kText);
+    } else if (s == &sample_) {
+      sample_.notice(ctx, kText);
+    } else if (s == &sample_edit_) {
+      sample_edit_.notice(ctx, kText);
+    } else if (s == &sample_rec_) {
+      sample_rec_.notice(ctx, kText);
+    } else if (s == &params_) {
+      params_.notice(ctx, kText);
+    } else if (s == &song_) {
+      song_.notice(ctx, kText);
+    } else if (s == &master_) {
+      master_.notice(ctx, kText);
+    } else if (s == &file_) {
+      file_.notice(ctx, kText);
+    }
+    ctx.redraw();
   }
 
   // FILE's save, and PATTERN's F8 (through save_bank_cb): the bank to the card; false when a file job is still running.
@@ -571,7 +601,7 @@ class MyApp final : public app::App {
   }
 
   // The console's `state` after the kit's pairs (`o3console.py state` over USB; the same line is in the simulator's tests): the keyboard
-  // octave (PERFORM's), pattern A's steps and carrier steps, PATTERN's cursor, the transport and the chain.
+  // octave (PERFORM's), pattern A's steps and carrier steps, PATTERN's cursor, the transport, the chain and FILE's strip note.
   std::size_t describe_state(const app::Context& ctx, char* out, std::size_t cap) const noexcept override {
     app::StateWriter w(out, cap);
     w.sint("octave", perform_.octave());
@@ -583,6 +613,7 @@ class MyApp final : public app::App {
     w.num("chain_row", song_.playing_row());
     w.num("chain_cursor", song_.cursor());
     w.num("chain_loop", g_chain.loop);
+    w.str("file_note", file_.note(), 24);  // the line FILE's strip says now (a refusal, SAVED, a failure): empty when none
     const app::AudioIn& in = ctx.audio_in();
     const bool have = in.available();
     w.str("in_src", have ? source_name(in.source()) : "none");

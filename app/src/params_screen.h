@@ -47,6 +47,9 @@ class ParamsScreen final : public o3sdk::app::Screen {
   unsigned page() const noexcept { return page_; }
   unsigned focus() const noexcept { return focus_; }
 
+  // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
+  void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
+
  private:
   void step(o3sdk::app::Context& ctx, unsigned key, int delta, bool coarse, bool tap) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;

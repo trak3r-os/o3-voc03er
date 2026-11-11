@@ -135,6 +135,9 @@ class PerformScreen final : public o3sdk::app::Screen {
   static constexpr std::uint8_t kAuditionVelocity = 110;
   static constexpr unsigned kCurrentVoicing = 4;  // audition_press: the chord uses PERFORM's voicing (0..3 is a voicing of its own, a step's)  // what PERFORM's pads play
 
+  // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): the hint line's moment of text.
+  void notice(o3sdk::app::Context& ctx, const char* text) noexcept { show_flash(ctx, text, ""); }
+
  private:
   void release_all(o3sdk::app::Context& ctx) noexcept;
   void press_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;

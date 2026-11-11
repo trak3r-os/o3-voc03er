@@ -1,0 +1,32 @@
+# SAMPLE LOAD pressed while FILE runs an open says FILE IS BUSY on the screen that is up (PERFORM here) and opens nothing; once the job has ended the key works. Events are taken in order,
+# so F1 (OPEN) starts the job and SAMPLE LOAD finds it in hand. Start from an empty card directory (tests/app_test.cpp gives each scenario a fresh one):
+#
+#   mkdir <dir> <card> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/file_busy.txt --card <card> --out <dir>
+wait 300
+tap file
+wait 40
+tap f2            # SAVE AS: the name starts as PROJECT
+wait 20
+tap f7
+wait 300
+expect file Apps/o3_voc03er/PROJECT/project.o3a
+tap f8
+wait 40
+tap file
+wait 40
+tap f1            # LOAD asks
+tap f1            # the picker lists the project folders
+wait 300
+press f1          # OPEN the folder under the cursor, in the same moment PERFORM, then SAMPLE LOAD: the job is in hand, PERFORM says FILE IS BUSY
+press performance
+press sampleload
+snap 00_busy
+release f1
+release performance
+release sampleload
+expect state screen=PERFORM
+wait 1500
+tap sampleload    # the job has ended: the picker opens
+wait 100
+expect state screen=SAMPLE_LOAD
+snap 01_opens
