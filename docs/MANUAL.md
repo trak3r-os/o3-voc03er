@@ -399,7 +399,7 @@ leaves it as it is). A different pattern starts when the one that plays ends.
 SONG chains patterns: up to sixteen rows, each a pattern letter and a number of repeats. UP and DOWN move the cursor; the encoder changes the
 row's letter, and after F2 its repeats (1 to 64). F1 ADD or INSERT adds a row after the cursor, DELETE removes one. PLAY with SONG open
 starts from the cursor's row. The chain plays on when you leave SONG, so you can play over it from PERFORM; PLAY stops it. A change lands
-at the end of the pattern that plays. While the chain plays it owns what plays: a pattern you pick in PATTERN only changes what that screen shows and edits. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
+at the end of the pattern that plays. While the chain plays it owns what plays: a pattern you pick in PATTERN only changes what that screen shows and edits. Opening a project while it plays starts the new project's chain at its first row after the lap in progress. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
 ## 8. MIDI
 
 MIDI notes play the synth beside the pads and share its voices. They also feed TUNE when NOTES IN is on. Pitch bend moves the synth; the

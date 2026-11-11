@@ -159,6 +159,7 @@ class MyApp final : public app::App {
     pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this, &sample_);
     song_.init(voice, &g_chain, &carriers_, &perform_);
     pattern_.set_song(&song_);
+    file_.set_song(&song_);
     // M1 (docs/UI-DESIGN.md 7c): the notes of the user's MIDI channel play the SYNTH carrier, as the pads do (the unit takes them in apply()).
     // M2: from note 36 the unit fires the SPEAKS slot's slices instead (Vocoder::kSliceNoteLow), told from the pads' notes by kNoteLocal.
     (void)ctx.midi().route(voice, 0);

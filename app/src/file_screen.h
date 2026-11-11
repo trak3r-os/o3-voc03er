@@ -31,6 +31,8 @@
 
 namespace o3_voc03er {
 
+class SongScreen;
+
 class FileScreen final : public o3sdk::app::Screen {
  public:
   FileScreen() noexcept;
@@ -38,6 +40,8 @@ class FileScreen final : public o3sdk::app::Screen {
   // `load` and `mem` (the loop bank, slot n at n * Loop::kMaxSamples): F5 writes the slots out of `mem`, and LOAD reads the WAVs back through `load`'s external entry.
   void init(o3sdk::dsp::UnitId voice, SampleScreen* sample, PerformScreen* perform, PatternScreen* pattern, Bank* bank, Chain* chain, SampleLoadScreen* load,
             std::int16_t* mem) noexcept;
+  // LE4: the SONG screen, told when a load replaces the chain under a player that walks it.
+  void set_song(SongScreen* song) noexcept { song_ = song; }
   // The screen F8 returns to (the one that opened this); nullptr (and the default) is PERFORM.
   void set_back(o3sdk::app::Screen* back) noexcept { back_ = back; }
 
@@ -94,6 +98,7 @@ class FileScreen final : public o3sdk::app::Screen {
   SampleScreen* sample_ = nullptr;
   PerformScreen* perform_ = nullptr;
   PatternScreen* pattern_ = nullptr;
+  SongScreen* song_ = nullptr;
   Bank* bank_ = nullptr;
   Chain* chain_ = nullptr;
   SampleLoadScreen* load_ = nullptr;

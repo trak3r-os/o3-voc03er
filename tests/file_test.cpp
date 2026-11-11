@@ -640,3 +640,59 @@ TEST_CASE("file: P3 NEW puts every field of STAT 1.1 and TRIG and CHOKE back to 
   }
   CHECK(h->runtime().frame_failures() == 0u);
 }
+
+// LE4: a project opened under a walking chain replaces the chain in place. The player used to keep its row (past the new chain's end: the chain then
+// ended at the lap's end, the lit row out of range, and the new chain never played); now it starts over at the new chain's first row.
+TEST_CASE("file: a LOAD under a walking chain starts the new chain at its first row") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-chain");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::Song);
+  h->run_ms(60);
+  tap(*h, app::Button::Insert);  // the project's chain: one row, pattern D
+  h->turn(3);
+  h->run_ms(20);
+  REQUIRE(state_num(*h, "chain") == 1u);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F2);  // SAVE AS: the name starts as PROJECT
+  h->run_ms(20);
+  tap(*h, app::Button::F7);
+  h->run_ms(300);
+  REQUIRE(std::filesystem::exists(std::filesystem::path(card_dir.path()) / "Apps" / "o3_voc03er" / "PROJECT" / "project.o3a"));
+  tap(*h, app::Button::F8);
+
+  tap(*h, app::Button::Song);  // a longer chain of A rows, played from its last row
+  h->run_ms(60);
+  h->turn(-3);
+  tap(*h, app::Button::Insert);
+  tap(*h, app::Button::Insert);
+  tap(*h, app::Button::Insert);
+  h->run_ms(20);
+  REQUIRE(state_num(*h, "chain") == 4u);
+  tap(*h, app::Button::Play);
+  h->run_ms(300);
+  REQUIRE(state_num(*h, "playing") == 1u);
+  REQUIRE(state_num(*h, "chain_row") == 3u);
+  REQUIRE(state_num(*h, "pat_playing") == 0u);
+
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+  h->run_ms(300);
+  tap(*h, app::Button::F1);  // OPEN, under the walking chain
+  h->run_ms(300);
+  REQUIRE(state_num(*h, "chain") == 1u);
+  CHECK(state_num(*h, "chain_row") == 0u);  // not row 3 of a one-row chain
+  bool d_played = false;
+  for (unsigned t = 0; t < 200 && !d_played; ++t) {  // the lap in progress plays out, then the new chain's row 0 (pattern D)
+    h->run_ms(20);
+    d_played = state_num(*h, "playing") == 1u && state_num(*h, "pat_playing") == 3u;
+  }
+  CHECK(d_played);
+  CHECK(h->runtime().frame_failures() == 0u);
+}

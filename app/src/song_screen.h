@@ -58,6 +58,10 @@ class SongScreen final : public o3sdk::app::Screen {
   unsigned playing_row() const noexcept { return player_.active ? player_.entry : kChainMax; }
   unsigned playing_lap() const noexcept { return player_.lap; }
 
+  // LE4: FILE's load put another chain in place. A player that walks it starts over at the new chain's first row: the lap in progress plays out and
+  // the next lap is that row's first (a lap that has not begun yet starts it), the cursor is clamped, and the next request is made again.
+  void chain_replaced() noexcept;
+
   // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
   void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
 

@@ -107,6 +107,20 @@ void SongScreen::sync_ahead() noexcept {
   }
 }
 
+void SongScreen::chain_replaced() noexcept {
+  if (chain_ == nullptr) {
+    return;
+  }
+  cursor_ = static_cast<std::uint8_t>(song::clamp_cursor(*chain_, cursor_));
+  if (!player_.active) {
+    return;
+  }
+  player_.entry = 0;
+  player_.lap = 0;
+  player_.gone = !first_;  // gone: the lap in progress finishes and the next lap is the first of the entry at index 0 (the Play's own lap is that entry's already)
+  sync_ahead();
+}
+
 bool SongScreen::start(app::Context& ctx) noexcept {
   dsp::Engine& e = ctx.engine();
   if (chain_ == nullptr || seq_ == nullptr || e.playing() || !song::start(*chain_, cursor_, player_)) {

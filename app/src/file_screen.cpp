@@ -3,6 +3,7 @@
 
 #include "file_logic.h"
 #include "sample_edit_screen.h"
+#include "song_screen.h"
 #include "skin/ornoir.h"
 
 #include <o3sdk/app/context.h>
@@ -503,6 +504,9 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
   *bank_ = g_proj.bank;
   *chain_ = g_proj.chain;
   pattern_->show(ctx, g_proj.stat != 0u ? g_proj.pattern : pattern_->shown());
+  if (song_ != nullptr) {
+    song_->chain_replaced();  // after the pattern's own request: a chain that walks keeps the last word on what plays next
+  }
   apply_route(ctx);
   apply_slots(ctx);
   if (g_proj.stat != 0u) {
