@@ -782,7 +782,7 @@ TEST_CASE("mouth hook: a vowel writes VOWEL on the step's frame, (value-1)/8, an
   CHECK(rig.of(dsp::EventKind::Param).empty());  // the vocoder's own spy saw no mouth event
 }
 
-TEST_CASE("mouth hook: GLD writes SLIDE (a sixteenth in ms) before VOWEL, the next plain vowel writes SLIDE 0 first") {
+TEST_CASE("mouth hook: GLD writes SLIDE (a sixteenth in ms / 3) before VOWEL, the next plain vowel writes SLIDE 0 first") {
   MouthRig rig;
   REQUIRE(rig.ok);
   PatternData& a = rig.bank.pattern[0];
@@ -795,7 +795,7 @@ TEST_CASE("mouth hook: GLD writes SLIDE (a sixteenth in ms) before VOWEL, the ne
   const std::vector<Seen>& v = rig.ev();
   REQUIRE(v.size() == 7);
   const std::uint16_t id[7] = {kSlideId, kVowelId, kSlideId, kVowelId, kSlideId, kVowelId, kVowelId};
-  const float val[7] = {125.0f, 0.25f, 125.0f, 0.75f, 0.0f, 0.0f, 1.0f};  // 120 BPM: a sixteenth is 125 ms
+  const float val[7] = {125.0f / 3.0f, 0.25f, 125.0f / 3.0f, 0.75f, 0.0f, 0.0f, 1.0f};  // 120 BPM: a sixteenth is 125 ms, the tube's one pole needs a third
   const double at[7] = {0, 0, 1, 1, 2, 2, 3};
   for (unsigned i = 0; i < 7; ++i) {
     INFO("event " << i);
@@ -948,12 +948,33 @@ TEST_CASE("mouth hook: while a strip pad is held the hook emits no mouth event, 
   CHECK(rig.ev().empty());
   REQUIRE(rig.e.stop());
   rig.run(4);
-  CHECK(rig.ev().empty());  // not even the Stop pair: the pad owns the tract
+  CHECK(rig.ev().empty());  // the line wrote nothing, so the Stop has nothing to clear
   rig.seq.set_mouth_hold(false);
   CHECK(!rig.seq.mouth_hold());
   REQUIRE(rig.e.play());
   rig.run_samples(1.5 * kSixteenth);
   CHECK(!rig.ev().empty());
+}
+
+TEST_CASE("mouth hook: a Stop under a held strip pad clears SLIDE (the GLIDE knob must not stay dead) but leaves CLOSE to the pad") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_mouth(a, 0, kGld | 5));  // a slid vowel: SLIDE is on
+  REQUIRE(set_mouth(a, 1, 11));        // a closure still open
+  REQUIRE(rig.e.play());
+  rig.run_samples(1.5 * kSixteenth);
+  const std::size_t before = rig.ev().size();
+  REQUIRE(before == 3);
+  rig.seq.set_mouth_hold(true);  // a pad goes down (a vowel pad holds as well as a closure pad)
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  const std::vector<Seen>& v = rig.ev();
+  REQUIRE(v.size() == before + 1);
+  CHECK(v[before].param == kSlideId);
+  CHECK(v[before].value == 0.0f);
+  rig.run(12);
+  CHECK(rig.ev().size() == before + 1);  // once
 }
 
 TEST_CASE("mouth hook: with no tract unit named the line writes nothing, and a missing mouth is FOLLOW") {

@@ -132,6 +132,12 @@ constexpr bool mouth_valid(unsigned m) noexcept {
   const std::uint8_t b = static_cast<std::uint8_t>(m);
   return mouth_value(b) <= kMouthBack && (!mouth_gld(b) || mouth_is_vowel(b));
 }
+// SLIDE for a move that must arrive within `ms`: the tube's glide is one pole (time constant = the glide), so a third of the time reaches 95 %. The
+// tract's Processor clamps its glide to 5..500 ms, and so does this.
+inline constexpr float kSlideMinMs = 5.0f;
+inline constexpr float kSlideMaxMs = 500.0f;
+constexpr float slide_clamp(float ms) noexcept { return ms < kSlideMinMs ? kSlideMinMs : (ms > kSlideMaxMs ? kSlideMaxMs : ms); }
+constexpr float slide_for(float ms) noexcept { return slide_clamp(ms * (1.0f / 3.0f)); }
 inline std::uint8_t get_mouth(const PatternData& p, unsigned i) noexcept {
   return i < kPatternSteps ? __atomic_load_n(&p.mouth[i], __ATOMIC_RELAXED) : std::uint8_t{0};
 }
@@ -442,10 +448,11 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
 //   LEVEL    the notes' velocity: the last note sets the level of the SYNTH and NOISE carriers (one gain, 100 and up are full). A slice has no level.
 //   MOUTH    (V3, once set_tract() names the tract unit; events go out in every mode, the unit is a bypass outside TRACT) at most 3 Param events
 //            a step, all on the step's frame or on its gate's end: a vowel writes VOWEL at the step's frame; with GLD it writes SLIDE (the step's
-//            length in ms) first, and the next plain vowel writes SLIDE 0 first; a closure writes CLOSE 1..3 at the step's frame and CLOSE 0 at the
+//            length / 3: the tube's glide is one pole, so a third of the time reaches 95 %) first, and the next plain vowel writes SLIDE 0 first; a closure writes CLOSE 1..3 at the step's frame and CLOSE 0 at the
 //            gate's end (a step with no note: at the step's end, the next edge, unless the next step is a closure too); FOLLOW writes nothing. The
 //            hook never writes GLIDE. A Stop (and so a pattern change that lands on it) writes CLOSE 0 and SLIDE 0 once, if the line wrote since the
-//            last one. While set_mouth_hold(true) (a PERFORM strip pad is held: the pad owns the tract) it emits no mouth events at all.
+//            last one. While set_mouth_hold(true) (a PERFORM strip pad, vowel or closure, is held: the pad owns the tract) it emits no mouth event, and
+//            at a Stop CLOSE stays the pad's but SLIDE 0 still goes out, or the GLIDE knob would stay dead.
 // An event budget for a block (the vocoder's; the mouth's events go to the tract unit, whose own 32 are far from used): a step's chord is at most kChordMaxNotes ons, plus the same offs at the gate, one CarSrc and the 3 region events:
 // 14 of kMaxEventsPerUnit (32, of which the notes injected by the main loop take at most kMaxInjectPerUnit = 16, so 16 are left); a block holds
 // at most one step edge.
@@ -665,9 +672,8 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     if (mouth_is_vowel(m)) {
       if (mouth_gld(m)) {
         const float bpm = t.tempo_bpm();
-        float ms = bpm > 0.0f ? 15000.0f / bpm : 2000.0f;  // a sixteenth, in ms
-        ms = ms < 5.0f ? 5.0f : (ms > 2000.0f ? 2000.0f : ms);
-        (void)mouth_emit(ctx, TractParam::Slide, ms, frame);
+        const float ms = bpm > 0.0f ? 15000.0f / bpm : 2000.0f;  // a sixteenth, in ms
+        (void)mouth_emit(ctx, TractParam::Slide, slide_for(ms), frame);
         slid_ = true;
       } else if (slid_ && mouth_emit(ctx, TractParam::Slide, 0.0f, frame)) {
         slid_ = false;
@@ -681,13 +687,15 @@ class StepSeq final : public o3sdk::dsp::Clocked {
     }
     return false;
   }
-  // A Stop: CLOSE 0 and SLIDE 0, once, when the line wrote since the last one.
+  // A Stop: CLOSE 0 (not under a held strip pad: the pad owns it) and SLIDE 0 (always), once, when the line wrote since the last one.
   void mouth_stop(o3sdk::dsp::BlockContext& ctx) noexcept {
-    if (!mouth_dirty_ || tract_ == o3sdk::dsp::kNoUnit || mouth_hold_.load(std::memory_order_relaxed)) {
+    if (!mouth_dirty_ || tract_ == o3sdk::dsp::kNoUnit) {
       return;
     }
-    (void)mouth_emit(ctx, TractParam::Close, 0.0f, 0);
-    (void)mouth_emit(ctx, TractParam::Slide, 0.0f, 0);
+    if (!mouth_hold_.load(std::memory_order_relaxed)) {
+      (void)ctx.emit(tract_, o3sdk::dsp::param_change(static_cast<std::uint16_t>(TractParam::Close), 0.0f, 0));
+    }
+    (void)ctx.emit(tract_, o3sdk::dsp::param_change(static_cast<std::uint16_t>(TractParam::Slide), 0.0f, 0));
     mouth_dirty_ = false;
     closing_ = false;
     slid_ = false;

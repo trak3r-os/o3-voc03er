@@ -292,7 +292,8 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
 
 // ---- the mouth strip (row C set to MOUTH, TRACT mode) ------------------------------------------------------------------------------------
 
-// The step sequencer's mouth line stands aside while a closure pad is down (the pad owns the tract then).
+// The step sequencer's mouth line stands aside while any strip pad is down, a vowel or a closure (the pad owns the tract then); at a Stop it still
+// clears SLIDE, only CLOSE stays the pad's.
 void PerformScreen::sync_mouth_hold() noexcept {
   if (seq_ != nullptr) {
     seq_->set_mouth_hold(mouth_pads_ != 0u);
