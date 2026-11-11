@@ -147,7 +147,7 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "PAGE BEFORE", nullptr},
       {Button::Down, "PAGE AFTER", nullptr},
-      {Button::Params, "NEXT PAGE", "THE OLD PLAY SCREEN"},
+      {Button::Params, "NEXT PAGE", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
@@ -171,11 +171,10 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     }
   }
   h.summary = "THREE PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE. PARAMS OR UP AND DOWN\n"
-              "TURN THE PAGE. DIM KEYS COME WITH A LATER SLICE. THE PADS PLAY CHORDS.";
+              "TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. THE PADS PLAY CHORDS.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
-    h.fkey[i] = "TAP: FOCUS, THEN STEP";
+    h.fkey[i] = pr::focusable(page_, i) ? "TAP: FOCUS, THEN STEP" : nullptr;  // a blank key has no row
   }
-  h.fkey[7] = nullptr;
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "THE LIT F KEY'S VALUE";
@@ -214,6 +213,7 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     if (k.kind == pr::Kind::Later) {
       keys[i].dim = true;
     } else if (k.kind == pr::Kind::Value || k.kind == pr::Kind::App) {
+      keys[i].dim = !pr::key_live(k, mode);  // QUALITY outside TALK
       const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, voice_, k);
       char txt[12];
       pr::format_value(k, v, txt);

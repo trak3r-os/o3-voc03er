@@ -171,4 +171,53 @@ inline bool rest_lane(PatternData& p, unsigned i, Lane lane) noexcept {
   return false;
 }
 
+// ---- COPY, INSERT, DELETE (docs/UI-DESIGN.md section 3): the step under the cursor, or with SHIFT the whole pattern ----------------------
+// One clipboard holds the last COPY: a step (every lane) or a pattern (its LENGTH with it).
+enum class ClipKind : std::uint8_t { Empty, Step, Pattern };
+struct Clip {
+  ClipKind kind = ClipKind::Empty;
+  std::uint32_t word = 0;  // the step (pack_step)
+  PatternData pattern{};
+};
+inline void copy_step(Clip& c, const PatternData& p, unsigned i) noexcept {
+  if (i < kPatternSteps) {
+    c.kind = ClipKind::Step;
+    c.word = load_word(p.step[i]);
+  }
+}
+inline void copy_whole(Clip& c, const PatternData& p) noexcept {
+  c.kind = ClipKind::Pattern;
+  copy_pattern(c.pattern, p);
+}
+// INSERT: the copied step at `i`, the steps from `i` to the end of LENGTH one step right (the last one falls off). False, changing nothing, with
+// no step copied or `i` past LENGTH.
+inline bool insert_step(PatternData& p, unsigned i, const Clip& c) noexcept {
+  const unsigned len = length_of(p);
+  if (c.kind != ClipKind::Step || i >= len) {
+    return false;
+  }
+  for (unsigned j = len - 1u; j > i; --j) {
+    store_word(p.step[j], load_word(p.step[j - 1u]));
+  }
+  store_word(p.step[i], c.word);
+  return true;
+}
+// SHIFT + INSERT: the copied pattern over this one, LENGTH and all. False with no pattern copied.
+inline bool paste_whole(PatternData& p, const Clip& c) noexcept {
+  if (c.kind != ClipKind::Pattern) {
+    return false;
+  }
+  copy_pattern(p, c.pattern);
+  return true;
+}
+// DELETE: the step empty in every lane (a rest, FOLLOW, the default level, no slice), as rest_lane leaves each lane.
+inline bool clear_step(PatternData& p, unsigned i) noexcept { return set_step(p, i, Step{}); }
+// SHIFT + DELETE, once F1 confirms: every step empty; LENGTH stays.
+inline void clear_steps(PatternData& p) noexcept {
+  for (unsigned i = 0; i < kPatternSteps; ++i) {
+    (void)clear_step(p, i);
+  }
+}
+inline constexpr const char* kClearPatternPrompt = "EMPTY THE PATTERN: F1 CONFIRMS";
+
 }  // namespace o3_voc03er::pattern

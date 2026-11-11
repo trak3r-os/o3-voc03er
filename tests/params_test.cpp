@@ -119,7 +119,12 @@ TEST_CASE("params: stepping clamps the linear keys and wraps the round ones") {
   CHECK(pm::step_display(noise, 100, 1, false, true) == 0);  // a tap at the end goes to the other end
   CHECK(pm::step_display(noise, 0, -1, false, true) == 100);
   CHECK(pm::step_display(noise, 40, 0, false) == 40);
-
+  // LEVEL's tap stops at +6 dB: from the default -6 dB, taps go 0, +6, +6, never round to -48 dB (Fable's finding 11)
+  const pm::KeyDef& tap_level = pm::key_def(0, 7);
+  REQUIRE(tap_level.param == Vocoder::Level);
+  CHECK(pm::step_display(tap_level, -60, 1, true, true) == 0);
+  CHECK(pm::step_display(tap_level, 0, 1, true, true) == 60);
+  CHECK(pm::step_display(tap_level, 60, 1, true, true) == 60);
   const pm::KeyDef& key = pm::key_def(2, 0);
   CHECK(pm::step_display(key, 11, 1, false) == 0);
   CHECK(pm::step_display(key, 0, -1, false) == 11);
@@ -159,6 +164,23 @@ TEST_CASE("params: stepping clamps the linear keys and wraps the round ones") {
     v = pm::step_display(attack, v, 1, false);
   }
   CHECK(v == 500);
+}
+
+TEST_CASE("params: QUALITY is live only in TALK, every other key in every mode") {
+  REQUIRE(std::string(o3_voc03er::kModeNames[1]) == "TALK");
+  const pm::KeyDef& quality = pm::key_def(1, 1);
+  CHECK(pm::key_live(quality, 1u));
+  for (unsigned m = 0; m < o3_voc03er::kModeCount; ++m) {
+    CHECK(pm::key_live(quality, m) == (m == 1u));
+    for (unsigned page = 0; page < pm::kPages; ++page) {
+      for (unsigned k = 0; k < pm::kKeys; ++k) {
+        const pm::KeyDef& d = pm::key_def(page, k);
+        if (&d != &quality) {
+          CHECK(pm::key_live(d, m));
+        }
+      }
+    }
+  }
 }
 
 TEST_CASE("params: values read as short text") {

@@ -261,6 +261,75 @@ TEST_CASE("pattern: LENGTH cuts the steps, CLEAR LANE empties the lane") {
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
+TEST_CASE("pattern: COPY, INSERT and DELETE on a step and on a pattern (the logic)") {
+  using o3_voc03er::PatternData;
+  PatternData p{};
+  (void)o3_voc03er::set_length(p, 4);
+  for (unsigned i = 0; i < 4; ++i) {
+    REQUIRE(o3_voc03er::set_note(p, i, 60u + i));
+  }
+  pt::Clip c;
+  CHECK_FALSE(pt::insert_step(p, 0, c));  // nothing copied: nothing changes
+  CHECK_FALSE(pt::paste_whole(p, c));
+  CHECK(o3_voc03er::get_step(p, 0).note == 60u);
+  pt::copy_step(c, p, 3);
+  CHECK_FALSE(pt::paste_whole(p, c));  // a step is not a pattern
+  CHECK_FALSE(pt::insert_step(p, 4, c));  // past LENGTH
+  REQUIRE(pt::insert_step(p, 1, c));
+  const unsigned want[4] = {60, 63, 61, 62};  // the old last step (63) fell off LENGTH; step 5 was not touched
+  for (unsigned i = 0; i < 4; ++i) {
+    CHECK(o3_voc03er::get_step(p, i).note == want[i]);
+  }
+  CHECK(o3_voc03er::get_step(p, 4).note == 0u);
+  REQUIRE(pt::clear_step(p, 2));
+  const o3_voc03er::Step e = o3_voc03er::get_step(p, 2);
+  CHECK((e.note == 0u && e.kind == 0u && e.carrier == 0u && e.level == 0u && e.slice == 0u));
+  pt::Clip whole;
+  pt::copy_whole(whole, p);
+  PatternData q{};
+  REQUIRE(pt::paste_whole(q, whole));
+  CHECK(o3_voc03er::same_pattern(p, q));  // LENGTH too
+  pt::clear_steps(q);
+  CHECK(o3_voc03er::notes_used(q) == 0u);
+  CHECK(o3_voc03er::length_of(q) == 4u);  // emptied, LENGTH kept
+}
+
+TEST_CASE("pattern: COPY + INSERT moves the steps right, DELETE empties one, SHIFT + DELETE asks F1 for the pattern") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  auto shifted = [&h](app::Button b) {
+    h.press(app::Button::Shift);
+    h.run_ms(5);
+    tap(h, b);
+    h.release(app::Button::Shift);
+    h.run_ms(5);
+  };
+  pad(h, 5);   // step 1
+  pad(h, 7);   // step 2
+  pad(h, 24);  // the cursor on step 1
+  tap(h, app::Button::Copy);
+  tap(h, app::Button::Insert);  // step 1's copy at step 1: steps 1 to 3 hold notes now
+  pad(h, 31);                   // the cursor away, on step 8
+  CHECK(rig.led(24) == app::kLedDim);
+  CHECK(rig.led(25) == app::kLedDim);
+  CHECK(rig.led(26) == app::kLedDim);
+  CHECK(rig.led(27) == app::kLedOff);
+  pad(h, 25);
+  tap(h, app::Button::Delete);  // step 2 empty
+  pad(h, 31);
+  CHECK(rig.led(25) == app::kLedOff);
+  CHECK(rig.led(24) == app::kLedDim);
+  CHECK(rig.led(26) == app::kLedDim);
+  shifted(app::Button::Delete);  // asks first
+  tap(h, app::Button::F2);       // any other key cancels
+  CHECK(rig.led(24) == app::kLedDim);
+  shifted(app::Button::Delete);
+  tap(h, app::Button::F1);  // F1 empties the pattern
+  CHECK(rig.led(24) == app::kLedOff);
+  CHECK(rig.led(26) == app::kLedOff);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
 TEST_CASE("pattern: CLEAR LANE's question names the lane as the screen does") {
   for (unsigned l = 0; l < pt::kLanes; ++l) {
     const std::string q = pt::kClearPrompt[l];
@@ -302,7 +371,8 @@ TEST_CASE("pattern: HELP gives a row to every button the screen answers") {
   app::HelpProblem p;
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
-  for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Shift, app::Button::Rec,
+  for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Shift, app::Button::Copy,
+                              app::Button::Insert, app::Button::Delete,
                               app::Button::Params, app::Button::Performance, app::Button::Play, app::Button::Master, app::Button::File,
                               app::Button::SampleLoad, app::Button::SamplePlay, app::Button::SampleEdit, app::Button::SampleRec,
                               app::Button::Song, app::Button::Pattern, app::Button::Note, app::Button::Instr, app::Button::Vol,

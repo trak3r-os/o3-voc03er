@@ -8,15 +8,27 @@
   TRIAD, 7TH, OPEN, POWER, round. F6 TRIAD, the default, keeps the grid as it was; F6 7TH, OPEN or POWER no longer play one kind on two
   rows. With BEND ROW on, the three chord rows play F6's kind and the next two. PERFORM's HELP names each row's kind.
 - PATTERN's NOTE palette follows the same rule: F6's kind on the lower row, the next kind above it. The pad labels name the kind.
+- A tap on a focused LEVEL key (PARAMS) or on MASTER's GAIN and LEVEL stops at the top instead of wrapping round to the bottom, so a
+  third tap no longer silences the output.
+- PARAMS dims QUALITY outside TALK, where it does nothing.
 
 ### Added
 
 - PATTERN: SHIFT + a chord pad on the NOTE lane writes its root alone, a single note (issue #2). A single-note step lights its column in
   both palette rows. With PADS on KEYS the palette is single notes already.
+- PATTERN: COPY copies the cursor's step, INSERT puts the copy there and moves the steps after it right (the last one inside LENGTH
+  falls off), DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY copies it, SHIFT + INSERT pastes it
+  over the current one (LENGTH too), SHIFT + DELETE empties it after F1 confirms.
 
 ### Fixed
 
 - PATTERN: a step pad past LENGTH no longer moves the cursor off the pattern.
+- The manual: what a project keeps (the patterns, the chain, the route, the vocoder settings, the tempo, the current pattern, the
+  octave, the chord kind, the pad mode, the slot data) and what it does not keep yet; PATTERN's F8 SAVE writes the patterns, not the
+  project; a chord latches when SHIFT is pressed while a chord pad is held, not the other way round; QUALITY is TALK's detail, not
+  a number of bands.
+- HELP: PATTERN no longer lists REC, which does nothing there; PARAMS no longer speaks of a later slice, names F8 LEVEL on every page
+  and leaves blank keys unlabelled.
 
 ## v0.2.0 (pre-release)
 

@@ -96,12 +96,13 @@ inline const SourceName& source_after(int cur, int delta) noexcept {
   return kSources[static_cast<std::size_t>(v) % kSourceCount];
 }
 
-// A second tap on a key: MONITOR toggles between off and the kit's "on" (70), the rest step coarse and wrap at the end.
+// A second tap on a key: MONITOR toggles between off and the kit's "on" (70), the rest step coarse and wrap at the end, but GAIN and LEVEL
+// stop at the top (a wrap would go from full to silence in one tap).
 inline int tap_value(unsigned k, int cur) noexcept {
   if (k == Monitor) {
     return cur == 0 ? static_cast<int>(o3sdk::app::AudioIn::kMonitorOn) : 0;
   }
-  return k < 6u ? params::step_display(kDefs[k], cur, 1, true, true) : cur;
+  return k < 6u ? params::step_display(kDefs[k], cur, 1, true, k != Gain) : cur;
 }
 
 // ---- radio ----------------------------------------------------------------------------------------------------------------------------

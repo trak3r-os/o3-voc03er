@@ -105,6 +105,11 @@ struct PatternHelp {
 };
 O3SDK_BIG PatternHelp g_pd = {};
 
+// COPY's clipboard (a step or a pattern), kept while the app runs; INSERT pastes it on any pattern.
+O3SDK_BIG pt::Clip g_clip = {};
+constexpr std::uint8_t kArmLane = 1;     // CLEAR LANE (F6)
+constexpr std::uint8_t kArmPattern = 2;  // SHIFT + DELETE
+
 constexpr int kGridX = 124;
 constexpr int kCellW = 40;
 constexpr int kCellY = 128;
@@ -131,7 +136,7 @@ const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { retu
 
 void PatternScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
-  armed_ = false;
+  armed_ = 0;
   ctx.redraw();
 }
 
@@ -283,10 +288,16 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
 
 void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
-  if (armed_ && in.type != app::Input::Type::Release) {  // CLEAR LANE asked: F1 clears, anything else cancels and is spent on that
-    armed_ = false;
+  if (armed_ != 0u && in.type != app::Input::Type::Release) {  // CLEAR LANE or SHIFT + DELETE asked: F1 clears, anything else cancels and is spent
+    const std::uint8_t what = armed_;
+    armed_ = 0;
     if (in.fkey_press(k) && k == 0u && !in.shift) {
       PatternData& p = pattern_now();
+      if (what == kArmPattern) {
+        pt::clear_steps(p);
+        say(ctx, "PATTERN EMPTIED");
+        return;
+      }
       for (unsigned i = 0; i < kPatternSteps; ++i) {
         (void)pt::rest_lane(p, i, lane());
       }
@@ -301,7 +312,7 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       return;
     }
     if (k == 5u) {  // CLEAR LANE: asks first (F1 confirms, any other key cancels), on the pattern shown
-      armed_ = true;
+      armed_ = kArmLane;
       ctx.redraw();
       return;
     }
@@ -344,6 +355,26 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     const unsigned len = length_of(pattern_now());
     const unsigned c = cursor_;
     cursor_ = static_cast<std::uint8_t>(in.press(Button::Right) ? (c + 1u) % len : (c == 0u || c > len ? len - 1u : c - 1u));
+    ctx.redraw();
+  } else if (in.press(Button::Copy)) {  // the cursor's step, every lane (SHIFT: the whole pattern)
+    if (in.shift) {
+      pt::copy_whole(g_clip, pattern_now());
+    } else {
+      pt::copy_step(g_clip, pattern_now(), cursor_);
+    }
+    say(ctx, in.shift ? "PATTERN COPIED" : "STEP COPIED");
+  } else if (in.press(Button::Insert)) {  // the copied step at the cursor, the rest one step right (SHIFT: the copied pattern over this one)
+    PatternData& p = pattern_now();
+    const bool ok = in.shift ? pt::paste_whole(p, g_clip) : pt::insert_step(p, cursor_, g_clip);
+    const unsigned len = length_of(p);
+    cursor_ = static_cast<std::uint8_t>(cursor_ < len ? cursor_ : len - 1u);  // a pasted pattern can be shorter
+    say(ctx, ok ? (in.shift ? "PATTERN PASTED" : "STEP INSERTED") : (in.shift ? "COPY A PATTERN FIRST (SHIFT + COPY)" : "COPY A STEP FIRST"));
+  } else if (in.press(Button::Delete)) {  // the cursor's step empty in every lane (SHIFT: the whole pattern, once F1 confirms)
+    if (in.shift) {
+      armed_ = kArmPattern;
+    } else {
+      (void)pt::clear_step(pattern_now(), cursor_);
+    }
     ctx.redraw();
   } else if (in.pad_press()) {
     pad(ctx, in.pad(), in.shift);
@@ -415,8 +446,10 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Vol, "LEVEL LANE", nullptr},
       {Button::Fx, "SLICE LANE: A SPEAKS CUT", nullptr},
       {Button::Shift, "STEP: REST. CHORD: ONE NOTE", nullptr},
-      {Button::Rec, "SAMPLE REC: A TAKE", nullptr},
-      {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
+      {Button::Copy, "COPY THE STEP", "COPY THE PATTERN"},
+      {Button::Insert, "INSERT THE COPIED STEP", "PASTE THE COPIED PATTERN"},
+      {Button::Delete, "EMPTY THE STEP", "EMPTY THE PATTERN (F1)"},
+      {Button::Params, "PARAMS: THREE PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
@@ -615,8 +648,9 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
       }
     }
   }
-  if (armed_) {
-    r.text(kGridX, kCellY + 4 * kLaneStep + 10, pt::kClearPrompt[lane_ & 3u], Color::Accent, Face::Label);
+  if (armed_ != 0u) {
+    r.text(kGridX, kCellY + 4 * kLaneStep + 10, armed_ == kArmPattern ? pt::kClearPatternPrompt : pt::kClearPrompt[lane_ & 3u], Color::Accent,
+           Face::Label);
   } else if (note_ != nullptr) {
     r.text(kGridX, kCellY + 4 * kLaneStep + 10, note_, Color::Accent, Face::Label);
   } else {

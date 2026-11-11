@@ -84,6 +84,9 @@ TEST_CASE("master: the source is a round key, a second tap steps coarse, MONITOR
   CHECK(ms::tap_value(ms::Monitor, 40) == 0);
   CHECK(ms::tap_value(ms::Dry, 100) == 0);  // coarse, wraps at the end
   CHECK(ms::tap_value(ms::Dry, 0) == 10);
+  CHECK(ms::tap_value(ms::Gain, 100) == 100);  // GAIN and LEVEL stop at the top: a wrap would be full to silence in one tap
+  CHECK(ms::tap_value(ms::Gain, 95) == 100);
+  CHECK(ms::tap_value(ms::Level, 60) == 60);
   CHECK(ms::tap_value(ms::SeekUp, 7) == 7);
 }
 

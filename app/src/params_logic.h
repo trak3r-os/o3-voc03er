@@ -79,6 +79,10 @@ inline constexpr const KeyDef& key_def(unsigned page, unsigned key) noexcept { r
 // PARAMS pressed again, or DOWN: the next page; UP: the one before. Round.
 inline constexpr unsigned next_page(unsigned page, int delta = 1) noexcept { return perform::step_wrapped(page % kPages, delta, kPages); }
 
+// Whether a key acts in mode `mode` (mode_index): QUALITY is TALK's LPC order and does nothing in the other modes, so PARAMS draws it dim
+// there (it stays focusable: the value is TALK's when the mode comes back). Every other key acts in every mode.
+inline constexpr bool key_live(const KeyDef& k, unsigned mode) noexcept { return !(k.kind == Kind::Value && k.param == Vocoder::Quality && mode != 1u); }
+
 inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && (key_def(page, key).kind == Kind::Value || key_def(page, key).kind == Kind::App); }
 
 // The key the encoder points at when a page opens: its first live one.
@@ -118,12 +122,17 @@ inline float to_param(Fmt f, int d) noexcept {
   }
 }
 
+// LEVEL's tap stops at the top: a wrap would go from the loudest (+6 dB) to -48 dB in one tap, so three taps on a focused key would go from
+// normal to full to silence (MASTER's GAIN does the same, master_logic.h).
+inline constexpr bool tap_holds(const KeyDef& k) noexcept { return k.kind == Kind::Value && k.param == Vocoder::Level; }
+
 // `cur` stepped by `delta` detents (SHIFT or a second tap: `coarse`). Round keys wrap; the rest stop at their ends, unless `wrap` (a tap) is set
-// and the value already stands at the end it moves towards, which sends it to the other end.
+// and the value already stands at the end it moves towards, which sends it to the other end (not LEVEL: tap_holds).
 inline int step_display(const KeyDef& k, int cur, int delta, bool coarse, bool wrap = false) noexcept {
   if (delta == 0 || (k.kind != Kind::Value && k.kind != Kind::App)) {
     return cur;
   }
+  wrap = wrap && !tap_holds(k);
   const int n = k.hi - k.lo + 1;
   if (k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff) {
     int v = (cur - k.lo + delta) % n;

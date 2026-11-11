@@ -89,8 +89,8 @@ moves and the voiceprint in the middle flickers. Nothing sounds yet: the synth h
 right is another chord. Hold the pad while you sing. The wide pad row at the bottom is one chord per key: C major, D minor, and so on,
 all in the key and scale that F4 and F5 say.
 
-**4. Free your hands.** Hold SHIFT and press a chord pad: the chord is latched and keeps sounding after you let go. A new latch replaces
-the old one. DELETE lets it go.
+**4. Free your hands.** Hold a chord pad and press SHIFT: the chord is latched and keeps sounding after you let go. A new latch replaces
+the old one. DELETE lets it go. (SHIFT first and then a pad latches nothing.)
 
 **5. Try the other voices.** Press F1 (MODE) to step from BANDS to TALK, TUNE and ROBOT. Section 5 says what each does.
 
@@ -171,7 +171,8 @@ UP and DOWN, to change page.
 
 ![PARAMS, page SHAPE](manual/img/params-shape.png)
 
-*SHAPE: MODE, QUALITY (how many bands), FREEZE, DRY (the voice mixed in as it is), and VOICING: how a chord's notes are laid out.*
+*SHAPE: MODE, QUALITY (TALK's detail; dim in the other modes, where it does nothing), FREEZE, DRY (the voice mixed in as it is), and
+VOICING: how a chord's notes are laid out.*
 
 VOICING has four settings. CLOSE stacks the notes as written. OPEN lifts the third an octave. WIDE spreads the chord over two octaves.
 SMOOTH, the default, picks the arrangement nearest the chord before, so a progression moves without jumps.
@@ -216,7 +217,7 @@ Section 9.
 The mode is the way the voiceprint is taken and applied. F1 on PERFORM steps through them.
 
 **BANDS.** The classic vocoder. The voice is split into bands, each band's loudness is read, and the same bands of the synth are raised and
-lowered to follow. It is clear and robotic, and it works on any voice or any sound. QUALITY sets how many bands. A note at the top of the
+lowered to follow. It is clear and robotic, and it works on any voice or any sound. A note at the top of the
 range has fewer bright harmonics to shape, so SPREAD, TILT and NOISE help the consonants.
 
 **TALK.** The voice is described as a smooth curve of the mouth's resonances, and the synth is played through that curve. It sounds more
@@ -272,7 +273,7 @@ DELETE throws a take away.
 *SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom rows are the chords. One slice is sounding.*
 
 The top two pad rows are the slices of the selected slot. The bottom two rows are chords. **Hold a slice and a chord together, and the
-slice sings that chord.** SHIFT + a chord pad latches it so one hand can play slices over it. Four slices can sound at once.
+slice sings that chord.** Holding a chord pad and pressing SHIFT latches it, so one hand can play slices over it. Four slices can sound at once.
 
 | Key | What it does |
 |---|---|
@@ -350,10 +351,12 @@ a chord pad to write its root alone, a single note**: a bass line of sixteen not
 | F5 VALUE | The cursor step's value in the lane; the encoder edits it |
 | F6 CLR LANE | Clears the lane. F1 confirms |
 | F7 FOLLOW | The cursor rides the playhead |
-| F8 SAVE | Saves the project |
+| F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
 
-PLAY starts and stops the transport. COPY copies the step under the cursor (SHIFT: the whole pattern); INSERT pastes it. DELETE clears
-the step (SHIFT: the whole pattern). A different pattern starts when the one that plays ends.
+PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
+to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY
+copies it, SHIFT + INSERT pastes it over the current one, LENGTH too, and SHIFT + DELETE empties it after F1 confirms (any other key
+leaves it as it is). A different pattern starts when the one that plays ends.
 
 ### SONG
 
@@ -380,9 +383,11 @@ Clock: set FOLLOW in Config, and FOLLOW PORT to the port the clock comes from. U
 
 ## 9. Projects and the card
 
-A project is a folder under `Apps/o3_voc03er/` that holds one project file. It keeps the eight patterns, the song chain, the route, and
-each slot's cuts, trim, speed, direction, level and the name of the WAV it came from. It does not keep the tempo, the octave, the pad
-mode or the WAV sound itself: F5 SAVE WAVS writes the sounds into the project folder.
+A project is a folder under `Apps/o3_voc03er/` that holds one project file. It keeps the eight patterns, the song chain, the route, the
+vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, the chord kind, the pad mode, and each
+slot's cuts, trim, speed, direction, level and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
+writes the sounds into the project folder. Not kept yet: VOICING, BEND ROW and its range, SAMPLE's TRIG and CHOKE, PATTERN's FOLLOW
+and the preset's name.
 
 ![FILE: the list of projects](manual/img/file.png)
 
@@ -401,8 +406,7 @@ mode or the WAV sound itself: F5 SAVE WAVS writes the sounds into the project fo
 
 *SAVE AS: the name is typed with the on-screen keys. F1 changes the type, F7 accepts, F8 cancels.*
 
-Nothing is saved by itself: FILE saves only when you tell it. Not kept in a project: the octave, the tempo, the current pattern, the chord
-kind and the pad mode. The app also keeps two small files of its own in `Apps/o3_voc03er/`, `pattern.o3a` (the working patterns) and
+Nothing is saved by itself: FILE saves only when you tell it. The app also keeps two small files of its own in `Apps/o3_voc03er/`, `pattern.o3a` (the working patterns) and
 `config.o3a` (settings); the previous copy of the patterns is kept beside it as `pattern.o3a.bak`. A damaged project file is refused
 whole.
 
