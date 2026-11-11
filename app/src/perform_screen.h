@@ -4,20 +4,22 @@
 // PERFORM, the home screen (docs/UI-DESIGN.md), in the OR NOIR skin (skin/ornoir.h): what speaks (the audio input) on the left, the voiceprint
 // of the vocoder's 16 bands in the middle, what sounds (the carrier) on the right, and the pads as a chord grid under them.
 //
-//   F1 MODE  F2 SPEAKS  F3 SOUNDS  F4 KEY  F5 SCALE  F6 CHORD  F7 PADS  F8 by mode (BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED)
+//   F1 MODE  F2 SPEAKS  F3 SOUNDS  F4 KEY  F5 SCALE  F6 ROW  F7 PLAYS  F8 by mode (BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED)
 //   A tap on an F key points the encoder at it (the key stays lit); a second tap steps it on. The encoder changes the value.
 //   F2, F3      a tap opens a list over the column (SPEAKS: sources and slots; SOUNDS: SYNTH, NOISE, LIVE, sources, slots): UP / DOWN or the encoder move the
 //               cursor, the key again or F1 takes the row, F8 backs out; F4..F7, SHIFT, PERFORMANCE and the screen buttons close it, the pads sound as ever.
 //               A dimmed row (a second LIVE source) arms a capture. REC records the live source for two bars into the first empty slot, which then takes
 //               the side that held LIVE (route.h; the capture is a state machine run by update()).
-//   pads          F7: CHORDS (F6's kind on the bottom row, the next kinds above: kind_for_row) or KEYS (a chromatic keyboard). SHIFT + F7 toggles BEND ROW (kept when F7
-//                 moves): the bottom row is a bend strip; the chord rows move up one, or the keyboard keeps the three rows above it
+//   pads          row 0 is KEYS' controls in every layout (OCT, VOL, ROOT, MOD, BND); rows 1, 2 and 3 are the layout's A, B and C (pads_logic.h), each with its PLAYS
+//                 value: a note, a chord kind, a piano (A the black keys, B the white ones), OFF, and on C the FORMANT strip or the BEND strip. F6 ROW picks
+//                 A, B or C (a tap steps and wraps, the encoder stops at the ends; the row's LEDs flash once); F7 PLAYS sets that row. Holding a pad of a
+//                 row and tapping F7 (or turning) changes THAT row at once, and F6 follows it. A row above plays one octave higher per playing row below it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
 //                 about 120 ms after the last one. A tap on an F key takes the encoder back. MIDI pitch bend adds to it (set_wheel)
-//   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, BEND ROW, PRESET); SHIFT + F key focuses
+//   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, -, PRESET); SHIFT + F key focuses
 //                 its value, shown while it has the focus; a plain F tap goes back (perform_logic.h kShiftKeys)
-//   SHIFT         latches the held pad's chord (it keeps sounding); DELETE releases it
-//   UP / DOWN     the bottom row's chord kind;  LEFT / RIGHT  the octave (they repeat when held)
+//   SHIFT         latches the held pad's note or chord (it keeps sounding); DELETE releases it
+//   LEFT / RIGHT  the octave (they repeat when held)
 //   PLAY          the transport (the app's); the other screen buttons open their screen (app.cpp), MODE is F1
 //
 // Everything runs in the main loop (o3-sdk app/screen.h). The tables (labels, the chord of each pad, the peak holds) are one O3SDK_BIG struct
@@ -87,7 +89,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   route::Route route_now(const o3sdk::app::Context& ctx) const noexcept;
   void apply_route(o3sdk::app::Context& ctx, route::Side side, route::Route from, route::Route to) noexcept { set_route(ctx, side, from, to); }
 
-  // SAMPLE's F1 CHORD and LEFT / RIGHT are PERFORM's own: the bottom row's ChordKind (0..3) and the octave.
+  // SAMPLE's F1 CHORD is PERFORM's own old bottom-row kind (0..3), and its LEFT / RIGHT the octave. PERFORM itself no longer uses the kind (its rows
+  // follow the layout since Q6); bottom_, chord_kind() and step_chord() live on for SAMPLE only, until Q7 moves SAMPLE onto the layout too.
   unsigned chord_kind() const noexcept { return bottom_ & 3u; }
   void step_chord(o3sdk::app::Context& ctx, int delta) noexcept { bottom_kind(ctx, delta); }
   void step_octave(o3sdk::app::Context& ctx, int delta) noexcept;
@@ -105,17 +108,11 @@ class PerformScreen final : public o3sdk::app::Screen {
   // Main loop only. Saved with the octave (the config file).
   unsigned voicing() const noexcept { return voicing_; }
   void set_voicing(unsigned v) noexcept { voicing_ = v > 3u ? 3u : v; }
-  // FILE (U9c2) restores these: the octave is clamped as the keys clamp it, the chord kind is the bottom row's (0..3), `keys` the pads mode.
+  // FILE (U9c2) restores these: the octave is clamped as the keys clamp it, the chord kind is SAMPLE's (0..3; the layout holds PERFORM's rows).
   void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
   void set_chord_kind(unsigned k) noexcept { bottom_ = static_cast<decltype(bottom_)>(k & 3u); }
-  void set_keys(bool on) noexcept { keys_ = on; }
-  // FILE (P3) restores these too. BEND ROW lets the held pads go first, as SHIFT + F7 does; the layout is taken as it is (the caller has checked it with
-  // pads::offered); the preset is an index of presets.h, anything past the table is none (the window shows ---).
-  void set_strip(o3sdk::app::Context& ctx, bool on) noexcept {
-    if (on != strip_) {
-      toggle_strip(ctx);
-    }
-  }
+  // FILE (P3) restores these too. The layout is taken as it is (the caller has checked it with pads::offered; PERFORM is not on screen, so no pad is
+  // held); the preset is an index of presets.h, anything past the table is none (the window shows ---).
   void set_layout(const pads::Layout& l) noexcept { layout_ = l; }
   unsigned preset() const noexcept { return preset_; }
   void set_preset(unsigned index) noexcept { preset_ = index < kPresetCount ? index : perform::kNoPreset; }
@@ -123,12 +120,14 @@ class PerformScreen final : public o3sdk::app::Screen {
   void set_slots_waiting(unsigned mask) noexcept { slots_waiting_ = static_cast<std::uint8_t>(mask & 0xFu); }
   unsigned slots_waiting() const noexcept { return slots_waiting_; }
   unsigned focus() const noexcept { return focus_; }
-  bool keys_mode() const noexcept { return keys_; }
-  // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play. PATTERN's palette writes from it (rows A and B); PERFORM's own pads
-  // follow it from Q6 on. Main loop only. Saved in the project (STAT 1.1); init() sets the default: A NOTE, B TRIAD, C FORMANT.
+  // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play. PERFORM's own pads (rows 1, 2 and 3), PATTERN's palette (rows A
+  // and B) and, from Q7, SAMPLE's follow it. Main loop only. Saved in the project (STAT 1.1); init() sets the default: A NOTE, B TRIAD, C FORMANT.
+  // set_plays is for the screens that are not PERFORM (PATTERN's F7): false, changing nothing, for a value the row does not offer. PERFORM's own F7 lets
+  // the held pads go first (step_plays).
   const pads::Layout& layout() const noexcept { return layout_; }
   bool set_plays(pads::Row row, pads::Plays value) noexcept { return pads::set_plays(layout_, row, value); }
-  bool strip_mode() const noexcept { return strip_; }
+  // The row F6 points at (A, B or C) and the one whose LEDs flash.
+  pads::Row row() const noexcept { return row_; }
   int latched() const noexcept { return latched_; }
   // The audition (Q3): another screen (PATTERN) plays a palette pad through PERFORM's local-note path, so the sequencer's note-offs do not cut it.
   // `pad` 0..23 (it takes that pad's slot of the tables and its bit of held_; PERFORM is not on screen meanwhile, and its leave() lets the pads go),
@@ -148,13 +147,14 @@ class PerformScreen final : public o3sdk::app::Screen {
   void latch(o3sdk::app::Context& ctx, bool on) noexcept;
   void turn(o3sdk::app::Context& ctx, int delta, bool coarse, bool tap = false) noexcept;
   void shift_key(o3sdk::app::Context& ctx, unsigned key) noexcept;
-  void toggle_strip(o3sdk::app::Context& ctx) noexcept;
   void apply_bend(o3sdk::app::Context& ctx) noexcept;
   void apply_vib(o3sdk::app::Context& ctx) noexcept;
-  void control_press(o3sdk::app::Context& ctx, unsigned pad, perform::PianoFn fn) noexcept;
-  void control_release(o3sdk::app::Context& ctx, unsigned pad, perform::PianoFn fn) noexcept;
+  void control_press(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
+  void control_release(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
+  void choose_row(o3sdk::app::Context& ctx, pads::Row row) noexcept;
+  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;
+  pads::Row pressed_row() const noexcept;
   void show_flash(o3sdk::app::Context& ctx, const char* name, const char* value) noexcept;
-  int key_pad_note(unsigned pad) const noexcept;
   void bottom_kind(o3sdk::app::Context& ctx, int delta) noexcept;
   void refresh_labels(const o3sdk::dsp::Engine& e) noexcept;
   bool note_in_use(std::uint8_t note, unsigned except_pad) const noexcept;
@@ -178,20 +178,20 @@ class PerformScreen final : public o3sdk::app::Screen {
   void* source_user_ = nullptr;
   unsigned preset_ = perform::kNoPreset;  // the last factory sound chosen (SHIFT + F8), or kNoPreset: the window shows ---
   unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (1 GATE, 2 ARP, 3 GLIDE, 4 FORMANT, 5 THRU, 7 PRESET), or kNoShiftFocus; the row stays shown while set
-  unsigned focus_ = 5;       // the F key the encoder drives (default F6, CHORD); perform::kBendFocus (8): none, the encoder bends
+  unsigned focus_ = 5;       // the F key the encoder drives (default F6, ROW); perform::kBendFocus (8): none, the encoder bends
   int octave_ = 0;
   unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
-  unsigned bottom_ = 0;      // ChordKind of the bottom row
+  unsigned bottom_ = 0;      // SAMPLE's chord kind (0..3) until Q7; PERFORM's rows follow layout_
   pads::Layout layout_{};    // see layout()
+  pads::Row row_ = pads::Row::A;  // F6: the row F7 and the encoder set (main loop only)
+  std::uint64_t row_flash_until_ = 0;  // the chosen row's LEDs are dark until then, a short off-on when F6 changes the row (leds() checks it)
   std::uint8_t slots_waiting_ = 0;  // see set_slots_waiting
-  bool keys_ = false;        // F7 PADS: false CHORDS, true KEYS
-  bool strip_ = false;       // BEND ROW (SHIFT + F7): the bottom row is the bend strip
   unsigned strip_last_ = 0;  // the strip pad pressed last
   unsigned range_ = 2;       // BEND RANGE, semitones either way (2, 5, 12)
   float local_ = 0.0f;       // the encoder's and the strip's bend, semitones (main loop only)
   float wheel_ = 0.0f;       // MIDI pitch bend, semitones (main loop only); the unit's Bend is their sum, held to +-12
   std::uint64_t spring_at_ = 0;  // uptime_ms at which the encoder's bend returns to 0; 0 none
-  // The held control pads of KEYS (MOD, BND-, BND+; bit pad), apart from held_ (they play no note). Main loop only.
+  // The held control pads of row 0 (MOD, BND-, BND+; bit pad), apart from held_ (they play no note). Main loop only.
   std::uint64_t ctl_held_ = 0;
   int bnd_dir_ = 0;                  // the time bend in force: -1 BND-, +1 BND+, 0 none (the last pressed of the strip and the BND pads wins)
   std::uint64_t bnd_at_[2] = {0, 0}; // uptime_ms at which BND- and BND+ were pressed

@@ -153,8 +153,8 @@ void PerformScreen::init(dsp::UnitId voice, const InputMeter* meter, const Vocod
   octave_ = 0;
   bottom_ = 0;
   layout_ = pads::Layout{};
-  keys_ = false;
-  strip_ = false;
+  row_ = pads::Row::A;
+  row_flash_until_ = 0;
   strip_last_ = 0;
   range_ = 2;
   local_ = 0.0f;
@@ -228,39 +228,43 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
     return;
   }
   dsp::Engine& e = ctx.engine();
-  if (pl::on_strip(pad, strip_)) {  // the bend strip: no notes, the pad's semitones bend the carrier (the last pad pressed wins)
-    held_ |= std::uint64_t{1} << pad;
-    g_pd.count[pad] = 0;
-    strip_last_ = pad;
-    bnd_dir_ = 0;
-    local_ = static_cast<float>(pl::strip_semitone(app::pad_col(pad)));
-    spring_at_ = 0;
-    apply_bend(ctx);
-    ctx.redraw();
-    return;
-  }
-  if (keys_) {
-    const pl::PianoPad pp = pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_);
-    if (pp.fn == pl::PianoFn::Formant) {  // the formant strip: a tap sets Formant and it stays (no note, nothing held)
-      (void)e.set_param(voice_, Vocoder::Formant, static_cast<float>(pp.offset));
+  const pl::PadSpec sp = pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_);
+  switch (sp.fn) {
+    case pl::PadFn::None:  // OFF, a piano gap, a note out of range
+      return;
+    case pl::PadFn::Strip:  // the bend strip (C = BEND): no notes, the pad's semitones bend the carrier (the last pad pressed wins)
+      held_ |= std::uint64_t{1} << pad;
+      g_pd.count[pad] = 0;
+      strip_last_ = pad;
+      bnd_dir_ = 0;
+      local_ = static_cast<float>(pl::strip_semitone(app::pad_col(pad)));
+      spring_at_ = 0;
+      apply_bend(ctx);
+      ctx.redraw();
+      return;
+    case pl::PadFn::Formant: {  // the formant strip (C = FORMANT): a tap sets Formant and it stays (no note, nothing held)
+      (void)e.set_param(voice_, Vocoder::Formant, static_cast<float>(sp.offset));
       char val[pl::kLabelChars + 1] = {};
-      pl::strip_label(pp.offset, val);
+      pl::strip_label(sp.offset, val);
       show_flash(ctx, "FORMANT", val);
       return;
     }
-    if (pl::is_control(pp.fn)) {  // a control: no note; the notes held keep the note they began with
-      control_press(ctx, pad, pp.fn);
+    case pl::PadFn::Play:
+      break;
+    default:  // a control (row 0): no note; the notes held keep the note they began with
+      control_press(ctx, pad, sp.fn);
       return;
-    }
-    const int note = pl::piano_note(pp, octave_);
-    if (note < 0) {
-      return;
-    }
-    g_pd.notes[pad][0] = static_cast<std::uint8_t>(note);
+  }
+  if (sp.play.kind == 0u) {
+    g_pd.notes[pad][0] = static_cast<std::uint8_t>(sp.play.note);
     g_pd.count[pad] = 1;
-  } else {
+    for (unsigned i = 1; i < kChordMaxNotes; ++i) {
+      g_pd.notes[pad][i] = 0;
+    }
+  } else {  // a chord on the pad's note, as the PATTERN palette does it
+    const unsigned note = static_cast<unsigned>(sp.play.note);
     const Chord prev = chord_from(g_pd.last_notes, g_pd.last_count);
-    const Chord c = make_chord(pl::row_kind(app::pad_row(pad), static_cast<ChordKind>(bottom_), strip_), app::pad_col(pad), octave_,
+    const Chord c = make_chord(static_cast<ChordKind>(sp.play.kind - 1u), note % 12u, static_cast<int>(note / 12u) - 4,
                                round_param(e, voice_, Vocoder::Key), round_param(e, voice_, Vocoder::Scale), static_cast<Voicing>(voicing_),
                                g_pd.last_count != 0u ? &prev : nullptr);
     g_pd.count[pad] = c.count;
@@ -328,14 +332,14 @@ void PerformScreen::audition_release_all(app::Context& ctx) noexcept {
 
 void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
   if (pad < app::kPadCount && ((ctl_held_ >> pad) & 1u) != 0u) {
-    control_release(ctx, pad, pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_).fn);
+    control_release(ctx, pad, pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_).fn);
     return;
   }
   if (pad >= app::kPadCount || ((held_ >> pad) & 1u) == 0u) {
     return;
   }
   held_ &= ~(std::uint64_t{1} << pad);
-  if (pl::on_strip(pad, strip_)) {  // back to 0, to the BND pad still held, or to the strip pad still held when this was the last
+  if (pl::on_strip(pad, pl::strip_on(layout_))) {  // back to 0, to the BND pad still held, or to the strip pad still held when this was the last
     const std::uint64_t rest = held_ >> (pl::kStripRow * app::kPadCols);
     if (rest == 0u && (ctl_held_ & 0xC00u) != 0u) {  // BND- and BND+ are pads 10 and 11 of row 0
       bnd_dir_ = (ctl_held_ & 0x800u) != 0u ? 1 : -1;
@@ -368,12 +372,12 @@ void PerformScreen::latch(app::Context& ctx, bool on) noexcept {
   const unsigned old_count = latched_ >= 0 ? g_pd.lat_count : 0u;
   std::memcpy(old, g_pd.lat_notes, sizeof old);
   if (on) {
-    if (held_ == 0u || keys_) {
-      return;  // nothing held, or the keys have no latch
-    }
     unsigned p = 0;
-    while (((held_ >> p) & 1u) == 0u) {
+    while (p < app::kPadCount && (((held_ >> p) & 1u) == 0u || g_pd.count[p] == 0u)) {  // the first held pad that sounds (not a strip pad)
       ++p;
+    }
+    if (p >= app::kPadCount) {
+      return;  // nothing held that plays
     }
     latched_ = static_cast<int>(p);
     g_pd.lat_count = g_pd.count[p];
@@ -417,16 +421,41 @@ void PerformScreen::release_all(app::Context& ctx) noexcept {
   apply_vib(ctx);
 }
 
-// The note of a keyboard pad: with BEND ROW the three rows above the strip are the keyboard (the lowest octave moves up a row).
-int PerformScreen::key_pad_note(unsigned pad) const noexcept {
-  return pl::piano_note(pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_), octave_);
+// F6: the chosen row. The row's pads go dark for a moment so the eye finds it (as on PATTERN).
+void PerformScreen::choose_row(app::Context& ctx, pads::Row r) noexcept {
+  row_ = r;
+  row_flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
+  ctx.redraw();
 }
 
-// BEND ROW on or off (SHIFT + F7, or the BEND pad of KEYS): the pads' notes end and the strip's and the encoder's bend return to 0.
-void PerformScreen::toggle_strip(app::Context& ctx) noexcept {
+// The row of the lowest pad held in A, B or C, or the chosen row when none is: F7 changes the row whose pad is under the finger.
+pads::Row PerformScreen::pressed_row() const noexcept {
+  for (unsigned r = 1; r <= pads::kRows; ++r) {
+    if (((held_ >> (r * app::kPadCols)) & 0xFFFu) != 0u) {
+      return pl::layout_row(r);
+    }
+  }
+  return row_;
+}
+
+// F7: PLAYS of the chosen row, or of the row a pad is held in (and ROW moves to it). A tap steps and wraps, a detent stops at the ends. A change
+// of layout ends the notes: they were started by the old meaning.
+void PerformScreen::step_plays(app::Context& ctx, int delta, bool tap) noexcept {
+  const pads::Row r = pressed_row();
+  const pads::Plays cur = layout_.row[pads::idx(r)];
+  const pads::Plays next = tap ? pads::plays_tap(r, cur) : pads::plays_step(r, cur, delta);
+  row_ = r;
+  if (next == cur) {
+    ctx.redraw();
+    return;
+  }
+  pads::Layout l = layout_;
+  if (!pads::set_plays(l, r, next)) {
+    return;
+  }
   release_all(ctx);
-  strip_ = !strip_;
-  ctx.redraw();
+  layout_ = l;
+  show_flash(ctx, pads::kRowNames[pads::idx(r)], pads::kPlaysShort[pads::idx(next)]);
 }
 
 // The unit's Bend: the local and the wheel's semitones added, held to +-12 (the unit ramps it; main loop only).
@@ -491,16 +520,16 @@ inline constexpr float kLevelMin = -48.0f;  // Vocoder::Level's range (the one P
 inline constexpr float kLevelMax = 6.0f;
 }  // namespace
 
-// A KEYS control pad goes down: no note. OCT, VOL and ROOT act at once; BND and MOD act while held (update() runs their ramps).
-void PerformScreen::control_press(app::Context& ctx, unsigned pad, pl::PianoFn fn) noexcept {
+// A control pad (row 0) goes down: no note. OCT, VOL and ROOT act at once; BND and MOD act while held (update() runs their ramps).
+void PerformScreen::control_press(app::Context& ctx, unsigned pad, pl::PadFn fn) noexcept {
   dsp::Engine& e = ctx.engine();
   const std::uint64_t now = ctx.uptime_ms();
   ctl_held_ |= std::uint64_t{1} << pad;
   char val[12] = {};
   switch (fn) {
-    case pl::PianoFn::OctDown:
-    case pl::PianoFn::OctUp: {
-      octave_ = clamp_octave(octave_ + (fn == pl::PianoFn::OctUp ? 1 : -1));
+    case pl::PadFn::OctDown:
+    case pl::PadFn::OctUp: {
+      octave_ = clamp_octave(octave_ + (fn == pl::PadFn::OctUp ? 1 : -1));
       unsigned n = 0;
       if (octave_ > 0) {
         val[n++] = '+';
@@ -512,31 +541,31 @@ void PerformScreen::control_press(app::Context& ctx, unsigned pad, pl::PianoFn f
       show_flash(ctx, "OCT", val);
       break;
     }
-    case pl::PianoFn::VolDown:
-    case pl::PianoFn::VolUp: {
-      (void)e.step_param(voice_, Vocoder::Level, fn == pl::PianoFn::VolUp ? 1 : -1, true);
+    case pl::PadFn::VolDown:
+    case pl::PadFn::VolUp: {
+      (void)e.step_param(voice_, Vocoder::Level, fn == pl::PadFn::VolUp ? 1 : -1, true);
       pl::format_db(e.param(voice_, Vocoder::Level), val);
       show_flash(ctx, "VOL", val);
       break;
     }
-    case pl::PianoFn::RootDown:
-    case pl::PianoFn::RootUp: {
+    case pl::PadFn::RootDown:
+    case pl::PadFn::RootUp: {
       static constexpr const char* kRoot[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-      const unsigned k = static_cast<unsigned>(pl::step_wrapped(round_param(e, voice_, Vocoder::Key), fn == pl::PianoFn::RootUp ? 1 : -1, 12));
+      const unsigned k = static_cast<unsigned>(pl::step_wrapped(round_param(e, voice_, Vocoder::Key), fn == pl::PadFn::RootUp ? 1 : -1, 12));
       (void)e.set_param(voice_, Vocoder::Key, static_cast<float>(k));
       show_flash(ctx, "ROOT", kRoot[k % 12u]);
       break;
     }
-    case pl::PianoFn::BndDown:
-    case pl::PianoFn::BndUp: {
-      const unsigned i = fn == pl::PianoFn::BndUp ? 1u : 0u;
+    case pl::PadFn::BndDown:
+    case pl::PadFn::BndUp: {
+      const unsigned i = fn == pl::PadFn::BndUp ? 1u : 0u;
       bnd_at_[i] = now;
       bnd_dir_ = i != 0u ? 1 : -1;
       spring_at_ = 0;
       ctx.redraw();
       break;
     }
-    case pl::PianoFn::Mod:
+    case pl::PadFn::Mod:
       mod_held_ = true;
       mod_t_ = now - static_cast<std::uint32_t>(vib_pad_ * static_cast<float>(pl::kRampMs));  // the rise goes on from the depth in force
       ctx.redraw();
@@ -546,14 +575,14 @@ void PerformScreen::control_press(app::Context& ctx, unsigned pad, pl::PianoFn f
   }
 }
 
-void PerformScreen::control_release(app::Context& ctx, unsigned pad, pl::PianoFn fn) noexcept {
+void PerformScreen::control_release(app::Context& ctx, unsigned pad, pl::PadFn fn) noexcept {
   ctl_held_ &= ~(std::uint64_t{1} << pad);
-  if (fn == pl::PianoFn::Mod) {
+  if (fn == pl::PadFn::Mod) {
     mod_held_ = false;
     mod_from_ = vib_pad_;
     mod_t_ = ctx.uptime_ms();
-  } else if (fn == pl::PianoFn::BndDown || fn == pl::PianoFn::BndUp) {
-    const int mine = fn == pl::PianoFn::BndUp ? 1 : -1;
+  } else if (fn == pl::PadFn::BndDown || fn == pl::PadFn::BndUp) {
+    const int mine = fn == pl::PadFn::BndUp ? 1 : -1;
     if (bnd_dir_ == mine) {
       const bool other_up = (ctl_held_ & 0x800u) != 0u;
       const bool other_down = (ctl_held_ & 0x400u) != 0u;
@@ -563,7 +592,7 @@ void PerformScreen::control_release(app::Context& ctx, unsigned pad, pl::PianoFn
       } else {
         bnd_dir_ = 0;
         const std::uint64_t strip_held = held_ >> (pl::kStripRow * app::kPadCols);
-        if (strip_ && strip_held != 0u) {
+        if (pl::strip_on(layout_) && strip_held != 0u) {
           local_ = static_cast<float>(pl::strip_semitone(app::pad_col(strip_last_)));
         } else {
           local_ = 0.0f;
@@ -991,13 +1020,20 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) no
     case 4:
       (void)e.set_param(voice_, Vocoder::Scale, static_cast<float>(pl::step_wrapped(round_param(e, voice_, Vocoder::Scale), delta, kScaleTableCount)));
       break;
-    case 5:
-      bottom_kind(ctx, delta);
+    case 5: {  // ROW: A, B, C; a tap steps round, a detent stops at the ends
+      const int n = static_cast<int>(pads::kRows);
+      const int cur = static_cast<int>(pads::idx(row_));
+      const int to = tap ? (cur + (delta < 0 ? n - 1 : 1)) % n : pl::step_clamped(cur, delta, 0, n - 1);
+      if (to != cur) {
+        choose_row(ctx, static_cast<pads::Row>(to));
+        return;
+      }
       break;
-    case 6:
+    }
+    case 6:  // PLAYS of the chosen row (or of the row a pad is held in)
       if (delta != 0) {
-        release_all(ctx);
-        keys_ = !keys_;
+        step_plays(ctx, delta, tap);
+        return;
       }
       break;
     default:
@@ -1016,7 +1052,7 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) no
   ctx.redraw();
 }
 
-// SHIFT + an F key: the SHIFT row (pl::kShiftKeys). FREEZE and BEND ROW are actions; the others take the encoder
+// SHIFT + an F key: the SHIFT row (pl::kShiftKeys). FREEZE is an action, key 7 (F7) is empty; the others take the encoder
 // (a second tap steps the value on, as the plain row does).
 void PerformScreen::shift_key(app::Context& ctx, unsigned key) noexcept {
   if (key >= 8u) {
@@ -1027,8 +1063,7 @@ void PerformScreen::shift_key(app::Context& ctx, unsigned key) noexcept {
       (void)ctx.engine().set_param(voice_, Vocoder::Freeze, ctx.engine().param(voice_, Vocoder::Freeze) >= 0.5f ? 0.0f : 1.0f);
       ctx.redraw();
       break;
-    case pl::ShiftFn::BendRow:  // the pads' notes end, the strip's and the encoder's bend return to 0
-      toggle_strip(ctx);
+    case pl::ShiftFn::None:
       break;
     case pl::ShiftFn::Value:
       if (key == sfocus_) {
@@ -1055,6 +1090,10 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
     } else if (pick_ == 0u && sfocus_ == pl::kNoShiftFocus && (k == 1u || k == 2u)) {  // F2 SPEAKS, F3 SOUNDS: a list, not a step
       open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
+    } else if (k == 6u && pick_ == 0u && (held_ >> app::kPadCols) != 0u) {  // F7 with a pad of A, B or C held: that row's PLAYS steps at once
+      sfocus_ = pl::kNoShiftFocus;
+      focus_ = k;
+      turn(ctx, 1, false, true);
     } else if (sfocus_ != pl::kNoShiftFocus) {  // a plain tap goes back to the plain row, its key focused
       sfocus_ = pl::kNoShiftFocus;
       focus_ = k;
@@ -1078,17 +1117,13 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     latch(ctx, false);
   } else if (in.press(Button::Rec)) {
     rec_press(ctx);
-  } else if (in.press(Button::Up)) {
+  } else if (in.press(Button::Up)) {  // only the picker's cursor; the chord kind is a row's PLAYS now
     if (pick_ != 0u) {
       turn(ctx, -1, false);
-    } else {
-      bottom_kind(ctx, 1);
     }
   } else if (in.press(Button::Down)) {
     if (pick_ != 0u) {
       turn(ctx, 1, false);
-    } else {
-      bottom_kind(ctx, -1);
     }
   } else if (in.press(Button::Left) || in.press(Button::Right)) {  // repeats arrive as presses (repeat_buttons)
     octave_ = clamp_octave(octave_ + (in.press(Button::Left) ? -1 : 1));
@@ -1106,7 +1141,7 @@ namespace {
 
 // An F key's name: the skin's F row and HELP's caps. F8 is the mode's own value.
 const char* fkey_name(unsigned key, unsigned mode) noexcept {
-  static constexpr const char* kNames[] = {"MODE", "SPEAKS", "SOUNDS", "KEY", "SCALE", "CHORD", "PADS"};
+  static constexpr const char* kNames[] = {"MODE", "SPEAKS", "SOUNDS", "KEY", "SCALE", "ROW", "PLAYS"};
   const unsigned page = pl::mode_page(mode);
   return key < 7u ? kNames[key] : (page == 0u ? "SPREAD" : (page == 1u ? "QUALITY" : "SPEED"));
 }
@@ -1116,7 +1151,10 @@ const char* fkey_name(unsigned key, unsigned mode) noexcept {
 void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
   const unsigned key = round_param(e, voice_, Vocoder::Key);
   const unsigned scale = round_param(e, voice_, Vocoder::Scale);
-  const std::uint32_t sig = key | (scale << 4) | (static_cast<std::uint32_t>(octave_ + 8) << 8) | (bottom_ << 12) | (keys_ ? 1u << 16 : 0u) | (strip_ ? 1u << 17 : 0u);
+  std::uint32_t sig = key | (scale << 4) | (static_cast<std::uint32_t>(octave_ + 8) << 8);
+  for (unsigned r = 0; r < pads::kRows; ++r) {
+    sig = sig * 17u + pads::idx(layout_.row[r]);  // the layout's three values (13 each) make the rest of the signature
+  }
   if (sig == label_sig_) {
     return;
   }
@@ -1124,30 +1162,29 @@ void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     char (&out)[12] = g_pd.label[pad];
     out[0] = '\0';
-    if (pl::on_strip(pad, strip_)) {
+    const pl::PadSpec sp = pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_);
+    if (sp.fn == pl::PadFn::Strip) {
       char lbl[pl::kLabelChars + 1] = {};
       pl::strip_label(pl::strip_semitone(app::pad_col(pad)), lbl);
       append(out, lbl);
-    } else if (keys_) {
-      const pl::PianoPad pp = pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_);
-      const int note = pl::piano_note(pp, octave_);
-      if (note >= 0) {
-        char nm[8] = {};
-        (void)ornoir::note_name(note, nm);
-        append(out, nm);
-      } else if (pp.fn == pl::PianoFn::Formant) {
-        char lbl[pl::kLabelChars + 1] = {};
-        pl::strip_label(pp.offset, lbl);
-        append(out, lbl);
-      } else if (pl::is_control(pp.fn)) {
-        append(out, pl::kControlName[app::pad_col(pad)]);
-      }
-    } else {
-      const Chord c = make_chord(pl::row_kind(app::pad_row(pad), static_cast<ChordKind>(bottom_), strip_), app::pad_col(pad), octave_, key, scale, Voicing::Close,
-                                 nullptr);
+    } else if (sp.fn == pl::PadFn::Formant) {
       char lbl[pl::kLabelChars + 1] = {};
-      pl::chord_label(c, lbl);
+      pl::strip_label(sp.offset, lbl);
       append(out, lbl);
+    } else if (sp.fn == pl::PadFn::Play) {
+      const unsigned note = static_cast<unsigned>(sp.play.note);
+      if (sp.play.kind == 0u) {
+        char nm[8] = {};
+        (void)ornoir::note_name(sp.play.note, nm);
+        append(out, nm);
+      } else {
+        const Chord c = make_chord(static_cast<ChordKind>(sp.play.kind - 1u), note % 12u, static_cast<int>(note / 12u) - 4, key, scale, Voicing::Close, nullptr);
+        char lbl[pl::kLabelChars + 1] = {};
+        pl::chord_label(c, lbl);
+        append(out, lbl);
+      }
+    } else if (pl::is_control(sp.fn)) {
+      append(out, pl::kControlName[app::pad_col(pad)]);
     }
   }
 }
@@ -1250,8 +1287,8 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   keys[2].role = ornoir::KeyRole::Carrier;
   set(3, pl::kKeyNames[key % 12u]);
   set(4, pl::kScaleNames[scale < kScaleTableCount ? scale : 0u]);
-  set(5, pl::kKindNames[bottom_ & 3u]);
-  set(6, keys_ ? (strip_ ? "KEYS +B" : "KEYS") : (strip_ ? "CHORDS +B" : "CHORDS"));
+  set(5, pads::kRowNames[pads::idx(row_)]);
+  set(6, pads::kPlaysShort[pads::idx(layout_.row[pads::idx(row_)])]);
   {
     char num[12] = {};
     if (pl::mode_page(mode) == 0u) {
@@ -1284,8 +1321,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
         case pl::ShiftFn::Freeze:
           append(keys[i].value, e.param(voice_, Vocoder::Freeze) >= 0.5f ? "ON" : "OFF");
           break;
-        case pl::ShiftFn::BendRow:
-          append(keys[i].value, strip_ ? "ON" : "OFF");
+        case pl::ShiftFn::None:
           break;
         case pl::ShiftFn::Value:
           if (i == 1u || i == 2u) {
@@ -1355,7 +1391,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   }
 
   // The readout is the latched pad's chord, else the lowest held one.
-  const std::uint64_t sounding = strip_ ? held_ & ((std::uint64_t{1} << (pl::kStripRow * app::kPadCols)) - 1u) : held_;  // the strip's pads sound nothing
+  const std::uint64_t sounding = pl::strip_on(layout_) ? held_ & ((std::uint64_t{1} << (pl::kStripRow * app::kPadCols)) - 1u) : held_;  // the strip's pads sound nothing
   int shown = latched_;
   if (shown < 0 && sounding != 0u) {
     shown = 0;
@@ -1384,27 +1420,24 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   }
   ornoir::PadsView pads;
   pads.label = g_pd.label;
-  pads.scale_cols = keys_ ? 0xFFFu : pl::scale_cols(key, scale);
-  pads.column_in_scale_known = !keys_;
+  const bool piano = pads::is_piano(layout_);
+  pads.scale_cols = piano ? 0xFFFu : pl::scale_cols(key, scale);  // the piano's columns are not the scale's
+  pads.column_in_scale_known = !piano;
   pads.held = held_ | ctl_held_;
   pads.latched = latched_;
-  if (!keys_) {
-    for (unsigned row = 0; row < 4; ++row) {
-      pads.row_name[row] = pl::kKindNames[static_cast<unsigned>(pl::row_kind(row, static_cast<ChordKind>(bottom_ & 3u), strip_))];
-    }
-  }
-  if (strip_) {
-    pads.row_name[pl::kStripRow] = "BEND";
-  } else if (keys_) {
-    pads.row_name[pl::kStripRow] = "FORMANT";
+  char row_text[pads::kRows][12] = {};  // "A TRIAD": the row's letter and what it plays (the margin holds ten characters)
+  pads.row_name[0] = "CONTROLS";
+  for (unsigned i = 0; i < pads::kRows; ++i) {
+    put(row_text[i], pads::kRowNames[i]);
+    cat(row_text[i], sizeof row_text[i], " ");
+    cat(row_text[i], sizeof row_text[i], pads::kPlaysShort[pads::idx(layout_.row[i])]);
+    pads.row_name[i + 1u] = row_text[i];
   }
   pads.key_hint = flash_[0] != '\0' ? flash_ : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_));
   if (pick_ != 0u) {
     pads.hint_left = "UP DOWN OR TURN: CURSOR   F1 OR SAME KEY: TAKE   F8: BACK";
-  } else if (keys_) {
-    pads.hint_left = strip_ ? "BOTTOM ROW BENDS  LEFT RIGHT OCTAVE" : "KEYS  LEFT RIGHT OCTAVE";
   } else {
-    pads.hint_left = strip_ ? "BOTTOM ROW BENDS  SHIFT LATCH  UP DOWN KIND  LEFT RIGHT OCTAVE" : "SHIFT LATCH  DELETE RELEASE  UP DOWN ROW  LEFT RIGHT OCTAVE";
+    pads.hint_left = "SHIFT LATCH  DELETE RELEASE  LEFT RIGHT OCTAVE  F6 ROW  F7 PLAYS";
   }
 
   ui::plot::Canvas c(r);
@@ -1421,39 +1454,49 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const unsigned key = round_param(e, voice_, Vocoder::Key);
   const std::uint16_t cols = pl::scale_cols(key, round_param(e, voice_, Vocoder::Scale));
   const int formant = static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f));
+  const std::uint64_t now = ctx.uptime_ms();
+  const bool flashing = now < row_flash_until_;  // F6: the chosen row goes dark for a moment
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     std::uint8_t level = app::kLedOff;
-    if (pl::on_strip(pad, strip_)) {  // the middle pair (0) lit dim
-      const unsigned col = app::pad_col(pad);
-      level = pl::strip_semitone(col) == 0 ? app::kLedDim : app::kLedOff;
-    } else if (keys_) {  // the piano: the key's root low, the scale dim, outside it dark; the controls dim
-      const pl::PianoPad pp = pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_);
-      const int note = pl::piano_note(pp, octave_);
-      if (note >= 0) {
-        const unsigned pc = static_cast<unsigned>(note) % 12u;
-        level = pc == key % 12u ? app::kLedLow : (((cols >> pc) & 1u) != 0u ? app::kLedDim : app::kLedOff);
-      } else if (pp.fn == pl::PianoFn::OctDown) {
-        level = clamp_octave(octave_ - 1) != octave_ ? app::kLedDim : app::kLedOff;
-      } else if (pp.fn == pl::PianoFn::OctUp) {
-        level = clamp_octave(octave_ + 1) != octave_ ? app::kLedDim : app::kLedOff;
-      } else if (pp.fn == pl::PianoFn::VolDown) {
-        level = e.param(voice_, Vocoder::Level) > kLevelMin ? app::kLedDim : app::kLedOff;
-      } else if (pp.fn == pl::PianoFn::VolUp) {
-        level = e.param(voice_, Vocoder::Level) < kLevelMax ? app::kLedDim : app::kLedOff;
-      } else if (pp.fn == pl::PianoFn::Formant) {  // the pad of the value in force on, the others dim
+    const pl::PadSpec sp = pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_);
+    switch (sp.fn) {
+      case pl::PadFn::Strip:  // the middle pair (0) lit dim
+        level = pl::strip_semitone(app::pad_col(pad)) == 0 ? app::kLedDim : app::kLedOff;
+        break;
+      case pl::PadFn::Formant:  // the pad of the value in force on, the others dim
         level = pl::formant_lit(formant, app::pad_col(pad)) ? app::kLedOn : app::kLedDim;
-      } else if (pl::is_control(pp.fn)) {  // ROOT, BND, MOD: always dim
+        break;
+      case pl::PadFn::Play: {  // the key's root low, the scale dim, outside it dark (the piano's keys the same, by their note)
+        const unsigned pc = static_cast<unsigned>(sp.play.note) % 12u;
+        level = pc == key % 12u ? app::kLedLow : (((cols >> pc) & 1u) != 0u ? app::kLedDim : app::kLedOff);
+        if (static_cast<int>(pad) == latched_) {
+          level = app::kLedMid;
+        }
+        break;
+      }
+      case pl::PadFn::None:
+        break;
+      case pl::PadFn::OctDown:
+        level = clamp_octave(octave_ - 1) != octave_ ? app::kLedDim : app::kLedOff;
+        break;
+      case pl::PadFn::OctUp:
+        level = clamp_octave(octave_ + 1) != octave_ ? app::kLedDim : app::kLedOff;
+        break;
+      case pl::PadFn::VolDown:
+        level = e.param(voice_, Vocoder::Level) > kLevelMin ? app::kLedDim : app::kLedOff;
+        break;
+      case pl::PadFn::VolUp:
+        level = e.param(voice_, Vocoder::Level) < kLevelMax ? app::kLedDim : app::kLedOff;
+        break;
+      default:  // ROOT, BND, MOD: always dim
         level = app::kLedDim;
-      }
-    } else {
-      const unsigned col = app::pad_col(pad);
-      level = col == key % 12u ? app::kLedLow : (((cols >> col) & 1u) != 0u ? app::kLedDim : app::kLedOff);
-      if (static_cast<int>(pad) == latched_) {
-        level = app::kLedMid;
-      }
+        break;
     }
     if ((((held_ | ctl_held_) >> pad) & 1u) != 0u) {
       level = app::kLedOn;
+    }
+    if (flashing && app::pad_row(pad) == pads::idx(row_) + 1u) {
+      level = app::kLedOff;
     }
     leds.set(pad, level);
   }
@@ -1466,6 +1509,40 @@ void PerformScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
     out.label[i] = fkey_name(i, mode);
   }
 }
+
+namespace {
+
+// What a row's value does, one line for HELP's legend (at most kHelpGroupText characters).
+const char* plays_help(pads::Row r, pads::Plays p) noexcept {
+  switch (p) {
+    case pads::Plays::Note:
+      return "THE COLUMN'S NOTE: ONE PAD, ONE NOTE";
+    case pads::Plays::Triad:
+      return "ROOT, THIRD, FIFTH OF THE SCALE";
+    case pads::Plays::Seventh:
+      return "THE SEVENTH CHORDS OF THE SCALE";
+    case pads::Plays::Open:
+      return "ROOT, FIFTH, NINTH: SUS2";
+    case pads::Plays::Power:
+      return "ROOT, FIFTH, OCTAVE";
+    case pads::Plays::Off:
+      return "DARK AND SILENT";
+    case pads::Plays::PianoNote:
+      return r == pads::Row::A ? "BLACK KEYS; NO KEY ON A GAP" : "WHITE KEYS, C TO G";
+    case pads::Plays::PianoTriad:
+    case pads::Plays::PianoSeventh:
+    case pads::Plays::PianoOpen:
+    case pads::Plays::PianoPower:
+      return r == pads::Row::A ? "A CHORD ON EACH BLACK KEY" : "A CHORD ON EACH WHITE KEY";
+    case pads::Plays::Formant:
+      return "A TAP SETS IT, -12 TO +12, AND IT STAYS";
+    case pads::Plays::Bend:
+      return "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0";
+  }
+  return "";
+}
+
+}  // namespace
 
 // HELP (Shift + Config). A button with no entry draws as a hollow cap, which says it does nothing here: every button app.cpp's input() answers
 // on this screen has a row, and tests/perform_screen_test.cpp holds that. The legend carries the groups of the page in force only.
@@ -1489,32 +1566,19 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Rec, "CAPTURE LIVE INTO A SLOT", nullptr},
       {Button::Shift, "HOLD A PAD, TAP: LATCH CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
-      {Button::Up, "BOTTOM ROW: NEXT KIND", nullptr},
-      {Button::Down, "BOTTOM ROW: PREVIOUS KIND", nullptr},
+      {Button::Up, "A LIST: THE CURSOR UP", nullptr},
+      {Button::Down, "A LIST: THE CURSOR DOWN", nullptr},
       {Button::Left, "OCTAVE DOWN (HOLD: REPEAT)", nullptr},
       {Button::Right, "OCTAVE UP (HOLD: REPEAT)", nullptr},
   };
-  static constexpr app::HelpPadGroup kKeyGroups[] = {
-      {"WHITE KEYS", "C TO G, THE CURRENT OCTAVE", ui::Color::Vol},
-      {"BLACK KEYS", "THE SEMITONES; NO KEY ON A GAP", ui::Color::Fx},
-      {"CONTROLS", "OCT VOL ROOT STEP; HOLD MOD VIBRATO, BND BEND", ui::Color::Instr},
-      {"BEND ROW", "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0", ui::Color::Play},
-      {"FORMANT", "A TAP SETS IT, -12 TO +12, AND IT STAYS; LIT ON", ui::Color::Play},
-  };
-  static constexpr const char* kKindText[4] = {"ROOT, THIRD, FIFTH OF THE SCALE", "THE SEVENTH CHORDS OF THE SCALE", "ROOT, FIFTH, NINTH: SUS2", "ROOT, FIFTH, OCTAVE"};
-  static constexpr ui::Color kRowColor[4] = {ui::Color::Vol, ui::Color::Instr, ui::Color::Fx, ui::Color::Play};
-  const ChordKind bottom = static_cast<ChordKind>(bottom_ & 3u);
-  if (!keys_) {  // the legend names each chord row's kind (F6's on the lowest chord row, the next ones above), then the strip if it is on
-    const unsigned lowest = strip_ ? 2u : 3u;
-    for (unsigned r = 0; r <= lowest; ++r) {
-      const unsigned kind = static_cast<unsigned>(pl::row_kind(r, bottom, strip_));
-      help_groups_[r] = {pl::kKindNames[kind], r == lowest ? "F6, UP OR DOWN CHOOSE ITS KIND" : kKindText[kind], kRowColor[r]};
-    }
-    if (strip_) {
-      help_groups_[3] = {"BEND ROW", "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0", ui::Color::Play};
-    }
-    help_groups_[4] = {"PAD LEDS", "KEY COLUMN BRIGHTEST, SCALE DIM, OUTSIDE IT DARK", ui::Color::TextDim};
+  // The legend: the controls, then one group per row A, B, C (what it plays), then the LEDs. A pad's group is its row + 1.
+  help_groups_[0] = {"CONTROLS", "OCT VOL ROOT STEP; HOLD MOD VIBRATO, BND BEND", ui::Color::Instr};
+  static constexpr ui::Color kRowColor[pads::kRows] = {ui::Color::Vol, ui::Color::Fx, ui::Color::Play};
+  for (unsigned r = 0; r < pads::kRows; ++r) {
+    const pads::Plays p = layout_.row[r];
+    help_groups_[r + 1u] = {pads::kPlaysNames[pads::idx(p)], plays_help(static_cast<pads::Row>(r), p), kRowColor[r]};
   }
+  help_groups_[4] = {"PAD LEDS", "KEY BRIGHTEST, SCALE DIM, OUTSIDE IT DARK", ui::Color::TextDim};
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
               "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
@@ -1523,83 +1587,35 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[2] = "SYNTH, LOOPS, VOICE, LIVE";
   h.fkey[3] = "THE SCALE'S ROOT";
   h.fkey[4] = "SCALE OF THE CHORDS";
-  h.fkey[5] = "BOTTOM ROW KIND";
-  h.fkey[6] = "CHORDS OR KEYS";
-  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row
-    h.fkey_shift[i] = pl::kShiftKeys[i].name;
+  h.fkey[5] = "ROW: A, B OR C";
+  h.fkey[6] = "WHAT THE ROW PLAYS";
+  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row (key 7 is empty: no text)
+    h.fkey_shift[i] = pl::kShiftKeys[i].name[0] != '\0' ? pl::kShiftKeys[i].name : nullptr;
   }
   h.fkey[7] = pl::mode_page(mode) == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED");
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "VALUE OR BEND (SHIFT COARSE)";
-  if (keys_) {
-    h.groups = kKeyGroups;  // the fourth is the strip's (BEND ROW on) or the formant's (off): the row 3 pads are group 4 either way
-    h.group_count = 4u;
-    if (!strip_) {
-      help_groups_[0] = kKeyGroups[0];
-      help_groups_[1] = kKeyGroups[1];
-      help_groups_[2] = kKeyGroups[2];
-      help_groups_[3] = kKeyGroups[4];
-      h.groups = help_groups_;
-    }
-  } else {
-    h.groups = help_groups_;
-    h.group_count = 5;
-  }
-  if (keys_) {
-    h.pads = strip_ ? "A PIANO: WHITE KEYS, BLACK ABOVE, CONTROLS ON TOP. THE BOTTOM ROW BENDS: PRESS, RELEASE TO 0."
-                    : "A PIANO: WHITE KEYS, BLACK ABOVE, THE CONTROLS ON TOP. NO LATCH HERE.";
-  } else {
-    h.pads = strip_ ? "COLUMN: ROOT. BOTTOM ROW BENDS: PRESS, RELEASE TO 0. THE CHORD ROWS ARE ABOVE IT."
-                    : "COLUMN: ROOT. ROW: KIND, F6'S AT THE BOTTOM AND THE NEXT ONES ABOVE. - IS MINOR.";
-  }
+  h.groups = help_groups_;
+  h.group_count = 5;
+  h.pads = "TOP ROW: CONTROLS. A, B, C BELOW: F6 CHOOSES THE ROW, F7 WHAT IT PLAYS (A HELD PAD'S ROW FIRST).";
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
-    if (pl::on_strip(pad, strip_)) {  // the strip, whichever page: -5 .. +5, the pair at 0
-      char lbl[pl::kLabelChars + 1] = {};
-      pl::strip_label(pl::strip_semitone(app::pad_col(pad)), lbl);
-      std::size_t n = 0;
-      while (lbl[n] != '\0' && n < app::kHelpPadLabel) {
-        g_help_names[pad][n] = lbl[n];
-        ++n;
-      }
-      g_help_names[pad][n] = '\0';
-      h.pad_label[pad] = g_help_names[pad];
-      h.pad_group[pad] = 4;
-    } else if (keys_) {
-      const pl::PianoPad pp = pl::piano_pad(app::pad_row(pad), app::pad_col(pad), strip_);
-      const int note = pl::piano_note(pp, octave_);
-      if (note >= 0) {
-        h.pad_group[pad] = pp.fn == pl::PianoFn::White ? 1 : 2;
-        (void)app::help_pad_note(h, g_help_names, pad, note);
-      } else if (pp.fn == pl::PianoFn::Formant) {
-        char lbl[pl::kLabelChars + 1] = {};
-        pl::strip_label(pp.offset, lbl);
-        std::size_t n = 0;
-        while (lbl[n] != '\0' && n < app::kHelpPadLabel) {
-          g_help_names[pad][n] = lbl[n];
-          ++n;
-        }
-        g_help_names[pad][n] = '\0';
-        h.pad_label[pad] = g_help_names[pad];
-        h.pad_group[pad] = 4;
-      } else if (pp.fn != pl::PianoFn::None) {
-        const char* nm = pl::kControlName[app::pad_col(pad)];
-        std::size_t n = 0;
-        while (nm[n] != '\0') {
-          g_help_names[pad][n] = nm[n];
-          ++n;
-        }
-        g_help_names[pad][n] = '\0';
-        h.pad_label[pad] = g_help_names[pad];
-        h.pad_group[pad] = 3;
-      }
-    } else {
-      const unsigned row = app::pad_row(pad);
-      h.pad_group[pad] = static_cast<std::uint8_t>(row + 1u);
+    const pl::PadSpec sp = pl::pad_spec(layout_, app::pad_row(pad), app::pad_col(pad), octave_);
+    h.pad_group[pad] = static_cast<std::uint8_t>(app::pad_row(pad) + 1u);  // a dark pad belongs to its row's group, with no label
+    if (sp.fn == pl::PadFn::None) {
+      continue;
+    }
+    if (sp.fn == pl::PadFn::Play && sp.play.kind == 0u) {
+      (void)app::help_pad_note(h, g_help_names, pad, sp.play.note);
+      continue;
+    }
+    char lbl[pl::kLabelChars + 1] = {};
+    if (sp.fn == pl::PadFn::Strip || sp.fn == pl::PadFn::Formant) {  // -5 .. +5 (the pair at 0), or the formant's semitones
+      pl::strip_label(sp.fn == pl::PadFn::Strip ? pl::strip_semitone(app::pad_col(pad)) : sp.offset, lbl);
+    } else if (sp.fn == pl::PadFn::Play) {
       // HELP draws capitals only: the minor's "m" right after the root becomes "-" (so "Cm7" is "C-7" and "CM7" stays the major seventh).
-      std::size_t n = 0;
       bool minor_done = false;
-      while (n < app::kHelpPadLabel && g_pd.label[pad][n] != '\0') {
+      for (unsigned n = 0; n < pl::kLabelChars && g_pd.label[pad][n] != '\0'; ++n) {
         char ch = g_pd.label[pad][n];
         const char prev = n > 0 ? g_pd.label[pad][n - 1] : '\0';
         if (ch == 'm' && !minor_done && n > 0 && ((prev >= 'A' && prev <= 'Z') || prev == '#')) {
@@ -1608,12 +1624,18 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
         } else if (ch >= 'a' && ch <= 'z') {
           ch = static_cast<char>(ch - 'a' + 'A');
         }
-        g_help_names[pad][n] = ch;
-        ++n;
+        lbl[n] = ch;
       }
-      g_help_names[pad][n] = '\0';
-      h.pad_label[pad] = g_help_names[pad];
+    } else {
+      put(lbl, pl::kControlName[app::pad_col(pad)]);
     }
+    std::size_t n = 0;
+    while (lbl[n] != '\0' && n < app::kHelpPadLabel) {
+      g_help_names[pad][n] = lbl[n];
+      ++n;
+    }
+    g_help_names[pad][n] = '\0';
+    h.pad_label[pad] = g_help_names[pad];
   }
 }
 

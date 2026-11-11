@@ -66,11 +66,11 @@ TEST_CASE("app: it starts, a pad sounds, and every frame fits the display list")
   h->run_ms(200);
   CHECK(rms(h->audio(), 0) < 1e-6);  // nothing played yet: digital silence
 
-  h->pad_down(36);  // bottom left
+  h->pad_down(12);  // row A, first pad: plays a note (row C is FORMANT by default and holds nothing)
   h->run_ms(300);
-  CHECK(h->runtime().context().panel().pad_held(36));
-  CHECK(h->leds().level(36) == 255);  // a held pad is full
-  h->pad_up(36);
+  CHECK(h->runtime().context().panel().pad_held(12));
+  CHECK(h->leds().level(12) == 255);  // a held pad is full
+  h->pad_up(12);
   h->run_ms(300);
   CHECK(rms(h->audio(), 0) > 0.01);
 

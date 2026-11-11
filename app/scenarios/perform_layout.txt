@@ -1,0 +1,54 @@
+# PERFORM plays the layout (Q6, docs/REVIEW-2026-11-11.md section 3): row 0 is always the controls, rows A, B and C play what their PLAYS says. The default is
+# A NOTE, B TRIAD, C FORMANT; F6 ROW picks the row (it flashes), F7 PLAYS sets it; C goes to BEND, A and B to a piano with a chord on every key; a pad held
+# while F7 is tapped changes that pad's row at once. The WAV carries the notes; the unit's feel is for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/perform_layout.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+snap 01_default
+paddown 26
+wait 300
+snap 02_b_triad_held
+padup 26
+wait 600
+tap f6
+wait 40
+snap 03_row_b_flash
+wait 300
+tap f6
+wait 400
+tap f7
+turn 1
+wait 300
+snap 04_c_bend
+paddown 38
+wait 300
+snap 05_strip_pad_held
+padup 38
+wait 300
+tap f6
+turn -2
+tap f7
+turn 6
+wait 300
+snap 06_piano_triad
+paddown 13
+paddown 28
+wait 400
+snap 07_piano_keys_held
+padup 13
+padup 28
+wait 600
+paddown 28
+tap f7
+wait 300
+snap 08_shortcut_piano_7th
+padup 28
+wait 400
+paddown 3
+wait 100
+snap 09_controls_vol_held
+padup 3
+wait 300
+record off
+wav perform_layout

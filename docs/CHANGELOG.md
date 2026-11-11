@@ -4,9 +4,12 @@
 
 ### Changed
 
-- CHORDS pads, one rule for every row (issue #4): the bottom row plays F6's kind and each row above plays the next kind in the order
-  TRIAD, 7TH, OPEN, POWER, round. F6 TRIAD, the default, keeps the grid as it was; F6 7TH, OPEN or POWER no longer play one kind on two
-  rows. With BEND ROW on, the three chord rows play F6's kind and the next two. PERFORM's HELP names each row's kind.
+- PERFORM plays the layout (Q6): row 0 is always the controls (OCT, VOL, ROOT, MOD, BND), and rows A, B and C below it play their PLAYS
+  value, a note, a chord (TRIAD, 7TH, OPEN, POWER), a piano (A the black keys, B the white keys), FORMANT or BEND (C only) or nothing (OFF).
+  F6 is ROW (A, B or C; the row's pads flash once) and F7 is PLAYS; holding a pad of A, B or C makes F7 change that pad's row at once.
+  The default is A NOTE, B TRIAD, C FORMANT. F6 CHORD, F7 PADS (CHORDS or KEYS) and SHIFT + F7 BEND ROW are gone: BEND is a value of row C,
+  and SHIFT + F7 is empty. SHIFT latches a pad on every row that plays notes. SAMPLE REC, SAMPLE EDIT and PARAMS play the same layout.
+  Saving writes the 1.0 chord kind, pads mode and bend row derived from the layout, and a 1.1 file loads through the layout alone.
 - A tap on a focused LEVEL key (PARAMS) or on MASTER's GAIN and LEVEL stops at the top instead of wrapping round to the bottom, so a
   third tap no longer silences the output.
 - PARAMS dims QUALITY outside TALK, where it does nothing.
@@ -21,8 +24,8 @@
 - The project keeps more (P3, Q8): STAT 1.1 adds VOICING, the BEND ROW and its range, FOLLOW, the preset (by name, so a reordered
   table does not move it), and the pads layout (rows A, B, C and the two last-used chord pads); SLOT 1.1 adds TRIG and CHOKE per slot.
   A v0.2.0 project loads with SMOOTH, bend row off, range 2, FOLLOW off, no preset, ONE SHOT and CHOKE ON, and its KEYS or chord kind
-  becomes the equivalent layout. An out-of-range value refuses the file whole. F4 NEW resets all of them. Saving still writes the 1.0
-  chord kind and pads mode from PERFORM, for an older build to read.
+  becomes the equivalent layout. An out-of-range value refuses the file whole. F4 NEW resets all of them. Saving also writes the 1.0
+  chord kind, pads mode and bend row, derived from the layout, for an older build to read.
 - PATTERN, NOTE lane (Q3): a palette pad sounds while it is held (a note, or its chord in PERFORM's voicing) and its LED is on; the bar's
   note-offs do not cut it. SHIFT + a palette pad sounds and writes nothing. Leaving the screen lets a held pad go.
 - PATTERN (Q4): with step pads held, a palette pad writes every held step and the cursor stays. UP and DOWN are now the octave (PERFORM's and

@@ -13,7 +13,9 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <vector>
 #include <string>
 
 namespace app = o3sdk::app;
@@ -91,65 +93,49 @@ TEST_CASE("perform: HELP names every control, and its legend is the page in forc
     }
     for (unsigned k = 0; k < 8; ++k) {
       CHECK(help.fkey[k] != nullptr);
-      CHECK(help.fkey_shift[k] != nullptr);  // the SHIFT row: eight labels
+      CHECK((help.fkey_shift[k] != nullptr) == (k != 6u));  // the SHIFT row: seven labels, F7's key is empty since Q6
     }
     CHECK(help.encoder != nullptr);
-    CHECK(help.group_count == 5u);  // the three fixed rows, the bottom row, the LEDs
+    CHECK(help.group_count == 5u);  // the controls, rows A, B and C, the LEDs
     for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
       CHECK(help.pad_group[pad] == app::pad_row(pad) + 1u);
-      CHECK(help.pad_label[pad] != nullptr);
+      // Every pad has a label but the gaps of the controls row (columns 2, 5 and 8), which are dark and silent.
+      CHECK((help.pad_label[pad] != nullptr) == (pad >= 12u || (app::pad_col(pad) != 2u && app::pad_col(pad) != 5u && app::pad_col(pad) != 8u)));
     }
   }
   tap(*h, app::Button::Config);
   REQUIRE_FALSE(h->runtime().help_open());
 
-  tap(*h, app::Button::F7);  // the focus, then a second tap: KEYS
+  // A piano on A and B (F7 takes the focus, the encoder steps A to PIANO NOTE), then C to BEND (F6 to row C, F7 steps it): the legend follows.
   tap(*h, app::Button::F7);
+  h->turn(5);
+  tap(*h, app::Button::F6);
+  tap(*h, app::Button::F6);
+  tap(*h, app::Button::F6);
+  tap(*h, app::Button::F7);
+  tap(*h, app::Button::F7);
+  h->run_ms(200);
   open_help(*h);
   {
     const app::Help& help = h->runtime().help_overlay().help();
     app::HelpProblem p;
     const bool ok = app::help_check(help, &p);
     CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
-    CHECK(help.group_count == 4u);  // white keys, black keys, controls, and the FORMANT row: none of the chord rows
+    CHECK(help.group_count == 5u);
     for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
-      CHECK(help.pad_group[pad] <= 4u);
-    }
-    for (unsigned col = 0; col < app::kPadCols; ++col) {
-      CHECK(help.pad_group[3u * app::kPadCols + col] == 4u);
-    }
-  }
-  tap(*h, app::Button::Config);
-
-  h->press(app::Button::Shift);  // SHIFT + F7: BEND ROW on, over KEYS: row 3 is the strip, a fourth group
-  h->run_ms(2);
-  tap(*h, app::Button::F7);
-  h->release(app::Button::Shift);
-  h->run_ms(20);
-  open_help(*h);
-  {
-    const app::Help& help = h->runtime().help_overlay().help();
-    app::HelpProblem p;
-    const bool ok = app::help_check(help, &p);
-    CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
-    CHECK(help.group_count == 4u);
-    for (unsigned col = 0; col < app::kPadCols; ++col) {
-      CHECK(help.pad_group[3u * app::kPadCols + col] == 4u);
+      CHECK(help.pad_group[pad] == app::pad_row(pad) + 1u);
     }
   }
   tap(*h, app::Button::Config);
 }
 
-TEST_CASE("perform: KEYS controls light while held and play no note; a gap is dark") {
+TEST_CASE("perform: the controls row lights while held and plays no note; a gap is dark; row C is the formant strip by default") {
   auto h = std::make_unique<sim::Harness>(::o3sdk_app());
   REQUIRE(h->start());
   h->run_ms(100);
-  tap(*h, app::Button::F7);
-  tap(*h, app::Button::F7);  // KEYS
-  h->run_ms(60);
   CHECK(h->leds().level(7) == 24);   // ROOT+: dim
   CHECK(h->leds().level(2) == 0);    // a gap
-  CHECK(h->leds().level(36) == 24);  // row 3 without BEND ROW: the formant strip, -12 dim
+  CHECK(h->leds().level(36) == 24);  // row C FORMANT: -12 dim
   h->pad_down(7);
   h->run_ms(60);
   CHECK(h->leds().level(7) == 255);
@@ -287,9 +273,7 @@ TEST_CASE("perform: the formant strip sets Formant, stays lit, and SHIFT + F5 sh
   auto h = std::make_unique<sim::Harness>(::o3sdk_app());
   REQUIRE(h->start());
   h->run_ms(100);
-  tap(*h, app::Button::F7);
-  tap(*h, app::Button::F7);  // KEYS, BEND ROW off
-  h->run_ms(60);
+  h->run_ms(60);  // row C is FORMANT by default
   CHECK(h->leds().level(36 + 5) == 255);  // 0: both middle pads on
   CHECK(h->leds().level(36 + 6) == 255);
   CHECK(h->leds().level(36 + 0) == 24);
@@ -320,7 +304,22 @@ struct Rig {
     cap.input_tone(220.0f, -12.0f);
     h = std::make_unique<sim::Harness>(::o3sdk_app(), nullptr, nullptr, nullptr, nullptr, &cap);
     REQUIRE(h->start());
+    h->record(true);
     h->run_ms(100);
+  }
+  std::size_t mark() const { return h->audio().size(); }
+  // The rms (fraction of full scale) of the next `ms` milliseconds.
+  double listen(unsigned ms) {
+    const std::size_t from = mark();
+    h->run_ms(ms);
+    const std::vector<std::int16_t>& a = h->audio();
+    double sum = 0.0;
+    std::size_t n = 0;
+    for (std::size_t i = from; i < a.size(); i += 2) {
+      sum += static_cast<double>(a[i]) * static_cast<double>(a[i]);
+      ++n;
+    }
+    return n != 0 ? std::sqrt(sum / static_cast<double>(n)) / 32768.0 : 0.0;
   }
   // SOUNDS on the live input, so the SPEAKS picker's other sources are dimmed (CAPTURE FIRST).
   void sounds_live() {
@@ -438,4 +437,226 @@ TEST_CASE("perform: F1 MODE taps wrap round, the encoder clamps") {
   tap(*h, app::Button::F1);
   h->run_ms(20);
   CHECK(unit_param(*h, kMode) == doctest::Approx(1.0f));
+}
+
+// ---- Q6: PERFORM plays the layout; F6 ROW and F7 PLAYS --------------------------------------------------------------------------------------
+
+namespace {
+constexpr double kSound = 1e-4;  // above: a note is sounding (the vocoder speaks the tone on the fake capture)
+
+// Which of rows A, B and C (bits 0, 1, 2) are dark on column 5, a pad that is lit in every default row: the F6 flash.
+unsigned dark_rows(sim::Harness& h) {
+  unsigned m = 0;
+  for (unsigned r = 1; r <= 3; ++r) {
+    if (h.leds().level(r * app::kPadCols + 5u) == 0) {
+      m |= 1u << (r - 1u);
+    }
+  }
+  return m;
+}
+bool row_dark(sim::Harness& h, unsigned pad_row) {
+  for (unsigned c = 0; c < app::kPadCols; ++c) {
+    if (h.leds().level(pad_row * app::kPadCols + c) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+TEST_CASE("perform: F6 steps the row and wraps on a tap, the encoder stops at the ends, and the chosen row flashes") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  CHECK(dark_rows(h) == 0u);  // F6 holds the focus at start, row A
+  tap(h, app::Button::F6);    // A to B
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 2u);
+  h.run_ms(300);
+  CHECK(dark_rows(h) == 0u);  // the flash is short
+  tap(h, app::Button::F6);    // B to C
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 4u);
+  h.run_ms(300);
+  tap(h, app::Button::F6);  // C wraps to A
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 1u);
+  h.run_ms(300);
+  h.turn(5);  // the encoder stops at C ...
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 4u);
+  h.run_ms(300);
+  h.turn(1);  // ... and does not wrap: nothing changes, nothing flashes
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 0u);
+  h.turn(-5);
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 1u);
+  h.run_ms(300);
+  h.turn(-1);  // stops at A
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 0u);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, BEND takes C, a piano joins A and B and a grid value splits them") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  // Defaults: A NOTE, B TRIAD, C FORMANT (the major scale is the rig's: the root 70, in-scale pads 24, the others dark).
+  CHECK(h.leds().level(12 + 0) == 70);
+  CHECK(h.leds().level(24 + 0) == 70);
+  CHECK(h.leds().level(36 + 5) == 255);
+
+  tap(h, app::Button::F6);  // F6 holds the focus at start: A to B
+  tap(h, app::Button::F7);  // F7 takes the focus and changes nothing
+  h.run_ms(300);
+  CHECK(h.leds().level(24 + 0) == 70);
+  h.turn(10);  // B stops at OFF
+  h.run_ms(300);
+  CHECK(row_dark(h, 2));
+  CHECK(h.leds().level(12 + 0) == 70);  // A is as it was
+  h.pad_down(24 + 5);
+  CHECK(rig.listen(300) < kSound);  // silent
+  h.pad_up(24 + 5);
+  h.run_ms(100);
+
+  tap(h, app::Button::F6);  // focus
+  tap(h, app::Button::F6);  // B to C
+  tap(h, app::Button::F7);  // focus
+  h.turn(1);                // FORMANT to BEND: the strip's middle pair is dim, the rest dark
+  h.run_ms(300);
+  CHECK(h.leds().level(36 + 5) == 24);
+  CHECK(h.leds().level(36 + 6) == 24);
+  CHECK(h.leds().level(36 + 0) == 0);
+
+  tap(h, app::Button::F6);  // focus
+  tap(h, app::Button::F6);  // C wraps to A
+  tap(h, app::Button::F7);  // focus
+  h.turn(5);                // A: NOTE to PIANO NOTE, and B (which was OFF) joins it
+  h.run_ms(300);
+  CHECK(h.leds().level(12 + 0) == 0);   // A holds the black keys: no key at column 0
+  CHECK(h.leds().level(24 + 0) == 70);  // B's white C
+  CHECK(h.leds().level(24 + 1) == 24);  // D, in the scale
+  h.pad_down(12 + 0);
+  CHECK(rig.listen(300) < kSound);  // no key: no sound
+  h.pad_up(12 + 0);
+  h.run_ms(100);
+  h.pad_down(24 + 4);
+  CHECK(rig.listen(300) > kSound);
+  h.pad_up(24 + 4);
+  h.run_ms(100);
+  h.turn(-1);  // PIANO NOTE back to POWER: a grid value splits A from B, and B takes the value it had at the join (OFF)
+  h.run_ms(300);
+  CHECK(h.leds().level(12 + 0) == 70);
+  CHECK(row_dark(h, 2));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: every row value plays what it says, and row C FORMANT holds nothing") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  // A NOTE and B TRIAD sound.
+  h.pad_down(12 + 4);
+  CHECK(rig.listen(300) > kSound);
+  h.pad_up(12 + 4);
+  h.run_ms(900);
+  CHECK(rig.listen(200) < kSound);
+  h.pad_down(24 + 4);
+  CHECK(rig.listen(300) > kSound);
+  h.pad_up(24 + 4);
+  h.run_ms(900);
+  // C FORMANT: a tap sets the value and flashes it, and nothing sounds or stays held.
+  h.pad_down(36 + 8);
+  CHECK(rig.listen(300) < kSound);
+  h.pad_up(36 + 8);
+  h.run_ms(100);
+  CHECK(unit_param(h, kFormant) == doctest::Approx(4.0f));
+  // A as a PIANO TRIAD: a chord on a black key; a gap is silent.
+  tap(h, app::Button::F7);
+  h.turn(6);  // NOTE .. POWER, PIANO NOTE, PIANO TRIAD
+  h.run_ms(100);
+  h.pad_down(12 + 1);
+  CHECK(rig.listen(300) > kSound);
+  h.pad_up(12 + 1);
+  h.run_ms(900);
+  h.pad_down(12 + 3);
+  CHECK(rig.listen(300) < kSound);
+  h.pad_up(12 + 3);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: a held pad's row takes F7 at once, and ROW follows it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  h.pad_down(24 + 5);  // a pad of row B, held (the chosen row is A)
+  h.run_ms(100);
+  CHECK(h.leds().level(24 + 5) == 255);
+  tap(h, app::Button::F7);  // B steps now, TRIAD to 7TH, and its notes end; F7 takes the focus
+  h.run_ms(40);
+  CHECK(h.leds().level(24 + 5) != 255);
+  h.pad_up(24 + 5);
+  h.run_ms(300);
+  tap(h, app::Button::F6);  // takes the focus back
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 0u);
+  tap(h, app::Button::F6);  // steps from B, the pad's row, to C (not from A to B)
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 4u);
+  h.run_ms(300);
+
+  // The encoder does the same while F7 holds the focus: a pad of A is held, the encoder takes A to OFF.
+  tap(h, app::Button::F7);  // focus
+  h.pad_down(12 + 0);
+  h.run_ms(100);
+  h.turn(10);
+  h.run_ms(300);
+  CHECK(row_dark(h, 1));
+  CHECK(h.leds().level(24 + 0) == 70);  // B is as it was
+  h.pad_up(12 + 0);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: SHIFT latches a piano key too, and DELETE lets it go") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F7);
+  h.turn(5);  // A and B are a piano
+  h.run_ms(100);
+  h.pad_down(12 + 1);  // a black key
+  h.run_ms(100);
+  CHECK(h.leds().level(12 + 1) == 255);
+  tap(h, app::Button::Shift);
+  h.pad_up(12 + 1);
+  h.run_ms(100);
+  CHECK(h.leds().level(12 + 1) == 140);
+  CHECK(rig.listen(300) > kSound);
+  tap(h, app::Button::Delete);
+  h.run_ms(100);
+  CHECK(h.leds().level(12 + 1) != 140);
+  // A white key latches too; a gap has nothing to latch.
+  h.pad_down(24 + 2);
+  tap(h, app::Button::Shift);
+  h.pad_up(24 + 2);
+  h.run_ms(100);
+  CHECK(h.leds().level(24 + 2) == 140);
+  tap(h, app::Button::Delete);
+  h.pad_down(12 + 0);  // a gap
+  tap(h, app::Button::Shift);
+  h.pad_up(12 + 0);
+  h.run_ms(100);
+  CHECK(h.leds().level(12 + 0) == 0);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: SHIFT + F7 is empty and a layout's OCT and VOL pads keep working on row 0") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  shift_tap(h, app::Button::F7);  // nothing: no BEND ROW any more
+  h.run_ms(60);
+  CHECK(h.leds().level(36 + 5) == 255);
+  CHECK(h.leds().level(0) == 24);  // OCT-: dim
+  h.pad_down(1);                   // OCT+
+  h.pad_up(1);
+  h.run_ms(60);
+  CHECK(h.leds().level(1) == 24);
+  CHECK(h.runtime().frame_failures() == 0u);
 }

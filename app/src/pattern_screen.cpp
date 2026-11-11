@@ -32,7 +32,6 @@ constexpr const char* kKeyNames[ornoir::kFKeys] = {"PATTERN", "LANE", "LENGTH", 
 constexpr const char* kShiftNames[ornoir::kFKeys] = {"", "", "", "", "", "CLR LANE", "FOLLOW", ""};
 constexpr unsigned kKeyRow = 5;     // F6
 constexpr unsigned kKeyPlays = 6;   // F7
-constexpr std::uint64_t kFlashMs = 150;  // the chosen row's LEDs off for this long when F6 changes it (a short off-on)
 inline constexpr pads::Layout kDefaultLayout{};  // when no PERFORM is wired (a standalone screen)
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr char kLetters[kBankPatterns + 1] = "ABCDEFGH";
@@ -376,7 +375,7 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
         const unsigned next = tap ? row_ ^ 1u : (n < 0 ? 0u : (n > 1 ? 1u : static_cast<unsigned>(n)));
         if (next != row_) {
           row_ = static_cast<std::uint8_t>(next);
-          flash_until_ = ctx.uptime_ms() + kFlashMs;
+          flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
         }
       } else {
         const pads::Row r = static_cast<pads::Row>(row_);

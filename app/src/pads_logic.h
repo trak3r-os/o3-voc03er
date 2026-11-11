@@ -196,4 +196,33 @@ constexpr Layout layout_from_legacy(bool keys, ChordKind bottom, bool bend_row) 
   return l;
 }
 
+// The chosen row's LEDs go dark this long when F6 changes the row, a short off-on (PATTERN and PERFORM).
+inline constexpr std::uint64_t kRowFlashMs = 150;
+
+// The settings of the 1.0 STAT that a 1.1 file still carries, derived from the layout on save so an older reader finds something sensible: `keys` 1
+// for a piano, `chord` the ChordKind of the lowest chord row (C, then B, then A; a piano chord counts; none gives 0), `bend_row` 1 when C is BEND.
+// A 1.1 file loads through the layout alone; these three are ignored there.
+struct LegacyFields {
+  std::uint8_t keys = 0;
+  std::uint8_t chord = 0;
+  std::uint8_t bend_row = 0;
+};
+constexpr LegacyFields legacy_fields(const Layout& l) noexcept {
+  LegacyFields f;
+  f.keys = is_piano(l) ? 1u : 0u;
+  f.bend_row = l.row[idx(Row::C)] == Plays::Bend ? 1u : 0u;
+  for (unsigned r = kRows; r-- > 0;) {  // C first, then B, then A
+    const Plays p = l.row[r];
+    if (p >= Plays::Triad && p <= Plays::Power) {
+      f.chord = static_cast<std::uint8_t>(idx(p) - idx(Plays::Triad));
+      break;
+    }
+    if (p >= Plays::PianoTriad && p <= Plays::PianoPower) {
+      f.chord = static_cast<std::uint8_t>(idx(p) - idx(Plays::PianoTriad));
+      break;
+    }
+  }
+  return f;
+}
+
 }  // namespace o3_voc03er::pads

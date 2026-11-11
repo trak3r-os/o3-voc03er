@@ -1,4 +1,4 @@
-# The bend (docs/UI-DESIGN.md sections 7b and 7c): a chord held while the free encoder bends it and springs back, the BEND ROW strip, KEYS with
+# The bend (docs/UI-DESIGN.md sections 7b and 7c): a chord held while the free encoder bends it and springs back, row C as the BEND strip, a piano on A and B with
 # the BND and MOD pads, the MIDI wheel and the mod wheel. The WAV carries the pitch; it is not the unit (the encoder's feel, the ramps' glide
 # and the vibrato's rate are for the unit).
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/bend.txt --out <dir>   (the dir must exist)
@@ -25,14 +25,15 @@ snap 05_coarse
 wait 400
 padup 26
 tap f7
-turn 1
+turn 5
 wait 100
 snap 06_keys
-press shift
+tap f6
+turn 2
 tap f7
-release shift
-wait 100
-snap 07_f7_bend_row
+turn 1
+wait 300
+snap 07_c_bend
 paddown 28
 wait 200
 paddown 38

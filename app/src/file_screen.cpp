@@ -273,11 +273,12 @@ void FileScreen::capture(app::Context& ctx) noexcept {
   p.swing = 0;
   p.pattern = static_cast<std::uint8_t>(pattern_->shown() & 7u);
   p.octave = static_cast<std::int8_t>(perform_->octave());
-  p.chord = static_cast<std::uint8_t>(perform_->chord_kind());
-  p.keys = perform_->keys_mode() ? 1u : 0u;
-  // STAT 1.1. The chord kind and the pads mode above are still PERFORM's own bottom_ and keys_ (Q6 derives those two and the bend row from the layout).
+  // The three 1.0 fields (chord kind, pads mode, bend row) are derived from the layout, which is what a 1.1 file loads through.
+  const pads::LegacyFields lf = pads::legacy_fields(perform_->layout());
+  p.chord = lf.chord;
+  p.keys = lf.keys;
   p.voicing = static_cast<std::uint8_t>(perform_->voicing());
-  p.bend_row = perform_->strip_mode() ? 1u : 0u;
+  p.bend_row = lf.bend_row;
   p.bend_range = static_cast<std::uint8_t>(perform_->bend_range());
   p.follow = pattern_->follow() ? 1u : 0u;
   set_project_preset(p, perform_->preset());
@@ -507,11 +508,9 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
   if (g_proj.stat != 0u) {
     (void)ctx.engine().set_tempo(g_proj.tempo_mbpm);
     perform_->set_octave(g_proj.octave);
-    perform_->set_chord_kind(g_proj.chord);
-    perform_->set_keys(g_proj.keys != 0u);
+    perform_->set_chord_kind(g_proj.chord);  // SAMPLE's chord kind until Q7
     // STAT 1.1 (a 1.0 file arrives here with the defaults of today and the legacy layout, read_stat's doing).
     perform_->set_voicing(g_proj.voicing);
-    perform_->set_strip(ctx, g_proj.bend_row != 0u);
     (void)perform_->set_bend_range(g_proj.bend_range);
     pattern_->set_follow(g_proj.follow != 0u);
     const int preset = project_preset_index(g_proj);

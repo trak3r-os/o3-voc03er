@@ -138,9 +138,9 @@ inline std::uint8_t level_byte(float linear) noexcept {
   return static_cast<std::uint8_t>(b < 0.0f ? 0.0f : (b > 255.0f ? 255.0f : b));
 }
 
-// ---- F7 PADS and the bend -----------------------------------------------------------------------------------------------------------
-// BEND ROW (SHIFT + F7), on either F7 page: the bottom row of the grid is a bend strip.
-inline constexpr unsigned kStripRow = 3;  // the bend strip: the bottom row of the grid
+// ---- the pads and the bend ----------------------------------------------------------------------------------------------------------
+// A row of the layout (pads_logic.h) set to BEND: the bottom row of the grid is a bend strip.
+inline constexpr unsigned kStripRow = 3;  // the bend strip: the bottom row of the grid (C)
 inline constexpr unsigned kBendFocus = 8;  // PerformScreen's focus value when no F key is hot: the encoder bends
 inline constexpr float kBendMaxSt = 12.0f;  // the unit's Bend range (Vocoder::Bend)
 inline constexpr std::uint64_t kBendSpringMs = 120;  // the encoder's bend returns to 0 this long after the last detent
@@ -152,47 +152,53 @@ constexpr int strip_semitone(unsigned col) noexcept {
 }
 // Whether `pad` is on the strip (bottom row) and the strip is up.
 constexpr bool on_strip(unsigned pad, bool strip) noexcept { return strip && o3sdk::app::pad_row(pad) == kStripRow; }
+// Whether row C of the layout is the bend strip.
+constexpr bool strip_on(const o3_voc03er::pads::Layout& l) noexcept { return l.row[o3_voc03er::pads::idx(o3_voc03er::pads::Row::C)] == o3_voc03er::pads::Plays::Bend; }
 
-// The KEYS page is a piano (PERFORM only; PLAY keeps its chromatic grid). Rows count from the top (pad_row): row 2 the white keys from C of
-// the current octave, row 1 the black keys on the column of the white key to their right, row 0 the controls, row 3 the strip (BEND ROW on;
-// dark and silent otherwise).
-enum class PianoFn : std::uint8_t { None, White, Black, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip, Formant };
-struct PianoPad {
-  PianoFn fn = PianoFn::None;
-  int offset = 0;  // semitones above C of the octave (White, Black); the semitones of the pad (Formant)
+// What a pad of PERFORM is (docs/REVIEW-2026-11-11.md section 3). Row 0 (the top) is the controls in every layout; rows 1, 2 and 3 are the layout's
+// A, B and C, and what each plays is pads::pad_play (so a pad gives the same note and kind on every screen); C may be the formant strip or the bend
+// strip instead. A control pad plays no note: BND and MOD act while held, the others on the press.
+enum class PadFn : std::uint8_t { None, Play, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip, Formant };
+struct PadSpec {
+  PadFn fn = PadFn::None;
+  o3_voc03er::pads::PadPlay play;  // Play: the note (1..127) and the stored kind (0 a note, 1..4 the ChordKind + 1)
+  int offset = 0;                  // Formant: the semitones of the pad
 };
-using o3_voc03er::pads::kBlackOffset;  // pads_logic.h: the piano's keys, shared with the layout
-using o3_voc03er::pads::kWhiteOffset;
 // Row 0, by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; 2, 5 and 8 are gaps.
-inline constexpr PianoFn kControlFn[12] = {PianoFn::OctDown, PianoFn::OctUp,   PianoFn::None,    PianoFn::VolDown, PianoFn::VolUp,  PianoFn::None,
-                                           PianoFn::RootDown, PianoFn::RootUp, PianoFn::None,    PianoFn::Mod,     PianoFn::BndDown, PianoFn::BndUp};
+inline constexpr PadFn kControlFn[12] = {PadFn::OctDown,  PadFn::OctUp,   PadFn::None,    PadFn::VolDown, PadFn::VolUp,  PadFn::None,
+                                         PadFn::RootDown, PadFn::RootUp, PadFn::None,    PadFn::Mod,     PadFn::BndDown, PadFn::BndUp};
 inline constexpr const char* kControlName[12] = {"OCT-", "OCT+", "", "VOL-", "VOL+", "", "ROOT-", "ROOT+", "", "MOD", "BND-", "BND+"};
-// The formant strip (KEYS, BEND ROW off, row 3): the Vocoder::Formant semitones of each column; both middle pads are 0.
+// The formant strip (row C set to FORMANT): the Vocoder::Formant semitones of each column; both middle pads are 0.
 inline constexpr int kFormantStrip[12] = {-12, -9, -6, -4, -2, 0, 0, 2, 4, 6, 9, 12};
-constexpr PianoPad piano_pad(unsigned row, unsigned col, bool strip) noexcept {
-  PianoPad p;
-  if (col >= 12u) {
-    return p;
+// The layout's row of a pad row 1..3 (A, B, C).
+constexpr o3_voc03er::pads::Row layout_row(unsigned pad_row) noexcept { return static_cast<o3_voc03er::pads::Row>(pad_row - 1u); }
+// The pad at (`row` 0..3 from the top, `col` 0..11) of `l` with the screen's octave shift `octave`.
+constexpr PadSpec pad_spec(const o3_voc03er::pads::Layout& l, unsigned row, unsigned col, int octave) noexcept {
+  PadSpec s;
+  if (col >= 12u || row >= 4u) {
+    return s;
   }
-  if (row == 2u) {
-    p.fn = PianoFn::White;
-    p.offset = kWhiteOffset[col];
-  } else if (row == 1u && kBlackOffset[col] >= 0) {
-    p.fn = PianoFn::Black;
-    p.offset = kBlackOffset[col];
-  } else if (row == 0u) {
-    p.fn = kControlFn[col];
-  } else if (row == kStripRow && strip) {
-    p.fn = PianoFn::Strip;
-  } else if (row == kStripRow) {  // BEND ROW off: the formant strip
-    p.fn = PianoFn::Formant;
-    p.offset = kFormantStrip[col];
+  if (row == 0u) {
+    s.fn = kControlFn[col];
+    return s;
   }
-  return p;
+  const o3_voc03er::pads::Row r = layout_row(row);
+  const o3_voc03er::pads::Plays v = l.row[o3_voc03er::pads::idx(r)];
+  if (r == o3_voc03er::pads::Row::C && v == o3_voc03er::pads::Plays::Formant) {
+    s.fn = PadFn::Formant;
+    s.offset = kFormantStrip[col];
+  } else if (r == o3_voc03er::pads::Row::C && v == o3_voc03er::pads::Plays::Bend) {
+    s.fn = PadFn::Strip;
+  } else {
+    s.play = o3_voc03er::pads::pad_play(l, r, col, octave);
+    if (s.play.note >= 0) {
+      s.fn = PadFn::Play;
+    }
+  }
+  return s;
 }
-// A control pad plays no note; BND and MOD act while held, the others on the press.
-constexpr bool is_control(PianoFn f) noexcept { return f != PianoFn::None && f != PianoFn::White && f != PianoFn::Black && f != PianoFn::Strip && f != PianoFn::Formant; }
-constexpr bool is_held_control(PianoFn f) noexcept { return f == PianoFn::Mod || f == PianoFn::BndDown || f == PianoFn::BndUp; }
+constexpr bool is_control(PadFn f) noexcept { return f != PadFn::None && f != PadFn::Play && f != PadFn::Strip && f != PadFn::Formant; }
+constexpr bool is_held_control(PadFn f) noexcept { return f == PadFn::Mod || f == PadFn::BndDown || f == PadFn::BndUp; }
 
 // The time bend (BND- and BND+) and the vibrato (MOD): linear in the time held, full after kRampMs; the vibrato falls the same way on release.
 inline constexpr std::uint64_t kRampMs = 400;
@@ -232,18 +238,6 @@ inline void format_db(float db, char (&out)[12]) noexcept {
   out[n] = '\0';
 }
 
-// The MIDI note of a key pad at `octave` (C of octave 0 is kBottomLeftNote), or -1 for a pad that is no key or past 0..127.
-constexpr int piano_note(const PianoPad& p, int octave) noexcept {
-  if (p.fn != PianoFn::White && p.fn != PianoFn::Black) {
-    return -1;
-  }
-  const int n = kBottomLeftNote + 12 * octave + p.offset;
-  return n >= 0 && n <= 127 ? n : -1;
-}
-
-// The ChordKind of a chord row: kind_for_row (chords.h), whose lowest chord row is 3, or 2 with BEND ROW's strip on the bottom row.
-constexpr ChordKind row_kind(unsigned row, ChordKind bottom, bool strip) noexcept { return kind_for_row(row, bottom, strip ? 2u : 3u); }
-
 // The local bend (semitones) after one encoder detent: range / 8, SHIFT coarse range / 2, held inside +-range.
 constexpr float bend_step(float st, int delta, bool coarse, unsigned range) noexcept {
   const float r = static_cast<float>(range);
@@ -279,14 +273,14 @@ inline void strip_label(int st, char (&out)[kLabelChars + 1]) noexcept {
 }
 
 // ---- the SHIFT row (docs/UI-DESIGN.md "The SHIFT row of PERFORM") -------------------------------------------------------------------
-// What SHIFT + F1..F8 are. Toggle: an action, no focus (FREEZE). Value: takes the encoder (sfocus), a second tap steps it. BendRow: an action.
-enum class ShiftFn : std::uint8_t { Freeze, Value, BendRow };
+// What SHIFT + F1..F8 are. Freeze: an action, no focus. Value: takes the encoder (sfocus), a second tap steps it. None: no key (F7's, empty since Q6).
+enum class ShiftFn : std::uint8_t { Freeze, Value, None };
 struct ShiftKey {
   const char* name;  // on the F row (the Label face fits 8) and, upper case, HELP's Shift label (9 at most)
   ShiftFn fn;
 };
 inline constexpr ShiftKey kShiftKeys[8] = {{"FREEZE", ShiftFn::Freeze}, {"GATE", ShiftFn::Value},      {"ARP", ShiftFn::Value},        {"GLIDE", ShiftFn::Value},
-                                           {"FORMANT", ShiftFn::Value}, {"THRU", ShiftFn::Value},    {"BEND ROW", ShiftFn::BendRow}, {"PRESET", ShiftFn::Value}};
+                                           {"FORMANT", ShiftFn::Value}, {"THRU", ShiftFn::Value},    {"", ShiftFn::None},            {"PRESET", ShiftFn::Value}};
 inline constexpr unsigned kNoShiftFocus = 8;  // PerformScreen's sfocus_ when no SHIFT-row value has the encoder
 
 inline constexpr int kFormantMin = -12;
@@ -340,8 +334,8 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
   }
   static constexpr const char* kHints[7] = {
       "F1 MODE: BANDS, TALK, TUNE OR ROBOT",    "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
-      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 CHORD: BOTTOM ROW; NEXT KINDS ABOVE",
-      "F7 PADS: CHORDS OR KEYS. SHIFT: BEND ROW",
+      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 ROW: A, B OR C; F7 SETS WHAT IT PLAYS",
+      "F7 PLAYS: WHAT THE CHOSEN ROW'S PADS DO",
   };
   static constexpr const char* kF8[kModePages] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES"};
   return focus < 7u ? kHints[focus] : kF8[mode_page(mode < kModeCount ? mode : 0u)];

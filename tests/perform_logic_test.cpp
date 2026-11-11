@@ -102,62 +102,125 @@ TEST_CASE("perform: the hint of the free encoder fits") {
   CHECK(hint.find("ENCODER") != std::string::npos);
 }
 
-TEST_CASE("perform: the piano pad map") {
-  using F = pl::PianoFn;
-  // Row 2: white keys C D E F G A B C D E F G.
+namespace {
+pads::Layout layout_of(pads::Plays a, pads::Plays b, pads::Plays c) {
+  pads::Layout l;
+  l.row[0] = a;
+  l.row[1] = b;
+  l.row[2] = c;
+  return l;
+}
+}  // namespace
+
+TEST_CASE("perform: row 0 is the controls in every layout, the gaps dark, and no control plays a note") {
+  using F = pl::PadFn;
+  const F ctl[12] = {F::OctDown, F::OctUp, F::None, F::VolDown, F::VolUp, F::None, F::RootDown, F::RootUp, F::None, F::Mod, F::BndDown, F::BndUp};
+  const pads::Layout layouts[3] = {pads::Layout{}, layout_of(pads::Plays::PianoNote, pads::Plays::PianoNote, pads::Plays::Bend),
+                                   layout_of(pads::Plays::Off, pads::Plays::Seventh, pads::Plays::Off)};
+  for (const pads::Layout& l : layouts) {
+    for (unsigned c = 0; c < 12; ++c) {
+      const pl::PadSpec sp = pl::pad_spec(l, 0, c, 0);
+      CHECK(sp.fn == ctl[c]);
+      CHECK(sp.play.note == -1);
+      CHECK(std::string(pl::kControlName[c]).empty() == (ctl[c] == F::None));
+    }
+  }
+  CHECK(pl::is_control(F::Mod));
+  CHECK_FALSE(pl::is_control(F::Play));
+  CHECK_FALSE(pl::is_control(F::None));
+  CHECK_FALSE(pl::is_control(F::Formant));
+  CHECK_FALSE(pl::is_control(F::Strip));
+  CHECK(pl::is_held_control(F::BndUp));
+  CHECK_FALSE(pl::is_held_control(F::OctUp));
+}
+
+TEST_CASE("perform: rows 1, 2 and 3 are A, B and C, and a pad plays what pads::pad_play says") {
+  using F = pl::PadFn;
+  const pads::Layout def;  // A NOTE, B TRIAD, C FORMANT
+  for (unsigned c = 0; c < 12; ++c) {
+    const pl::PadSpec a = pl::pad_spec(def, 1, c, 0);
+    const pl::PadSpec b = pl::pad_spec(def, 2, c, 0);
+    CHECK(a.fn == F::Play);
+    CHECK(a.play.note == pads::pad_play(def, pads::Row::A, c, 0).note);
+    CHECK(a.play.kind == 0u);
+    CHECK(b.fn == F::Play);
+    CHECK(b.play.kind == 1u);
+    CHECK(b.play.note == pads::pad_play(def, pads::Row::B, c, 0).note);
+    CHECK(a.play.note == b.play.note + 12);  // C plays no note, so B is at +0 and A one octave above it
+  }
+}
+
+TEST_CASE("perform: the piano is B's white keys and A's black keys, from the same C") {
+  using F = pl::PadFn;
+  const pads::Layout piano = layout_of(pads::Plays::PianoNote, pads::Plays::PianoNote, pads::Plays::Formant);
   const int white[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};
   for (unsigned c = 0; c < 12; ++c) {
-    CHECK(pl::piano_pad(2, c, false).fn == F::White);
-    CHECK(pl::piano_pad(2, c, false).offset == white[c]);
+    const pl::PadSpec w = pl::pad_spec(piano, 2, c, 0);
+    REQUIRE(w.fn == F::Play);
+    CHECK(w.play.note == kChordBaseNote + 12 * pads::row_octave(piano, pads::Row::B) + white[c]);
   }
-  // Row 1: blacks on columns 1 2 4 5 6 8 9 11 (C# D# F# G# A# C# D# F#).
   const unsigned black_cols[8] = {1, 2, 4, 5, 6, 8, 9, 11};
   const int black[8] = {1, 3, 6, 8, 10, 13, 15, 18};
   unsigned n = 0;
   for (unsigned c = 0; c < 12; ++c) {
-    const pl::PianoPad p = pl::piano_pad(1, c, false);
-    if (p.fn == F::Black) {
+    const pl::PadSpec p = pl::pad_spec(piano, 1, c, 0);
+    if (p.fn == F::Play) {
       REQUIRE(n < 8u);
       CHECK(c == black_cols[n]);
-      CHECK(p.offset == black[n]);
+      CHECK(p.play.note == kChordBaseNote + 12 * pads::row_octave(piano, pads::Row::A) + black[n]);
       ++n;
+    } else {
+      CHECK(p.fn == F::None);
     }
   }
   CHECK(n == 8u);
-  // Row 0: the controls, the gaps dark.
-  const F ctl[12] = {F::OctDown, F::OctUp, F::None, F::VolDown, F::VolUp, F::None, F::RootDown, F::RootUp, F::None, F::Mod, F::BndDown, F::BndUp};
+}
+
+TEST_CASE("perform: row C is the formant strip, the bend strip, a note row or dark") {
+  using F = pl::PadFn;
+  const int want[12] = {-12, -9, -6, -4, -2, 0, 0, 2, 4, 6, 9, 12};
+  const pads::Layout formant;  // C FORMANT
+  const pads::Layout bend = layout_of(pads::Plays::Note, pads::Plays::Triad, pads::Plays::Bend);
+  const pads::Layout notes = layout_of(pads::Plays::Note, pads::Plays::Triad, pads::Plays::Seventh);
+  const pads::Layout off = layout_of(pads::Plays::Note, pads::Plays::Triad, pads::Plays::Off);
   for (unsigned c = 0; c < 12; ++c) {
-    CHECK(pl::piano_pad(0, c, false).fn == ctl[c]);
-    CHECK(pl::piano_pad(0, c, true).fn == ctl[c]);
-    CHECK(pl::piano_note(pl::piano_pad(0, c, false), 0) == -1);  // no control plays a note
+    CHECK(pl::pad_spec(formant, 3, c, 0).fn == F::Formant);
+    CHECK(pl::pad_spec(formant, 3, c, 0).offset == want[c]);
+    CHECK(pl::pad_spec(formant, 3, c, 0).play.note == -1);
+    CHECK(pl::pad_spec(bend, 3, c, 0).fn == F::Strip);
+    CHECK(pl::pad_spec(notes, 3, c, 0).fn == F::Play);
+    CHECK(pl::pad_spec(notes, 3, c, 0).play.kind == 2u);
+    CHECK(pl::pad_spec(off, 3, c, 0).fn == F::None);
   }
-  // Row 3: the strip with BEND ROW on, the formant strip otherwise.
-  CHECK(pl::piano_pad(3, 4, false).fn == F::Formant);
-  CHECK(pl::piano_pad(3, 4, false).offset == -2);
-  CHECK(pl::piano_note(pl::piano_pad(3, 4, false), 0) == -1);
-  CHECK_FALSE(pl::is_control(F::Formant));
-  CHECK(pl::piano_pad(3, 4, true).fn == F::Strip);
-  CHECK(pl::piano_note(pl::piano_pad(3, 4, true), 0) == -1);
-  CHECK(pl::is_control(F::Mod));
-  CHECK_FALSE(pl::is_control(F::White));
-  CHECK_FALSE(pl::is_control(F::None));
+  CHECK(pl::strip_on(bend));
+  CHECK_FALSE(pl::strip_on(formant));
+  CHECK_FALSE(pl::strip_on(notes));
+  CHECK(pl::layout_row(1) == pads::Row::A);
+  CHECK(pl::layout_row(3) == pads::Row::C);
+}
+
+TEST_CASE("perform: OFF is dark and silent on every row") {
+  const pads::Layout l = layout_of(pads::Plays::Off, pads::Plays::Off, pads::Plays::Off);
+  for (unsigned r = 1; r < 4; ++r) {
+    for (unsigned c = 0; c < 12; ++c) {
+      CHECK(pl::pad_spec(l, r, c, 0).fn == pl::PadFn::None);
+    }
+  }
 }
 
 TEST_CASE("perform: octave end stops, and a note is not moved by the octave") {
-  const pl::PianoPad c = pl::piano_pad(2, 0, false);
-  const int n0 = pl::piano_note(c, 0);
+  const pads::Layout def;
+  const pl::PadSpec c = pl::pad_spec(def, 2, 0, 0);
+  const int n0 = c.play.note;
   REQUIRE(n0 >= 0);
-  CHECK(pl::piano_note(c, 1) == n0 + 12);
-  CHECK(pl::piano_note(c, -1) == n0 - 12);
+  CHECK(pl::pad_spec(def, 2, 0, 1).play.note == n0 + 12);
+  CHECK(pl::pad_spec(def, 2, 0, -1).play.note == n0 - 12);
   // The end of the range reads -1 (no note), never wraps.
-  CHECK(pl::piano_note(c, 100) == -1);
-  CHECK(pl::piano_note(c, -100) == -1);
+  CHECK(pl::pad_spec(def, 2, 0, 100).fn == pl::PadFn::None);
+  CHECK(pl::pad_spec(def, 2, 0, -100).fn == pl::PadFn::None);
   // clamp_octave holds the end stops the OCT pads dim at.
   CHECK(clamp_octave(1000) != 1000);
   CHECK(clamp_octave(-1000) != -1000);
-  // PERFORM keeps the note a pad began with (g_pd.notes), so the note value of a pad pressed at octave 0 stays n0 after the octave moves.
-  const int pressed = pl::piano_note(c, 0);
-  CHECK(pressed == n0);
 }
 
 TEST_CASE("perform: VOL clamps and ROOT wraps") {
@@ -201,12 +264,7 @@ TEST_CASE("perform: the bend sums the wheel and the local bend, and the encoder 
   CHECK(pl::wheel_semitones(0, 0, 12) == doctest::Approx(-12.0f));
 }
 
-TEST_CASE("perform: the formant strip reads -12 to +12 with both middle pads at 0, and the lit pad is the value in force") {
-  const int want[12] = {-12, -9, -6, -4, -2, 0, 0, 2, 4, 6, 9, 12};
-  for (unsigned c = 0; c < 12; ++c) {
-    CHECK(pl::piano_pad(3, c, false).offset == want[c]);
-    CHECK(pl::piano_pad(3, c, true).fn == pl::PianoFn::Strip);  // BEND ROW on: the bend strip, not the formant's
-  }
+TEST_CASE("perform: the lit formant pad is the value in force, both middle pads at 0") {
   for (unsigned c = 0; c < 12; ++c) {
     CHECK(pl::formant_lit(0, c) == (c == 5u || c == 6u));
     CHECK(pl::formant_lit(4, c) == (c == 8u));
@@ -242,7 +300,8 @@ TEST_CASE("perform: the SHIFT row's steps hold their ranges, and all eight keys 
   CHECK(pl::kShiftKeys[0].fn == pl::ShiftFn::Freeze);
   CHECK(pl::kShiftKeys[4].fn == pl::ShiftFn::Value);
   CHECK(pl::kShiftKeys[5].fn == pl::ShiftFn::Value);
-  CHECK(pl::kShiftKeys[6].fn == pl::ShiftFn::BendRow);
+  CHECK(pl::kShiftKeys[6].fn == pl::ShiftFn::None);  // BEND ROW went with the layout: the key is empty
+  CHECK(std::string(pl::kShiftKeys[6].name).empty());
   CHECK(std::string(pl::key_hint(5, 0, 4)).size() <= pl::kKeyHintMax);
   CHECK(std::string(pl::key_hint(5, 0, 5)).size() <= pl::kKeyHintMax);
 }

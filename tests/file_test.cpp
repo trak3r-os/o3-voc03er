@@ -413,8 +413,10 @@ TEST_CASE("file: P3 a load puts the layout, FOLLOW, BEND ROW, RANGE, VOICING, th
   CHECK(got.tempo_mbpm == src.tempo_mbpm);
   CHECK(got.pattern == src.pattern);
   CHECK(got.octave == src.octave);
-  CHECK(got.chord == src.chord);
-  CHECK(got.keys == src.keys);
+  // The 1.0 fields are derived from the layout on save (Q6): a piano of triads with BEND on C is keys 1, chord 0 (TRIAD), bend row 1,
+  // whatever the loaded file's own 1.0 fields said (chord 2).
+  CHECK(got.chord == 0);
+  CHECK(got.keys == 1);
   CHECK(got.voicing == src.voicing);
   CHECK(got.bend_row == src.bend_row);
   CHECK(got.bend_range == src.bend_range);

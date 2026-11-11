@@ -124,8 +124,8 @@ now.
 | F3 SOUNDS | A list: SYNTH, NOISE, LIVE, or SLOT 1 to 4 |
 | F4 KEY | The root of the key. Chords and pitch correction share it |
 | F5 SCALE | The scale: the chords and TUNE stay in it |
-| F6 CHORD | The kind on the bottom pad row: TRIAD, 7TH, OPEN or POWER. The rows above play the next kinds |
-| F7 PADS | CHORDS or KEYS (below) |
+| F6 ROW | Which pad row F7 sets: A, B or C. A tap steps and wraps; the encoder stops at the ends. The row's pads flash once |
+| F7 PLAYS | What the chosen row plays (below). Hold a pad of A, B or C and F7 changes that pad's row at once |
 | F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED |
 | SHIFT + F1 | FREEZE the vowel |
 | SHIFT + F2 | GATE: chops the sound in time (OFF, 1/4, 1/8, 1/16, 1/32) |
@@ -133,31 +133,36 @@ now.
 | SHIFT + F4 | GLIDE: slides between notes |
 | SHIFT + F5 | FORMANT: moves the voice's colour up or down, as if the singer were smaller or bigger |
 | SHIFT + F6 | THRU: lets some of the voice's top through |
-| SHIFT + F7 | BEND ROW: the bottom pad row becomes a pitch-bend strip |
+| SHIFT + F7 | Empty |
 | SHIFT + F8 | PRESET: eight factory sounds |
 
 ![PERFORM in TALK mode with a chord held](manual/img/perform-talk.png)
 
 *PERFORM in TALK: the voiceprint is now a smooth curve, the shape of the mouth.*
 
-**The pads in CHORDS.** The twelve columns are the twelve roots, C at the left. The bottom row plays the chord kind F6 names, and each row
-above it plays the next kind in this order, going round: TRIAD, 7TH (the seventh chord), OPEN (root, fifth, ninth: open and airy), POWER
-(root, fifth, octave: the classic robot fifth). With F6 on TRIAD, the default, the rows are TRIAD, 7TH, OPEN and POWER from the bottom; with
-F6 on POWER they are POWER, TRIAD, 7TH and OPEN. All four kinds are always on the grid, and no two rows play the same one. The screen names
-each row's kind beside it. With BEND ROW on, the strip takes the bottom row and the three rows above play F6's kind and the next two. LEFT
-and RIGHT move the octave.
+**The pads.** The top pad row is always the controls: OCT- and OCT+, VOL- and VOL+, ROOT- and ROOT+, MOD (adds a little vibrato while
+held) and BND- and BND+ (bend while held). Below it are three rows, A, B and C from the top, and the twelve columns are the twelve roots,
+C at the left. F6 chooses a row and F7 chooses what it plays:
 
-**The pads in KEYS.** A piano: white keys on the third row, black keys above them. The top row has controls: OCT- and OCT+, VOL- and VOL+,
-ROOT- and ROOT+, MOD (adds a little vibrato while held) and BND- and BND+ (bend while held). The row under the white keys is a formant
-strip when BEND ROW is off.
+- NOTE: one note per pad. TRIAD, 7TH (the seventh chord), OPEN (root, fifth, ninth: open and airy) and POWER (root, fifth, octave: the
+  classic robot fifth): a chord per pad.
+- PIANO NOTE, PIANO TRIAD, PIANO 7TH, PIANO OPEN and PIANO POWER (rows A and B only): a piano. A is the black keys and B the white keys;
+  choosing one on either row sets both, and choosing a plain value on one of them splits the piano again.
+- FORMANT and BEND (row C only): FORMANT is a strip of semitones: a tap sets the formant and nothing is held. BEND is the pitch-bend strip:
+  the middle pair is zero, each pad outwards is a semitone, and it springs back when you let go.
+- OFF: the row is dark and silent.
 
-![PERFORM with the pads as KEYS: two keys held, the control row drawn above the piano](manual/img/perform-keys.png)
+The default is A NOTE, B TRIAD and C FORMANT. Each row that plays notes sits an octave above the one under it, so a note on row B is
+one octave over the same pad on row C. SHIFT tapped while a pad is held latches it, on any row that plays notes; DELETE lets it go. The
+screen names each row's value beside it. LEFT and RIGHT move the octave.
 
-*PADS set to KEYS. The grid above the F keys draws the controls; the pad lights show the held keys.*
+![PERFORM with a piano on rows A and B: two keys held, the control row drawn above the piano](manual/img/perform-keys.png)
+
+*A piano on rows A and B with the formant strip on C. The grid above the F keys draws the controls; the pad lights show the held keys.*
 
 **Pitch bend.** The encoder bends the synth once it is free: press PERFORMANCE while on PERFORM to free it, and tap any F key to take it
-back. It springs back to the middle about a tenth of a second after you stop turning. SHIFT makes the steps larger. BEND ROW (SHIFT + F7)
-puts a strip of pads on the bottom row: the middle pair is zero, each pad outwards is a semitone. A bend moves the synth only: a live
+back. It springs back to the middle about a tenth of a second after you stop turning. SHIFT makes the steps larger. Set row C to BEND
+(F6, then F7) for a strip of pads: the middle pair is zero, each pad outwards is a semitone. A bend moves the synth only: a live
 source and a slot have no pitch of their own to move.
 
 ### PARAMS
@@ -346,9 +351,9 @@ pad writes into the step under the cursor and moves the cursor on; with one or m
 On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
 fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
 
-On the NOTE lane the palette is the chord grid's two lower rows: F6's kind on the lower row, the next kind above it. **Hold SHIFT and press
-a chord pad to write its root alone, a single note**: a bass line of sixteen notes is sixteen presses, with SHIFT held. With PADS on KEYS
-(PERFORM's F7) the palette is two octaves of single notes, the upper row an octave up, and no SHIFT is needed.
+On the NOTE lane the palette is PERFORM's rows A and B as they play (F6 chooses A or B here, F7 what it plays). **Hold SHIFT and press
+a chord pad to write its root alone, a single note**: a bass line of sixteen notes is sixteen presses, with SHIFT held. With a piano
+on PERFORM's rows A and B the palette is the piano, and no SHIFT is needed.
 
 | Key | What it does |
 |---|---|
@@ -434,7 +439,7 @@ been read there, but several things need more testing, most of all by ear. In pa
 - **The microphone and the radio.** Switching between them has been seen; how they sound needs a person.
 - **Clicks** at the switch when a take is captured from a live source need more testing.
 - **Glide, gate, arp, vibrato and the bend** need more testing by hand and ear, and so do the formant steps and the VOL, ROOT and BND
-  pads on KEYS.
+  pads of the controls row.
 - **MIDI.** USB MIDI has been seen working. A DIN cable has not been run: no interface was at hand.
 - **SONG.** The exact step where a change lands, the stop at the end of a chain and a pattern of length 1 at a boundary need more testing
   on the unit.

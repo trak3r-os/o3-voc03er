@@ -268,3 +268,50 @@ TEST_CASE("pads: the layout an older file meant") {
     for (Row r : {Row::A, Row::B, Row::C}) CHECK(pd::offered(r, l.row[pd::idx(r)]));
   }
 }
+
+TEST_CASE("pads: legacy_fields derives the 1.0 settings of a layout (keys, the lowest chord row's kind, BEND ROW)") {
+  pd::Layout l;  // A NOTE, B TRIAD, C FORMANT
+  pd::LegacyFields f = pd::legacy_fields(l);
+  CHECK(f.keys == 0);
+  CHECK(f.chord == 0);  // B's TRIAD is the lowest chord row
+  CHECK(f.bend_row == 0);
+
+  l.row[2] = Plays::Seventh;  // C is the lowest row and a chord: its kind wins
+  CHECK(pd::legacy_fields(l).chord == 1);
+  l.row[2] = Plays::Bend;
+  f = pd::legacy_fields(l);
+  CHECK(f.bend_row == 1);
+  CHECK(f.chord == 0);  // B's TRIAD again
+
+  l.row[1] = Plays::Off;
+  l.row[0] = Plays::Power;  // only A is a chord
+  CHECK(pd::legacy_fields(l).chord == 3);
+  l.row[0] = Plays::Note;  // no chord at all
+  CHECK(pd::legacy_fields(l).chord == 0);
+
+  // A piano is KEYS, and a piano chord counts as its kind.
+  pd::Layout p;
+  REQUIRE(pd::set_plays(p, Row::A, Plays::PianoOpen));
+  f = pd::legacy_fields(p);
+  CHECK(f.keys == 1);
+  CHECK(f.chord == 2);
+  CHECK(f.bend_row == 0);
+  REQUIRE(pd::set_plays(p, Row::A, Plays::PianoNote));
+  CHECK(pd::legacy_fields(p).chord == 0);
+  REQUIRE(pd::set_plays(p, Row::A, Plays::Note));  // a grid value splits the piano
+  CHECK(pd::legacy_fields(p).keys == 0);
+
+  // A layout an older file meant gives its settings back.
+  for (unsigned i = 0; i < 16; ++i) {
+    const bool keys = (i & 1u) != 0;
+    const ChordKind bottom = static_cast<ChordKind>((i >> 1) & 3u);
+    const bool bend = (i & 8u) != 0;
+    const pd::LegacyFields g = pd::legacy_fields(pd::layout_from_legacy(keys, bottom, bend));
+    CAPTURE(i);
+    CHECK((g.keys != 0) == keys);
+    CHECK((g.bend_row != 0) == bend);
+    if (!keys) {
+      CHECK(g.chord == static_cast<unsigned>(bottom));
+    }
+  }
+}

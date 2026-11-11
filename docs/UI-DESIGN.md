@@ -96,8 +96,8 @@ Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN met
 Middle: the voiceprint with the MODE word over it. Right, SOUNDS: the carrier chip, the chord being played in big type ("Dm7", "C5") with its
 notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the chord grid or the keys, with the octave.
 
-- F1 MODE (BANDS, TALK, TUNE, ROBOT) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 CHORD
-  (TRIAD, 7TH, OPEN, POWER: the kind of the bottom chord row, section 7) · F7 PADS (CHORDS, CHORDS + BEND, KEYS) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
+- F1 MODE (BANDS, TALK, TUNE, ROBOT) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 ROW
+  (A, B or C: the pad row F7 sets, section 7) · F7 PLAYS (what that row plays, section 7) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
   A tap on F2 or F3 opens its picker as a list over the column (UP / DOWN or the encoder, the key again or F1 takes it, F8 backs out); the
   dimmed rows are the rule of section 2.
   Built in U3b: this replaces the second-tap-steps rule for F2 and F3 only (the other F keys keep it); the same key again takes the row the cursor is
@@ -107,9 +107,9 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
   stop is written in the middle of the second bar while the transport plays, so the unit stops at the bar line, and at once when it is stopped),
   and REC again cancels while it waits for the bar or stops early while it records. The ADC and the route change in one step, when the loop holds audio.
   The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side is SAMPLE's F2 SIDE, and FOLLOW is a value of the pattern's CARRIER lane.
-- Pads: CHORDS (default, section 7) or KEYS (a four-octave keyboard, today's `pad_map.h`); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
+- Pads: row 0 the controls, rows A, B and C the layout (section 7); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
   releases. REC captures.
-- LEDs: section 7 for CHORDS; KEYS: white keys `kLedDim`, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays.
+- LEDs: section 7 (the layout's rows: root, scale, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays).
 
 ### SAMPLE (SAMPLE PLAY): the slots
 
@@ -419,16 +419,22 @@ page CARRIER; SPREAD is also PERFORM's F8 in BANDS, because it is the one that i
 
 The first thing a new user reaches. KEY and SCALE are the TUNE parameters, so the chords and the pitch correction agree by construction.
 
-**The grid** (PADS = CHORDS): the 12 columns are the 12 roots, C at the left of the octave LEFT / RIGHT chose; the row is the chord's kind.
-The kinds: TRIAD, the triad the scale gives on that root (major, minor or diminished, by the scale: a chord is never out of key unless the root
-is); 7TH, the seventh the scale gives; OPEN, root, fifth, ninth (sus2-like, the airy vocoder pad); POWER, root, fifth, octave (the classic
-robot fifth). A root outside the scale still plays (its nearest diatonic quality) and is lit dimmer.
-**One rule for every row** (issue #4, 2026-11-11): F6 CHORD picks the kind of the lowest chord row (on SAMPLE it is F1; UP / DOWN on PERFORM do
-the same), and each row above it plays the next kind in the order TRIAD, 7TH, OPEN, POWER, round (`kind_for_row`, `chords.h`). TRIAD is the
-default, which gives the grid it always had: TRIAD, 7TH, OPEN, POWER from the bottom. No F6 value makes two rows play the same kind, and every
-kind is on the full grid, so a kind is one press away when fewer rows are chords: the SAMPLE split, PATTERN's NOTE
-palette (the same two), or the bend strip of section 7b (F6's kind and the next two). The issue's own candidates were rejected: a ladder of
-voicings per row would take over PARAMS' VOICING, and a fixed POWER top row duplicates the bottom row when F6 is POWER.
+**The layout** (Q6, `pads_logic.h`, `docs/REVIEW-2026-11-11.md` section 3): the 12 columns are the 12 roots, C at the left of the octave LEFT / RIGHT chose.
+Row 0 is the controls on every layout (below). Rows 1, 2 and 3 are A, B and C, each with a PLAYS value, and what a pad plays is
+`pads::pad_play(layout, row, col, octave)`, the same function on every screen. PLAYS values: NOTE (one note); TRIAD, 7TH, OPEN, POWER (a chord
+of the kind per pad: TRIAD, the triad the scale gives on that root, major, minor or diminished; 7TH, the seventh the scale gives; OPEN, root,
+fifth, ninth, the airy vocoder pad; POWER, root, fifth, octave); on A and B the same five as a piano (PIANO NOTE .. PIANO POWER: A the black
+keys, B the white keys, the voice of the pad's kind); on C only, FORMANT (a strip of semitones, a tap sets the formant and holds nothing) and BEND
+(the strip of section 7b); OFF on every row (dark and silent). A root outside the scale still plays (its nearest diatonic quality) and is lit
+dimmer. The default is A NOTE, B TRIAD, C FORMANT.
+**F6 ROW and F7 PLAYS**: F6 chooses A, B or C (a tap steps and wraps, the encoder stops at the ends) and the row's LEDs flash once
+(`kRowFlashMs`, 150 ms); F7 steps the chosen row through its order (A and B: NOTE, TRIAD, 7TH, OPEN, POWER, PIANO NOTE .. PIANO POWER, OFF; C: NOTE,
+TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, OFF; a tap wraps, the encoder stops at the ends). A piano value on A or B takes both rows (the grid values
+they had are kept) and a grid value on either splits them, the other row getting its old value back. **The shortcut**: while a pad of A, B or
+C is held, F7 changes that pad's row at once and F6's row moves to it. SHIFT + F7 is empty. Each row that plays notes sits one octave above
+the playing rows under it (`row_octave`, the joined piano counting as one row). The project keeps the layout (STAT 1.1); a 1.1 file loads
+through it alone, and saving also writes the 1.0 chord kind, pads mode and bend row derived from it (`legacy_fields`) for an older build.
+The old F6 CHORD, `kind_for_row` rule (issue #4) and PADS = KEYS are gone from PERFORM; SAMPLE still uses them until Q7.
 
 **Voicing** (PARAMS, page SHAPE): CLOSE (as stacked), OPEN (the third up an octave), WIDE (across two octaves), SMOOTH (the inversion nearest the chord before:
 voice-leading for free, the default). The chord's notes become `note_on`s to the unit, up to five, inside its eight voices.
@@ -439,9 +445,9 @@ LEDs cannot name a chord: the screen does, in Display type, with the notes as ti
 
 **Latch**: SHIFT + a pad latches its chord; a new latch replaces the old one, and notes shared by both keep sounding.
 
-**Keys** (PADS = KEYS) are a piano on PERFORM (a piano; the chromatic map of the old PLAY screen is gone). Row 2 (from the top, 0) holds the white keys, C D E F G A B C D E F G of the octave LEFT / RIGHT chose; row 1 the black keys on the column of the white key to their right (C# D# F# G# A# C# D# F#: columns 1, 2, 4, 5, 6, 8, 9, 11); row 0 the controls, below; row 3 is dark and silent, or the strip when BEND ROW is on. LEDs: the key's root `kLedLow`, the scale `kLedDim`, outside the scale off, held `kLedOn`.
+**A piano** (A and B joined, any PIANO value) on PERFORM: row B holds the white keys, C D E F G A B C D E F G of the octave LEFT / RIGHT chose; row A the black keys on the column of the white key to their right (C# D# F# G# A# C# D# F#: columns 1, 2, 4, 5, 6, 8, 9, 11). LEDs: the key's root `kLedLow`, the scale `kLedDim`, outside the scale off, held `kLedOn`.
 
-Row 0 by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; columns 2, 5 and 8 are dark and silent. No control plays a note, and a note held when the octave moves ends with the note it began with. OCT steps the octave. VOL steps the unit's `Level` (PLAY's OUTPUT LEVEL) by its coarse step, 6 dB, held to -48..6. ROOT steps `Key` round the twelve. The hint line shows the new OCT, VOL or ROOT for a moment. A VOL or OCT pad at the end of its range is off; ROOT, BND and MOD stay `kLedDim`; a held control `kLedOn`. BND- and BND+ and MOD act while held (section 7b). F7 PADS has two values, CHORDS and KEYS; BEND ROW is independent of them, SHIFT + F7 toggles it and F7's value shows "+B".
+**The controls row** (row 0, every layout) by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; columns 2, 5 and 8 are dark and silent. No control plays a note, and a note held when the octave moves ends with the note it began with. OCT steps the octave. VOL steps the unit's `Level` (PLAY's OUTPUT LEVEL) by its coarse step, 6 dB, held to -48..6. ROOT steps `Key` round the twelve. The hint line shows the new OCT, VOL or ROOT for a moment. A VOL or OCT pad at the end of its range is off; ROOT, BND and MOD stay `kLedDim`; a held control `kLedOn`. BND- and BND+ and MOD act while held (section 7b).
 
 ## 7b. Pitch bend
 
@@ -450,9 +456,9 @@ under a held vowel is the classic robot glide. The unit gets one parameter, `Ben
 `dsp::Ramp` once a block, so a stepped input arrives as a glide; the cost is a multiply a voice a block [est].
 
 - **The encoder.** On PERFORM the encoder bends once it is free: PERFORMANCE pressed while PERFORM is up frees it, and a tap on any F key takes it back (a second tap on the focused F key keeps stepping its value). Boot focus is F6. A detent is range / 8, SHIFT coarse range / 2, held to +-range. An encoder has no spring, so the bend returns to 0 about 120 ms after the last detent. BEND RANGE (+-2, +-5, +-12 semitones, default +-2) is set with the console command `voc bendrange <2|5|12>`. SAMPLE keeps its own encoder.
-- **The pad strip.** BEND ROW (SHIFT + F7), on either F7 value: the bottom row becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. In CHORDS the chord rows move up one and the row above the strip plays F6 CHORD's kind, the two above it the next two kinds (the rule of section 7). In KEYS the piano does not move (row 3 was free). LEDs: the middle pair `kLedDim`, the held pad `kLedOn`.
-- **BND- and BND+ (KEYS, row 0).** While held, the local bend grows linearly to -BEND RANGE or +BEND RANGE in 400 ms (the main loop's `uptime_ms`, written only when it changes); on release it returns to 0 through the unit's ramp. The last pressed of these and the strip wins. It sums with the MIDI wheel (clamped +-12).
-- **MOD (KEYS, col 9) and `Vib` (id 43).** The unit adds a vibrato to the bend: about 5.5 Hz, +-0.5 semitone at depth 1. At Vib 0 the output is bit-identical to Bend 0 and the phase resets. Held, the MOD pad raises the depth linearly to 1 in 400 ms; released, it falls to 0 in 400 ms. MIDI CC1 writes Vib too (when it is not learned): the larger of the pad's and the wheel's depth wins.
+- **The pad strip.** Row C set to BEND (F6 ROW C, F7 PLAYS BEND): row C becomes a strip: columns 6 and 7, the middle pair, are 0, and each pad outwards is one semitone, -5 at the left end and +5 at the right. Pressing bends, with the glide of the ramp; releasing returns to 0; two held, the last one wins. Rows A and B keep their own values. LEDs: the middle pair `kLedDim`, the held pad `kLedOn`.
+- **BND- and BND+ (controls row).** While held, the local bend grows linearly to -BEND RANGE or +BEND RANGE in 400 ms (the main loop's `uptime_ms`, written only when it changes); on release it returns to 0 through the unit's ramp. The last pressed of these and the strip wins. It sums with the MIDI wheel (clamped +-12).
+- **MOD (controls row, col 9) and `Vib` (id 43).** The unit adds a vibrato to the bend: about 5.5 Hz, +-0.5 semitone at depth 1. At Vib 0 the output is bit-identical to Bend 0 and the phase resets. Held, the MOD pad raises the depth linearly to 1 in 400 ms; released, it falls to 0 in 400 ms. MIDI CC1 writes Vib too (when it is not learned): the larger of the pad's and the wheel's depth wins.
 
 ### The SHIFT row of PERFORM
 
@@ -466,15 +472,15 @@ Asked by the maintainer on 2026-11-06 ("mete todos"): FORMANT, FREEZE, GATE, ARP
 | SHIFT + F4 | GLIDE | Slides between the carrier's notes, 0 to 500 ms |
 | SHIFT + F5 | FORMANT | `Formant`, -12 to +12 st |
 | SHIFT + F6 | THRU | `Thru`, 0 to 100 |
-| SHIFT + F7 | BEND ROW | As above, an action |
+| SHIFT + F7 | (empty) | BEND ROW went with Q6: row C set to BEND does it; HELP says the key is empty |
 | SHIFT + F8 | PRESET | One of eight factory sounds |
 
 - **GATE and ARP** run in the unit on one step clock taken from the tempo, so pads and MIDI notes go the same way and a step lands on its frame. The clock runs with the transport stopped and restarts at the bar when it starts. GATE has soft edges of about 2 ms against clicks, a 50 % duty, and costs a multiply a sample only while on. ARP's rate is GATE's when GATE is on and 1/16 otherwise. GATE cuts any carrier, a loop playing as the carrier too. With the transport stopped and the arp idle the first key pressed restarts the step clock and sounds at once; with it running the note waits for the grid.
 - **GLIDE** slews each voice's increment once a run, so it costs nothing in the sample loop.
-- **FORMANT strip.** On KEYS with BEND ROW off, row 4 picks the formant: -12, -9, -6, -4, -2, 0, 0, +2, +4, +6, +9, +12. A tap sets it and it stays, the pad lit, because a formant is a voice to pick and not a gesture to spring back from. FORMANT at 0 is the cheap path.
+- **FORMANT strip.** With row C set to FORMANT (the default), row C picks the formant: -12, -9, -6, -4, -2, 0, 0, +2, +4, +6, +9, +12. A tap sets it and it stays, the pad lit, because a formant is a voice to pick and not a gesture to spring back from. FORMANT at 0 is the cheap path.
 - **Presets** are a constexpr table of parameter values in flash, each a whole sound: ROBOT, CHOIR, WHISPER, GIANT, ELF, PULSE, ARP, FROZEN (`app/include/o3_voc03er/presets.h`, starting points for the maintainer's ear). Each sets the same 15 parameters (Mode, CarSrc, Wave, Noise, Attack, Release, Detune, Quality, Formant, Thru, Glide, Gate, Arp, Vib, Freeze) and never KEY, SCALE, the source, the loops or the transport; the encoder or a second SHIFT + F8 tap applies one at once. Saved user sounds wait for FILE in U9.
 
-SCALE (only the scale's notes) and STACK (a pad turns its note on and off) are not built: KEYS lights the scale, and SHIFT latch with DELETE does what STACK would. VOICE was built in E2 as a value of the carrier source: the synth plays the sung note snapped by KEY and SCALE, a held chord follows it, and with nothing sung the carrier is silent (`docs/ENGINE-REALISM.md`). VOICE needs TUNE's pitch detector beside BANDS, about 4 to 5 points of CPU [est, TUNE 45.3 % against 40.9 % idle], which takes BANDS 8 from 57.3 % to about 62 %, past the 60 % budget.
+SCALE (only the scale's notes) and STACK (a pad turns its note on and off) are not built: a piano lights the scale, and SHIFT latch with DELETE does what STACK would. VOICE was built in E2 as a value of the carrier source: the synth plays the sung note snapped by KEY and SCALE, a held chord follows it, and with nothing sung the carrier is silent (`docs/ENGINE-REALISM.md`). VOICE needs TUNE's pitch detector beside BANDS, about 4 to 5 points of CPU [est, TUNE 45.3 % against 40.9 % idle], which takes BANDS 8 from 57.3 % to about 62 %, past the 60 % budget.
 
 ## 7c. MIDI in
 
@@ -539,7 +545,7 @@ the skin's theme and its contrast test; every screen's `help()` checked with `he
 
 ## 10. The first five minutes
 
-No manual, the unit just switched on. PERFORM comes up: LIVE > SYNTH, BANDS, PADS = CHORDS, KEY C, SCALE MAJOR, the stored source (LINE on the first
+No manual, the unit just switched on. PERFORM comes up: LIVE > SYNTH, BANDS, layout A NOTE, B TRIAD, C FORMANT, KEY C, SCALE MAJOR, the stored source (LINE on the first
 boot, section 11).
 
 **To a vocoded chord.** Play something into the line jack, or pick MIC on MASTER and speak: the IN meter moves and the voiceprint flickers in the voice ink; nothing sounds yet, the carrier has no note. Press

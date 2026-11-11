@@ -1,5 +1,5 @@
 # The SHIFT row of PERFORM (docs/UI-DESIGN.md "The SHIFT row of PERFORM"): SHIFT held shows the second F row, SHIFT + F5 / F6 focus FORMANT and
-# THRU, the encoder moves them, SHIFT + F1 toggles FREEZE, the formant strip on KEYS, a plain
+# THRU, the encoder moves them, SHIFT + F1 toggles FREEZE, the formant strip on row C, C as BEND, a plain
 # F tap goes back, and HELP carries the row. The WAV is not the point (the unit hears the formant); the pictures are.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/shift_row.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -43,10 +43,8 @@ snap 07_gate_focus
 tap f3
 wait 100
 snap 08_plain_f_tap
-tap f7
-tap f7
 wait 100
-snap 09_keys_formant_strip
+snap 09_formant_strip
 pad 44
 wait 100
 snap 10_formant_plus_4
@@ -56,24 +54,25 @@ snap 11_formant_minus_12
 press shift
 tap f1
 release shift
-press shift
+tap f6
+turn 2
 tap f7
-release shift
-wait 100
-snap 12_bend_row_over_keys
+turn 1
+wait 300
+snap 12_c_bend
 press shift
 tap config
 release shift
 wait 100
-snap 13_help_keys_bend
+tap f2
+snap 13_help_c_bend
 tap config
+turn -1
+wait 300
 press shift
-tap f7
+tap config
 release shift
 wait 100
-press shift
-tap config
-release shift
-wait 100
-snap 14_help_keys_formant
+tap f2
+snap 14_help_c_formant
 tap config

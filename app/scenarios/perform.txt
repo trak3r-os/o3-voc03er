@@ -1,5 +1,5 @@
 # PERFORM, the home screen in OR NOIR: a tone in for the voice (a recorded voice goes in with `input wav <file>`), a chord pad held, SHIFT
-# latching it, each MODE (PLAY), PADS = KEYS (F7, a piano; G and G# held), HELP (Shift + Config). The simulator shows the screen and that the unit hears the input;
+# latching it, each MODE (PLAY), A and B a piano (F7 PLAYS; E and F# held), HELP (Shift + Config). The simulator shows the screen and that the unit hears the input;
 # it cannot say how it sounds or what the frame costs on the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/perform.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -36,7 +36,7 @@ wait 300
 snap 07_tune
 tap f1
 tap f7
-turn 1
+turn 5
 paddown 28
 paddown 18
 wait 300

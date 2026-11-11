@@ -41,17 +41,16 @@ padup 43
 tap f1
 turn -3
 wait 300
-# ---- the keys: PADS = KEYS, two keys held
+# ---- the keys: A and B a piano (F7 PLAYS), two keys held
 tap f7
-turn 1
+turn 5
 paddown 28
 paddown 18
 wait 300
 snap m_perform_keys
 padup 28
 padup 18
-tap f7
-turn -1
+turn -5
 wait 200
 # ---- PARAMS: its three pages with a chord held
 tap params

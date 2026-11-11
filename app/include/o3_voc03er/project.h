@@ -23,7 +23,9 @@
 //             name (matched against presets.h on load; length 0 or an unknown name is no preset: a name survives a reordered table, an index would not),
 //             then the pads' layout, 5 bytes: rows A, B, C and last[0..1] (pads::Plays values; each row must offer its value, see pads_logic.h `offered`).
 //             A 1.0 STAT sets the 1.1 fields to the defaults of today (voicing SMOOTH, bend row off, range 2, FOLLOW off, no preset) and the layout to
-//             pads::layout_from_legacy(pads mode, chord kind, false), not to what the previous project left. Absent STAT: those stay as they are
+//             pads::layout_from_legacy(pads mode, chord kind, false), not to what the previous project left. Absent STAT: those stay as they are.
+//             On save the 1.0 fields chord kind, pads mode and bend row are derived from the layout (pads::legacy_fields) so an older reader finds something
+//             sensible; on load of a 1.1 STAT the layout wins and those three are ignored
 //
 // Records inside PTNS and SLOT carry their own length, so a later minor appends fields to a record (read only when the record is long enough) and a later app
 // may hold more patterns or slots than this one reads. The WAV data is not in this file; the slot's `name` says which WAV of the project folder it came from.
@@ -116,7 +118,7 @@ struct Project {
   // STAT 1.1 (valid with `stat`; a 1.0 file gets the defaults of today, see the header; none of them is zero by default, so a Project that is to be written
   // takes them from file::default_stat or a capture):
   std::uint8_t voicing = 0;                        // 0..3 (the Voicing enum; 3 is SMOOTH)
-  std::uint8_t bend_row = 0;                       // 0/1: PERFORM's BEND ROW
+  std::uint8_t bend_row = 0;                       // 0/1: C is BEND (derived from the layout on save, ignored on load)
   std::uint8_t bend_range = 0;                     // 2, 5 or 12 semitones
   std::uint8_t follow = 0;                         // 0/1: PATTERN's FOLLOW
   std::uint8_t preset_len = 0;                     // 0: no preset
@@ -641,7 +643,7 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
     return 0;
   }
   if (p.stat != 0u) {
-    // The 1.0 fields keep the chord kind and the pads mode as an older build reads them (Q6 derives those two and the bend row from the layout).
+    // chord, keys and bend_row are derived from the layout by the capture (pads::legacy_fields); the layout below is what a 1.1 load uses.
     if (!w.begin("STAT") || !w.u16(kStatVersion) || !w.u32(p.tempo_mbpm) || !w.u8(p.swing) || !w.u8(p.pattern) || !w.u8(static_cast<std::uint8_t>(p.octave)) ||
         !w.u8(p.chord) || !w.u8(p.keys) || !w.u8(p.voicing) || !w.u8(p.bend_row) || !w.u8(p.bend_range) || !w.u8(p.follow) || !w.u8(p.preset_len) ||
         !w.bytes(p.preset, p.preset_len)) {
