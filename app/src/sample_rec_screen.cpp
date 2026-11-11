@@ -158,17 +158,19 @@ void SampleRecScreen::delete_press(app::Context& ctx) noexcept {
   if (voc_ == nullptr) {
     return;
   }
-  if (phase_ != Phase::Idle) {  // the take ends and is thrown away
-    drop_ = true;
+  if (phase_ != Phase::Idle) {
     const bool armed = phase_ == Phase::Starting || voc_->loop_status(rec_slot_).rec == Rec::Armed;
-    if (armed) {
+    if (armed) {  // nothing is recorded yet: cancel exactly as REC does, the slot keeps its audio (a second DELETE empties it)
       write_rec(ctx, false);
       phase_ = Phase::Idle;
-      finish(ctx);
-    } else if (!stop_) {
+      drop_ = false;
+      say(ctx, "CANCELLED");
+    } else if (!stop_) {  // recording: the take ends at the bar line and is thrown away
+      drop_ = true;
       write_rec(ctx, false);
       stop_ = true;
     }
+    ctx.redraw();
     return;
   }
   if (!holds_audio(slot_)) {
@@ -421,7 +423,7 @@ void SampleRecScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
 void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Rec, "ARM, OR STOP AT THE BAR", nullptr},
-      {Button::Delete, "THROW THE TAKE AWAY", nullptr},
+      {Button::Delete, "CANCEL/DROP TAKE, EMPTY SLOT", nullptr},
       {Button::Up, "SLOT BEFORE", nullptr},
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "SHORTER LENGTH, HOLD REPEATS", nullptr},

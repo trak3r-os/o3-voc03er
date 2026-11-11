@@ -213,3 +213,59 @@ TEST_CASE("sample_rec: a 2 BAR take with the transport stopped is exactly 2 bars
   CHECK(loop1() == "loop1=176400");
   CHECK(h.runtime().frame_failures() == 0u);
 }
+
+namespace {
+// What the console's state says of slot 1: the samples it holds ("loop1=0" is empty), the unit's own view, the one every screen reads.
+std::string slot1_state(sim::Harness& h) {
+  char line[1200];
+  const std::string text(line, h.runtime().state_line(line, sizeof line));
+  const std::size_t at = text.find("loop1=");
+  return at == std::string::npos ? std::string() : text.substr(at, text.find(' ', at) - at);
+}
+}  // namespace
+
+TEST_CASE("sample_rec: DELETE while a take only waits for the bar line cancels it and keeps the audio, a second DELETE empties the slot") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  h.run_ms(60);
+  tap(h, app::Button::Rec);    // transport stopped: records at once, stops by itself at the bar
+  h.run_ms(4500);
+  const std::string held = slot1_state(h);
+  REQUIRE_FALSE(held.empty());
+  REQUIRE(held != "loop1=0");  // the slot holds a take
+  tap(h, app::Button::Play);   // the transport runs: the next take waits for the bar line
+  h.run_ms(100);
+  REQUIRE(h.engine().playing());
+  tap(h, app::Button::Rec);  // ARMED: nothing is recorded yet
+  h.run_ms(40);
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(1.0f));
+  tap(h, app::Button::Delete);  // cancels as REC does
+  h.run_ms(40);
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  CHECK(slot1_state(h) == held);  // the audio stays
+  h.run_ms(5000);                 // past any bar line: nothing records, the take is not kept as a new one
+  CHECK(slot1_state(h) == held);
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  tap(h, app::Button::Delete);  // idle now: empties the slot
+  h.run_ms(100);
+  CHECK(slot1_state(h) == "loop1=0");
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));  // CLEAR does not stay in a saved project
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample_rec: DELETE while recording stops the take at the bar line and throws it away") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  h.run_ms(60);
+  tap(h, app::Button::Rec);
+  h.run_ms(600);  // recording
+  REQUIRE(slot1_state(h) != "loop1=0");
+  tap(h, app::Button::Delete);
+  h.run_ms(4500);
+  CHECK(slot1_state(h) == "loop1=0");
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Play)) == doctest::Approx(0.0f));
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}

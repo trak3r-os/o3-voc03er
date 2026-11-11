@@ -264,7 +264,8 @@ it at the bar. LENGTH can end it by itself.
 | F6 MONITOR | Hear the live input while you record |
 | F7 SLOT | Which slot, 1 to 4 (UP and DOWN too) |
 
-DELETE throws a take away.
+DELETE while a take waits for the bar line cancels it, as REC does, and the slot keeps its sound. DELETE while it records ends it at the
+bar and throws it away. DELETE with no take running empties the slot.
 
 ### SAMPLE
 
