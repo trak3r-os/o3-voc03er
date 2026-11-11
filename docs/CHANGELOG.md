@@ -22,13 +22,18 @@
 
 ### Fixed
 
+- SAMPLE slices (issue #3): a slice pad plays its cut once and stops at its end cut (TRIG ONE SHOT is the default now; GATE also stops it
+  at the release), and a new hit restarts it from its start cut (CHOKE ON fades out the slot's sounding slice). A slice no longer pauses
+  the slot's whole loop and lets it resume one slice behind: it turns the loop off, LOOP reads OFF, and F5 starts it again. The same holds
+  for a slice from PATTERN's SLICE lane or from MIDI. SAMPLE's play line shows what is left of each sounding slice.
 - PATTERN: a step pad past LENGTH no longer moves the cursor off the pattern.
 - The manual: what a project keeps (the patterns, the chain, the route, the vocoder settings, the tempo, the current pattern, the
   octave, the chord kind, the pad mode, the slot data) and what it does not keep yet; PATTERN's F8 SAVE writes the patterns, not the
   project; a chord latches when SHIFT is pressed while a chord pad is held, not the other way round; QUALITY is TALK's detail, not
   a number of bands.
-- HELP: PATTERN no longer lists REC, which does nothing there; PARAMS no longer speaks of a later slice, names F8 LEVEL on every page
-  and leaves blank keys unlabelled.
+- HELP: PATTERN, SAMPLE and SAMPLE EDIT no longer list REC, which does nothing there; PARAMS no longer speaks of a later slice, names
+  F8 LEVEL on every page and leaves blank keys unlabelled; SHIFT + PARAMS no longer reads "the old play screen" on PARAMS, PATTERN and
+  the SAMPLE screens.
 
 ## v0.2.0 (pre-release)
 

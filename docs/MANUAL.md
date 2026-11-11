@@ -275,6 +275,10 @@ DELETE throws a take away.
 The top two pad rows are the slices of the selected slot. The bottom two rows are chords. **Hold a slice and a chord together, and the
 slice sings that chord.** Holding a chord pad and pressing SHIFT latches it, so one hand can play slices over it. Four slices can sound at once.
 
+A slice pad plays its own cut once, from its start cut to its end cut, and then stops. A new hit on it starts it again from its start cut.
+A slice turns the slot's whole loop off, so LOOP reads OFF until F5 starts it again; a slice from PATTERN's SLICE lane or from MIDI does
+the same.
+
 | Key | What it does |
 |---|---|
 | F1 CHORD | The chord kind, shared with PERFORM |
@@ -282,8 +286,8 @@ slice sings that chord.** Holding a chord pad and pressing SHIFT latches it, so 
 | F3 SPEED | 0.5X, 1X or 2X |
 | F4 DIR | FWD or REV |
 | F5 LOOP | The whole slot plays round from the bar |
-| F6 TRIG | GATE: a slice stops when you let go. ONE SHOT: it plays to its end |
-| F7 CHOKE | ON: a new slice cuts the one sounding. OFF: they overlap |
+| F6 TRIG | ONE SHOT (the default): the slice plays to its end cut. GATE: it also stops when you let go of the pad |
+| F7 CHOKE | ON (the default): a hit fades out the slot's sounding slice and starts the new one. OFF: up to four slices overlap |
 | F8 LEVEL | -24 to +12 dB |
 
 UP and DOWN pick the slot. DELETE silences every sounding slice.

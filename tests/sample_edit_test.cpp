@@ -507,6 +507,17 @@ float unit_param(sim::Harness& h, std::uint16_t id) {
 
 float rp(sim::Harness& h, unsigned reader, Vocoder::RegionField f) { return unit_param(h, Vocoder::region_param(reader, f)); }
 
+// The vocoder's unit: the one whose UnitInfo names it.
+dsp::UnitId voc_unit(sim::Harness& h) {
+  for (unsigned u = 0; u < 8; ++u) {
+    const dsp::UnitInfo* info = h.engine().unit_info(static_cast<dsp::UnitId>(u));
+    if (info != nullptr && std::strcmp(info->name, "VOCODER") == 0) {
+      return static_cast<dsp::UnitId>(u);
+    }
+  }
+  return dsp::kNoUnit;
+}
+
 // SAMPLE REC takes 1 BAR into slot 1, then SAMPLE EDIT opens.
 struct Rig {
   o3sdk::platform::host::FakeCapture cap;
@@ -540,7 +551,12 @@ struct Rig {
   }
   // Pad `pad` pressed and let go: the region's Start and Len the unit was asked for, and whether it was asked at all.
   bool audition(unsigned pad, float& start, float& len) {
-    h->run_ms(200);  // the voice of the one before ends
+    // The voice of the one before ends first. TRIG ONE SHOT (the default since issue #3) leaves Trig at 1 after its cut ends (only a hit
+    // or a GATE release writes it), so Trig reads 1 between hits: the rig lowers it, as a GATE release would, and a hit raises it again.
+    const dsp::UnitId voc = voc_unit(*h);
+    REQUIRE(voc != dsp::kNoUnit);
+    (void)h->engine().set_param(voc, Vocoder::region_param(0, Vocoder::RegionField::Trig), 0.0f);
+    h->run_ms(200);
     h->pad_down(pad);
     h->run_ms(40);
     const bool on = rp(*h, 0, Vocoder::RegionField::Trig) == doctest::Approx(1.0f);
@@ -739,7 +755,7 @@ TEST_CASE("sample edit: HELP gives a row to every button the screen answers") {
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
   for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Insert, app::Button::Delete,
-                              app::Button::Shift, app::Button::Rec, app::Button::Params, app::Button::Performance, app::Button::Play,
+                              app::Button::Shift, app::Button::Params, app::Button::Performance, app::Button::Play,
                               app::Button::Master, app::Button::File, app::Button::SampleLoad, app::Button::SamplePlay, app::Button::SampleEdit,
                               app::Button::SampleRec, app::Button::Song, app::Button::Pattern, app::Button::Note, app::Button::Instr,
                               app::Button::Vol, app::Button::Fx}) {

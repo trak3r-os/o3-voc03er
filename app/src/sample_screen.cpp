@@ -88,15 +88,16 @@ struct SliceVoice {
   std::uint64_t started_ms;
 };
 
-// SAMPLE's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just the cursor in the SRAM). Zero means TRIG GATE and
+// SAMPLE's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just the cursor in the SRAM). Zero means TRIG ONE SHOT and
 // CHOKE ON, the defaults. The help tables are valid while HELP is open.
 struct SampleData {
   sm::SliceTable table[sm::kReaders];
   SliceVoice voice[sm::kReaders];
   std::uint8_t edited[sm::kReaders];     // the cuts are the hand's or a re-cut's (SAMPLE EDIT): service() leaves them alone until the length changes
   std::uint8_t even_code[sm::kReaders];  // SAMPLE EDIT's CUT EVEN value (sample_edit_logic.h even_cuts_of); 0 = 8, the cuts a take starts from
-  std::uint8_t one_shot[sm::kReaders];   // TRIG per slot: 1 ONE SHOT
+  std::uint8_t gate[sm::kReaders];       // TRIG per slot: 1 GATE (the release also stops the slice), 0 ONE SHOT
   std::uint8_t choke_off[sm::kReaders];  // CHOKE per slot: 1 OFF
+  std::uint8_t was_region[sm::kReaders]; // service(): the reader's region bit of the last pass (a slice that begins turns its slot's loop off)
   std::uint32_t seq;
   SliceMap map;                 // the SPEAKS slot's slices for the step sequencer's SLICE lane (published through StepSeq::slices_open)
   sm::SlicePublished published;  // what the map holds
@@ -252,12 +253,23 @@ void SampleScreen::trigger(app::Context& ctx, unsigned pad) noexcept {
   put(Field::Dir, src.reverse ? 1.0f : 0.0f);
   put(Field::Level, src.level_db);
   put(Field::Role, car ? 1.0f : 0.0f);
+  // The slot's whole loop does not wait under the slice: a loop that plays (or waits for the bar) is turned off first, so LOOP reads OFF and the
+  // pads own the slot until F5 starts it again. The unit would otherwise resume the loop where the slice paused it.
+  stop_loop(ctx, slot_);
+  if (g_sd.choke_off[slot_ & 3u] == 0u) {  // CHOKE ON: a slice of this slot on a borrowed reader (CHOKE was off) fades out
+    for (unsigned j = 0; j < sm::kReaders; ++j) {
+      if (j != k && g_sd.voice[j].active && g_sd.voice[j].slot == slot_) {
+        g_sd.voice[j].gate = false;
+        (void)e.set_param(voice_, Vocoder::region_param(j, Vocoder::RegionField::Trig), 0.0f);
+      }
+    }
+  }
   (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Start), static_cast<float>(sm::region_start(slot_, Loop::kMaxSamples, cut)));
   (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Len), static_cast<float>(cut.len));
   (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Trig), 1.0f);
   v.active = true;
   v.seen = false;
-  v.gate = g_sd.one_shot[slot_ & 3u] == 0u;
+  v.gate = g_sd.gate[slot_ & 3u] != 0u;
   v.slot = slot_;
   v.pad = static_cast<std::uint8_t>(pad);
   v.seq = ++g_sd.seq;
@@ -265,7 +277,19 @@ void SampleScreen::trigger(app::Context& ctx, unsigned pad) noexcept {
   ctx.redraw();
 }
 
-// TRIG GATE: the pad's release fades the voice out. A ONE SHOT voice ignores it.
+// Turns the slot's own loop off when it plays or waits for the bar (the unit's Play 0 leaves a sounding region alone). Reads the unit's status,
+// not view(): a borrowed reader's saved values are not its play state.
+void SampleScreen::stop_loop(app::Context& ctx, unsigned slot) noexcept {
+  if (voc_ == nullptr) {
+    return;
+  }
+  const Vocoder::LoopStatus st = voc_->loop_status(slot & 3u);
+  if (st.playing || st.pending) {
+    (void)ctx.engine().set_param(voice_, Vocoder::loop_param(slot & 3u, Field::Play), 0.0f);
+  }
+}
+
+// TRIG GATE: the pad's release fades the voice out. A ONE SHOT voice (the default) ignores it and plays its cut to the end cut.
 void SampleScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
   for (unsigned k = 0; k < sm::kReaders; ++k) {
     SliceVoice& v = g_sd.voice[k];
@@ -288,6 +312,13 @@ void SampleScreen::service(app::Context& ctx) noexcept {
   }
   dsp::Engine& e = ctx.engine();
   const std::uint64_t now = ctx.uptime_ms();
+  for (unsigned k = 0; k < sm::kReaders; ++k) {  // a slice that begins without a pad (the SLICE lane, a MIDI note) owns its slot as a pad's does
+    const Vocoder::LoopStatus st = voc_->loop_status(k);
+    if (st.region && g_sd.was_region[k] == 0u && (st.playing || st.pending)) {
+      (void)e.set_param(voice_, Vocoder::loop_param(k, Field::Play), 0.0f);
+    }
+    g_sd.was_region[k] = st.region ? 1u : 0u;
+  }
   for (unsigned k = 0; k < sm::kReaders; ++k) {
     SliceVoice& v = g_sd.voice[k];
     if (!v.active) {
@@ -399,7 +430,7 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       write(ctx, Field::Play, ls.playing || ls.pending ? 0.0f : 1.0f);
       break;
     case 5:  // TRIG: a flip
-      g_sd.one_shot[slot_ & 3u] ^= 1u;
+      g_sd.gate[slot_ & 3u] ^= 1u;
       break;
     case 6:  // CHOKE
       g_sd.choke_off[slot_ & 3u] ^= 1u;
@@ -518,8 +549,7 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Right, "OCTAVE UP, HOLD REPEATS", nullptr},
       {Button::Shift, "LATCH THE HELD CHORD PAD", nullptr},
       {Button::Delete, "RELEASE THE LATCHED CHORD", nullptr},
-      {Button::Rec, "SAMPLE REC: A TAKE", nullptr},
-      {Button::Params, "PARAMS: THREE PAGES", "THE OLD PLAY SCREEN"},
+      {Button::Params, "PARAMS: THREE PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
@@ -548,7 +578,7 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     for (unsigned i = 0; i < h.group_count; ++i) {
       g_sd.groups[i] = h.groups[i];
     }
-    g_sd.groups[h.group_count] = {"SLICES", "THE SLOT'S CUTS; GATE HOLDS, ONE SHOT RUNS ON", ui::Color::Accent};
+    g_sd.groups[h.group_count] = {"SLICES", "A SLICE PLAYS ITS CUT ONCE; A HIT RESTARTS IT", ui::Color::Accent};
     h.groups = g_sd.groups;
     ++h.group_count;
     for (unsigned pad = 0; pad < sm::kTopPads; ++pad) {
@@ -567,8 +597,8 @@ void SampleScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[2] = "0.5X, 1X, 2X";
   h.fkey[3] = "FORWARD, REVERSE";
   h.fkey[4] = "THE WHOLE SLOT PLAYS ROUND";
-  h.fkey[5] = "GATE OR ONE SHOT";
-  h.fkey[6] = "ON: SLICES CUT EACH OTHER";
+  h.fkey[5] = "GATE STOPS AT THE RELEASE";
+  h.fkey[6] = "ON: HITS CUT EACH OTHER";
   h.fkey[7] = "-24 TO +12 DB";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
@@ -588,7 +618,7 @@ constexpr int kRightX = 592;
 }  // namespace
 
 // The play line of the selected slot: a bar, a tick at each cut (lit while its slice sounds), a head for every reader whose position is in the slot
-// (the slot's own loop or a slice on another reader). Rects only, so the display list grows by 2 + the cuts + the heads.
+// (the slot's own loop or a slice on another reader), and under the bar what is left of each slice that sounds. Rects only, so the display list grows by 2 + the cuts + the heads + a remaining bar for each slice that sounds.
 o3sdk::ui::Rgb SampleScreen::slot_ink(app::Context& ctx, unsigned slot) const noexcept {
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   return ornoir::theme().rgb(side_ink(sm::side_of(rt, slot & 3u)));
@@ -617,6 +647,22 @@ void SampleScreen::draw_line(app::Context& ctx, ui::Renderer& r, unsigned slot, 
     if ((s.playing || s.region) && s.position >= base && s.position - base < length) {
       const int hx = x + static_cast<int>(sm::bar_x(s.position - base, length, static_cast<std::uint32_t>(w - 4)));
       ornoir::fill_rect(c, hx, y - 3, 4, 16, Color::Accent);
+      if (s.region) {  // what is left of the slice that sounds: from the head to the end cut (to the start cut when it plays reversed), under the bar
+        const std::uint32_t off = s.position - base;
+        for (unsigned i = 0; i < t.count; ++i) {
+          if (off >= t.cut[i].start && off - t.cut[i].start < t.cut[i].len) {
+            const std::uint32_t wd = static_cast<std::uint32_t>(w - 4);
+            const int a = x + static_cast<int>(sm::bar_x(t.cut[i].start, length, wd));
+            const int b = x + static_cast<int>(sm::bar_x(t.cut[i].start + t.cut[i].len, length, wd)) + 4;
+            const int x0 = s.reverse ? a : hx;
+            const int x1 = s.reverse ? hx + 4 : b;
+            if (x1 > x0) {
+              ornoir::fill_rect(c, x0, y + 16, x1 - x0, 4, Color::Play);
+            }
+            break;
+          }
+        }
+      }
     }
   }
   c.close();
@@ -665,7 +711,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   cat(keys[2].value, sizeof keys[2].value, sm::kSpeedNames[ls.speed < sm::kSpeedCount ? ls.speed : 1u]);
   cat(keys[3].value, sizeof keys[3].value, sm::kDirNames[ls.reverse ? 1 : 0]);
   cat(keys[4].value, sizeof keys[4].value, ls.playing || ls.pending ? "ON" : "OFF");
-  cat(keys[5].value, sizeof keys[5].value, g_sd.one_shot[slot_ & 3u] != 0u ? "ONE SHOT" : "GATE");
+  cat(keys[5].value, sizeof keys[5].value, g_sd.gate[slot_ & 3u] != 0u ? "GATE" : "ONE SHOT");
   cat(keys[6].value, sizeof keys[6].value, g_sd.choke_off[slot_ & 3u] != 0u ? "OFF" : "ON");
   {
     char num[8];

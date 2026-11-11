@@ -277,7 +277,7 @@ TEST_CASE("sample: HELP gives a row to every button the screen answers") {
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
   for (const app::Button b : {app::Button::Up, app::Button::Down, app::Button::Left, app::Button::Right, app::Button::Shift, app::Button::Delete,
-                              app::Button::Rec, app::Button::Params, app::Button::Performance, app::Button::Play, app::Button::Master,
+                              app::Button::Params, app::Button::Performance, app::Button::Play, app::Button::Master,
                               app::Button::File, app::Button::SampleLoad, app::Button::SamplePlay, app::Button::SampleEdit,
                               app::Button::SampleRec, app::Button::Song, app::Button::Pattern, app::Button::Note, app::Button::Instr,
                               app::Button::Vol, app::Button::Fx}) {
@@ -298,7 +298,7 @@ float rp(sim::Harness& h, unsigned reader, Vocoder::RegionField f) { return unit
 float lp(sim::Harness& h, unsigned reader, Vocoder::LoopField f) { return unit_param(h, Vocoder::loop_param(reader, f)); }
 }  // namespace
 
-TEST_CASE("sample: a slice pad triggers its cut, GATE releases it, ONE SHOT runs on") {
+TEST_CASE("sample: a slice pad triggers its cut and plays it to the end (ONE SHOT, the default); GATE stops at the release") {
   Rig rig;
   sim::Harness& h = *rig.h;
   rig.take();
@@ -311,13 +311,80 @@ TEST_CASE("sample: a slice pad triggers its cut, GATE releases it, ONE SHOT runs
   CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(1.0f));
   h.pad_up(2);
   h.run_ms(40);
-  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));  // GATE
-  tap(h, app::Button::F6);  // TRIG: ONE SHOT
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(1.0f));  // ONE SHOT: the release is ignored
+  h.run_ms(600);
+  tap(h, app::Button::F6);  // TRIG: GATE
   h.pad_down(3);
   h.run_ms(40);
   h.pad_up(3);
   h.run_ms(40);
-  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(1.0f));  // the release is ignored
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));  // the release stops it
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: a retrigger restarts from the slice's start cut, and a hit fades the slot's other slice") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  h.pad_down(5);
+  h.run_ms(40);
+  h.pad_up(5);
+  const float len = rp(h, 0, Vocoder::RegionField::Len);
+  CHECK(rp(h, 0, Vocoder::RegionField::Start) == doctest::Approx(len * 5.0f).epsilon(0.01));
+  h.run_ms(60);  // mid-slice
+  h.pad_down(1);  // another slice of the slot: it takes the reader
+  h.run_ms(40);
+  h.pad_up(1);
+  CHECK(rp(h, 0, Vocoder::RegionField::Start) == doctest::Approx(len).epsilon(0.01));
+  h.run_ms(60);
+  h.pad_down(5);  // slice 6 again, mid-slice of slice 2: restarts at slice 6's own start
+  h.run_ms(40);
+  CHECK(rp(h, 0, Vocoder::RegionField::Start) == doctest::Approx(len * 5.0f).epsilon(0.01));
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(1.0f));
+  h.pad_up(5);
+  tap(h, app::Button::F7);  // CHOKE OFF: the slices overlap on two readers
+  h.pad_down(2);
+  h.run_ms(40);
+  h.pad_up(2);
+  h.pad_down(3);
+  h.run_ms(40);
+  h.pad_up(3);
+  unsigned live = 0;
+  for (unsigned k = 0; k < 4u; ++k) {
+    live += rp(h, k, Vocoder::RegionField::Trig) > 0.5f ? 1u : 0u;
+  }
+  CHECK(live >= 2u);
+  tap(h, app::Button::F7);  // CHOKE ON: a hit fades every other slice of the slot, only the new one is held
+  h.pad_down(4);
+  h.run_ms(40);
+  h.pad_up(4);
+  live = 0;
+  for (unsigned k = 0; k < 4u; ++k) {
+    live += rp(h, k, Vocoder::RegionField::Trig) > 0.5f ? 1u : 0u;
+  }
+  CHECK(live == 1u);
+  CHECK(rp(h, 0, Vocoder::RegionField::Start) == doctest::Approx(len * 4.0f).epsilon(0.01));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: a slice turns the slot's loop off, and the loop does not come back when the slice ends") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  tap(h, app::Button::F5);  // LOOP on (a flip)
+  h.run_ms(2500);           // the bar comes and the loop plays
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  h.pad_down(5);
+  h.run_ms(40);
+  h.pad_up(5);
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));  // LOOP reads OFF: the pads own the slot
+  h.run_ms(3000);  // the slice ended long ago
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+  tap(h, app::Button::F5);  // F5 starts it again
+  h.run_ms(60);
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
   CHECK(h.runtime().frame_failures() == 0u);
 }
 

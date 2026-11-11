@@ -7,8 +7,9 @@
 //   F1 CHORD  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on (DIR and LOOP flip at once). UP / DOWN: the slot.
 //   LEFT / RIGHT: the octave. The bottom two pad rows play PERFORM's chords (its code); the top two rows are the slot's slices 1..24 (even cuts,
-//   8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), TRIG GATE stops it at the release, ONE SHOT lets it end.
-//   TRIG and CHOKE are per slot; CHOKE ON (default) gives a slot one voice, OFF lets its slices overlap on the free readers (or steal the oldest).
+//   8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), it plays its cut once and stops at the end cut (TRIG ONE SHOT, the default; GATE also stops it at the release).
+//   A slice turns the slot's whole loop off (LOOP reads OFF) until F5 starts it again; a new hit restarts the slice from its start cut.
+//   TRIG and CHOKE are per slot; CHOKE ON (default) gives a slot one voice (a hit fades the sounding slice out and starts the new one), OFF lets its slices overlap on the free readers (or steal the oldest).
 //   SIDE moves the slot between SPEAKS, SOUNDS and NONE; an empty slot is refused and the screen says why. LOOP is the unit's Play: the whole
 //   slot plays round from the bar. SPEED, DIR and LEVEL are the slot's own parameters (Vocoder::loop_param).
 //
@@ -87,6 +88,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void set_side(o3sdk::app::Context& ctx, int delta) noexcept;
   void trigger(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void stop_loop(o3sdk::app::Context& ctx, unsigned slot) noexcept;  // Play 0 on the slot's loop when it plays or waits (a slice owns the slot)
   void release_all(o3sdk::app::Context& ctx) noexcept;
   void draw_line(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept;
   Vocoder::LoopStatus view(unsigned loop) const noexcept;
