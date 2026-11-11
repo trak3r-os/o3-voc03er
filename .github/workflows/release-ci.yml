@@ -78,6 +78,7 @@ jobs:
           O3SDK_DIR: ${{ github.workspace }}/o3-sdk
           O3SDK_CI_JOBS: 4
           O3SDK_CI_NICE: 0
+          O3SDK_CI_KEEP: 0
         run: |
           export ARM_GNU_ROOT="$HOME/arm/$ARM_GNU_NAME"
           tools/ci.sh ${{ matrix.mode }}
