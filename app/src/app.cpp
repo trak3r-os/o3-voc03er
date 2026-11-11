@@ -614,6 +614,7 @@ class MyApp final : public app::App {
     w.num("chain_cursor", song_.cursor());
     w.num("chain_loop", g_chain.loop);
     w.str("file_note", file_.note(), 24);  // the line FILE's strip says now (a refusal, SAVED, a failure): empty when none
+    w.num("waiting", perform_.slots_waiting());  // bit n: slot n+1's WAV is still on its way (a load's landing)
     const app::AudioIn& in = ctx.audio_in();
     const bool have = in.available();
     w.str("in_src", have ? source_name(in.source()) : "none");
