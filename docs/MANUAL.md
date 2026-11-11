@@ -435,7 +435,7 @@ name this build does not know opens as no preset. F4 NEW puts all of these back 
 | F3 SAVE AS | Saves under a new name |
 | F4 NEW | Starts an empty project |
 | F5 SAVE WAVS | Writes each slot's sound next to the project file. A slot can take a while on a slow card |
-| F8 BACK | Leaves FILE. During SAVE WAVS or an open's WAVs it gives the run up: a half-written WAV is removed, the rest are not written |
+| F8 BACK | Leaves FILE. While a save, an open, SAVE WAVS or an open's WAVs runs it reads CANCEL and gives the job up: a cancelled save leaves the old file whole, a cancelled open changes nothing, a half-written WAV is removed and the rest are not written. The last moment of an open (RESTORING) cannot be stopped: it ends on its own |
 
 ![SAVE AS: a name typed with the pads' keyboard on screen](manual/img/file-name.png)
 

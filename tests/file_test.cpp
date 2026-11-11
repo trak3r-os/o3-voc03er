@@ -696,3 +696,116 @@ TEST_CASE("file: a LOAD under a walking chain starts the new chain at its first 
   CHECK(d_played);
   CHECK(h->runtime().frame_failures() == 0u);
 }
+
+// LE6: F8 gives a plain save or open up. The kit's save is atomic (the old file stays whole) and a load reads into a buffer the project is not decoded from until it
+// ends, so a cancel changes nothing; the restore that follows is not cancellable (a half-applied project would be two projects mixed) and HELP says so.
+TEST_CASE("file: LE6 F8 cancels a running save and a running open, and changes nothing") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-cancel");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::F1);  // two taps of PERFORM's mode key: BANDS to TALK
+  tap(*h, app::Button::F1);
+  h->run_ms(700);
+  REQUIRE(state(*h).find("voc_mode=talk") != std::string::npos);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F2);  // SAVE AS: the name starts as PROJECT
+  h->run_ms(20);
+  tap(*h, app::Button::F7);
+  h->run_ms(300);
+  const std::filesystem::path file = std::filesystem::path(card_dir.path()) / "Apps" / "o3_voc03er" / "PROJECT" / "project.o3a";
+  REQUIRE(std::filesystem::exists(file));
+  const auto slurp = [&] {
+    std::ifstream in(file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  };
+  const std::string before = slurp();
+  REQUIRE_FALSE(before.empty());
+  tap(*h, app::Button::F8);
+  tap(*h, app::Button::F1);  // the live mode moves off TALK; the file still holds TALK
+  h->run_ms(600);
+  REQUIRE(state(*h).find("voc_mode=talk") == std::string::npos);
+
+  // A SAVE over the project, given up at once: the file on the card is the one it was.
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  h->press(app::Button::F2);  // SAVE starts the job, F8 (in the next event) gives it up
+  h->press(app::Button::F8);
+  h->run_ms(1);
+  h->release(app::Button::F2);
+  h->release(app::Button::F8);
+  h->run_ms(600);
+  CHECK(state(*h).find("file_note=CANCELLED") != std::string::npos);
+  CHECK(slurp() == before);
+  CHECK(state(*h).find("voc_mode=talk") == std::string::npos);
+
+  // An OPEN given up: the project is not applied (the live mode stays off TALK), the screen is free again.
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+  h->run_ms(300);
+  h->press(app::Button::F1);  // OPEN starts the job, F8 gives it up
+  h->press(app::Button::F8);
+  h->run_ms(1);
+  h->release(app::Button::F1);
+  h->release(app::Button::F8);
+  h->run_ms(1500);
+  CHECK(state(*h).find("file_note=CANCELLED") != std::string::npos);
+  CHECK(state(*h).find("voc_mode=talk") == std::string::npos);
+  CHECK(h->runtime().frame_failures() == 0u);
+
+  // Free again: the same open, not cancelled, applies the project (TALK is back).
+  tap(*h, app::Button::F1);
+  tap(*h, app::Button::F1);
+  h->run_ms(300);
+  tap(*h, app::Button::F1);
+  h->run_ms(1500);
+  CHECK(state(*h).find("voc_mode=talk") != std::string::npos);
+  CHECK(h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("file: LE6 HELP names F8 as CANCEL while a save or an open runs, and says the restore ends alone") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-cancel-help");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F2);
+  h->run_ms(20);
+  tap(*h, app::Button::F7);
+  h->run_ms(300);
+  const auto help_text = [&](bool* valid) {
+    h->press(app::Button::Shift);
+    h->run_ms(1);
+    h->press(app::Button::Config);
+    h->release(app::Button::Config);
+    h->release(app::Button::Shift);
+    h->run_ms(1);
+    std::string out;
+    if (h->runtime().help_open()) {
+      const app::Help& help = h->runtime().help_overlay().help();
+      app::HelpProblem p;
+      *valid = app::help_check(help, &p);
+      CHECK_MESSAGE(*valid, std::string(app::help_field_name(p.field)) << " " << std::string(p.what));
+      out = std::string(help.fkey[7] != nullptr ? help.fkey[7] : "") + "|" + (help.summary != nullptr ? help.summary : "");
+      tap(*h, app::Button::Config);
+    }
+    return out;
+  };
+  bool ok = false;
+  const std::string idle = help_text(&ok);
+  CHECK(idle.find("BACK|") == 0u);
+
+  // The save in hand: HELP is asked while the job runs.
+  h->press(app::Button::F2);
+  h->run_ms(1);
+  h->release(app::Button::F2);
+  std::string busy = help_text(&ok);
+  CHECK_MESSAGE(busy.find("CANCELS THE JOB|") == 0u, busy);
+  h->run_ms(600);
+}

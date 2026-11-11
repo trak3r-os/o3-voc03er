@@ -50,6 +50,8 @@
 
 ### Fixed
 
+- FILE: F8 gives up a running save or open (CANCEL on the soft key and in HELP). A cancelled save leaves the old file whole and a cancelled
+  open changes nothing; the restore that follows an open finishes on its own (HELP says so), as stopping half way would mix two projects.
 - FILE: opening a project while a SONG chain plays starts the new chain at its first row once the lap in progress ends. The chain used to keep
   its old row, past the end of a shorter new chain, and stop there.
 - PATTERN: a pattern picked by hand (a pattern pad, the PATTERN key) while a SONG chain plays no longer asks the sequencer for it. The pick used

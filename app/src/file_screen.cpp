@@ -39,6 +39,11 @@ enum Stage : std::uint8_t {
 };
 enum Ask : std::uint8_t { kNone, kLoad, kNew };
 
+// A save or a load in hand (not the restore, not a WAV run): F8 gives it up. The kit's save is atomic (its temporary file goes and the old file stays whole, a cancel
+// past the write is a rollback), and a load reads into g_fbuf only: g_proj and the engine are not touched until the read ends, so a cancel leaves the project as it was.
+// The restore that follows is another matter (values reach the engine a few a frame): a half-applied project would be two projects mixed, so it finishes on its own.
+bool kit_job_stage(std::uint8_t stage) noexcept { return stage == kSaving || stage == kLoading; }
+
 // The screen's state, in the SDRAM (O3SDK_BIG: zero at start, main loop only).
 struct FileData {
   std::uint8_t stage;
@@ -184,7 +189,14 @@ void FileScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     }
     return;
   }
-  if (g_fd.stage >= kSaving) {  // a job in hand: its buffers stay as they are
+  if (kit_job_stage(g_fd.stage)) {  // LE6: F8 gives a save or a load up; service() ends the stage with the kit's "CANCELLED" (wav_end and the pending name go with it)
+    if (in.press(Button::F8)) {
+      ctx.files().cancel();
+      ctx.redraw();
+    }
+    return;
+  }
+  if (g_fd.stage >= kSaving) {  // the restore: it finishes on its own (a half-applied project is a mixed one)
     return;
   }
   if (g_fd.stage == kNaming) {
@@ -796,7 +808,7 @@ void FileScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   out.label[2] = "SAVE AS";
   out.label[3] = "NEW";
   out.label[4] = "SAVE WAVS";
-  out.label[7] = wav_stage() ? "CANCEL" : "BACK";
+  out.label[7] = wav_stage() || kit_job_stage(g_fd.stage) ? "CANCEL" : "BACK";
   out.hot = 0;
   const bool locked = g_fd.stage >= kSaving || g_fd.ask != kNone;
   out.dim = static_cast<std::uint8_t>(0x60u | (locked ? 0x9Fu : 0u) | (g_fd.stage == kPicking ? 0x1Eu : 0u) | (!g_fd.has_name ? 0x10u : 0u));
@@ -806,8 +818,8 @@ void FileScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   if (g_fd.stage >= kSaving && !wav_stage()) {
     out.dim = static_cast<std::uint8_t>(out.dim | 0x80u);
   }
-  if (wav_stage()) {
-    out.dim = static_cast<std::uint8_t>(out.dim & ~0x80u);  // F8 gives the run up
+  if (wav_stage() || kit_job_stage(g_fd.stage)) {
+    out.dim = static_cast<std::uint8_t>(out.dim & ~0x80u);  // F8 gives the run, the save or the load up
   }
 }
 
@@ -831,6 +843,14 @@ void FileScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[3] = "STARTS A NEW PROJECT";
   h.fkey[4] = "SAVES THE SLOTS' WAVS";
   h.fkey[7] = "BACK";
+  if (wav_stage() || kit_job_stage(g_fd.stage)) {
+    h.fkey[7] = "CANCELS THE JOB";
+    h.summary = kit_job_stage(g_fd.stage) ? "A CANCELLED SAVE KEEPS THE OLD FILE WHOLE, AND A CANCELLED LOAD CHANGES NOTHING."
+                                          : "A CANCELLED WAV RUN STOPS AT THE JOB IN HAND: THE WAVS ALREADY WRITTEN OR LOADED STAY.";
+  } else if (g_fd.stage == kRestoring) {
+    h.fkey[7] = "WAIT: IT ENDS ALONE";
+    h.summary = "A LOAD IS APPLYING THE PROJECT: IT FINISHES ON ITS OWN, BECAUSE STOPPING HALF WAY WOULD LEAVE TWO PROJECTS MIXED.";
+  }
   h.pads = "NOT USED HERE.";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
