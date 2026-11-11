@@ -315,3 +315,20 @@ wait 150
 snap m_help
 tap f8
 wait 100
+# ---- TRACT: the fifth mode, row C set to MOUTH (the strip), a chord held on row B, the vowel I pressed (docs/manual/img/tract.png is m_tract)
+tap performance
+wait 200
+tap f1
+turn 8
+wait 300
+tap f6
+tap f6
+tap f6
+wait 100
+tap f7
+turn 2
+wait 200
+paddown 26
+paddown 40
+wait 500
+snap m_tract

@@ -1,7 +1,7 @@
 # O3-VOC03ER player's manual
 
 O3-VOC03ER turns the Tracker into a voice machine. Your voice, or a recording, shapes a synth you play with the 48 pads: a vocoder, a
-talkbox, a pitch corrector and a robot voice in one instrument, with a sampler, a step sequencer and a song chain beside it. This manual
+talkbox, a pitch corrector, a robot voice and a played mouth in one instrument, with a sampler, a step sequencer and a song chain beside it. This manual
 starts with what makes sound fastest and goes deeper as it goes on. You can stop reading after section 3 and play.
 
 The pictures come from the O3-VOC03ER simulator, which draws the same screens as the unit. Where a picture also shows the pads, the grid
@@ -16,7 +16,8 @@ pictures is thinner than a real voice would make it.
 2. [Install it, and go back to the stock firmware](#2-install-it-and-go-back-to-the-stock-firmware)
 3. [The first five minutes](#3-the-first-five-minutes)
 4. [The screens, one by one](#4-the-screens-one-by-one)
-5. [The four modes](#5-the-four-modes)
+5. [The five modes](#5-the-five-modes)
+   - [5b. TRACT: a mouth after the carrier](#5b-tract-a-mouth-after-the-carrier)
 6. [Samples and slices](#6-samples-and-slices)
 7. [Patterns and songs](#7-patterns-and-songs)
 8. [MIDI](#8-midi)
@@ -42,6 +43,8 @@ What you can do with it:
 - **A talkbox.** The same, taken as a smooth shape of the mouth, closer to a voice coming out of a tube.
 - **Pitch correction.** Your voice, pulled to the notes of a key and scale you pick.
 - **A robot voice.** The vocoder with a fast leveller after it, for a flat, hard, mechanical voice.
+- **A played mouth.** TRACT: nothing is analysed. The sound you play goes through a model of a mouth that you shape with the pads, the
+  encoder or a pattern, to make it say vowels and simple sung words.
 - **Recordings that speak.** Record a take, cut it into slices, and play the slices from the pads through the chord you hold.
 - **A pattern and a song.** Sixteen steps of chords, up to eight patterns, chained into a song.
 - **MIDI in.** Play the synth and the slices from a keyboard or a sequencer.
@@ -92,7 +95,7 @@ and scale that F4 and F5 say. The row above it, A, plays single notes, and the p
 **4. Free your hands.** Hold a chord pad and press SHIFT: the chord is latched and keeps sounding after you let go. A new latch replaces
 the old one. DELETE lets it go. (SHIFT first and then a pad latches nothing.)
 
-**5. Try the other voices.** Press F1 (MODE) to step from BANDS to TALK, TUNE and ROBOT. Section 5 says what each does.
+**5. Try the other voices.** Press F1 (MODE) to step from BANDS to TALK, TUNE, ROBOT and TRACT. Section 5 says what each does.
 
 **6. Record yourself.** Press REC on PERFORM and sing. The take is two bars long and ends by itself at the bar line. It plays back
 looped, through the chord you hold. (SAMPLE REC does the same with every setting in sight, section 6.)
@@ -119,7 +122,7 @@ now.
 
 | Key | What it does |
 |---|---|
-| F1 MODE | BANDS, TALK, TUNE or ROBOT (section 5). A tap steps round, from ROBOT back to BANDS; the encoder stops at the ends |
+| F1 MODE | BANDS, TALK, TUNE, ROBOT or TRACT (section 5). A tap steps round, from TRACT back to BANDS; the encoder stops at the ends |
 | F2 SPEAKS | A list: LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB, or SLOT 1 to 4. UP and DOWN move, F1 takes the row, F8 backs out |
 | F3 SOUNDS | A list: SYNTH, NOISE, LIVE, or SLOT 1 to 4 |
 | F4 KEY | The root of the key. Chords and pitch correction share it |
@@ -147,7 +150,7 @@ the key and scale of F4 and F5. Each row has a PLAYS value. F6 ROW chooses the r
 plays, in this order:
 
 - **Rows A and B:** NOTE, TRIAD, 7TH, OPEN, POWER, PIANO NOTE, PIANO TRIAD, PIANO 7TH, PIANO OPEN, PIANO POWER, OFF.
-- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, OFF.
+- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF.
 
 A tap on F7 steps on and wraps round; the encoder stops at the ends.
 
@@ -157,8 +160,7 @@ A tap on F7 steps on and wraps round; the encoder stops at the ends.
   choosing a piano value on either row sets both, and choosing a plain value on one of them splits the piano again.
 - FORMANT and BEND (row C only): FORMANT is a strip of semitones: a tap sets the formant and nothing is held. BEND is the pitch-bend strip:
   the middle pair is zero, each pad outwards is a semitone, and it springs back when you let go.
-- MOUTH (row C only, TRACT mode): a strip that plays the mouth. Pads 0 to 8 set the vowel, A to U, and it stays; pads 9, 10 and 11 close the
-  mouth while held (LIPS, TIP, BACK), and letting go opens it. In the other modes the row is dark.
+- MOUTH (row C only): the mouth strip of TRACT (section 5b). In the other modes the row is dark and the screen says MOUTH SPEAKS IN TRACT.
 - OFF: the row is dark and silent.
 
 The default is A NOTE, B TRIAD and C FORMANT. **Each row that plays notes sits one octave above the playing rows under it**, so a note on row
@@ -200,6 +202,9 @@ SMOOTH, the default, picks the arrangement nearest the chord before, within the 
 
 *TUNE: KEY, SCALE, SPEED (how fast a note is pulled), AMOUNT, and NOTES IN (follow the notes you play).*
 
+**TRACT**, the fourth page, is the mouth of TRACT mode (section 5b says what each value does): VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and
+HISS. The values are live in every mode and speak in TRACT only; in the other modes the page says TRACT MODE ONLY and keeps them.
+
 ### MASTER
 
 MASTER draws the whole path large: LIVE on the left, the mode in the middle, OUTPUT on the right. Only one live source runs at a time: the
@@ -231,11 +236,9 @@ Section 7.
 
 Section 9.
 
-*TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and HISS, the mouth of TRACT mode. They are live in every mode and speak in TRACT only.*
+## 5. The five modes
 
-## 5. The four modes
-
-The mode is the way the voiceprint is taken and applied. F1 on PERFORM steps through them.
+The mode is the way the sound is made from the voice, or, in TRACT, played without it. F1 on PERFORM steps through them.
 
 **BANDS.** The classic vocoder. The voice is split into bands, each band's loudness is read, and the same bands of the synth are raised and
 lowered to follow. It is clear and robotic, and it works on any voice or any sound. A note at the top of the
@@ -260,9 +263,78 @@ It plays no synth. SPEED is how fast it pulls: at the fastest it steps from note
 **ROBOT.** BANDS with a fast leveller after it. Loud and soft syllables come out at about the same level, which gives the flat, mechanical
 voice. Hold a fifth, or set a row to POWER (F6 then F7) and press one of its pads, for the classic robot sound.
 
-**TRACT.** A fifth mode: nothing is analysed, the synth speaks through a model of a vocal tract, and you play the mouth. Set row C to MOUTH
-(F6, then F7) and use its strip for the vowel and the closures, or turn F8 (VOWEL); PARAMS' TRACT page has the rest. The voiceprint draws the
-tube as a profile of the mouth. DRY (the live voice) goes through the tube too.
+**TRACT.** A fifth mode that does not listen to the voice. The synth speaks through a model of a mouth, and you play the mouth. It has its own
+section, 5b.
+
+## 5b. TRACT: a mouth after the carrier
+
+![PERFORM in TRACT: row C is the mouth strip, a chord is held on row B and the vowel I is pressed](manual/img/tract.png)
+
+*TRACT: row C set to MOUTH is the strip (the nine vowels, then LIPS, TIP and BACK), the voiceprint draws the mouth and SPEAKS is dimmed.*
+
+**What it is.** The other four modes listen to the voice. TRACT listens to nothing. The sound you play (the synth, the noise or a slot, as
+F3 SOUNDS has it) goes through a model of a mouth, a tube from the throat to the lips, and you shape the tube with your hands: a vowel, a jaw,
+the lips, a closure. The live voice, if DRY lets it through, goes through the tube too. The voiceprint draws the tube as a profile of the mouth,
+and SPEAKS is dimmed: it says NO INPUT: THE MOUTH IS PLAYED. GATE, ARP, GLIDE, BEND, VIB, SUB, TILT, NOISE and the carrier lane work as in the
+other modes. No preset picks TRACT: you press F1 until it says TRACT.
+
+**When to pick it.** Pick BANDS or TALK when the sound should follow a voice. Pick TRACT when there is no voice to follow, or when you want to
+play the words yourself: a synth line that sings vowels, a bass that goes WOW, a pad that opens from U to A. It gives you a mouth you can write
+into a pattern; it does not give you a voice you can talk through.
+
+**Playing it by hand.** There are three ways, and they all move the same mouth.
+
+- **The strip.** Set row C to MOUTH (F6 until it says C, then F7 until it says MOUTH). Columns 1 to 9 of the row are the vowels A, A-E, E, E-I, I,
+  I-O, O, O-U and U: a press sets the vowel and it stays when you let go. Columns 10, 11 and 12 are the closures LIPS, TIP and BACK: the mouth
+  shuts while the pad is held and opens when you let go, and if two are held the last pressed wins. The row plays no notes, so the rows above it
+  keep the octave to themselves. Outside TRACT the row is dark and the screen says MOUTH SPEAKS IN TRACT.
+- **F8 VOWEL.** In TRACT F8 is VOWEL, the same value as the strip's, one percent a click, with SHIFT ten.
+- **PARAMS, the TRACT page** (section 4, PARAMS). Its eight values are the whole mouth:
+
+| Value | What it does |
+|---|---|
+| VOWEL, 0 to 100 % | The vowel, a sweep through A, E, I, O, U. 0 is A |
+| TONGUE, -100 to 100 % | Where the tongue sits, added to the vowel's shape. 0 leaves the vowel as it is |
+| JAW, -100 to 100 % | How far the jaw opens, added to the vowel's shape |
+| LIPS, -100 to 100 % | The rounding and opening of the lips, added to the vowel's shape |
+| GLIDE, 5 to 500 ms | How long the vowel, tongue, jaw and lips take to move. The default is 30 ms: lower is a jump, higher is a slide |
+| SIZE | The length of the tube: BIG, LARGE, NORMAL, SMALL or TINY. BIG is a longer tube with lower resonances, TINY a shorter one with higher resonances. Changing it makes a very short dip |
+| RES, 0 to 100 | How long the mouth rings. The default is 50 |
+| HISS, 0 to 100 | Noise at the narrowest point, and only while the mouth is narrow: the breath of a consonant. The default is 30 |
+
+The values are live in every mode, so you can set the mouth before you press F1. In the other modes the page says TRACT MODE ONLY and keeps them.
+A strip pad that is held wins over the pattern's mouth line while it is held.
+
+**Writing it: the MOUTH lane.** In PATTERN, F2 (or FX, a second press after SLICE) picks the fifth lane, MOUTH. Each step holds one mouth:
+FOLLOW (empty: the step leaves the mouth as it is), one of the nine vowels, a closure, a word, or a wobble. The palette is the top two rows of
+pads, and F6 SET flips it between two pages.
+
+- **VOWELS.** Row 0 is the strip: the nine vowels, then LIPS, TIP and BACK. Row 1, columns 1 to 9, is the same vowels with **GLD**, a glide: the
+  mouth slides to that vowel and arrives by the end of the step instead of jumping there (the cell shows a `>` before the vowel). A slide is
+  capped at 500 ms.
+- **WORDS.** Row 0 is eight words: WOW, YEAH, YOI, WAH, OW, BA, DA and GA. Each is a short movement of the mouth that fits the step. BA, DA and GA
+  close the mouth on their consonant. Row 1, columns 1 to 6, is **WOB**, a wobble between the neighbouring vowels at 1/4, 1/8, 1/16, 1/32, 1/8T
+  or 1/16T, running with the line until the next mouth step. A word pad is heard once when you press it; a WOB pad sounds nothing (the strip
+  says WOB PLAYS WITH THE LINE).
+- **Closures.** A closure shuts the mouth at the step and opens it when the note's gate ends (on a step with no note, at the step's end).
+- **ACCENT.** A step with a note and a LEVEL above 100 (the LEVEL lane) opens the jaw a little more: up to half at 127. It needs no mouth
+  value on that step.
+- **F7 FILL** writes a random line of vowels, some FOLLOW, some glided, over LENGTH. If the lane holds something you wrote, it asks first (F1
+  confirms, any other key leaves it); pressing F7 again rolls another.
+
+A palette pad writes the cursor step, moves on and, in TRACT, sounds the mouth while it is held. With step pads held it writes those steps and
+the cursor stays. SHIFT + a palette pad only sounds; SHIFT + a step pad clears the step; SHIFT + F6 empties the lane. Playing writes the mouth in
+every mode, but it speaks in TRACT only: outside TRACT the lane is dim, it still edits, and the strip says MOUTH SPEAKS IN TRACT. Stopping the
+transport opens the mouth.
+
+**What the project keeps.** The MOUTH lane of the eight patterns, and the TRACT page's eight values (VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and
+HISS). It does not keep CLOSE (the closure held now), MIX, SLIDE or ACCENT: the line writes those as it plays, and F4 NEW puts them back. A project
+saved with a word or a WOB does not open in the build before this one.
+
+**What it can say, and what it cannot.** TRACT says vowels, the glides w and y (WOW, WAH, YEAH, YOI), and the stops b, d and g (BA, DA, GA) and p,
+t and k (the closures LIPS, TIP and BACK, with a short pop). Put a few together and a listener who is told the words hears them: sung words, not
+speech. A closure is a mute with a plosive, never an m or an n, so nasals are out of reach; so are l and r, and an s held on: HISS only sounds
+while the mouth is closing or on a very narrow vowel. FORMANT on row C does nothing in TRACT. TRACT needs more testing by ear (section 10).
 
 ## 6. Samples and slices
 
@@ -360,13 +432,13 @@ holds a sample asks first: F1 confirms, any other key cancels.
 
 ### PATTERN
 
-![PATTERN: sixteen steps with four lanes under each](manual/img/pattern.png)
+![PATTERN: sixteen steps with five lanes under each](manual/img/pattern.png)
 
 *PATTERN playing with FOLLOW on: the bright frame is the playhead.*
 
 Eight patterns, A to H, of up to sixteen steps each. Each step has five lanes: **NOTE** (a chord or a note), **CARRIER** (what sounds on that
 step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL**, **SLICE** (which slice of the speaking slot fires) and **MOUTH** (TRACT mode's mouth). NOTE, INSTR (carrier), VOL (level)
-and FX (slice, then MOUTH on a second press) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
+and FX (slice, then MOUTH on a second press, then slice again) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
 
 The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). A palette
 pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays (on every lane, not only NOTE). The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
@@ -393,22 +465,8 @@ and writes nothing.
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
 
-**The MOUTH lane.** Each step holds a mouth: FOLLOW (empty, the step leaves the mouth as it is), one of the nine vowels A, A-E, E, E-I, I,
-I-O, O, O-U, U, or a closure, LIPS, TIP or BACK. Palette row 0 is the strip (the nine vowels, then LIPS, TIP and BACK); row 1, columns 1 to 9,
-is the same vowels with GLD, a glide: the mouth slides to that vowel over the step's length instead of jumping there (the cell shows a `>`
-before it). A closure shuts the mouth at the step and opens it again when the note's gate ends (a step with no note: at the step's end). A
-palette pad writes the cursor step, moves on and, in TRACT, sounds the mouth while it is held; with a step pad held it writes that step;
-SHIFT + a palette pad only sounds; SHIFT + a step pad clears the step. Playing writes the mouth in every mode but it speaks in TRACT only
-(outside TRACT the lane is dim, it still edits and the strip says MOUTH SPEAKS IN TRACT). Stopping opens the mouth. A pad of PERFORM's MOUTH
-strip held while the pattern plays wins over the sequence. A GLD step's glide is capped at 500 ms by the voice.
-
-The MOUTH lane's second palette, **WORDS** (F6 SET flips it): row 0 is eight words, WOW, YEAH, YOI, WAH, OW, BA, DA and GA, each a short gesture of
-the mouth that fits the step (BA, DA and GA close the mouth on their consonant); row 1, columns 1 to 6, is WOB, a wobble between the neighbouring
-vowels at 1/4, 1/8, 1/16, 1/32, 1/8T or 1/16T, running with the line until the next mouth step. A word pad is heard once when you press it; a WOB
-pad sounds nothing (the strip says WOB PLAYS WITH THE LINE). A step with a note and a LEVEL above 100 opens the jaw a little more (an accent, up to
-half at 127). **F7 FILL** writes a random line of vowels, some FOLLOW, some glided, over LENGTH; if the lane holds something you wrote it asks
-first (F1 confirms, any other key leaves it), and pressing F7 again rolls another. SHIFT + F6 empties the lane. A project saved with a word or a
-WOB does not open in the build before this one.
+**The MOUTH lane** writes TRACT's mouth, one value a step. Its palette has two pages, VOWELS and WORDS (F6 SET flips them), and F7 FILL writes a
+line for you. Section 5b says what each value does and how the pads write it. SHIFT + F6 empties the lane, as on the others.
 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY
@@ -444,7 +502,7 @@ Clock: set FOLLOW in Config, and FOLLOW PORT to the port the clock comes from. U
 A project is a folder under `Apps/o3_voc03er/` that holds one project file. It keeps the eight patterns, the song chain, the route, the
 vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, VOICING, the BEND ROW and its range,
 the pads layout (the three rows' plays and the two last-used chord pads), the preset's name, PATTERN's FOLLOW, the MOUTH lane, TRACT's
-PARAMS page (not CLOSE or MIX), and each slot's cuts,
+PARAMS page (section 5b says what is not kept), and each slot's cuts,
 trim, speed, direction, level, TRIG, CHOKE and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
 writes the sounds into the project folder. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
 becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and CHOKE ON. The preset is kept by name: a
@@ -479,8 +537,11 @@ whole.
 This is a first public pre-release. The firmware has been measured on a unit for the load it puts on the processor, and the screens have
 been read there, but several things need more testing, most of all by ear. In particular:
 
-- **The sound.** How the four modes sound with a real voice, how the synth sounds at the top of its range, the level of TALK, and the
+- **The sound.** How the modes sound with a real voice, how the synth sounds at the top of its range, the level of TALK, and the
   eight presets are for your ears. Nothing here says a sound is right.
+- **TRACT.** The words, the closures, WOB, the accent and the strip by hand need more testing by ear; the pop of a closure too. Entering TRACT may
+  let the raw carrier through for a few milliseconds before the mouth fades in. On a unit, TRACT with the mouth at rest takes about a fifth of the
+  processor; the load while the mouth moves, with many notes and loops, needs more testing.
 - **The microphone and the radio.** Switching between them has been seen; how they sound needs a person.
 - **Clicks** at the switch when a take is captured from a live source need more testing.
 - **Glide, gate, arp, vibrato and the bend** need more testing by hand and ear, and so do the formant steps and the VOL, ROOT and BND

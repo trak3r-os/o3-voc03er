@@ -24,51 +24,20 @@
   for a moment). The chord page and the latch of a chord on SAMPLE are gone (a chord is held with the hand, as on PATTERN's
   palette), and SAMPLE no longer handles DELETE. SAMPLE EDIT's lower pads play the same rows.
 
-- The MOUTH line's slide arrives by the end of the step (V3b): a GLD vowel writes SLIDE as the move's length / 3 (the voice's glide is one pole), and Stop
-  writes SLIDE 0 and ACCENT 0 even while a pad of PERFORM's MOUTH strip is held; only CLOSE stays the pad's.
 
 ### Added
 
-- TRACT, a fifth mode (V1, console only): the vocoder runs the carrier alone (BANDS, TALK and TUNE idle) and the carrier bus, after the
-  CARRIER switch, goes through a vocal tract unit (`units/tract`, `TractUnit`, on slot 0's insert 0, wrapping the kit's `extras/tract` at
-  Full quality). Any SOUNDS source speaks through it; GATE, ARP, GLIDE, BEND, VIB, SUB, TILT, NOISE and the carrier lane work as before. The
-  unit's ids are VOWEL, TONGUE, JAW, LIPS, CLOSE, GLIDE, SIZE, RES, HISS, MIX and SLIDE (V3's own); MIX 0 is a bit-exact bypass, and the unit
-  sleeps on silence. The app's `apply_mode()` writes the tube's MIX (1 in TRACT, 0 elsewhere) for every writer of MODE; the unit holds the
-  MIX rise 12 ms, so a mode change crossfades first. `voc tract` and `tract <param> <value>` from the console; PERFORM's F1 reaches it and
-  draws BANDS' page without the bars (V2 draws the mouth). Modes 0 to 3 render sample for sample as before. Unit check owed: CPU and the first listen.
-- PERFORM and PARAMS in TRACT (V2): row C gains a PLAYS value, MOUTH (`Plays::Mouth` 13, offered on row C in every mode, after BEND and before
-  OFF; it plays no notes, so the rows above it get no octave). In TRACT a MOUTH row is a strip: pads 0 to 8 set VOWEL (A, a-e, E, e-i, I, i-o,
-  O, o-u, U) and it stays; pads 9, 10 and 11 close the mouth while held (LIPS, TIP, BACK; the last pressed wins, a release opens it). Outside
-  TRACT the row is dark and the hint says MOUTH SPEAKS IN TRACT. F8 in TRACT is VOWEL (1 % a detent, 10 % coarse). The voiceprint in TRACT draws
-  the tube's 22 sections as a mouth profile (SPEAKS dimmed, "NO INPUT: THE MOUTH IS PLAYED"). PARAMS has a fourth page, TRACT: VOWEL, TONGUE, JAW,
-  LIPS, GLIDE, SIZE, RES and HISS, live in every mode (outside TRACT it says TRACT MODE ONLY and keeps the values). The writes go to the tube from
-  the main loop. PARAMS now opens on its first page after a `setup()`. Unit check owed: the strip by hand, the pop of a closure by ear, PERFORM's
-  frame in TRACT under the display budget, FORMANT on row C in TRACT (it does nothing there: whether it becomes the mouth is the maintainer's call);
-  DRY (mic thru) also goes through the tube in TRACT, and entering TRACT may let the raw carrier through for a few ms before the tube fades in.
-- The MOUTH line (V3): each pattern step gets a mouth byte (16 a pattern, inside `PatternData`, so copy, INSERT, DELETE, SHIFT + COPY and the
-  pattern file carry it): FOLLOW, the nine vowels, the closures LIPS, TIP and BACK (13 to 15 are refused until V3b), and GLD (bit 7, vowels
-  only). StepSeq's `set_tract(UnitId)` turns it into at most three Param events a step in every mode: VOWEL; a GLD vowel writes SLIDE (the step
-  length in ms) first and the next plain step writes SLIDE 0; a closure writes CLOSE 1 to 3 at the step and CLOSE 0 at the gate's end (a step with
-  no note: the step's end); Stop, and a pattern change that lands on Stop, write CLOSE 0 and SLIDE 0 once. A pad of PERFORM's MOUTH strip held
-  suppresses the events. The tract unit's SLIDE (id 10) is live: 0 to 2000 ms, default 0, 0 means GLIDE rules; GLIDE is never written by the
-  hook, and the voice clamps a glide to 5 to 500 ms. PATTERN's fifth lane, MOUTH (F2, or FX after SLICE): the strip, the vowels with GLD, a
-  palette press sounds live in TRACT, "A", "AE", ..., "LIP", "TIP", "BCK", a `>` before a slid vowel; dim outside TRACT. Console:
-  `pat <A-H> <step> mou <0-12, +128 GLD>`. The project file gains two chunks, `MOUT` (u16 0x0100, a count, 16 bytes a pattern, after PTNS; absent
-  is FOLLOW; a bad byte or count refuses the file) and `TRCT` (u16 0x0100, then VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS; absent is the
-  defaults; out of range refuses the file; CLOSE, MIX and SLIDE are not saved); they carry the chunk version 0x0100, the file, PTNS and STAT keep
-  their versions, and an older build skips both. F4 NEW resets them. Unit check owed: the sequenced phrase by ear, no click at a slid step, the
-  closures and GLD, a sequenced mode change with 8 notes and 4 loops, a save and an open of a project with a mouth line on the card.
-- Words, WOB, ACCENT and FILL on the MOUTH line (V3b): the mouth byte gains WORD (13, bits 4 to 6 pick WOW, YEAH, YOI, WAH, OW, BA, DA or GA) and WOB
-  (14, bits 4 to 6 pick the rate 1/4, 1/8, 1/16, 1/32, 1/8T or 1/16T); 15 stays refused, GLD stays on vowels. A word is a short gesture of the
-  mouth (a few points on the tick grid, with closures for BA, DA and GA); WOB moves the mouth between the neighbouring vowels, synced to the
-  transport, and the rate's note length is one half-cycle. The tract unit gains ACCENT (id 11, 0 to 1, default 0, 0 bit-exact): the jaw opens by
-  that much more; the hook writes 0.5 * (level - 100) / 27 on a step that has a note and a level above 100, only when it changes, and Stop writes 0.
-  PATTERN's MOUTH lane: F6 SET flips the strip between VOWELS and WORDS (WORDS: row 0 the eight words, row 1 the six WOB rates; a WORD pad is
-  heard once from the main loop, a WOB pad sounds nothing and the strip says WOB PLAYS WITH THE LINE) and F7 FILL writes a seeded random walk of
-  vowels over LENGTH (it asks first, F1 confirms, unless the lane is empty or is the last fill's own output; F7 again rolls another). CLEAR LANE
-  on this lane is SHIFT + F6, as on the others. Console: `pat <A-H> <step> mou <0-255>` takes the raw byte (valid bytes only). The file always
-  writes MOUT 0x0101 (a 0x0100 file loads as before); a V3 build refuses a 0x0101 file that holds a WORD or a WOB. Unit check owed: the words by
-  ear, WOB at each rate, no click at an accented step, CPU while the shape moves (WOB 1/32, 8 notes, 4 loops), FILL by hand.
+- **TRACT, a fifth mode: a mouth after the carrier.** Press F1 until it says TRACT. Nothing is analysed: the sound you play goes through a
+  model of a vocal tract that you shape with your hands. You play a vowel, a jaw, the lips, a closure, and the pattern can write them.
+  - PERFORM: set row C to MOUTH (F6, then F7) and the row is a strip: nine vowels from A to U, which stay when you let go, and the closures
+    LIPS, TIP and BACK while held. F8 is VOWEL. The voiceprint draws the mouth. Outside TRACT the row is dark.
+  - PARAMS has a fourth page, TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and HISS. The values are live in every mode and speak in TRACT.
+  - PATTERN has a fifth lane, MOUTH (F2, or FX on a second press). A step holds a vowel, a vowel that glides (GLD), a closure, one of eight
+    words (WOW, YEAH, YOI, WAH, OW, BA, DA, GA) or a wobble between vowels (WOB, six rates). F6 SET flips the palette between the vowels and the
+    words, and F7 FILL writes a random line of vowels. On a step with a note, a LEVEL above 100 opens the jaw a little more.
+  - The project keeps the MOUTH lane and the TRACT page. A project saved with a word or a WOB does not open in the earlier TRACT build.
+  - TRACT says vowels, w, y, b, d, g, p, t and k, as sung words a listener recognises when told what they are. It cannot say nasals, l, r or a
+    held s. It needs more testing by ear, and so does its load on the processor while the mouth moves.
 - The project keeps more (P3, Q8): STAT 1.1 adds VOICING, the BEND ROW and its range, FOLLOW, the preset (by name, so a reordered
   table does not move it), and the pads layout (rows A, B, C and the two last-used chord pads); SLOT 1.1 adds TRIG and CHOKE per slot.
   A v0.2.0 project loads with SMOOTH, bend row off, range 2, FOLLOW off, no preset, ONE SHOT and CHOKE ON, and its KEYS or chord kind

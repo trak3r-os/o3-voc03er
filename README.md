@@ -32,14 +32,15 @@
 One instrument with one idea: a voice (SPEAKS) is turned into a voiceprint, and the voiceprint shapes a sound (SOUNDS). You keep the hardware
 you know, the pads, the buttons, the encoder and the screen, and they all become the vocoder.
 
-- **Four modes.** BANDS, a 16-band channel vocoder. TALK, an LPC talkbox. TUNE, pitch correction with a key and a scale to snap to.
-  ROBOT, the bands with a fast compressor.
+- **Five modes.** BANDS, a 16-band channel vocoder. TALK, an LPC talkbox. TUNE, pitch correction with a key and a scale to snap to.
+  ROBOT, the bands with a fast compressor. TRACT, a model of a vocal tract after the carrier: nothing is analysed, you shape the vowel,
+  the jaw and the lips with your hands, and a MOUTH lane in the pattern writes them. It needs more testing.
 - **Sources.** The line input, the microphone, USB audio, the radio, and samples, on either side of the vocoder: a sample can speak, or
   be the sound that is spoken through.
 - **A carrier synth inside.** Eight voices with SHAPE, SPREAD, SUB, TILT and NOISE. The 48 pads play chords: twelve roots, with triad,
   seventh, open and power rows and four voicings (CLOSE, OPEN, WIDE, SMOOTH), or plain keys, and a bend row.
 - **Four sample slots** of 16 s each, with up to 24 slices per slot, edited on the unit.
-- **A step sequencer.** Eight patterns of 1 to 16 steps with NOTE, CARRIER, LEVEL and SLICE lanes, and a SONG that chains them.
+- **A step sequencer.** Eight patterns of 1 to 16 steps with NOTE, CARRIER, LEVEL, SLICE and MOUTH lanes, and a SONG that chains them.
 - **MIDI in.** Notes, pitch bend, program change (it picks the pattern) and clock.
 - **Projects** that you save to the card, with the samples as WAVs.
 
@@ -71,11 +72,11 @@ you know, the pads, the buttons, the encoder and the screen, and they all become
     <td align="center"><b>SAMPLE EDIT</b>: trim, speed, direction and slices</td>
   </tr>
   <tr>
-    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/pattern.png" alt="PATTERN: the step grid with the NOTE, CARRIER, LEVEL and SLICE lanes" width="400"></a></td>
+    <td><a href="docs/MANUAL.md"><img src="docs/manual/img/pattern.png" alt="PATTERN: the step grid with the NOTE, CARRIER, LEVEL, SLICE and MOUTH lanes" width="400"></a></td>
     <td><a href="docs/MANUAL.md"><img src="docs/manual/img/song.png" alt="SONG: a list of rows with pattern and repeats" width="400"></a></td>
   </tr>
   <tr>
-    <td align="center"><b>PATTERN</b>: eight patterns, four lanes</td>
+    <td align="center"><b>PATTERN</b>: eight patterns, five lanes</td>
     <td align="center"><b>SONG</b>: patterns in order, with repeats</td>
   </tr>
   <tr>

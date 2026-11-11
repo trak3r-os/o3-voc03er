@@ -21,7 +21,7 @@ The maintainer's two modes are the two common pairs: **REALTIME** is LIVE > SYNT
 a WAV speaks through a carrier chosen apart). They are not a switch: the header always shows the pair in force ("MIC > SYNTH", "SLOT 2 > LINE"),
 PERFORM changes it with two keys, and the two homes (PERFORM for playing, SAMPLE for the slots and slices) are reached by PERFORMANCE and SAMPLE
 PLAY without touching the routing. BANDS, TALK, TUNE and ROBOT (BANDS with a fast compressor after it) stay as they are: the ways the voiceprint is taken and applied, on F1 of either
-home. TUNE corrects what SPEAKS and runs no carrier.
+home. TUNE corrects what SPEAKS and runs no carrier. TRACT, the fifth (V1 to V3b, section 4), takes nothing: the carrier goes through a vocal tract that the hands play.
 
 **The four loops become the four slots.** A slot is 16 s of mono audio in the existing 5.6 MB bank, recorded (SAMPLE REC, or a capture) or loaded
 (SAMPLE LOAD), cut into up to 24 slices (SAMPLE EDIT), played whole as a bar-aligned loop or slice by slice from the pads (SAMPLE), on whichever
@@ -60,7 +60,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | Printed | What it does | Where |
 |---|---|---|
 | F1 .. F8 | The screen's eight values or actions, the kit's convention: a tap latches the encoder on it, hold + turn moves it for a moment, two held move together | every screen (section 4 lists each row) |
-| PARAMS | Opens PARAMS, the engine's values in three pages (CARRIER, SHAPE, TUNE); pressed again, the next page | everywhere |
+| PARAMS | Opens PARAMS, the engine's values in four pages (CARRIER, SHAPE, TUNE, TRACT); pressed again, the next page | everywhere |
 | PERFORMANCE | Opens PERFORM, the home: chords, the voiceprint, the routing | everywhere |
 | FILE | Opens FILE: the projects on the card (load, save, save as, new) | everywhere |
 | CONFIG | The kit's system Config; SHIFT + CONFIG is HELP, drawn by the kit from each screen's `help()` | the kit's |
@@ -73,7 +73,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | NOTE | The pattern's NOTE lane: opens PATTERN with that lane selected (the pads write notes or chords into the step) | everywhere |
 | INSTR | The pattern's CARRIER lane (what sounds on that step: FOLLOW, SYNTH, NOISE, SLOT 1 to 4) | everywhere |
 | VOL | The pattern's LEVEL lane (the step's velocity) | everywhere |
-| FX | The pattern's SLICE lane (the slice of the SPEAKS slot that fires on that step). The weakest of the four caps: HELP says "LANE: SLICE" | everywhere |
+| FX | The pattern's SLICE lane (the slice of the SPEAKS slot that fires on that step); pressed again on that lane, the MOUTH lane (TRACT's mouth), and again, back to SLICE. The weakest of the caps: HELP says "SLICE LANE, THEN MOUTH LANE" | everywhere |
 | PATTERN | Opens PATTERN, the 16-step sequencer (note or chord, carrier, level, slice per step) | everywhere |
 | PLAY | Starts or stops the transport: the pattern, the bar lines that takes and loop starts wait for | everywhere |
 | REC | PERFORM: capture (section 2). SAMPLE REC: start the take at the bar, again to stop at the bar. SAMPLE and SAMPLE EDIT: arm the selected slot (SAMPLE REC opens armed). PATTERN: write arm, the pads record into the step under the playhead | all but the lists |
@@ -96,8 +96,8 @@ Left, SPEAKS: the source chip (LIVE with its name, or SLOT n), a vertical IN met
 Middle: the voiceprint with the MODE word over it. Right, SOUNDS: the carrier chip, the chord being played in big type ("Dm7", "C5") with its
 notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as they are now: the layout's rows A, B and C and the controls row, with the octave.
 
-- F1 MODE (BANDS, TALK, TUNE, ROBOT) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 ROW
-  (A, B or C: the pad row F7 sets, section 7) · F7 PLAYS (what that row plays, section 7) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED.
+- F1 MODE (BANDS, TALK, TUNE, ROBOT, TRACT) · F2 SPEAKS (LIVE, SLOT 1 to 4) · F3 SOUNDS (SYNTH, NOISE, LIVE, SLOT 1 to 4) · F4 KEY · F5 SCALE · F6 ROW
+  (A, B or C: the pad row F7 sets, section 7) · F7 PLAYS (what that row plays, section 7) · F8 by mode: BANDS SPREAD (the synth's unison), TALK QUALITY, TUNE SPEED, TRACT VOWEL (1 % a detent, SHIFT 10 %).
   A tap on F2 or F3 opens its picker as a list over the column (UP / DOWN or the encoder, the key again or F1 takes it, F8 backs out); the
   dimmed rows are the rule of section 2.
   Built in U3b: this replaces the second-tap-steps rule for F2 and F3 only (the other F keys keep it); the same key again takes the row the cursor is
@@ -110,6 +110,9 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
 - Pads: row 0 the controls, rows A, B and C the layout (section 7); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
   releases. REC captures.
 - LEDs: section 7 (the layout's rows: root, scale, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays).
+- TRACT (V2): row C set to MOUTH (a PLAYS value of row C only, after BEND and before OFF) is the mouth strip, section 7. The voiceprint draws the tube's
+  22 sections as a mouth profile, SPEAKS is dimmed and the caption says "NO INPUT: THE MOUTH IS PLAYED"; F8 is VOWEL. Outside TRACT the MOUTH row is
+  dark and the hint says "MOUTH SPEAKS IN TRACT".
 
 ### SAMPLE (SAMPLE PLAY): the slots
 
@@ -173,17 +176,34 @@ one is refused on the strip, with the slot as it was.
 
 ### PATTERN
 
-Sixteen steps as cells with four lanes under each (NOTE, CARRIER, LEVEL, SLICE), the playhead in the voice ink, the cursor framed, the lane in
+Sixteen steps as cells with five lanes under each (NOTE, CARRIER, LEVEL, SLICE, MOUTH), the playhead in the voice ink, the cursor framed, the lane in
 force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever PERFORM's rows A and B play there (section 7). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
 the playhead); columns 8 to 11 of those rows are patterns A to H (`kLedMid` the current, `kLedOn` the one playing); rows 0 and 1 are the lane's
 palette: NOTE PERFORM's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER six pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4), LEVEL 24 steps of
-velocity, SLICE slices 1 to 24. A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
+velocity, SLICE slices 1 to 24, MOUTH two pages (below). A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
 the cursor there (SHIFT + step pad: a rest in the lane).
 On LEVEL the palette pad also sounds the cursor step's note or chord at that level while held (a rest sounds nothing); on SLICE it fires the
 slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silent.
 
-- F1 PATTERN (A to H) · F2 LANE (also NOTE, INSTR, VOL, FX; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's
-  value in the lane, the encoder edits it) · F6 CLEAR LANE (action, F1 confirms) · F7 FOLLOW (the cursor rides the playhead) · F8 SAVE (FILE's save, here).
+- F1 PATTERN (A to H) · F2 LANE (NOTE, CARRIER, LEVEL, SLICE, MOUTH; also the buttons NOTE, INSTR, VOL and FX, which picks SLICE, then MOUTH on a second press,
+  then SLICE again; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's value in the lane, the encoder edits it) ·
+  F6 ROW (NOTE lane: the palette's row, A or B) or SET (MOUTH lane: the palette page, VOWELS or WORDS), dim on the others · F7 PLAYS (NOTE lane: what that row
+  plays) or FILL (MOUTH lane), dim on the others · SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) ·
+  F8 SAVE (FILE's save, here).
+
+**The MOUTH lane** (V3, V3b; `stepseq.h`, `pattern_logic.h`). A step's byte is the value in bits 0 to 3 (0 FOLLOW, 1 to 9 the vowels A to U, 10 to 12 the
+closures LIPS, TIP and BACK, 13 WORD, 14 WOB, 15 refused), bits 4 to 6 the word (WOW, YEAH, YOI, WAH, OW, BA, DA, GA) or the WOB rate (1/4, 1/8, 1/16, 1/32,
+1/8T, 1/16T), and bit 7 GLD (vowels only). The palette has two pages and F6 SET flips them. VOWELS: row 0 the strip (pads 0 to 8 the vowels, 9 to 11 the
+closures), row 1 pads 0 to 8 the vowels with GLD (the cell shows a `>`). WORDS: row 0 pads 0 to 7 the eight words, row 1 pads 0 to 5 the six WOB rates.
+A palette pad writes the cursor step and moves on (with step pads held it writes them and the cursor stays); in TRACT it sounds the mouth while it is held
+(a word once, from the main loop; a WOB pad nothing, the strip says "WOB PLAYS WITH THE LINE"), SHIFT + a palette pad only sounds, SHIFT + a step pad clears
+the step. The lane is dim outside TRACT; it still edits, and the strip says "MOUTH SPEAKS IN TRACT". F7 FILL is a seeded random walk of vowels over LENGTH
+(some FOLLOW, some GLD); it asks first (F1 confirms, any other key leaves it) unless the lane is empty or is the last fill's own output, and F7 again rolls
+another. SHIFT + F6 clears the lane (CLEAR <LANE> LANE, F1 confirms). The hook turns the line into Param events to the tract unit (VOWEL, SLIDE, CLOSE, ACCENT),
+at most four on one frame and ten a step (the tract unit takes 32 a block), in every mode: a closure shuts the mouth at the step and opens it at the gate's end (no note: the step's end); a GLD vowel arrives by the
+step's end (SLIDE is a third of the move, capped at 500 ms); ACCENT is 0.5 * (LEVEL - 100) / 27 on a step with a note and a LEVEL above 100, so the LEVEL lane
+that only turned a step down above also opens the jaw in TRACT; Stop writes CLOSE 0, SLIDE 0 and ACCENT 0. A held pad of PERFORM's MOUTH strip suppresses the
+mouth events (not ACCENT).
 
 Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cpp`): a step is one 32-bit word (note, kind, voicing, carrier, level,
 slice), the bank of eight patterns is `O3SDK_BIG`, and the hook reads one word per step with a relaxed atomic, so an edit is heard whole at the
@@ -253,9 +273,9 @@ values and the voiceprint stays under the budget on the Tracker.
 
 ### PARAMS
 
-Three pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,
+Four pages of eight values on the F row, the voiceprint small above them so a change is seen. CARRIER: the synth of section 6 (SHAPE, SPREAD,
 SUB, TILT, NOISE, ATTACK, RELEASE, LEVEL). SHAPE: MODE, QUALITY, FREEZE,
-DRY, VOICING (the app's own: CLOSE, OPEN, WIDE, SMOOTH, default SMOOTH), then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. PARAMS again or UP / DOWN page.
+DRY, VOICING (the app's own: CLOSE, OPEN, WIDE, SMOOTH, default SMOOTH), then the band parameters when they exist. TUNE: KEY, SCALE (shared with the chords), SPEED, AMOUNT, NOTES IN. TRACT (V2): VOWEL (0 to 100 %), TONGUE, JAW, LIPS (-100 to 100 %), GLIDE (5 to 500 ms), SIZE (BIG, LARGE, NORMAL, SMALL, TINY), RES and HISS (0 to 100), the tract unit's own table, live in every mode (outside TRACT the page says "TRACT MODE ONLY" and keeps the values). PARAMS again or UP / DOWN page.
 
 ### MASTER
 
@@ -425,12 +445,12 @@ Row 0 is the controls on every layout (below). Rows 1, 2 and 3 are A, B and C, e
 `pads::pad_play(layout, row, col, octave)`, the same function on every screen. PLAYS values: NOTE (one note); TRIAD, 7TH, OPEN, POWER (a chord
 of the kind per pad: TRIAD, the triad the scale gives on that root, major, minor or diminished; 7TH, the seventh the scale gives; OPEN, root,
 fifth, ninth, the airy vocoder pad; POWER, root, fifth, octave); on A and B the same five as a piano (PIANO NOTE .. PIANO POWER: A the black
-keys, B the white keys, the voice of the pad's kind); on C only, FORMANT (a strip of semitones, a tap sets the formant and holds nothing) and BEND
-(the strip of section 7b); OFF on every row (dark and silent). A root outside the scale still plays (its nearest diatonic quality) and is lit
+keys, B the white keys, the voice of the pad's kind); on C only, FORMANT (a strip of semitones, a tap sets the formant and holds nothing), BEND
+(the strip of section 7b) and MOUTH (TRACT's strip, below); OFF on every row (dark and silent). A root outside the scale still plays (its nearest diatonic quality) and is lit
 dimmer. The default is A NOTE, B TRIAD, C FORMANT.
 **F6 ROW and F7 PLAYS**: F6 chooses A, B or C (a tap steps and wraps, the encoder stops at the ends) and the row's LEDs flash once
 (`kRowFlashMs`, 150 ms); F7 steps the chosen row through its order (A and B: NOTE, TRIAD, 7TH, OPEN, POWER, PIANO NOTE .. PIANO POWER, OFF; C: NOTE,
-TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, OFF; a tap wraps, the encoder stops at the ends). A piano value on A or B takes both rows (the grid values
+TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF; a tap wraps, the encoder stops at the ends). A piano value on A or B takes both rows (the grid values
 they had are kept) and a grid value on either splits them, the other row getting its old value back. **The shortcut**: while a pad of A, B or
 C is held, F7 changes that pad's row at once and F6's row moves to it. SHIFT + F7 is empty. Each row that plays notes sits one octave above
 the playing rows under it (`row_octave`, the joined piano counting as one row). The project keeps the layout (STAT 1.1); a 1.1 file loads
@@ -479,6 +499,7 @@ Asked by the maintainer on 2026-11-06 ("mete todos"): FORMANT, FREEZE, GATE, ARP
 - **GATE and ARP** run in the unit on one step clock taken from the tempo, so pads and MIDI notes go the same way and a step lands on its frame. The clock runs with the transport stopped and restarts at the bar when it starts. GATE has soft edges of about 2 ms against clicks, a 50 % duty, and costs a multiply a sample only while on. ARP's rate is GATE's when GATE is on and 1/16 otherwise. GATE cuts any carrier, a loop playing as the carrier too. With the transport stopped and the arp idle the first key pressed restarts the step clock and sounds at once; with it running the note waits for the grid.
 - **GLIDE** slews each voice's increment once a run, so it costs nothing in the sample loop.
 - **FORMANT strip.** With row C set to FORMANT (the default), row C picks the formant: -12, -9, -6, -4, -2, 0, 0, +2, +4, +6, +9, +12. A tap sets it and it stays, the pad lit, because a formant is a voice to pick and not a gesture to spring back from. FORMANT at 0 is the cheap path.
+- **MOUTH strip** (V2, `pads_logic.h`). With row C set to MOUTH, pads 0 to 8 set VOWEL (A, A-E, E, E-I, I, I-O, O, O-U, U; the nearest lit, and it stays like a formant, a vowel being a place and not a gesture) and pads 9, 10 and 11 are the closures LIPS, TIP and BACK, momentary (the last pressed wins, a release opens the mouth). Outside TRACT the row is dark and silent. A held pad wins over the PATTERN's MOUTH lane while it is down. FORMANT on row C does nothing in TRACT.
 - **Presets** are a constexpr table of parameter values in flash, each a whole sound: ROBOT, CHOIR, WHISPER, GIANT, ELF, PULSE, ARP, FROZEN (`app/include/o3_voc03er/presets.h`, starting points for the maintainer's ear). Each sets the same 15 parameters (Mode, CarSrc, Wave, Noise, Attack, Release, Detune, Quality, Formant, Thru, Glide, Gate, Arp, Vib, Freeze) and never KEY, SCALE, the source, the loops or the transport; the encoder or a second SHIFT + F8 tap applies one at once. Saved user sounds wait for FILE in U9.
 
 SCALE (only the scale's notes) and STACK (a pad turns its note on and off) are not built: a piano lights the scale, and SHIFT latch with DELETE does what STACK would. VOICE was built in E2 as a value of the carrier source: the synth plays the sung note snapped by KEY and SCALE, a held chord follows it, and with nothing sung the carrier is silent (`docs/ENGINE-REALISM.md`). VOICE needs TUNE's pitch detector beside BANDS, about 4 to 5 points of CPU [est, TUNE 45.3 % against 40.9 % idle], which takes BANDS 8 from 57.3 % to about 62 %, past the 60 % budget.
@@ -636,3 +657,14 @@ Built in U10c: on the unit (candidate 4ce71cd, BANDS, 8 notes and 4 loops, limit
 Measured on the host: aliasing (non-harmonic energy, notes 84, 96, 108) from -33 to -25.6 dB, the 10 % pulse at note 108 -19.2 dB (bound -18); the largest step when a voice starts and the plan changes 0.45 against 0.57 in the steady state.
 
 Unit check owed: the cycles of the plan's constants at eight notes (U11), SPREAD + SUB with and without a morph, and the TILT and SHAPE sweeps by ear.
+
+### Built in TRACT V1 to V3b
+
+TRACT is the fifth mode (`kModeTract`, index 4): the vocoder runs the carrier alone and the carrier bus, after the CARRIER switch, goes through a vocal tract (`units/tract`, `TractUnit`, slot 0 insert 0, wrapping the kit's `extras/tract` at Full quality). The tube's MIX is 1 in TRACT and 0 elsewhere (a bit-exact bypass, written by `apply_mode()` for every writer of MODE); the unit holds the MIX rise 12 ms and sleeps on silence. No preset selects TRACT. DRY goes through the tube too.
+
+- **V1** (032a681, `tests/tract_mode_test.cpp`, `app/scenarios/tract.txt`): the mode and the unit, from the console (`voc tract`, `tract <param> <value>`). The unit's ids are Vowel, Tongue, Jaw, Lips, Close, Glide, Size, Res, Hiss, Mix, then V3's Slide and V3b's Accent (12 in all, appended).
+- **V2** (1fb190a, `app/scenarios/perform_tract.txt`): row C gains MOUTH (the strip and F8 VOWEL, section 7, PERFORM above), the voiceprint draws the mouth, PARAMS gains its fourth page, TRACT.
+- **V3** (7978c1e, `app/scenarios/mouth_lane.txt`, `tests/stepseq_test.cpp`, `tests/pattern_screen_test.cpp`): the MOUTH lane (PATTERN above), the byte in each step, the hook's events, the project's `MOUT` and `TRCT` chunks (`TRCT` holds the page's eight values; CLOSE, MIX, SLIDE and ACCENT are not saved, and F4 NEW resets them).
+- **V3b** (0055066, 7327b2a, `app/scenarios/mouth_words.txt`): a GLD vowel arrives by the step's end; the words, WOB, ACCENT and FILL; the file always writes `MOUT` 0x0101, and a V3 build refuses a file holding a word or a WOB.
+
+What TRACT cannot say (`docs/REVIEW-2026-11-11.md` section 4): a closure is a mute with a plosive, never m or n; l, r and a held s are out of reach, since HISS only sounds in the closure's travel or on a very narrow vowel. Entering TRACT may let the raw carrier through for a few ms. Unit check owed: the first listen, the strip by hand, the words and WOB by ear, the pop of a closure, and the CPU while the mouth moves (WOB 1/32, 8 notes, 4 loops). Measured on the unit (7327b2a): TRACT idle 52.4k cycles a block (20 %, the tube asleep with no carrier), BANDS idle 92.0k (35 %).
