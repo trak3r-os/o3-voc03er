@@ -19,6 +19,7 @@
 namespace app = o3sdk::app;
 namespace sim = o3sdk::sim;
 namespace pt = o3_voc03er::pattern;
+namespace pd = o3_voc03er::pads;
 
 TEST_CASE("pattern: the pad map") {
   CHECK(pt::step_of_pad(24) == 0);
@@ -82,6 +83,54 @@ TEST_CASE("pattern: the SLICE lane's palette, value and clear") {
   CHECK(pt::slice_write(p, 4, 2, 8) == pt::SliceWrite::Written);
   CHECK(pt::step_value(p, 4, pt::Lane::Level, 1));
   CHECK(get_step(p, 4).slice == 3u);
+}
+
+TEST_CASE("pattern: the palette plays what the layout says, row 0 is A and row 1 is B") {
+  const pd::Layout def;  // A NOTE, B TRIAD, C FORMANT: B +0, A +1
+  const unsigned a_pad = o3sdk::app::pad_at(0, 3);
+  const unsigned b_pad = o3sdk::app::pad_at(1, 3);
+  CHECK(pt::palette_play(a_pad, 0, def).note == 48 + 12 + 3);
+  CHECK(pt::palette_play(a_pad, 0, def).kind == 0);
+  CHECK(pt::palette_play(b_pad, 0, def).note == 48 + 3);
+  CHECK(pt::palette_play(b_pad, 0, def).kind == 1);
+  CHECK(pt::palette_play(b_pad, 2, def).note == 48 + 24 + 3);
+  // A piano: B the white keys, A the black ones, one gap in the black row.
+  pd::Layout piano;
+  pd::set_plays(piano, pd::Row::A, pd::Plays::PianoSeventh);
+  CHECK(pt::palette_play(o3sdk::app::pad_at(1, 2), 0, piano).note == 48 + 4);
+  CHECK(pt::palette_play(o3sdk::app::pad_at(1, 2), 0, piano).kind == 2);
+  CHECK(pt::palette_play(o3sdk::app::pad_at(0, 1), 0, piano).note == 48 + 1);
+  CHECK(pt::palette_play(o3sdk::app::pad_at(0, 0), 0, piano).note == -1);
+  // OFF plays nothing.
+  pd::Layout off;
+  pd::set_plays(off, pd::Row::B, pd::Plays::Off);
+  CHECK(pt::palette_play(b_pad, 0, off).note == -1);
+}
+
+TEST_CASE("pattern: a step matches the palette pad whose note and kind it stores") {
+  const pd::Layout def;
+  const unsigned a_pad = o3sdk::app::pad_at(0, 3);
+  const unsigned b_pad = o3sdk::app::pad_at(1, 3);
+  o3_voc03er::Step s;
+  s.note = 63;  // A's pad 3
+  CHECK(pt::palette_matches(pt::Lane::Note, a_pad, s, 0, def));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Note, b_pad, s, 0, def));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Note, a_pad, s, 1, def));  // another octave
+  s.note = 51;  // B's pad 3 is a triad
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Note, b_pad, s, 0, def));  // a note, not the triad
+  s.kind = 1;
+  CHECK(pt::palette_matches(pt::Lane::Note, b_pad, s, 0, def));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Note, a_pad, s, 0, def));
+  // A rest matches nothing, and a pad that plays nothing matches nothing.
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Note, b_pad, o3_voc03er::Step{}, 0, def));
+  pd::Layout off;
+  pd::set_plays(off, pd::Row::B, pd::Plays::Off);
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Note, b_pad, s, 0, off));
+  // The other lanes are as they were.
+  o3_voc03er::Step lv;
+  lv.level = static_cast<std::uint8_t>(pt::level_of_pad(5));
+  CHECK(pt::palette_matches(pt::Lane::Level, 5, lv, 0, def));
+  CHECK_FALSE(pt::palette_matches(pt::Lane::Level, 6, lv, 0, def));
 }
 
 TEST_CASE("pattern: the LEVEL palette is 24 distinct steps up to 100, not 127") {

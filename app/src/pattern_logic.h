@@ -6,6 +6,8 @@
 
 #include <o3_voc03er/stepseq.h>
 
+#include "pads_logic.h"
+
 #include <o3sdk/app/panel.h>
 
 #include <cstdint>
@@ -60,6 +62,12 @@ constexpr unsigned note_of_pad(unsigned pad, int octave, bool keys) noexcept {
 // upper one the next kind after it.
 constexpr ChordKind kind_of_pad(unsigned pad, ChordKind bottom) noexcept { return kind_for_row(o3sdk::app::pad_row(pad) % 2u + 2u, bottom); }
 
+// The layout's palette (Q1; PATTERN switches to it in Q2): palette row 0 is row A, row 1 is row B, so a pad plays what pads::pad_play says of it.
+inline constexpr pads::Row kPaletteRow[2] = {pads::Row::A, pads::Row::B};
+constexpr pads::PadPlay palette_play(unsigned pad, int octave, const pads::Layout& layout) noexcept {
+  return pads::pad_play(layout, kPaletteRow[o3sdk::app::pad_row(pad) % 2u], o3sdk::app::pad_col(pad), octave);
+}
+
 // Does the palette pad hold what the step stores? (LED mid on it.)
 constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, bool keys, ChordKind bottom) noexcept {
   switch (lane) {
@@ -82,6 +90,15 @@ constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octav
       return pad < kSliceMax && pad + 1u == s.slice;
   }
   return false;
+}
+
+// The same with the layout: on the NOTE lane the step's note and kind equal the pad's play (a rest, and a pad that plays nothing, never match).
+constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, const pads::Layout& layout) noexcept {
+  if (lane == Lane::Note) {
+    const pads::PadPlay p = palette_play(pad, octave, layout);
+    return s.note != 0u && p.note > 0 && s.note == static_cast<unsigned>(p.note) && s.kind == p.kind;
+  }
+  return palette_matches(lane, pad, s, octave, false, ChordKind::Triad);  // the other lanes do not depend on the pads
 }
 
 // A palette pad of the SLICE lane: pads 0..23 are slices 1..24 of the SPEAKS slot, lit (dim) up to its slice count `count`.

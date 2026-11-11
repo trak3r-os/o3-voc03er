@@ -15,7 +15,8 @@
 // Kinds: TRIAD (root, 3rd, 5th of the scale), SEVENTH (and the 7th), OPEN (root, fifth, ninth: "sus2"), POWER (root, fifth, octave: "5").
 // Voicings, on the notes stacked upward from the root: CLOSE as stacked; OPEN the second note up an octave; WIDE the root, the notes above the
 // second, the second up an octave and the root two octaves up (one note more, two octaves wide); SMOOTH the inversion nearest the previous
-// chord (see smooth_cost), CLOSE when there is none; OPEN and POWER kinds keep their shape in SMOOTH (only the octave moves).
+// chord (see smooth_cost) among the inversions whose lowest note is in the pad's own octave (a tie keeps the earlier inversion), CLOSE when
+// there is none; OPEN and POWER kinds keep their shape in SMOOTH (root position on the pad's root).
 // Range: a chord that leaves 0..127 moves whole by octaves until it is inside, so its shape stays.
 
 #include <o3_voc03er/pad_map.h>
@@ -194,15 +195,16 @@ inline Chord make_chord(ChordKind kind, unsigned root_pc, int octave, unsigned k
       int r[kChordMaxNotes] = {};
       for (std::size_t j = 0; j < n; ++j) r[j] = s[(k + j) % n] + (k + j >= n ? 12 : 0);
       sort_up(r, n);
-      for (int q = 0; q < 11; ++q) {
-        int c[kChordMaxNotes] = {};
-        for (std::size_t j = 0; j < n; ++j) c[j] = pc + 12 * q + r[j];
-        if (c[n - 1] > 127) break;
-        const int cost = smooth_cost(c, n, prev->notes, prev->count);
-        if (cost < best) {
-          best = cost;
-          for (std::size_t j = 0; j < n; ++j) v[j] = c[j];
-        }
+      // The rotation sits once, at the shift that puts its lowest note in the pad's octave [base, base + 11]: SMOOTH never leaves the octave
+      // the pad is in, so the same pad an octave up plays the same chord an octave up.
+      const int low = kChordBaseNote + 12 * octave + (pc + r[0]) % 12;
+      int c[kChordMaxNotes] = {};
+      for (std::size_t j = 0; j < n; ++j) c[j] = low + r[j] - r[0];
+      if (c[n - 1] > 127) continue;
+      const int cost = smooth_cost(c, n, prev->notes, prev->count);
+      if (cost < best) {
+        best = cost;
+        for (std::size_t j = 0; j < n; ++j) v[j] = c[j];
       }
     }
     smooth = best != 0x7fffffff;

@@ -11,6 +11,8 @@
 
 #include <o3sdk/core/audio_clock.h>
 
+#include "pads_logic.h"
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -159,8 +161,8 @@ struct PianoPad {
   PianoFn fn = PianoFn::None;
   int offset = 0;  // semitones above C of the octave (White, Black); the semitones of the pad (Formant)
 };
-inline constexpr int kWhiteOffset[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};          // C D E F G A B C D E F G
-inline constexpr int kBlackOffset[12] = {-1, 1, 3, -1, 6, 8, 10, -1, 13, 15, -1, 18};       // C# D# . F# G# A# . C# D# . F#; -1 no key
+using o3_voc03er::pads::kBlackOffset;  // pads_logic.h: the piano's keys, shared with the layout
+using o3_voc03er::pads::kWhiteOffset;
 // Row 0, by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; 2, 5 and 8 are gaps.
 inline constexpr PianoFn kControlFn[12] = {PianoFn::OctDown, PianoFn::OctUp,   PianoFn::None,    PianoFn::VolDown, PianoFn::VolUp,  PianoFn::None,
                                            PianoFn::RootDown, PianoFn::RootUp, PianoFn::None,    PianoFn::Mod,     PianoFn::BndDown, PianoFn::BndUp};

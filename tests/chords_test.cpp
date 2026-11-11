@@ -169,23 +169,55 @@ TEST_CASE("chords: OPEN and WIDE voicings") {
   expect(make_chord(ChordKind::Seventh, 7, 0, 0, kMajor, Voicing::Wide), {7, "G7", {55, 62, 65, 71, 79}});
 }
 
-TEST_CASE("chords: SMOOTH leads the voices through I vi IV V") {
-  // Nothing before: the close chord. Then the inversion with the least summed movement; a tie goes to the lower rotation, then the lower octave.
+TEST_CASE("chords: SMOOTH leads the voices through I vi IV V, each chord inside the pad's octave") {
+  // Nothing before: the close chord. Then, among the inversions whose lowest note is in the pad's octave (48..59 at octave 0), the one with the
+  // least summed movement; a tie goes to the earlier rotation.
   Chord c = chord_for_pad(3, 0, 0, 0, kMajor, Voicing::Smooth);  // C
   expect(c, {0, "C", {48, 52, 55}});
-  c = chord_for_pad(3, 9, 0, 0, kMajor, Voicing::Smooth, &c);  // Am: C E A, 2 semitones
+  c = chord_for_pad(3, 9, 0, 0, kMajor, Voicing::Smooth, &c);  // Am: C E A (48 52 57) costs 2, A C E (57 60 64) 26, E A C (52 57 60) 14
   expect(c, {9, "Am", {48, 52, 57}});
-  c = chord_for_pad(3, 5, 0, 0, kMajor, Voicing::Smooth, &c);  // F: C F A, 1 semitone
+  c = chord_for_pad(3, 5, 0, 0, kMajor, Voicing::Smooth, &c);  // F: C F A costs 1
   expect(c, {5, "F", {48, 53, 57}});
-  c = chord_for_pad(3, 7, 0, 0, kMajor, Voicing::Smooth, &c);  // G: B D G and D G B both cost 6; B D G (rotation 1) wins
-  expect(c, {7, "G", {47, 50, 55}});
+  c = chord_for_pad(3, 7, 0, 0, kMajor, Voicing::Smooth, &c);  // G: D G B (50 55 59) costs 6; G B D (55 59 62) 18; B D G would start at 59: 30
+  expect(c, {7, "G", {50, 55, 59}});
   // The same chord again does not move.
   const Chord again = chord_for_pad(3, 7, 0, 0, kMajor, Voicing::Smooth, &c);
-  expect(again, {7, "G", {47, 50, 55}});
-  // Four notes after three: the extra voice is measured against the top of the shorter chord.
+  expect(again, {7, "G", {50, 55, 59}});
+  // Four notes after three: the extra voice is measured against the top of the shorter chord. D F G B (50 53 55 59) and F G B D (53 55 59 62)
+  // both cost 6; the earlier rotation wins.
   const Chord g7 = chord_for_pad(2, 7, 0, 0, kMajor, Voicing::Smooth, &c);
-  CHECK(g7.count == 4);
-  CHECK(g7.notes[0] == 47);
+  expect(g7, {7, "G7", {50, 53, 55, 59}});
+}
+
+TEST_CASE("chords: SMOOTH one octave up is the same chords one octave up") {
+  const unsigned roots[] = {0, 9, 5, 7, 7};
+  const unsigned rows[] = {3, 3, 3, 3, 2};
+  for (int oct = -2; oct <= 3; ++oct) {
+    Chord lo, hi;
+    for (std::size_t i = 0; i < 5; ++i) {
+      lo = chord_for_pad(rows[i], roots[i], 0, 0, kMajor, Voicing::Smooth, i ? &lo : nullptr);
+      hi = chord_for_pad(rows[i], roots[i], oct, 0, kMajor, Voicing::Smooth, i ? &hi : nullptr);
+      CAPTURE(oct);
+      CAPTURE(i);
+      REQUIRE(lo.count == hi.count);
+      for (unsigned j = 0; j < lo.count; ++j) CHECK(hi.notes[j] == lo.notes[j] + 12 * oct);
+    }
+  }
+}
+
+TEST_CASE("chords: SMOOTH does not follow the previous chord out of the pad's octave") {
+  // The chord before sat two octaves up (C E G at 72). The old search chased it (Am at 72 76 81); now Am on a pad of octave 0 stays in 48..59:
+  // A C E (57 60 64) costs 15 + 16 + 15, C E A (48 52 57) 24 + 24 + 22, E A C (52 57 60) 20 + 19 + 19.
+  Chord far;
+  far.count = 3;
+  far.notes[0] = 72;
+  far.notes[1] = 76;
+  far.notes[2] = 79;
+  const Chord am = chord_for_pad(3, 9, 0, 0, kMajor, Voicing::Smooth, &far);
+  expect(am, {9, "Am", {57, 60, 64}});
+  // OPEN and POWER keep root position on the pad's root, wherever the chord before was.
+  const Chord pw = make_chord(ChordKind::Power, 7, 0, 0, kMajor, Voicing::Smooth, &far);
+  expect(pw, {7, "G5", {55, 62, 67}});
 }
 
 TEST_CASE("chords: the edges of the MIDI range keep the shape") {
