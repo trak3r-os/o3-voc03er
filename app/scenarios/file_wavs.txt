@@ -71,6 +71,14 @@ wait 2
 snap 03b_slot_grey
 wait 3
 snap 03c_slot_grey     # U9c4: the slot is grey (dim fill) in FILE's slot row until its WAV has landed
+press samplerec        # LE2: SAMPLE REC reads the grey slot as LOADING and REC refuses it (a take would fight the landing)
+release samplerec
+expect state waiting=1
+press rec
+release rec
+snap 03d_rec_loading
+press file
+release file
 wait 1400
 snap 04_loaded
 expect state edited1=1

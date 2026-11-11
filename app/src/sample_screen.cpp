@@ -448,7 +448,7 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       break;
     case 4:  // LOOP
       if (ls.length == 0u) {
-        say(ctx, "EMPTY: SAMPLE REC OR SAMPLE LOAD");
+        say(ctx, waiting(slot_) ? "SLOT IS LOADING" : "EMPTY: SAMPLE REC OR SAMPLE LOAD");
         return;
       }
       write(ctx, Field::Play, ls.playing || ls.pending ? 0.0f : 1.0f);
@@ -870,7 +870,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
       cat_tenths(buf, sizeof buf, sr::tenths_bars(s.length, bar));
       cat(buf, sizeof buf, " BARS");
     } else {
-      cat(buf, sizeof buf, "EMPTY");
+      cat(buf, sizeof buf, waiting(i) ? "LOADING" : "EMPTY");
     }
     r.text(kColX + kColW - 10 - r.text_width(buf, Face::Label), y + 8, buf, full ? Color::Text : Color::TextDim, Face::Label);
     if (full) {
@@ -887,7 +887,9 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   // The middle: the slot's name, its play state and where it plays (no wave: SAMPLE EDIT, U7, draws it); below, the play line.
   const int mid = kMidX + kMidW / 2;
   r.text(centred(r, kSlotNames[slot_ & 3u], Face::Display, mid), kRowY + 14, kSlotNames[slot_ & 3u], Color::Text, Face::Display);
-  if (empty) {
+  if (empty && waiting(slot_)) {
+    r.text(centred(r, "LOADING", Face::Label, mid), kRowY + 100, "LOADING", Color::Accent, Face::Label);
+  } else if (empty) {
     r.text(centred(r, "EMPTY: SAMPLE REC", Face::Label, mid), kRowY + 100, "EMPTY: SAMPLE REC", Color::Accent, Face::Label);
     r.text(centred(r, "OR SAMPLE LOAD", Face::Label, mid), kRowY + 126, "OR SAMPLE LOAD", Color::Accent, Face::Label);
   } else {

@@ -442,7 +442,7 @@ name this build does not know opens as no preset. F4 NEW puts all of these back 
 *SAVE AS: the name is typed with the on-screen keys. F1 changes the type, F7 accepts, F8 cancels.*
 
 A save or an open goes on when another button leaves FILE, and what it said is on the strip at your next visit. SAMPLE LOAD does not
-open while FILE's job runs, and the screen you are on says FILE IS BUSY.
+open while FILE's job runs, and the screen you are on says FILE IS BUSY. A slot grey in PERFORM is LOADING in SAMPLE, SAMPLE EDIT and SAMPLE REC, and REC and DELETE leave it alone, and SAMPLE EDIT edits nothing, until its sound has landed.
 
 Nothing is saved by itself: FILE saves only when you tell it. The app also keeps two small files of its own in `Apps/o3_voc03er/`, `pattern.o3a` (the working patterns) and
 `config.o3a` (settings); the previous copy of the patterns is kept beside it as `pattern.o3a.bak`. A damaged project file is refused

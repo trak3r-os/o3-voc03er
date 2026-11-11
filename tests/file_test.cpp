@@ -4,9 +4,12 @@
 
 #include "../app/src/file_logic.h"
 
+#include <o3_voc03er/units/vocoder/vocoder.h>
+
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/platform/host/dir_card.h>
+#include <o3sdk/platform/host/fake_capture.h>
 #include <o3sdk/sim/harness.h>
 
 #include <array>
@@ -106,7 +109,7 @@ void tap(sim::Harness& h, app::Button b) {
   h.run_ms(5);
 }
 std::string state(sim::Harness& h) {
-  char line[512];
+  char line[1024];  // the app's pairs run past 512 bytes: loop3 and later are cut there
   const std::size_t n = h.runtime().state_line(line, sizeof line);
   return std::string(line, n);
 }
@@ -361,6 +364,126 @@ TEST_CASE("file: LE1 SAMPLE LOAD pressed while FILE runs a job is refused where 
   tap(*h, app::Button::SampleLoad);
   h->run_ms(100);
   CHECK(state(*h).find("screen=SAMPLE_LOAD") != std::string::npos);
+}
+
+namespace {
+
+// The number after " key=" in the state line (0 when the key is not there).
+unsigned state_num(sim::Harness& h, const char* key) {
+  const std::string s = " " + state(h);
+  const std::string k = std::string(" ") + key + "=";
+  const std::size_t at = s.find(k);
+  return at == std::string::npos ? 0u : static_cast<unsigned>(std::strtoul(s.c_str() + at + k.size(), nullptr, 10));
+}
+
+// A tap that takes two passes of the main loop: a window of a few milliseconds (a WAV on its way) holds several of them.
+void quick(sim::Harness& h, app::Button b) {
+  h.press(b);
+  h.run_ms(1);
+  h.release(b);
+  h.run_ms(1);
+}
+
+// The vocoder's own unit (the TRACT insert is a unit too): a parameter's target as the screens wrote it.
+float voc_param(sim::Harness& h, std::uint16_t id) {
+  for (unsigned u = 0; u < 8; ++u) {
+    const dsp::UnitInfo* info = h.engine().unit_info(static_cast<dsp::UnitId>(u));
+    if (info != nullptr && std::strcmp(info->name, "VOCODER") == 0) {
+      return h.engine().param(static_cast<dsp::UnitId>(u), id);
+    }
+  }
+  return -1.0f;
+}
+
+}  // namespace
+
+TEST_CASE("file: LE2 a slot whose WAV is still on its way is not empty to SAMPLE REC, and SAMPLE EDIT waits") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-waiting");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  const std::filesystem::path project = std::filesystem::path(card_dir.path()) / "Apps" / "o3_voc03er" / "PROJECT";
+  platform::host::FakeCapture cap;
+  cap.input_tone(220.0f, -8.0f);
+  unsigned len1 = 0;
+  unsigned len2 = 0;
+  {
+    // Two takes of 1 BAR (slots 1 and 2), SAVE AS, SAVE WAVS: the card holds the project and both WAVs.
+    auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card, nullptr, &cap);
+    REQUIRE(h->start());
+    h->run_ms(300);
+    tap(*h, app::Button::SampleRec);
+    h->run_ms(200);
+    tap(*h, app::Button::F3);
+    tap(*h, app::Button::F4);
+    tap(*h, app::Button::F4);
+    tap(*h, app::Button::F4);
+    tap(*h, app::Button::Play);
+    h->run_ms(500);
+    tap(*h, app::Button::Rec);
+    h->run_ms(9000);
+    tap(*h, app::Button::Down);  // SAMPLE REC's slot 2
+    tap(*h, app::Button::Rec);
+    h->run_ms(9000);
+    tap(*h, app::Button::Up);  // back to SAMPLE REC's slot 1: the screen object outlives this harness (a real reboot starts at 0)
+    len1 = state_num(*h, "loop1");
+    len2 = state_num(*h, "loop2");
+    REQUIRE(len1 != 0u);
+    REQUIRE(len2 != 0u);
+    tap(*h, app::Button::File);
+    h->run_ms(40);
+    tap(*h, app::Button::F2);  // SAVE AS PROJECT
+    h->run_ms(20);
+    tap(*h, app::Button::F7);
+    h->run_ms(200);
+    tap(*h, app::Button::F5);  // SAVE WAVS
+    h->run_ms(3000);
+    REQUIRE(std::filesystem::exists(project / "slot1_001.wav"));
+    REQUIRE(std::filesystem::exists(project / "slot2_001.wav"));
+  }
+
+  // A fresh unit (empty slots) opens the project: the WAVs land slot by slot, each waiting slot is grey until then.
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card, nullptr, &cap);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  tap(*h, app::Button::File);
+  h->run_ms(40);
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // the picker lists the folders
+  h->run_ms(300);
+  h->press(app::Button::F1);  // OPEN
+  h->run_ms(1);
+  h->release(app::Button::F1);
+  // The window: slot 1 has landed, slot 2 is on its way (bit 1 of the mask).
+  bool window = false;
+  for (unsigned i = 0; i < 4000 && !window; ++i) {
+    h->run_ms(1);
+    window = state_num(*h, "waiting") == 2u && state_num(*h, "loop1") != 0u;
+  }
+  REQUIRE(window);
+
+  // SAMPLE REC on the waiting slot 2: a take would be overwritten by the landing WAV (or overwrite it): REC does nothing.
+  quick(*h, app::Button::SampleRec);
+  quick(*h, app::Button::Down);
+  quick(*h, app::Button::Rec);
+  CHECK(state_num(*h, "waiting") == 2u);  // still in the window
+  CHECK(voc_param(*h, o3_voc03er::Vocoder::loop_param(1, o3_voc03er::Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+
+  // SAMPLE EDIT's COPY of slot 1 in the window: refused (the landing owns the slots and the unit's Load parameter, and slot 2 looks empty).
+  quick(*h, app::Button::SampleEdit);
+  quick(*h, app::Button::Copy);
+  quick(*h, app::Button::F1);
+  CHECK(state_num(*h, "waiting") == 2u);
+  h->run_ms(3000);
+  CHECK(state_num(*h, "waiting") == 0u);
+  CHECK(state_num(*h, "loop1") == len1);
+  CHECK(state_num(*h, "loop2") == len2);  // the WAV landed whole, nothing was copied over it
+  CHECK(state_num(*h, "loop3") == 0u);    // and nothing went to the next slot either
+  // Once the landing is over, COPY works as ever: the next empty slot after slot 1 is slot 3 now.
+  tap(*h, app::Button::Copy);
+  tap(*h, app::Button::F1);
+  h->run_ms(900);
+  CHECK(state_num(*h, "loop3") == len1);
+  CHECK(h->runtime().frame_failures() == 0u);
 }
 
 namespace {

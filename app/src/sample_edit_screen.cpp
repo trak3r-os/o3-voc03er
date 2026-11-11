@@ -564,6 +564,14 @@ void SampleEditScreen::norm_finish(app::Context& ctx) noexcept {
 
 // True (and says why) while NORMALISE or a job owns the samples.
 bool SampleEditScreen::busy(app::Context& ctx) noexcept {
+  // FILE's open is still landing WAVs: it writes the slots and the unit's one Load parameter, as a trim or a copy would, and a slot it waits for
+  // looks empty (a copy would pick it as its target); every edit waits until the last WAV has landed.
+  for (unsigned k = 0; k < sm::kReaders; ++k) {
+    if (sample_->waiting(k)) {
+      say(ctx, "LOADING");
+      return true;
+    }
+  }
   if (g_se.norm.phase == se::NormPhase::Scan || g_se.norm.phase == se::NormPhase::Apply) {
     say(ctx, "NORMALISING");
     return true;
@@ -1116,7 +1124,7 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   r.text(kX + kW - r.text_width(buf, Face::Label), 100, buf, Color::Text, Face::Label);
 
   if (len == 0u) {
-    const char* line = recording ? "RECORDING" : "EMPTY: SAMPLE REC OR SAMPLE LOAD";
+    const char* line = recording ? "RECORDING" : (sample_->waiting(slot) ? "LOADING" : "EMPTY: SAMPLE REC OR SAMPLE LOAD");
     r.text(centred(r, line, Face::Label, kX + kW / 2), kWaveY + kWaveH / 2 - 8, line, Color::Accent, Face::Label);
   } else {
     int last = kX - 100;

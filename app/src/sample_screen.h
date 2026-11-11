@@ -94,6 +94,10 @@ class SampleScreen final : public o3sdk::app::Screen {
   // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
   void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
 
+  // True while the slot's WAV is still on its way after a project open (FILE's landing window): the slot looks empty to the unit but is not free.
+  // REC, COPY and DELETE refuse such a slot, and the screens label it LOADING.
+  bool waiting(unsigned slot) const noexcept { return perform_ != nullptr && slot < 4u && ((perform_->slots_waiting() >> slot) & 1u) != 0u; }
+
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;

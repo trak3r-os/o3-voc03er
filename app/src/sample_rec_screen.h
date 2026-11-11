@@ -66,6 +66,7 @@ class SampleRecScreen final : public o3sdk::app::Screen {
   void write_rec(o3sdk::app::Context& ctx, bool on) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   bool holds_audio(unsigned slot) const noexcept;
+  bool waiting(unsigned slot) const noexcept { return perform_ != nullptr && slot < 4u && ((perform_->slots_waiting() >> slot) & 1u) != 0u; }  // its WAV is still on its way
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   const InputMeter* meter_ = nullptr;

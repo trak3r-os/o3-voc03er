@@ -139,6 +139,10 @@ void SampleRecScreen::rec_press(app::Context& ctx) noexcept {
     ctx.redraw();
     return;
   }
+  if (waiting(slot_)) {  // its WAV is still on its way: a take now would be overwritten by the landing, or overwrite it
+    say(ctx, "SLOT IS LOADING");
+    return;
+  }
   if (!ctx.audio_in().available()) {
     say(ctx, "NO INPUT");
     return;
@@ -173,6 +177,10 @@ void SampleRecScreen::delete_press(app::Context& ctx) noexcept {
       }
     }
     ctx.redraw();
+    return;
+  }
+  if (waiting(slot_)) {
+    say(ctx, "SLOT IS LOADING");
     return;
   }
   if (!holds_audio(slot_)) {
@@ -595,7 +603,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
     case View::Recording: word = "REC"; ink = Color::AccentText; break;
     case View::Stopping: word = "STOPPING"; ink = Color::AccentText; break;
     case View::Take: word = "TAKE"; ink = Color::Play; break;
-    case View::Empty: break;
+    case View::Empty: word = waiting(shown) ? "LOADING" : "EMPTY"; break;
   }
   r.text(centred(r, word, Face::Display, 316), 136, word, ink, Face::Display);
 
@@ -648,7 +656,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
     const int x = 96 + static_cast<int>(i) * 112;
     const Vocoder::LoopStatus s = voc_ != nullptr ? voc_->loop_status(i) : Vocoder::LoopStatus{};
     const auto v = static_cast<std::uint8_t>(route::kFirstSlot + i);
-    const char* st = s.rec != Rec::Idle ? "REC" : (holds_audio(i) ? (rt.speaks == v ? "SPEAKS" : (rt.sounds == v ? "SOUNDS" : "HELD")) : "EMPTY");
+    const char* st = s.rec != Rec::Idle ? "REC" : (holds_audio(i) ? (rt.speaks == v ? "SPEAKS" : (rt.sounds == v ? "SOUNDS" : "HELD")) : (waiting(i) ? "LOADING" : "EMPTY"));
     r.text(x + 8, 280, kSlotNames[i], i == shown ? Color::Text : Color::TextDim, Face::Label);
     r.text(x + 8, 302, st, s.rec != Rec::Idle ? Color::Accent : (holds_audio(i) ? Color::Play : Color::TextDim), Face::Label);
   }
