@@ -1154,8 +1154,10 @@ TEST_CASE("sample edit: COPY asks, F1 confirms, the next empty slot gets the sam
 namespace {
 
 // A noise burst of peak amplitude `amp` (of 32767) at sample `at`, decaying with time constant `tau` samples, added into `x`.
+// The noise of a burst is its own sequence, seeded by where it starts. A case hears the same bursts whatever cases ran before it; a static
+// seed made them depend on the cases before, and the shards run a file's cases in other company.
 void burst(std::vector<std::int16_t>& x, std::uint32_t at, float amp, float tau = 900.0f) {
-  static std::uint32_t seed = 12345u;
+  std::uint32_t seed = 12345u + at * 2654435761u;
   for (std::uint32_t i = 0; at + i < x.size() && i < static_cast<std::uint32_t>(tau * 8.0f); ++i) {
     seed = seed * 1664525u + 1013904223u;
     const float n = static_cast<float>(static_cast<std::int32_t>(seed >> 8) - (1 << 23)) / static_cast<float>(1 << 23);
@@ -1295,9 +1297,13 @@ TEST_CASE("sample edit: a slow sung-like swell gives no hits") {
 TEST_CASE("sample edit: over 24 cuts the strongest hits stay, in time order, and capped is set") {
   std::vector<std::int16_t> x(44100u * 8u, 0);
   std::vector<std::uint32_t> at;
-  for (unsigned k = 0; k < 30u; ++k) {  // every 0.25 s, rising from 0.2 to 0.9
+  // Every 0.25 s: seven soft hits (0.20 to 0.32), then 23 strong ones (0.5 to 0.9). Steps of 0.024 all the way up were within the noise of
+  // a burst's peak hop, and which hit fell out depended on the noise (172 of 200 seeds dropped a wrong one); a gap between the two groups
+  // makes the 23 strongest the last 23 whatever the noise.
+  for (unsigned k = 0; k < 30u; ++k) {
     at.push_back(4000u + k * 11025u);
-    burst(x, at.back(), 0.2f + 0.7f * static_cast<float>(k) / 29.0f, 600.0f);
+    const float amp = k < 7u ? 0.2f + 0.02f * static_cast<float>(k) : 0.5f + 0.4f * static_cast<float>(k - 7u) / 22.0f;
+    burst(x, at.back(), amp, 600.0f);
   }
   sm::SliceTable t;
   const se::HitCut r = hits_of(x, 100u, t);
