@@ -4,11 +4,13 @@
 // PATTERN (docs/UI-DESIGN.md "PATTERN"), in the OR NOIR skin: the pattern letter A..H large at the left, sixteen step cells with four lanes under each
 // (NOTE, CARRIER, LEVEL, SLICE, MOUTH: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
 //
-//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW)
+//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
 //   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of PERFORM's two upper pad rows (A or B)
 //   F7 changes, F7 PLAYS is that row's value (NOTE, TRIAD, 7TH, OPEN, POWER, OFF or a piano value: pads::Layout, PERFORM holds it); both are dim off the
 //   NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
-//   The encoder starts on F5, the cursor step's value in the lane.
+//   The encoder starts on F5, the cursor step's value in the lane. SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected
+//   and writes the nearest of TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press
+//   cancels, leaving the screen cancels, and nothing is written before the analysis ends.
 //   UP / DOWN: the octave (PERFORM's and SAMPLE's, one press one step, the palette's notes move by 12). LEFT / RIGHT: the cursor (they repeat when
 //   held). NOTE, INSTR, VOL, FX and F2: the lane (app.cpp opens the screen on it; FX: SLICE, then MOUTH, then SLICE).
 //   Pads: rows 2 and 3, columns 0..7: steps 1..16 (a press moves the cursor; SHIFT + press writes a rest in the lane); columns 8..11: patterns A..H (the
@@ -42,8 +44,11 @@ class PatternScreen final : public o3sdk::app::Screen {
   // F8: the app's save of the bank (the same job FILE starts); it says what it did through the screen's line when it cannot (the card is busy).
   using SaveFn = bool (*)(void* user, o3sdk::app::Context& ctx) noexcept;
 
+  // loop_mem: the loop memory (Loop::kCount slots of Loop::kMaxSamples int16), which SHIFT + F8 CAPTURE reads; nullptr leaves CAPTURE with nothing to read.
   void init(o3sdk::dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user,
-            SampleScreen* sample = nullptr) noexcept;
+            SampleScreen* sample = nullptr, const std::int16_t* loop_mem = nullptr) noexcept;
+  // The console's `mcap`: reads `slot` (0..3) to the end in this call and writes pattern's (0..7) MOUTH lane. nullptr when written, else the reason.
+  const char* capture_now(o3sdk::app::Context& ctx, unsigned pattern, unsigned slot) noexcept;
 
   const char* title() const noexcept override { return "PATTERN"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -93,6 +98,13 @@ class PatternScreen final : public o3sdk::app::Screen {
   void word_start(o3sdk::app::Context& ctx, unsigned word) noexcept;  // a WORD pad sounds: its points are played from update() (word_pump)
   void word_pump(o3sdk::app::Context& ctx) noexcept;
   void word_end(o3sdk::app::Context& ctx) noexcept;
+  // MC1, SHIFT + F8 on the MOUTH lane: capture_press starts (or cancels) the analysis of the selected slot, capture_pump is one pass of it from update(),
+  // capture_finish writes the lane. The Capture itself is one object in the SDRAM (g_cap in the .cpp). Main loop only.
+  const char* capture_begin(o3sdk::app::Context& ctx, unsigned pattern, unsigned slot) noexcept;  // nullptr: running; else why not
+  void capture_press(o3sdk::app::Context& ctx) noexcept;
+  void capture_pump(o3sdk::app::Context& ctx) noexcept;
+  void capture_finish(o3sdk::app::Context& ctx) noexcept;
+  bool capture_slot_same() const noexcept;
   pattern::MouthPage mouth_page() const noexcept { return static_cast<pattern::MouthPage>(page_); }
   const pads::Layout& layout_now() const noexcept;  // PERFORM's (the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
@@ -102,6 +114,10 @@ class PatternScreen final : public o3sdk::app::Screen {
   StepSeq* seq_ = nullptr;
   PerformScreen* perform_ = nullptr;
   SampleScreen* sample_ = nullptr;  // the SLICE audition fires a slice as SAMPLE's pads do
+  const std::int16_t* loop_mem_ = nullptr;  // CAPTURE reads the selected slot from it (read only)
+  std::uint8_t cap_pattern_ = 0;  // the pattern a running capture writes (the one shown when it started)
+  std::uint8_t cap_slot_ = 0;     // the slot it reads
+  std::uint32_t cap_length_ = 0;  // that slot's length when it started (a change ends the capture)
   SaveFn save_ = nullptr;
   void* save_user_ = nullptr;
   const char* note_ = nullptr;  // a moment's line (a static string), until note_until_

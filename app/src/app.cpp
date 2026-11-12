@@ -88,6 +88,7 @@ void tract_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void slicech_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+void mcap_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
@@ -96,6 +97,7 @@ constexpr app::DiagCommand kCommands[] = {
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
     {"slicech", "slicech [same|1..16|off]: the MIDI channel that fires slices", &slicech_command},
+    {"mcap", "mcap <A-H> [1-4]: read a slot into the pattern's MOUTH lane", &mcap_command},
 };
 
 constexpr std::size_t text_length(const char* s) noexcept {
@@ -160,7 +162,7 @@ class MyApp final : public app::App {
     sample_load_.init(&sample_, g_loop_mem);
     file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain, &sample_load_, g_loop_mem);
     file_.set_tract(tube);
-    pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this, &sample_);
+    pattern_.init(voice, &g_bank, &carriers_, &perform_, &save_bank_cb, this, &sample_, g_loop_mem);
     song_.init(voice, &g_chain, &carriers_, &perform_);
     pattern_.set_song(&song_);
     file_.set_song(&song_);
@@ -641,6 +643,31 @@ class MyApp final : public app::App {
     out.nl();
   }
 
+  // `mcap <A-H> [1-4]` (main loop): CAPTURE (PATTERN, SHIFT + F8 on the MOUTH lane) from the console, to the end in this call: the nearest of TRACT's nine
+  // vowels (a closure where the level dips) of the slot, a step at a time, into the pattern's MOUTH lane. The slot defaults to the one SAMPLE shows.
+  void mcap(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    const char* p = args.argc >= 2u ? args.arg(1) : nullptr;
+    const char* q = args.argc == 3u ? args.arg(2) : nullptr;
+    const bool pat_ok = p != nullptr && p[0] >= 'A' && p[0] <= 'H' && p[1] == '\0';
+    const bool slot_ok = q == nullptr || (q[0] >= '1' && q[0] <= '4' && q[1] == '\0');
+    if (ctx_ == nullptr || args.argc < 2u || args.argc > 3u || !pat_ok || !slot_ok) {
+      out.text("usage: mcap <A-H> [1-4]").nl();
+      return;
+    }
+    const unsigned slot = q != nullptr ? static_cast<unsigned>(q[0] - '1') : sample_.slot();
+    const char* why = pattern_.capture_now(*ctx_, static_cast<unsigned>(p[0] - 'A'), slot);
+    if (why != nullptr) {
+      out.text("mcap: ").text(why).nl();
+      return;
+    }
+    out.text("mcap: slot ").dec(slot + 1u).text(" into ").chr(p[0]).text(": ");
+    const o3_voc03er::PatternData& pd = g_bank.pattern[p[0] - 'A'];
+    for (unsigned i = 0; i < o3_voc03er::length_of(pd); ++i) {
+      out.dec(o3_voc03er::get_mouth(pd, i)).chr(' ');
+    }
+    out.nl();
+  }
+
   // `voc <bands|talk|tune|robot|tract> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
     o3_voc03er::VocShape shape;
@@ -848,6 +875,10 @@ void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
 
 void slicech_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().slicech(args, out);
+}
+
+void mcap_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().mcap(args, out);
 }
 
 }  // namespace

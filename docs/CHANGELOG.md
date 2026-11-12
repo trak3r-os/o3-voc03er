@@ -4,6 +4,19 @@
 
 ### Added
 
+- **MC1: capture the mouth.** PATTERN, MOUTH lane, SHIFT + F8 CAPTURE reads the slot SAMPLE shows and writes the lane: per step the nearest of
+  TRACT's nine vowels (MOUTH 1 to 9) by the distance between mean-removed log-areas, or a closure (LIPS) where the step's level is 30 dB under
+  the take's loudest step. The analysis is TALK's at QUALITY 16 (fs/4, order 12, pre-emphasis 0.9, the same window and lag window, the TF1
+  reflection-to-area conversion) on a window centred in each step. The nine references are what that same analysis reads from the TRACT tube
+  itself for each vowel (built once per sample rate, cached), so there is one source of truth for the vowels. It runs from update() one piece a pass
+  (a level chunk of 4096 samples about 0.06 ms, a step 20k to 30k cycles, the references 9 passes of about 4 ms once: estimates that assume the
+  SDRAM read cost, to be measured on the unit) and shows READING THE SLOT n %; a second press cancels, and nothing is written before the end. The
+  level pass first removes the take's mean (a DC offset would hide the closures). If the slot is recorded over or reloaded while it runs, or the
+  pattern shown changes, it cancels and the lane stays as it was. The console command blocks the main loop while it runs (about 50 ms [est]). A slot of bars gives 16 steps a bar, any other take is spread over
+  the pattern's LENGTH. Console: `mcap <A-H> [1-4]`. No new parameter (64 of 64), nothing in `config.o3a`, the pattern file is unchanged; about 5.2 KB of
+  SDRAM. Tests in a synthetic TRACT: nine places at several pitches with noise and a vibrato, at 44.1 and 48 kHz, closures (also under a DC offset), short and silent takes, the step mapping and
+  the pieces equal to the one shot (`tests/mouth_capture_test.cpp`); `app/scenarios/mouth_capture.txt` shows the flow only (a tone has one shape). Needs
+  more testing on real voices on the unit: nearest of nine vowels, consonants only as closures, O and U, E and I confused most.
 - **TF1: FORMANT works in TALK.** It was set and ignored there. Once per analysis hop the reflection coefficients become the areas of the
   lossless tube the lattice is, the area function is stretched along the tube by 2^(st/12) (linear in area, a transparent extension past the
   open end) and goes back to reflection coefficients, so the voice's formants move up or down by the same factor as in BANDS, and the gain

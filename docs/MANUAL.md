@@ -330,6 +330,25 @@ the cursor stays. SHIFT + a palette pad only sounds; SHIFT + a step pad clears t
 every mode, but it speaks in TRACT only: outside TRACT the lane is dim, it still edits, and the strip says MOUTH SPEAKS IN TRACT. Stopping the
 transport opens the mouth.
 
+**Capturing a voice.** Instead of writing the mouth by hand, let the instrument listen to a recording and write it for you. Record a take in SAMPLE
+(or load a WAV into a slot) and leave that slot selected there. In PATTERN pick the MOUTH lane (F2), hold SHIFT and press F8 CAPTURE. The strip shows
+READING THE SLOT and a percentage, and a second SHIFT + F8 cancels. When it ends the MOUTH lane holds a line: at every step the nearest of the nine
+vowels to what the slot sounds like there, and a closure (LIPS) where the voice goes quiet. Play it in TRACT, on any carrier and at any tempo, and the
+mouth says the phrase.
+
+- **Which steps.** A take that is a whole number of bars at the current tempo gives 16 steps a bar, and the pattern takes the first bar; any other
+  take is spread over the pattern's LENGTH. Set LENGTH first if you want fewer steps.
+- **What it writes.** Only the MOUTH lane, and only when the analysis has finished: cancelling, leaving the screen or a silent take leaves the
+  lane as it was. A slot that is empty, still recording or shorter than 1,024 samples (23 ms) says so and does nothing. It writes the pattern that was shown when you pressed it, and as many steps as it was long then (changing LENGTH afterwards does not matter);
+  if you switch to another pattern, or the slot is recorded over or reloaded, while it runs, it cancels and writes nothing.
+- **The console.** `mcap <A-H> [1-4]` does the same from the USB console for that pattern and slot (the slot SAMPLE shows if you leave it out) and
+  prints the line it wrote. It runs the whole analysis in one go, so the main loop (screen, keys) waits while it works, about 50 ms [est].
+- **Honest limits.** It picks the nearest of nine vowels, so it hears vowels and nothing finer. Consonants become closures where they are quiet
+  and are otherwise read as whatever vowel they sit next to. O and U, and E and I, are the pairs it confuses most. It works best on slow, clear
+  speech or singing, one syllable to a few steps; fast or whispered speech will give a rough line, which you then edit by hand. The bar count
+  uses the tempo as it is now, so a take recorded at another tempo may be read as one spread over LENGTH. A recording of several bars gives its
+  first bar. It needs more testing on real voices: it is tested against a synthetic voice, not yet against people.
+
 **What the project keeps.** The MOUTH lane of the eight patterns, and the TRACT page's eight values (VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and
 HISS). It does not keep CLOSE (the closure held now), MIX, SLIDE or ACCENT: the line writes those as it plays, and F4 NEW puts them back. A project
 saved with a word or a WOB does not open in the build before this one.
@@ -483,10 +502,12 @@ and writes nothing.
 | F7 PLAYS | NOTE lane: what that row plays (PERFORM's values for rows A and B). MOUTH lane: FILL. Dim on the other lanes |
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
+| SHIFT + F8 CAPTURE | MOUTH lane only: reads the slot SAMPLE shows into the lane. Pressed again while it reads, it cancels |
 | F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
 
 **The MOUTH lane** writes TRACT's mouth, one value a step. Its palette has two pages, VOWELS and WORDS (F6 SET flips them), and F7 FILL writes a
 line for you. Section 5b says what each value does and how the pads write it. SHIFT + F6 empties the lane, as on the others.
+SHIFT + F8 CAPTURE writes the lane from a recording: see "Capturing a voice" in section 5b.
 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY

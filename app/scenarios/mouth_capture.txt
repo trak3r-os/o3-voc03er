@@ -1,0 +1,45 @@
+# CAPTURE THE MOUTH (MC1, docs/REVIEW-2026-11-11.md idea 7): PATTERN, MOUTH lane, SHIFT + F8 reads the slot SAMPLE shows and writes the nearest of TRACT's
+# nine vowels (a closure where the level dips) into the lane. Here: an empty slot says so and writes nothing (snap 01), a 1-bar take of a steady tone is
+# recorded (as in sample_rec.txt), SHIFT shows the CAPTURE label (snap 03), then CAPTURE runs and the lane fills (snap 04). It finishes inside a frame here, so
+# the progress line and the cancel (a second SHIFT + F8 while it runs) are for the unit and the doctest. The simulator shows the flow and the screen only: a sine has one vowel shape, so this says nothing about how well
+# a voice is read, and no speech WAV is kept in git. Detection quality is in tests/mouth_capture_test.cpp (a synthetic TRACT), the real voice is for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/mouth_capture.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap pattern
+wait 150
+tap fx
+tap fx
+wait 100
+press shift
+tap f8
+release shift
+wait 100
+snap 01_empty
+tap samplerec
+wait 200
+tap f3
+wait 100
+tap play
+wait 500
+record on
+tap rec
+wait 100
+paddown 26
+wait 1800
+wait 2500
+padup 26
+wait 1500
+snap 02_take
+tap pattern
+wait 150
+press shift
+wait 100
+snap 03_shift_label
+tap f8
+release shift
+wait 600
+snap 04_captured
+press shift
+tap config
+snap 05_help

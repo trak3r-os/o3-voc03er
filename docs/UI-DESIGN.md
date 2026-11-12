@@ -188,8 +188,8 @@ slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silen
 - F1 PATTERN (A to H) · F2 LANE (NOTE, CARRIER, LEVEL, SLICE, MOUTH; also the buttons NOTE, INSTR, VOL and FX, which picks SLICE, then MOUTH on a second press,
   then SLICE again; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's value in the lane, the encoder edits it) ·
   F6 ROW (NOTE lane: the palette's row, A or B) or SET (MOUTH lane: the palette page, VOWELS or WORDS), dim on the others · F7 PLAYS (NOTE lane: what that row
-  plays) or FILL (MOUTH lane), dim on the others · SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) ·
-  F8 SAVE (FILE's save, here).
+  plays) or FILL (MOUTH lane), dim on the others · SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
+  (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1) · F8 SAVE (FILE's save, here).
 
 **The MOUTH lane** (V3, V3b; `stepseq.h`, `pattern_logic.h`). A step's byte is the value in bits 0 to 3 (0 FOLLOW, 1 to 9 the vowels A to U, 10 to 12 the
 closures LIPS, TIP and BACK, 13 WORD, 14 WOB, 15 refused), bits 4 to 6 the word (WOW, YEAH, YOI, WAH, OW, BA, DA, GA) or the WOB rate (1/4, 1/8, 1/16, 1/32,

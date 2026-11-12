@@ -2,7 +2,9 @@
 #include "pattern_screen.h"
 
 #include "midi_pattern_logic.h"
+#include "mouth_capture.h"
 #include "perform_logic.h"
+#include "sample_rec_logic.h"
 #include "sample_screen.h"
 #include "song_screen.h"
 #include "skin/ornoir.h"
@@ -29,10 +31,11 @@ namespace {
 
 constexpr std::uint64_t kNoteMs = 2500;
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"PATTERN", "LANE", "LENGTH", "TEMPO", "VALUE", "ROW", "PLAYS", "SAVE"};
-// The SHIFT row: F6 and F7 only (the others are blank and dim), labelled the way PERFORM's is.
-constexpr const char* kShiftNames[ornoir::kFKeys] = {"", "", "", "", "", "CLR LANE", "FOLLOW", ""};
+// The SHIFT row: F6, F7 and F8 (the others are blank and dim), labelled the way PERFORM's is. F8 CAPTURE is the MOUTH lane's (dim elsewhere).
+constexpr const char* kShiftNames[ornoir::kFKeys] = {"", "", "", "", "", "CLR LANE", "FOLLOW", "CAPTURE"};
 constexpr unsigned kKeyRow = 5;     // F6
 constexpr unsigned kKeyPlays = 6;   // F7
+constexpr unsigned kKeyCapture = 7; // F8 (SHIFT)
 inline constexpr pads::Layout kDefaultLayout{};  // when no PERFORM is wired (a standalone screen)
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr char kLetters[kBankPatterns + 1] = "ABCDEFGH";
@@ -124,6 +127,9 @@ O3SDK_BIG PatternHelp g_pd = {};
 
 // COPY's clipboard (a step or a pattern), kept while the app runs; INSERT pastes it on any pattern.
 O3SDK_BIG pt::Clip g_clip = {};
+
+// CAPTURE's analysis (mouth_capture.h, about 5.2 KB), one at a time.
+O3SDK_BIG mouthcap::Capture g_cap = {};
 constexpr std::uint8_t kArmLane = 1;     // CLEAR LANE (SHIFT + F6)
 constexpr std::uint8_t kArmPattern = 2;  // SHIFT + DELETE
 constexpr std::uint8_t kArmFill = 3;     // F7 FILL on the MOUTH lane over a lane that holds something of the hands'
@@ -138,9 +144,12 @@ constexpr int kLaneStep = 52;  // five lanes (V3): 120 + 5 * 52 leaves the strip
 
 }  // namespace
 
-void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user, SampleScreen* sample) noexcept {
+void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScreen* perform, SaveFn save, void* user, SampleScreen* sample,
+                         const std::int16_t* loop_mem) noexcept {
   voice_ = voice;
   sample_ = sample;
+  loop_mem_ = loop_mem;
+  g_cap.cancel();
   bank_ = bank;
   seq_ = seq;
   perform_ = perform;
@@ -169,6 +178,7 @@ void PatternScreen::enter(app::Context& ctx) noexcept {
 }
 
 void PatternScreen::leave(app::Context& ctx) noexcept {
+  g_cap.cancel();  // a capture runs from this screen's update() only: leaving ends it, nothing written
   if (perform_ != nullptr) {
     perform_->audition_release_all(ctx);
   }
@@ -239,6 +249,10 @@ bool PatternScreen::tract_on(const app::Context& ctx) const noexcept {
 }
 
 void PatternScreen::show_pattern(app::Context& ctx, unsigned p, bool by_hand) noexcept {
+  if (g_cap.running() && (p & 7u) != cap_pattern_) {  // a capture writes the pattern it started on: a pattern change ends it, nothing written
+    g_cap.cancel();
+    say(ctx, "CAPTURE CANCELLED: THE PATTERN CHANGED");
+  }
   shown_ = static_cast<std::uint8_t>(p & 7u);
   // A SONG chain that plays owns the request: it re-asks for each lap's pattern only when a lap ends, so a hand request here would play for one
   // lap against the chain (or keep the chain's last lap from ending it). The screen still shows and edits the pattern picked.
@@ -489,6 +503,8 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       } else if (k == kKeyPlays) {  // SHIFT + F7, FOLLOW
         follow_ = !follow_;
         ctx.redraw();
+      } else if (k == kKeyCapture) {  // SHIFT + F8, CAPTURE (the MOUTH lane's; a second press while it runs cancels)
+        capture_press(ctx);
       }
       return;
     }
@@ -657,8 +673,123 @@ void PatternScreen::word_end(app::Context& ctx) noexcept {
   word_ = kNoWord;
 }
 
+// Starts the analysis of `slot` for `pattern`: nullptr when it runs, else why not. The slot must be recorded or loaded (not empty, not recording) and at
+// least mouthcap::kMinLength long; a slot of bars gives 16 steps a bar, any other the pattern's length over the whole slot (mouthcap::plan).
+const char* PatternScreen::capture_begin(app::Context& ctx, unsigned pattern, unsigned slot) noexcept {
+  if (sample_ == nullptr || loop_mem_ == nullptr) {
+    return "NO SLOT TO READ";
+  }
+  slot &= 3u;
+  pattern &= 7u;
+  const Vocoder::LoopStatus st = sample_->status(slot);
+  if (st.rec != Vocoder::LoopStatus::Rec::Idle) {
+    return "THE SLOT IS RECORDING: WAIT FOR IT TO END";
+  }
+  if (st.length == 0u) {
+    return "SLOT IS EMPTY: RECORD OR LOAD ONE IN SAMPLE";
+  }
+  const mouthcap::Plan pn = mouthcap::plan(st.length, pl::bar_samples(ctx.engine().stats().tempo_mbpm), length_of(bank_->pattern[pattern]));
+  const std::int16_t* mem = loop_mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples;
+  if (!g_cap.begin(mem, st.length, pn.total, pn.used, static_cast<float>(sample_rec::kSampleRate))) {
+    return "SLOT IS TOO SHORT TO READ";
+  }
+  cap_pattern_ = static_cast<std::uint8_t>(pattern);
+  cap_slot_ = static_cast<std::uint8_t>(slot);
+  cap_length_ = st.length;
+  return nullptr;
+}
+
+// The slot a running capture reads is still what it was at the start: not recording, the same length (a new take or a load changes it).
+bool PatternScreen::capture_slot_same() const noexcept {
+  if (sample_ == nullptr) {
+    return false;
+  }
+  const Vocoder::LoopStatus st = sample_->status(cap_slot_);
+  return mouthcap::slot_same(st.rec == Vocoder::LoopStatus::Rec::Idle, st.length, cap_length_);
+}
+
+// SHIFT + F8 on the MOUTH lane: a first press starts the analysis of the slot SAMPLE has selected, a second press while it runs cancels. Nothing is
+// written until the analysis ends (capture_finish).
+void PatternScreen::capture_press(app::Context& ctx) noexcept {
+  if (g_cap.running()) {
+    g_cap.cancel();
+    say(ctx, "CAPTURE CANCELLED");
+    return;
+  }
+  if (lane() != pt::Lane::Mouth) {
+    say(ctx, "CAPTURE IS THE MOUTH LANE'S: PRESS F2 TO SELECT IT");
+    return;
+  }
+  const char* why = capture_begin(ctx, shown_, sample_ != nullptr ? sample_->slot() : 0u);
+  if (why != nullptr) {
+    say(ctx, why);
+  }
+  ctx.redraw();
+}
+
+// The console's `mcap`: the same analysis run to the end in this call (about 50 ms [est] on the unit, the audio runs on its own interrupt), written to
+// `pattern`'s MOUTH lane. nullptr when written, else why not. Refused while PATTERN's own capture runs (they share the one Capture).
+const char* PatternScreen::capture_now(app::Context& ctx, unsigned pattern, unsigned slot) noexcept {
+  if (g_cap.running()) {
+    return "A CAPTURE IS RUNNING ON THE PATTERN SCREEN";
+  }
+  const char* why = capture_begin(ctx, pattern, slot);
+  if (why != nullptr) {
+    return why;
+  }
+  while (g_cap.step()) {
+  }
+  const char* res = nullptr;
+  if (!capture_slot_same()) {  // an armed take can start from the audio side while this runs
+    res = "SLOT CHANGED: NOTHING WRITTEN";
+  } else if (g_cap.silent()) {
+    res = "SLOT IS SILENT: NOTHING WRITTEN";
+  } else if (!mouthcap::apply(g_cap, bank_->pattern[cap_pattern_ & 7u])) {
+    res = "NOTHING WRITTEN";
+  }
+  g_cap.cancel();
+  ctx.redraw();
+  return res;
+}
+
+// One piece of the analysis a pass (a reference, a level chunk or a step: well under a millisecond each but the references, 4 ms [est]).
+void PatternScreen::capture_pump(app::Context& ctx) noexcept {
+  if (!g_cap.running()) {
+    return;
+  }
+  if (!capture_slot_same()) {  // recorded over or reloaded since the start: the lane stays as it was
+    g_cap.cancel();
+    say(ctx, "SLOT CHANGED");
+    ctx.redraw();
+    return;
+  }
+  (void)g_cap.step();
+  if (g_cap.done()) {
+    capture_finish(ctx);
+  }
+}
+
+void PatternScreen::capture_finish(app::Context& ctx) noexcept {
+  if (!capture_slot_same()) {  // the slot moved during the last pass
+    g_cap.cancel();
+    say(ctx, "SLOT CHANGED");
+    ctx.redraw();
+    return;
+  }
+  if (g_cap.silent()) {
+    say(ctx, "SLOT IS SILENT: NOTHING WRITTEN");
+  } else if (mouthcap::apply(g_cap, bank_->pattern[cap_pattern_ & 7u])) {
+    say(ctx, "MOUTH LANE CAPTURED FROM THE SLOT");
+  } else {
+    say(ctx, "NOTHING WRITTEN");
+  }
+  g_cap.cancel();
+  ctx.redraw();
+}
+
 void PatternScreen::update(app::Context& ctx) noexcept {
   word_pump(ctx);
+  capture_pump(ctx);
   if (follow_ && seq_ != nullptr && ctx.engine().playing()) {
     const unsigned s = seq_->playing_step();
     if (s < kPatternSteps && s < length_of(pattern_now())) {
@@ -781,7 +912,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
   const pads::Layout& layout = layout_now();
   h.summary = "THE 16 STEPS OF A PATTERN AND THEIR LANES. THE UPPER PADS WRITE THE LIT LANE.\n"
-              "SHIFT + F6: CLEAR LANE (F1 CONFIRMS). SHIFT + F7: FOLLOW. A SLICE IS A ONE-SHOT CUT.";
+              "SHIFT + F6: CLEAR LANE (F1 CONFIRMS). SHIFT + F7: FOLLOW. SHIFT + F8: CAPTURE (MOUTH).";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -798,6 +929,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[7] = "SAVES THE PATTERNS";
   h.fkey_shift[5] = kShiftNames[5];
   h.fkey_shift[6] = kShiftNames[6];
+  h.fkey_shift[7] = kShiftNames[7];
   for (unsigned i = 0; i < pt::kPalettePads; ++i) {
     char* l = g_pd.name[i];
     l[0] = '\0';
@@ -915,7 +1047,10 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
       keys[i] = ornoir::FKey{};
       keys[i].name = kShiftNames[i];
-      keys[i].dim = i != kKeyRow && i != kKeyPlays;
+      keys[i].dim = i != kKeyRow && i != kKeyPlays && (i != kKeyCapture || lane() != pt::Lane::Mouth);
+    }
+    if (g_cap.running()) {
+      keys[kKeyCapture].name = "CANCEL";
     }
     cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, follow_ ? "ON" : "OFF");
   }
@@ -994,7 +1129,14 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
       }
     }
   }
-  if (armed_ != 0u) {
+  if (g_cap.running()) {
+    char cap[48];
+    cap[0] = '\0';
+    cat(cap, sizeof cap, g_cap.phase() == mouthcap::Capture::Phase::Refs ? "PREPARING THE VOWELS " : "READING THE SLOT ");
+    cat_uint(cap, sizeof cap, g_cap.percent());
+    cat(cap, sizeof cap, "%   SHIFT + F8 CANCELS");
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, cap, Color::Accent, Face::Label);
+  } else if (armed_ != 0u) {
     r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, armed_ == kArmPattern ? pt::kClearPatternPrompt : (armed_ == kArmFill ? pt::kFillPrompt : pt::kClearPrompt[lane_ % pt::kLanes]), Color::Accent,
            Face::Label);
   } else if (note_ != nullptr) {
