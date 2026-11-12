@@ -103,6 +103,7 @@ class SampleScreen final : public o3sdk::app::Screen {
 
  private:
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
+  void step_value(o3sdk::app::Context& ctx, bool shift, int delta) noexcept;  // the encoder or an arrow: the SHIFT-row value in focus, else the F key's
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void write(o3sdk::app::Context& ctx, Vocoder::LoopField f, float v) noexcept;
   void write_slot(o3sdk::app::Context& ctx, unsigned loop, Vocoder::LoopField f, float v) noexcept;
@@ -113,7 +114,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void release_all(o3sdk::app::Context& ctx) noexcept;
   void play_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;     // pad 24..47: what PERFORM's row A (24..35) or B (36..47) plays there, held until the release
   void release_play(o3sdk::app::Context& ctx, unsigned pad) noexcept;  // its release (a pad that is not held does nothing)
-  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;  // F1: PLAYS of the row of the lowest held layout pad, else of the chosen row
+  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap, bool jump = false) noexcept;  // F1: PLAYS of the row of the lowest held layout pad, else of the chosen row
   void flip_row(o3sdk::app::Context& ctx) noexcept;                    // SHIFT + F1: the other row; its pads go dark for a moment
   void draw_line(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept;
   Vocoder::LoopStatus view(unsigned loop) const noexcept;
@@ -127,6 +128,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   std::uint8_t row_ = 0;        // the layout row F1 sets: 0 A, 1 B (pads 24..35, 36..47)
   std::uint8_t slice_ch_ = 0;   // the MIDI slice channel (SLICE CH): 0 SAME, 1..16, 17 OFF
   bool shift_slice_ = false;    // SHIFT + F2 was the last SHIFT key: the encoder steps SLICE CH while SHIFT is held
+  bool shift_oct_ = false;      // SHIFT + F3 was the last SHIFT key: the encoder and the arrows step PERFORM's octave while SHIFT is held (AK1)
   std::uint64_t flash_until_ = 0;  // ROW changed: its pads are dark until then
   std::uint32_t aud_ = 0;       // the layout pads sounding (bit pad - 24): the audition entry's pad ids; main loop only
   bool key_tap_ = false;        // turn() came from a second tap on an F key, not from the encoder

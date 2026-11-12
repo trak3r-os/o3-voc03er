@@ -503,12 +503,14 @@ Project p3_project() {
   p.follow = 1;
   o3_voc03er::set_project_preset(p, 4);
   o3_voc03er::pads::Layout l;
-  l.row[0] = o3_voc03er::pads::Plays::PianoTriad;
-  l.row[1] = o3_voc03er::pads::Plays::PianoTriad;
+  l.row[0] = o3_voc03er::pads::Plays::Open;
+  l.row[1] = o3_voc03er::pads::Plays::Power;
   l.row[2] = o3_voc03er::pads::Plays::Bend;
-  l.last[0] = o3_voc03er::pads::Plays::Open;
-  l.last[1] = o3_voc03er::pads::Plays::Power;
-  o3_voc03er::set_project_layout(p, l);
+  o3_voc03er::pads::Layout all[o3_voc03er::kModeCount];  // BANDS is the layout above; TRACT keeps its own default
+  for (unsigned m = 0; m < o3_voc03er::kModeCount; ++m) {
+    all[m] = m == o3_voc03er::kModeTract ? o3_voc03er::strip::default_layout(m) : l;
+  }
+  o3_voc03er::set_project_pads(p, all);
   p.slot[1].gate = 1;
   p.slot[2].choke_off = 1;
   p.slot[3].gate = 1;
@@ -574,10 +576,10 @@ TEST_CASE("file: P3 a load puts the layout, FOLLOW, BEND ROW, RANGE, VOICING, th
   CHECK(got.tempo_mbpm == src.tempo_mbpm);
   CHECK(got.pattern == src.pattern);
   CHECK(got.octave == src.octave);
-  // The 1.0 fields are derived from the layout on save (Q6): a piano of triads with BEND on C is keys 1, chord 0 (TRIAD), bend row 1,
-  // whatever the loaded file's own 1.0 fields said (chord 2).
-  CHECK(got.chord == 0);
-  CHECK(got.keys == 1);
+  // The 1.0 fields are derived from the layout on save (Q6): an OPEN and a POWER row with BEND on C is keys 0 (no piano now), chord 3 (the
+  // lowest chord row is B, POWER = index 3), bend row 1, whatever the loaded file's own 1.0 fields said (chord 2, keys 1).
+  CHECK(got.chord == 3);
+  CHECK(got.keys == 0);
   CHECK(got.voicing == src.voicing);
   CHECK(got.bend_row == src.bend_row);
   CHECK(got.bend_range == src.bend_range);

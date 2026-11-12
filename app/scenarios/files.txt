@@ -23,9 +23,12 @@ expect state files=done
 expect file Apps/o3_voc03er/pattern.o3a
 snap 01_saved
 
-# The setting (PERFORM's octave) saves itself a moment after it changes (an octave down): no key, no strip line.
+# The setting (PERFORM's octave) saves itself a moment after it changes (an octave down, SHIFT + F7 then the encoder): no key, no strip line.
 tap performance
-tap left
+press shift
+tap f7
+release shift
+turn -1
 wait 60
 expect state octave=-1
 expect file Apps/o3_voc03er/config.o3a

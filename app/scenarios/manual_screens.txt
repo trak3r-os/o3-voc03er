@@ -41,16 +41,14 @@ padup 43
 tap f1
 turn -3
 wait 300
-# ---- the keys: A and B a piano (F7 PLAYS), two keys held
+# ---- a parameter strip: A on SHAPE (F7 PLAYS, the first parameter after the notes), a pad held (perform-keys.png is retired, see docs/MANUAL.md)
 tap f7
-turn 5
-paddown 28
-paddown 18
+turn 6
+paddown 30
 wait 300
-snap m_perform_keys
-padup 28
-padup 18
-turn -5
+snap m_perform_strip
+padup 30
+turn -6
 wait 200
 # ---- PARAMS: its three pages with a chord held
 tap params

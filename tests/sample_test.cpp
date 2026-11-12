@@ -13,9 +13,11 @@
 #include <o3sdk/sim/harness.h>
 
 #include <o3_voc03er/route.h>
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include "../app/src/sample_logic.h"
+#include "../app/src/strip_logic.h"
 
 #include <cmath>
 #include <cstddef>
@@ -488,7 +490,7 @@ TEST_CASE("sample: rows 2 and 3 play layout rows A (a note) and B (a triad) whil
 TEST_CASE("sample: F1 PLAYS sets the chosen row and SHIFT + F1 chooses it; OFF is dark and silent") {
   LayoutRig r;
   CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
-  r.h.turn(30);  // F1 is the lit key: A to OFF
+  r.h.turn(5);  // F1 is the lit key: A to OFF
   r.h.run_ms(60);
   CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);
   CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);  // B is untouched
@@ -500,7 +502,7 @@ TEST_CASE("sample: F1 PLAYS sets the chosen row and SHIFT + F1 chooses it; OFF i
   tap(r.h, app::Button::F1);  // ROW: B
   r.h.release(app::Button::Shift);
   r.h.run_ms(250);  // past the flash
-  r.h.turn(30);
+  r.h.turn(4);
   r.h.run_ms(60);
   CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);  // B plays OFF too
   r.h.turn(-30);
@@ -524,22 +526,23 @@ TEST_CASE("sample: the row flashes dark when SHIFT + F1 chooses it") {
   CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
 }
 
-TEST_CASE("sample: a piano on A and B plays its keys and a gap plays nothing") {
+TEST_CASE("sample: a parameter strip on row A sets the parameter from its twelve pads and plays no note") {
   LayoutRig r;
-  r.h.turn(5);  // A: PIANO NOTE (joins B)
+  r.h.turn(6);  // A: NOTE, TRIAD, 7TH, OPEN, POWER, OFF, then the first strip (SHAPE)
   r.h.run_ms(60);
-  r.h.pad_down(kRowA + 0);  // the first pad is a gap between black keys
+  r.h.pad_down(kRowA + 11);  // the top of the range
   CHECK(r.listen(300) < kSound);
-  CHECK(r.led(kRowA + 0) != app::kLedOn);
+  CHECK(unit_param(r.h, Vocoder::Wave) > 1.5f);
+  r.h.pad_up(kRowA + 11);
+  r.h.pad_down(kRowA + 0);  // the bottom: the value stays after the release
+  r.h.run_ms(40);
   r.h.pad_up(kRowA + 0);
-  r.h.pad_down(kRowB + 2);  // B: a white key
+  r.h.run_ms(40);
+  CHECK(unit_param(r.h, Vocoder::Wave) < 0.1f);
+  r.h.pad_down(kRowB + 2);  // B is still a triad
   CHECK(r.listen(300) > kSound);
   CHECK(r.led(kRowB + 2) == app::kLedOn);
   r.h.pad_up(kRowB + 2);
-  r.h.run_ms(900);
-  r.h.pad_down(kRowA + 1);  // A: a black key
-  CHECK(r.listen(300) > kSound);
-  r.h.pad_up(kRowA + 1);
   CHECK(r.h.runtime().frame_failures() == 0u);
 }
 
@@ -547,7 +550,7 @@ TEST_CASE("sample: a held pad of row B plus F1 changes that row, and ROW follows
   LayoutRig r;
   r.h.pad_down(kRowB + 5);
   r.h.run_ms(60);
-  r.h.turn(30);  // the held pad's row (B) goes to OFF, and its note lets go
+  r.h.turn(4);  // the held pad's row (B) goes to OFF, and its note lets go
   r.h.run_ms(60);
   CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);
   CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
@@ -573,4 +576,70 @@ TEST_CASE("sample: leaving SAMPLE with a layout pad held lets it go, and the lat
   tap(r.h, app::Button::SamplePlay);
   r.h.run_ms(60);
   CHECK(r.led(kRowA + 5) != app::kLedOn);  // SAMPLE comes back with no pad lit
+}
+
+// ---- the strips on SAMPLE (TP1 fold) ----------------------------------------------------------------------------------------------------
+
+namespace {
+float tract_param(sim::Harness& h, std::uint16_t id) {
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) {
+      return h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    }
+  }
+  return -1.0e9f;
+}
+}  // namespace
+
+TEST_CASE("sample: a closure strip held on SAMPLE opens when SAMPLE is left, and the late release is harmless") {
+  namespace st = o3_voc03er::strip;
+  namespace pd = o3_voc03er::pads;
+  using o3_voc03er::TractUnit;
+  LayoutRig r;
+  tap(r.h, app::Button::Performance);
+  tap(r.h, app::Button::F1);  // MODE
+  r.h.turn(8);                // TRACT: rows A VOWEL, B TONGUE, C TIP
+  r.h.run_ms(300);
+  tap(r.h, app::Button::SamplePlay);
+  r.h.run_ms(60);
+  const int to_tip = static_cast<int>(st::entry_index(pd::Row::A, 4, pd::Plays::Strip, st::kIdTip)) -
+                     static_cast<int>(st::entry_index(pd::Row::A, 4, pd::Plays::Strip, st::kIdVowel));
+  r.h.turn(to_tip);  // F1 PLAYS is the lit key: row A to CL TIP
+  r.h.run_ms(60);
+  CHECK(tract_param(r.h, TractUnit::Close) == doctest::Approx(0.0f));
+  r.h.pad_down(kRowA + 5);
+  r.h.run_ms(60);
+  CHECK(tract_param(r.h, TractUnit::Close) == doctest::Approx(2.0f));
+  tap(r.h, app::Button::Performance);  // leave with the pad held
+  r.h.run_ms(100);
+  CHECK(tract_param(r.h, TractUnit::Close) == doctest::Approx(0.0f));
+  r.h.pad_up(kRowA + 5);
+  r.h.run_ms(100);
+  CHECK(tract_param(r.h, TractUnit::Close) == doctest::Approx(0.0f));
+  CHECK(r.h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: a strip of another mode pressed on SAMPLE writes nothing") {
+  using o3_voc03er::TractUnit;
+  LayoutRig r;
+  tap(r.h, app::Button::Performance);
+  tap(r.h, app::Button::F1);
+  r.h.turn(8);  // TRACT: row A is VOWEL
+  r.h.run_ms(300);
+  tap(r.h, app::Button::SamplePlay);
+  r.h.run_ms(60);
+  const float vowel = tract_param(r.h, TractUnit::Vowel);
+  // the mode leaves TRACT behind the screens' backs (a MIDI program, a project load): the press finds TRACT's layout and BANDS' mode
+  for (unsigned u = 0; u < 8; ++u) {
+    const o3sdk::dsp::UnitInfo* info = r.h.engine().unit_info(static_cast<o3sdk::dsp::UnitId>(u));
+    if (info != nullptr && std::strcmp(info->name, "VOCODER") == 0) {
+      (void)r.h.engine().set_param(static_cast<o3sdk::dsp::UnitId>(u), Vocoder::Mode, 0.0f);
+    }
+  }
+  r.h.pad_down(kRowA + 4);
+  r.h.run_ms(60);
+  r.h.pad_up(kRowA + 4);
+  r.h.run_ms(60);
+  CHECK(tract_param(r.h, TractUnit::Vowel) == doctest::Approx(vowel));
+  CHECK(r.h.runtime().frame_failures() == 0u);
 }

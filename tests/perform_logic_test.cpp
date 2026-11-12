@@ -117,7 +117,7 @@ pads::Layout layout_of(pads::Plays a, pads::Plays b, pads::Plays c) {
 TEST_CASE("perform: row 0 is the controls in every layout, the gaps dark, and no control plays a note") {
   using F = pl::PadFn;
   const F ctl[12] = {F::OctDown, F::OctUp, F::None, F::VolDown, F::VolUp, F::None, F::RootDown, F::RootUp, F::None, F::Mod, F::BndDown, F::BndUp};
-  const pads::Layout layouts[3] = {pads::Layout{}, layout_of(pads::Plays::PianoNote, pads::Plays::PianoNote, pads::Plays::Bend),
+  const pads::Layout layouts[3] = {pads::Layout{}, layout_of(pads::Plays::Note, pads::Plays::Note, pads::Plays::Bend),
                                    layout_of(pads::Plays::Off, pads::Plays::Seventh, pads::Plays::Off)};
   for (const pads::Layout& l : layouts) {
     for (unsigned c = 0; c < 12; ++c) {
@@ -152,30 +152,30 @@ TEST_CASE("perform: rows 1, 2 and 3 are A, B and C, and a pad plays what pads::p
   }
 }
 
-TEST_CASE("perform: the piano is B's white keys and A's black keys, from the same C") {
+TEST_CASE("perform: a parameter strip row is twelve Param pads with the strip's id, plays no note and gives no octave") {
   using F = pl::PadFn;
-  const pads::Layout piano = layout_of(pads::Plays::PianoNote, pads::Plays::PianoNote, pads::Plays::Formant);
-  const int white[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};
+  pads::Layout l;  // A NOTE, B TRIAD, C FORMANT
+  l.row[2] = pads::Plays::Strip;
+  l.strip[2] = pads::strip_id(2, 0);
   for (unsigned c = 0; c < 12; ++c) {
-    const pl::PadSpec w = pl::pad_spec(piano, 2, c, 0);
-    REQUIRE(w.fn == F::Play);
-    CHECK(w.play.note == kChordBaseNote + 12 * pads::row_octave(piano, pads::Row::B) + white[c]);
+    const pl::PadSpec sp = pl::pad_spec(l, 3, c, 0);
+    CHECK(sp.fn == F::Param);
+    CHECK(sp.offset == static_cast<int>(c));
+    CHECK(sp.id == pads::strip_id(2, 0));
+    CHECK(sp.play.note == -1);
   }
-  const unsigned black_cols[8] = {1, 2, 4, 5, 6, 8, 9, 11};
-  const int black[8] = {1, 3, 6, 8, 10, 13, 15, 18};
-  unsigned n = 0;
-  for (unsigned c = 0; c < 12; ++c) {
-    const pl::PadSpec p = pl::pad_spec(piano, 1, c, 0);
-    if (p.fn == F::Play) {
-      REQUIRE(n < 8u);
-      CHECK(c == black_cols[n]);
-      CHECK(p.play.note == kChordBaseNote + 12 * pads::row_octave(piano, pads::Row::A) + black[n]);
-      ++n;
-    } else {
-      CHECK(p.fn == F::None);
-    }
-  }
-  CHECK(n == 8u);
+  // The strip on row C leaves B at +0 and A at +1, as BEND does; the rows above still play.
+  CHECK(pl::pad_spec(l, 2, 0, 0).play.note == kChordBaseNote);
+  CHECK(pl::pad_spec(l, 1, 0, 0).play.note == kChordBaseNote + 12);
+  // A strip on row A: A plays nothing, B keeps its octave (C FORMANT plays no note either).
+  pads::Layout a;
+  a.row[0] = pads::Plays::Strip;
+  a.strip[0] = pads::strip_id(1, 3);
+  CHECK(pl::pad_spec(a, 1, 5, 0).fn == F::Param);
+  CHECK(pl::pad_spec(a, 1, 5, 0).id == pads::strip_id(1, 3));
+  CHECK(pl::pad_spec(a, 2, 5, 0).fn == F::Play);
+  // Row 0 stays the controls.
+  CHECK(pl::pad_spec(l, 0, 9, 0).fn == F::Mod);
 }
 
 TEST_CASE("perform: row C is the formant strip, the bend strip, a note row or dark") {
@@ -250,33 +250,40 @@ TEST_CASE("perform: a vowel pad is sticky: the nearest column to VOWEL is the li
 }
 
 TEST_CASE("perform: the mouth strip's closures are momentary: the last pressed of those held wins") {
-  pl::MouthHold h;
+  pl::CloseHold h;
   CHECK(h.current() == 0u);  // OPEN
   CHECK(h.mask() == 0u);
-  h.press(1);  // LIPS
+  h.press(1, 1);  // LIPS (pad 1)
   CHECK(h.current() == 1u);
-  h.press(3);  // BACK joins: it is the one written
+  h.press(3, 3);  // BACK joins: it is the one written
   CHECK(h.current() == 3u);
   CHECK(h.mask() == ((1u << 1) | (1u << 3)));
   h.release(3);  // the LIPS is still down: it comes back
   CHECK(h.current() == 1u);
-  h.press(2);
+  h.press(2, 2);
   h.release(1);  // an older pad released: the newer one stays
   CHECK(h.current() == 2u);
   h.release(2);
   CHECK(h.current() == 0u);
   CHECK(h.mask() == 0u);
   // A pad pressed twice without a release counts once; a release of one never pressed does nothing.
-  h.press(1);
-  h.press(1);
+  h.press(1, 1);
+  h.press(1, 1);
   h.release(2);
   CHECK(h.n == 1u);
   h.release(1);
   CHECK(h.current() == 0u);
   // Out-of-range values are ignored.
-  h.press(0);
-  h.press(4);
+  h.press(0, 0);
+  h.press(4, 4);
   CHECK(h.n == 0u);
+  // Pad-aware: two pads of the same closure, one let go does not open it (a closure strip's twelve pads).
+  h.press(20, 2);
+  h.press(21, 2);
+  h.release(20);
+  CHECK(h.current() == 2u);
+  h.release(21);
+  CHECK(h.current() == 0u);
 }
 
 TEST_CASE("perform: the mouth strip's LEDs: nearest column on, pure vowels mid, the rest dim, closures on while held") {
@@ -401,8 +408,20 @@ TEST_CASE("perform: the SHIFT row's steps hold their ranges, and all eight keys 
   CHECK(pl::kShiftKeys[0].fn == pl::ShiftFn::Freeze);
   CHECK(pl::kShiftKeys[4].fn == pl::ShiftFn::Value);
   CHECK(pl::kShiftKeys[5].fn == pl::ShiftFn::Value);
-  CHECK(pl::kShiftKeys[6].fn == pl::ShiftFn::None);  // BEND ROW went with the layout: the key is empty
-  CHECK(std::string(pl::kShiftKeys[6].name).empty());
+  CHECK(pl::kShiftKeys[6].fn == pl::ShiftFn::Value);  // BEND ROW went with the layout, and the octave moved here (AK1)
+  CHECK(std::string(pl::kShiftKeys[6].name) == "OCTAVE");
   CHECK(std::string(pl::key_hint(5, 0, 4)).size() <= pl::kKeyHintMax);
   CHECK(std::string(pl::key_hint(5, 0, 5)).size() <= pl::kKeyHintMax);
+}
+
+TEST_CASE("perform: an arrow steps every focused value but MODE, QUALITY in TALK and PRESET (a stray press must not change the sound's character)") {
+  CHECK_FALSE(pl::arrow_may_step(0, pl::kNoShiftFocus, 0));   // F1 MODE
+  CHECK(pl::arrow_may_step(1, pl::kNoShiftFocus, 0));         // F2 SPEAKS
+  CHECK(pl::arrow_may_step(6, pl::kNoShiftFocus, 1));         // F7 PLAYS
+  CHECK(pl::arrow_may_step(7, pl::kNoShiftFocus, 0));         // F8 SPREAD
+  CHECK(pl::arrow_may_step(7, pl::kNoShiftFocus, 4));         // F8 VOWEL in TRACT
+  CHECK_FALSE(pl::arrow_may_step(7, pl::kNoShiftFocus, 1));   // F8 QUALITY in TALK: a different voicing
+  CHECK(pl::arrow_may_step(1, 1, 0));                         // SHIFT + F2 GATE
+  CHECK(pl::arrow_may_step(6, 6, 0));                         // SHIFT + F7 OCTAVE
+  CHECK_FALSE(pl::arrow_may_step(7, 7, 0));                   // SHIFT + F8 PRESET: loads a whole sound
 }

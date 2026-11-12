@@ -6,6 +6,8 @@
 
 #include <o3_voc03er/project.h>
 
+#include "strip_logic.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -92,8 +94,22 @@ inline bool restore_values(const ProjectSlot& rec, std::uint32_t live_length, Sl
   return true;
 }
 
+// The five layouts a project means (TP1): the PADS chunk's, each with an unknown strip dropped to the mode's default; a file without PADS (an older image's)
+// gives its one STAT layout to BANDS, TALK, TUNE and ROBOT and the TRACT default to TRACT.
+inline void project_layouts(const Project& p, pads::Layout (&out)[kModeCount]) noexcept {
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    pads::Layout l = strip::default_layout(m);
+    if (p.pads != 0u) {
+      l = project_pads_layout(p, m);
+    } else if (m != kModeTract) {
+      l = project_layout(p);
+    }
+    out[m] = strip::sanitize(l, m);
+  }
+}
+
 // The STAT fields of a project that was just made: the first boot's tempo, pattern A, octave 0, the first chord kind, pads; voicing SMOOTH, bend row off,
-// range 2, FOLLOW off, no preset, the default layout (A NOTE, B TRIAD, C FORMANT).
+// range 2, FOLLOW off, no preset, the default layouts (A NOTE, B TRIAD, C FORMANT; TRACT A VOWEL, B TONGUE, C TIP).
 inline void default_stat(Project& p) noexcept {
   p.stat = 1;
   p.tempo_mbpm = 120000u;
@@ -107,7 +123,11 @@ inline void default_stat(Project& p) noexcept {
   p.bend_range = 2;
   p.follow = 0;
   set_project_preset(p, kPresetCount);  // none
-  set_project_layout(p, pads::Layout{});
+  pads::Layout l[kModeCount];
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    l[m] = strip::default_layout(m);
+  }
+  set_project_pads(p, l);
 }
 
 inline void cat(char* dst, std::size_t cap, const char* s) noexcept {

@@ -106,7 +106,12 @@ TEST_CASE("app: a pattern and an octave saved on the card come back after a rest
   REQUIRE(h->start());
   h->run_ms(100);
   CHECK(state(*h).find("steps=0") != std::string::npos);
-  tap(*h, app::Button::Left);  // PERFORM's octave down: it saves itself
+  h->press(app::Button::Shift);  // SHIFT + F7 OCTAVE takes the focus, LEFT steps it down (AK1): it saves itself
+  h->run_ms(5);
+  tap(*h, app::Button::F7);
+  h->release(app::Button::Shift);
+  h->run_ms(20);
+  tap(*h, app::Button::Left);
   h->run_ms(100);              // (a key pressed while a file job runs is ignored: let that one end)
   tap(*h, app::Button::Pattern);
   h->run_ms(60);

@@ -17,6 +17,10 @@
 //   TRCT 1.0  (TRACT V3, after STAT; written when the capture holds the tract) 8 x f32: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS (kTractSaved, the unit's own
 //             units). Not CLOSE (an action), MIX (the mode owns it) or SLIDE (the sequencer's). Absent: the unit's defaults. A value out of its range, or not a
 //             number, refuses the file
+//   PADS 1.0  (TP1, after STAT; written with STAT) u8 count (5 = modes.h kModeCount: BANDS, TALK, TUNE, ROBOT, TRACT), then per mode its layout: 3 x u8 row
+//             (pads::Plays: 0..5, 11..14) and 3 x u16 strip id (pads::strip_id: tag << 8 | parameter; 0 for a row that is not a STRIP, a STRIP row has one). An id
+//             this build does not know is not an error: the screen drops that row to the mode's default. Absent: the STAT layout serves BANDS, TALK, TUNE and ROBOT and
+//             TRACT gets its default (A VOWEL, B TONGUE, C TIP). An older image skips the chunk and reads the BANDS layout from STAT. A count other than 5 refuses the file
 //   SLOT 1.1  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
 //             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL),
 //             then u8 values (appended: 1 = the trim, speed, reverse and level above were captured live and are restored; 0 or absent = a file from before, they are left alone),
@@ -26,7 +30,9 @@
 //   STAT 1.1  u32 tempo (milli-BPM), u8 swing (0: none yet), u8 current pattern 0..7, i8 octave, u8 chord kind 0..3, u8 pads mode (0 pads, 1 keys) (all 1.0),
 //             then, appended in 1.1: u8 voicing 0..3, u8 bend row 0/1, u8 bend range (2, 5 or 12), u8 FOLLOW 0/1 (PATTERN's), u8 preset name length 0..16 and the
 //             name (matched against presets.h on load; length 0 or an unknown name is no preset: a name survives a reordered table, an index would not),
-//             then the pads' layout, 5 bytes: rows A, B, C and last[0..1] (pads::Plays values; each row must offer its value, see pads_logic.h `offered`).
+//             then the pads' layout, 5 bytes: rows A, B, C of the BANDS layout (a parameter strip is written as the row's default: STAT has no id for it) and two
+//             bytes that older images used for the piano's `last` (written 0, read and ignored). A saved 6..10 is a retired piano value and loads as the plain value
+//             of the same kind (pads::plays_from_saved); each row must offer its value (pads_logic.h `offered`).
 //             A 1.0 STAT sets the 1.1 fields to the defaults of today (voicing SMOOTH, bend row off, range 2, FOLLOW off, no preset) and the layout to
 //             pads::layout_from_legacy(pads mode, chord kind, false), not to what the previous project left. Absent STAT: those stay as they are.
 //             On save the 1.0 fields chord kind, pads mode and bend row are derived from the layout (pads::legacy_fields) so an older reader finds something
@@ -49,6 +55,7 @@
 // the default): it can live in `O3SDK_BIG Project g_project;`. read_project stages the file on the stack (sizeof(Project), asserted below).
 // Contexts: main loop. No heap, no float arithmetic.
 
+#include <o3_voc03er/modes.h>
 #include <o3_voc03er/presets.h>
 #include <o3_voc03er/route.h>
 #include <o3_voc03er/stepseq.h>
@@ -100,7 +107,7 @@ struct ProjectSlot {
 };
 
 inline constexpr std::size_t kPresetNameMax = 16;  // the longest preset name a file may hold (presets.h's are at most 8)
-inline constexpr unsigned kLayoutBytes = 5;        // rows A, B, C, then last[0], last[1]
+inline constexpr unsigned kLayoutBytes = 5;        // STAT's layout: rows A, B, C of the BANDS layout, then two bytes kept for older readers (written 0)
 
 // TRCT's parameters, in file order (TractUnit::Param ids), and the range a file may hold for each (the unit's own descriptors; tests/project_test.cpp compares them).
 inline constexpr unsigned kTractSaved = 8;
@@ -136,28 +143,54 @@ struct Project {
   std::uint8_t follow = 0;                         // 0/1: PATTERN's FOLLOW
   std::uint8_t preset_len = 0;                     // 0: no preset
   char preset[kPresetNameMax + 1] = {};            // the factory sound's name, preset_len bytes, printable
-  std::uint8_t layout[kLayoutBytes] = {};          // pads::Plays of rows A, B, C, then Layout::last[0], last[1]
+  std::uint8_t layout[kLayoutBytes] = {};          // STAT's bytes: pads::Plays (saved values) of rows A, B, C, then two spare
+  // PADS (TP1): 1 when the five layouts below are held (a file without PADS, and a zero Project, are 0: the STAT layout and the TRACT default serve).
+  std::uint8_t pads = 0;
+  std::uint8_t pad_row[kModeCount][pads::kRows] = {};            // pads::Plays per mode and row
+  std::uint16_t pad_strip[kModeCount][pads::kRows] = {};         // pads::strip_id of a STRIP row, else 0
   // TRCT (V3): 1 when the tract's values below are held (a file without TRCT, and a zero Project, are 0: the unit's defaults, which are not zero).
   std::uint8_t trct = 0;
   float tract[kTractSaved] = {};                   // by kTractSavedId, the unit's own units
 };
 
-// The layout a project holds, and the way back.
+// STAT's layout (the BANDS layout; a file from before this image's pads kept one layout for every mode), and the way back: a strip row is written as the
+// row's default value, the two spare bytes as 0.
 inline pads::Layout project_layout(const Project& p) noexcept {
   pads::Layout l;
   for (unsigned i = 0; i < pads::kRows; ++i) {
-    l.row[i] = static_cast<pads::Plays>(p.layout[i]);
+    l.row[i] = pads::plays_from_saved(p.layout[i]);
   }
-  l.last[0] = static_cast<pads::Plays>(p.layout[3]);
-  l.last[1] = static_cast<pads::Plays>(p.layout[4]);
   return l;
 }
 inline void set_project_layout(Project& p, const pads::Layout& l) noexcept {
+  const pads::Layout def;
   for (unsigned i = 0; i < pads::kRows; ++i) {
-    p.layout[i] = static_cast<std::uint8_t>(l.row[i]);
+    p.layout[i] = static_cast<std::uint8_t>(l.row[i] == pads::Plays::Strip ? def.row[i] : l.row[i]);
   }
-  p.layout[3] = static_cast<std::uint8_t>(l.last[0]);
-  p.layout[4] = static_cast<std::uint8_t>(l.last[1]);
+  p.layout[3] = 0;
+  p.layout[4] = 0;
+}
+
+// The PADS chunk's layout of a mode (only with `p.pads`), and the way back; set_project_pads also writes STAT's layout from mode 0 (BANDS).
+inline pads::Layout project_pads_layout(const Project& p, unsigned mode) noexcept {
+  pads::Layout l;
+  if (mode < kModeCount) {
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      l.row[r] = static_cast<pads::Plays>(p.pad_row[mode][r]);
+      l.strip[r] = p.pad_strip[mode][r];
+    }
+  }
+  return l;
+}
+inline void set_project_pads(Project& p, const pads::Layout (&l)[kModeCount]) noexcept {
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      p.pad_row[m][r] = static_cast<std::uint8_t>(l[m].row[r]);
+      p.pad_strip[m][r] = l[m].row[r] == pads::Plays::Strip ? l[m].strip[r] : pads::kNoStrip;
+    }
+  }
+  p.pads = 1;
+  set_project_layout(p, l[0]);
 }
 
 // The preset a project names: its index in presets.h, or -1 for none (no name, or a name this build does not know).
@@ -243,8 +276,9 @@ inline constexpr std::size_t kTrctMax = 2 + 4 * kTractSaved;
 inline constexpr std::size_t kSlotMax = 2 + 1 + route::kSlots * (2 + kSlotRecMax);
 inline constexpr std::size_t kValuMax = 2 + 2 + 6 * kEngineIds;
 inline constexpr std::size_t kStatMax = 2 + 4 + 5 + 4 + 1 + kPresetNameMax + kLayoutBytes;
+inline constexpr std::size_t kPadsMax = 2 + 1 + kModeCount * pads::kRows * 3;
 inline constexpr std::size_t kWorst = o3sdk::formats::chunk::kHeaderBytes + o3sdk::formats::chunk::kCrcChunkBytes + chunk_bytes(kPtnsMax) + chunk_bytes(kChaiMax) +
-                                      chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax) + chunk_bytes(kStatMax) + chunk_bytes(kMoutMax) + chunk_bytes(kTrctMax);
+                                      chunk_bytes(kRoutMax) + chunk_bytes(kSlotMax) + chunk_bytes(kValuMax) + chunk_bytes(kStatMax) + chunk_bytes(kMoutMax) + chunk_bytes(kTrctMax) + chunk_bytes(kPadsMax);
 
 }  // namespace project_detail
 
@@ -339,16 +373,43 @@ inline bool pattern_valid(const PatternData& p) noexcept {
 // STAT's fields: the tempo the engine takes (20 to 400 BPM), a pattern of the bank, an octave PERFORM can hold (clamped there), a chord kind and a mode flag.
 inline constexpr std::uint32_t kStatTempoMin = 20000u;
 inline constexpr std::uint32_t kStatTempoMax = 400000u;
-// The 1.1 fields: a voicing, two flags, a range PERFORM offers, a printable preset name and a layout whose every row offers its value.
+// The 1.1 fields: a voicing, two flags, a range PERFORM offers, a printable preset name and a layout whose every row offers its value (a saved piano value
+// counts as the plain one; a strip has no id in STAT, so it is not one of them).
 inline bool stat_layout_valid(const Project& p) noexcept {
   for (unsigned i = 0; i < kLayoutBytes; ++i) {
-    if (p.layout[i] >= pads::kPlaysCount) {
+    if (!pads::valid_saved(p.layout[i])) {
       return false;
     }
   }
   const pads::Layout l = project_layout(p);
-  return pads::offered(pads::Row::A, l.row[0]) && pads::offered(pads::Row::B, l.row[1]) && pads::offered(pads::Row::C, l.row[2]) && pads::offered(pads::Row::A, l.last[0]) &&
-         pads::offered(pads::Row::B, l.last[1]);
+  for (unsigned r = 0; r < pads::kRows; ++r) {
+    if (l.row[r] == pads::Plays::Strip || !pads::offered(static_cast<pads::Row>(r), l.row[r])) {
+      return false;
+    }
+  }
+  return true;
+}
+// PADS: every mode's rows offer their value, a STRIP row has an id and no other row has one. An id this build does not know passes (the screen drops it).
+inline bool pads_valid(const Project& p) noexcept {
+  if (p.pads == 0u) {
+    return true;
+  }
+  if (p.pads != 1u) {
+    return false;
+  }
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      const std::uint8_t b = p.pad_row[m][r];
+      if (!(b <= 5u || (b >= 11u && b <= 14u))) {
+        return false;
+      }
+      const pads::Plays v = static_cast<pads::Plays>(b);
+      if (!pads::offered(static_cast<pads::Row>(r), v) || (v == pads::Plays::Strip) != (p.pad_strip[m][r] != pads::kNoStrip)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 inline bool stat_valid(const Project& p) noexcept {
   if (p.preset_len > kPresetNameMax) {
@@ -364,7 +425,7 @@ inline bool stat_valid(const Project& p) noexcept {
 }
 
 inline bool project_valid(const Project& p) noexcept {
-  if (!chain_valid(p.chain) || !project_route_valid(p) || (p.stat != 0u && !stat_valid(p)) || p.trct > 1u || (p.trct == 1u && !trct_valid(p))) {
+  if (!chain_valid(p.chain) || !project_route_valid(p) || (p.stat != 0u && !stat_valid(p)) || !pads_valid(p) || p.trct > 1u || (p.trct == 1u && !trct_valid(p))) {
     return false;
   }
   for (const PatternData& pd : p.bank.pattern) {
@@ -390,6 +451,7 @@ inline constexpr std::uint16_t kProjectChunkVersion = 0x0100;
 inline constexpr std::uint16_t kMoutVersion = 0x0101;  // MOUT 1.1 (V3b): WORD and WOB values may be in it; a 0x0100 file loads (any minor of major 1 does)
 inline constexpr std::uint16_t kSlotVersion = 0x0101;  // SLOT 1.1: TRIG and CHOKE after `values`
 inline constexpr std::uint16_t kStatVersion = 0x0101;  // STAT 1.1: voicing, bend row and range, FOLLOW, preset, layout
+inline constexpr std::uint16_t kPadsVersion = 0x0100;  // PADS 1.0: the five layouts (TP1)
 
 namespace project_detail {
 
@@ -480,6 +542,26 @@ inline bool read_trct(const o3sdk::formats::chunk::Chunk& c, Project& got) noexc
   }
   got.trct = 1;
   return f.ok() && trct_valid(got);
+}
+
+inline bool read_pads(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
+  o3sdk::formats::chunk::Fields f(c);
+  if (!open_chunk(c, f)) {
+    return false;
+  }
+  if (f.u8() != kModeCount) {
+    return false;
+  }
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      got.pad_row[m][r] = f.u8();
+    }
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      got.pad_strip[m][r] = f.u16();
+    }
+  }
+  got.pads = 1;
+  return f.ok() && pads_valid(got);
 }
 
 inline bool read_chai(const o3sdk::formats::chunk::Chunk& c, Project& got) noexcept {
@@ -750,6 +832,26 @@ inline std::size_t write_project(const Project& p, std::uint8_t* out, std::size_
       return 0;
     }
   }
+  if (p.pads != 0u) {
+    if (!w.begin("PADS") || !w.u16(kPadsVersion) || !w.u8(static_cast<std::uint8_t>(kModeCount))) {
+      return 0;
+    }
+    for (unsigned m = 0; m < kModeCount; ++m) {
+      for (unsigned r = 0; r < pads::kRows; ++r) {
+        if (!w.u8(p.pad_row[m][r])) {
+          return 0;
+        }
+      }
+      for (unsigned r = 0; r < pads::kRows; ++r) {
+        if (!w.u16(p.pad_strip[m][r])) {
+          return 0;
+        }
+      }
+    }
+    if (!w.end()) {
+      return 0;
+    }
+  }
   if (p.trct != 0u) {
     if (!w.begin("TRCT") || !w.u16(ver)) {
       return 0;
@@ -784,7 +886,7 @@ inline bool read_project(const std::uint8_t* data, std::size_t n, Project& dst) 
     };
     static constexpr Known kKnown[] = {{"PTNS", project_detail::read_ptns}, {"CHAI", project_detail::read_chai}, {"ROUT", project_detail::read_rout},
                                        {"SLOT", project_detail::read_slot}, {"VALU", project_detail::read_valu}, {"STAT", project_detail::read_stat},
-                                       {"MOUT", project_detail::read_mout}, {"TRCT", project_detail::read_trct}};
+                                       {"MOUT", project_detail::read_mout}, {"TRCT", project_detail::read_trct}, {"PADS", project_detail::read_pads}};
     for (unsigned i = 0; i < sizeof kKnown / sizeof kKnown[0]; ++i) {
       if (c.id[0] != kKnown[i].id[0] || c.id[1] != kKnown[i].id[1] || c.id[2] != kKnown[i].id[2] || c.id[3] != kKnown[i].id[3]) {
         continue;

@@ -28,10 +28,4 @@ constexpr int clamp_octave(int octave) noexcept {
   return octave < kMinOctave ? kMinOctave : (octave > kMaxOctave ? kMaxOctave : octave);
 }
 
-// A white key of the piano (C D E F G A B), for the drawing and the LEDs.
-constexpr bool is_natural(int note) noexcept {
-  const int pc = note % 12;
-  return pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11;
-}
-
 }  // namespace o3_voc03er

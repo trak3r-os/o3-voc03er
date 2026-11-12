@@ -1,0 +1,41 @@
+# Parameter strips in PLAYS and one saved layout per mode (TP1): a BANDS row is set to the SHAPE strip (twelve pads over the range, a press sets the value and it stays),
+# then the mode goes to TRACT (its own layout: A VOWEL, B TONGUE, C TIP), back to BANDS (the strip is still there, the value kept) and to TALK (its layout is the default
+# one, untouched by the BANDS edit). The WAV carries the tone through the mode changes; the strip by hand is for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/perform_strips.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+snap 01_bands_default
+tap f6
+tap f6
+tap f6
+turn -2
+tap f7
+turn 6
+wait 300
+snap 02_bands_a_shape_strip
+paddown 23
+wait 400
+snap 03_shape_top_pad
+padup 23
+wait 300
+paddown 12
+wait 300
+padup 12
+wait 300
+snap 04_shape_bottom_pad_stays
+tap f1
+turn 8
+wait 600
+snap 05_tract_own_layout
+tap f1
+turn -80
+wait 600
+snap 06_bands_keeps_its_strip
+turn 1
+wait 600
+snap 07_talk_default_layout
+turn -1
+wait 300
+record off
+wav perform_strips

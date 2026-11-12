@@ -177,12 +177,14 @@ constexpr bool strip_on(const o3_voc03er::pads::Layout& l) noexcept { return l.r
 // What a pad of PERFORM is (docs/REVIEW-2026-11-11.md section 3). Row 0 (the top) is the controls in every layout; rows 1, 2 and 3 are the layout's
 // A, B and C, and what each plays is pads::pad_play (so a pad gives the same note and kind on every screen); C may be the formant strip or the bend
 // strip instead. A control pad plays no note: BND and MOD act while held, the others on the press.
-// Vowel and Closure are the mouth strip (C set to MOUTH; the screen acts on them in TRACT only).
-enum class PadFn : std::uint8_t { None, Play, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip, Formant, Vowel, Closure };
+// Vowel and Closure are the mouth strip (C set to MOUTH; the screen acts on them in TRACT only). Param is a pad of a parameter strip (any row set to a
+// STRIP, strip_logic.h): `offset` is its column 0..11 and `id` the strip's stable id; the screen resolves the rest.
+enum class PadFn : std::uint8_t { None, Play, OctDown, OctUp, VolDown, VolUp, RootDown, RootUp, Mod, BndDown, BndUp, Strip, Formant, Vowel, Closure, Param };
 struct PadSpec {
   PadFn fn = PadFn::None;
   o3_voc03er::pads::PadPlay play;  // Play: the note (1..127) and the stored kind (0 a note, 1..4 the ChordKind + 1)
-  int offset = 0;                  // Formant: the semitones of the pad; Vowel: its column 0..8; Closure: the tract's CLOSE value 1..3 (LIPS, TIP, BACK)
+  int offset = 0;                  // Formant: the semitones of the pad; Vowel: its column 0..8; Closure: the tract's CLOSE value 1..3 (LIPS, TIP, BACK); Param: the column
+  std::uint16_t id = 0;            // Param: the strip's stable id (pads::strip_id)
 };
 // Row 0, by column: 0 OCT-, 1 OCT+, 3 VOL-, 4 VOL+, 6 ROOT-, 7 ROOT+, 9 MOD, 10 BND-, 11 BND+; 2, 5 and 8 are gaps.
 inline constexpr PadFn kControlFn[12] = {PadFn::OctDown,  PadFn::OctUp,   PadFn::None,    PadFn::VolDown, PadFn::VolUp,  PadFn::None,
@@ -212,30 +214,38 @@ constexpr std::uint8_t mouth_led(unsigned col, float vowel, unsigned held) noexc
   }
   return col < 12u && ((held >> (col - kMouthVowelCols + 1u)) & 1u) != 0u ? o3sdk::app::kLedOn : o3sdk::app::kLedDim;
 }
-// The closures held on the strip: the CLOSE value to write is the one pressed last of those still down, OPEN (0) with none.
-struct MouthHold {
-  std::uint8_t order[3] = {};  // the held CLOSE values, oldest first
+// The closures held: by pad (the mouth strip's LIPS, TIP and BACK columns, a closure parameter strip's twelve pads), each with the CLOSE value it asked
+// for. The CLOSE value to write is the one pressed last of those still down, OPEN (0) with none. Pad-aware, so two pads may hold the same closure and one
+// let go does not open it.
+struct CloseHold {
+  static constexpr unsigned kMax = 48;
+  std::uint8_t pad[kMax] = {};
+  std::uint8_t close[kMax] = {};  // 1..3, oldest first
   unsigned n = 0;
-  constexpr void press(unsigned close) noexcept {
-    release(close);
-    if (close >= 1u && close <= 3u) {
-      order[n++] = static_cast<std::uint8_t>(close);
-    }
-  }
-  constexpr void release(unsigned close) noexcept {
+  constexpr void release(unsigned p) noexcept {
     unsigned j = 0;
     for (unsigned i = 0; i < n; ++i) {
-      if (order[i] != close) {
-        order[j++] = order[i];
+      if (pad[i] != p) {
+        pad[j] = pad[i];
+        close[j] = close[i];
+        ++j;
       }
     }
     n = j;
   }
-  constexpr unsigned current() const noexcept { return n == 0u ? 0u : order[n - 1u]; }
+  constexpr void press(unsigned p, unsigned c) noexcept {
+    release(p);
+    if (c >= 1u && c <= 3u && n < kMax) {
+      pad[n] = static_cast<std::uint8_t>(p);
+      close[n] = static_cast<std::uint8_t>(c);
+      ++n;
+    }
+  }
+  constexpr unsigned current() const noexcept { return n == 0u ? 0u : close[n - 1u]; }
   constexpr unsigned mask() const noexcept {
     unsigned m = 0;
     for (unsigned i = 0; i < n; ++i) {
-      m |= 1u << order[i];
+      m |= 1u << close[i];
     }
     return m;
   }
@@ -265,6 +275,10 @@ constexpr PadSpec pad_spec(const o3_voc03er::pads::Layout& l, unsigned row, unsi
   } else if (r == o3_voc03er::pads::Row::C && v == o3_voc03er::pads::Plays::Mouth) {
     s.fn = col < kMouthVowelCols ? PadFn::Vowel : PadFn::Closure;
     s.offset = col < kMouthVowelCols ? static_cast<int>(col) : static_cast<int>(col - kMouthVowelCols) + 1;
+  } else if (v == o3_voc03er::pads::Plays::Strip) {
+    s.fn = PadFn::Param;
+    s.offset = static_cast<int>(col);
+    s.id = l.strip[o3_voc03er::pads::idx(r)];
   } else {
     s.play = o3_voc03er::pads::pad_play(l, r, col, octave);
     if (s.play.note >= 0) {
@@ -274,7 +288,7 @@ constexpr PadSpec pad_spec(const o3_voc03er::pads::Layout& l, unsigned row, unsi
   return s;
 }
 constexpr bool is_control(PadFn f) noexcept {
-  return f != PadFn::None && f != PadFn::Play && f != PadFn::Strip && f != PadFn::Formant && f != PadFn::Vowel && f != PadFn::Closure;
+  return f != PadFn::None && f != PadFn::Play && f != PadFn::Strip && f != PadFn::Formant && f != PadFn::Vowel && f != PadFn::Closure && f != PadFn::Param;
 }
 constexpr bool is_held_control(PadFn f) noexcept { return f == PadFn::Mod || f == PadFn::BndDown || f == PadFn::BndUp; }
 
@@ -351,15 +365,25 @@ inline void strip_label(int st, char (&out)[kLabelChars + 1]) noexcept {
 }
 
 // ---- the SHIFT row (docs/UI-DESIGN.md "The SHIFT row of PERFORM") -------------------------------------------------------------------
-// What SHIFT + F1..F8 are. Freeze: an action, no focus. Value: takes the encoder (sfocus), a second tap steps it. None: no key (F7's, empty since Q6).
+// What SHIFT + F1..F8 are. Freeze: an action, no focus. Value: takes the encoder (sfocus), a second tap steps it. OCTAVE (F7's, AK1): a value like the others, the pad rows' octave. None: no key (no row uses it now).
 enum class ShiftFn : std::uint8_t { Freeze, Value, None };
 struct ShiftKey {
   const char* name;  // on the F row (the Label face fits 8) and, upper case, HELP's Shift label (9 at most)
   ShiftFn fn;
 };
 inline constexpr ShiftKey kShiftKeys[8] = {{"FREEZE", ShiftFn::Freeze}, {"GATE", ShiftFn::Value},      {"ARP", ShiftFn::Value},        {"GLIDE", ShiftFn::Value},
-                                           {"FORMANT", ShiftFn::Value}, {"THRU", ShiftFn::Value},    {"", ShiftFn::None},            {"PRESET", ShiftFn::Value}};
+                                           {"FORMANT", ShiftFn::Value}, {"THRU", ShiftFn::Value},    {"OCTAVE", ShiftFn::Value},     {"PRESET", ShiftFn::Value}};
 inline constexpr unsigned kNoShiftFocus = 8;  // PerformScreen's sfocus_ when no SHIFT-row value has the encoder
+
+// AK1: may an ARROW key step the value that has the focus? A stray arrow must not do harm, so three values answer only to a tap of their own key or the
+// encoder: F1 MODE (a reallocation and a new sound), F8 QUALITY on TALK (the LPC order: a cost and a reallocation) and SHIFT + F8 PRESET (it overwrites
+// many values at once). `focus` is the plain row's key (0..7), `sfocus` the SHIFT row's (kNoShiftFocus: none), `mode` the unit's mode (1 is TALK).
+inline constexpr bool arrow_may_step(unsigned focus, unsigned sfocus, unsigned mode) noexcept {
+  if (sfocus != kNoShiftFocus) {
+    return sfocus != 7u;
+  }
+  return focus != 0u && !(focus == 7u && mode == 1u);
+}
 
 inline constexpr int kFormantMin = -12;
 inline constexpr int kFormantMax = 12;
@@ -403,6 +427,9 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
   }
   if (sfocus == 3u) {
     return "SHIFT F4 GLIDE: SLIDE BETWEEN NOTES";
+  }
+  if (sfocus == 6u) {
+    return "SHIFT F7 OCTAVE: THE PADS' REGISTER";
   }
   if (sfocus == 7u) {
     return "SHIFT F8 PRESET: A FACTORY SOUND";

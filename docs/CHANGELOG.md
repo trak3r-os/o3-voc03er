@@ -4,6 +4,19 @@
 
 ### Added
 
+- **TP1: parameter strips in PLAYS, one saved layout per mode (NP1 and AK1 folded in).** F7 PLAYS gains a strip for every parameter PARAMS shows in the
+  mode that makes sense played live: twelve pads, pad 1 the minimum and pad 12 the maximum (a bipolar range has the middle pair at 0), one pad per choice up to
+  twelve choices and twelve pads spread over more. TRACT gets all its parameters, the closures CL LIPS, CL TIP and CL BACK (held, momentary, the last pad pressed
+  wins) and MOUTH. Left out: MODE, QUALITY, LEVEL, VIB, BEND, FORMANT, the carrier and modulator sources, the live channel, TRACT's CLOSE as a number, SLIDE and MIX.
+  Pad LEDs show the value, a strip row plays no notes, the screen names the strip beside the row, a strip of another mode's parameter is dark with "... IN <MODE>".
+  F7 with a long list: a tap steps and wraps, the encoder scrolls, SHIFT + encoder jumps by group. Each of the five modes keeps its own three rows; TRACT starts as
+  A VOWEL, B TONGUE, C CL TIP and the other modes as A NOTE, B TRIAD, C FORMANT. Saved in a new `PADS` 1.0 chunk (a strip by a stable id, unit and parameter), STAT still
+  carries the BANDS layout, so an older image reads a layout from a new project; an older project loads its layout on BANDS, TALK, TUNE and ROBOT and the TRACT default.
+  F4 NEW resets all five. No parameter or `config.o3a` change. Partial closure: the kit's `set_closure` takes a bool, so only the held full closures exist;
+  a graded closure is a kit follow-up. Recording strips into PATTERN lanes is not built. **NP1:** every PIANO value, its code, drawing and tests are removed; a saved
+  piano value loads as the plain value of the same kind; the perform-keys.png picture is no longer referenced. **AK1:** LEFT, RIGHT, UP and DOWN step the focused F value on
+  PERFORM; the octave moves to SHIFT + F7 (SAMPLE: SHIFT + F3); PATTERN keeps UP / DOWN as octave and LEFT / RIGHT as the cursor; the arrows skip F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET. A closure strip held on SAMPLE opens when SAMPLE is left, and a dark strip pressed there shows its "... IN <MODE>" note on SAMPLE's own line. Tests: `strip_logic_test`, `pads_logic_test`,
+  `perform_logic_test`, `perform_screen_test`, `project_test`, `file_test`; scenarios `perform_strips.txt`, `arrows.txt`, `perform_tract.txt`. Needs more testing on the unit.
 - **WI1: WAV import converts on load.** SAMPLE LOAD accepts 8, 16, 24 and 32-bit PCM and 32-bit float WAVs (plain or WAVE_FORMAT_EXTENSIBLE headers, unknown
   chunks skipped, odd chunks padded), mono or stereo, from 22.05 to 96 kHz, and converts them to the slot format (mono int16 at 44.1 kHz) while loading; the
   16 s limit applies to the converted length. 16-bit 44.1 kHz files take the old integer path and load sample for sample as before. Refused with a clear strip

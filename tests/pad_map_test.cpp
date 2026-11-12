@@ -39,12 +39,8 @@ TEST_CASE("pad map: every pad of the panel is a key at every octave the keyboard
   }
 }
 
-TEST_CASE("pad map: the octave is clamped and the white keys are the piano's") {
+TEST_CASE("pad map: the octave is clamped") {
   CHECK(clamp_octave(-9) == kMinOctave);
   CHECK(clamp_octave(9) == kMaxOctave);
   CHECK(clamp_octave(1) == 1);
-  CHECK(is_natural(60));
-  CHECK_FALSE(is_natural(61));
-  CHECK(is_natural(71));
-  CHECK_FALSE(is_natural(70));
 }

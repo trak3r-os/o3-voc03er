@@ -37,10 +37,11 @@ constexpr int kLevelTap = 6;  // a second tap on F8 moves the level this many ha
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"PLAYS", "SIDE", "SPEED", "DIR", "LOOP", "TRIG", "CHOKE", "LEVEL"};
-// The SHIFT row: F1 and F2 only (the others are blank and dim), labelled the way PATTERN's and PERFORM's are.
-constexpr const char* kShiftNames[ornoir::kFKeys] = {"ROW", "SLICE CH", "", "", "", "", "", ""};
+// The SHIFT row: F1 to F3 only (the others are blank and dim), labelled the way PATTERN's and PERFORM's are.
+constexpr const char* kShiftNames[ornoir::kFKeys] = {"ROW", "SLICE CH", "OCTAVE", "", "", "", "", ""};
 constexpr unsigned kKeyPlays = 0;  // F1
 constexpr unsigned kKeySliceCh = 1;  // F2, with SHIFT
+constexpr unsigned kKeyOctave = 2;   // F3, with SHIFT (AK1: the octave was LEFT and RIGHT)
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
   std::size_t n = std::strlen(dst);
@@ -138,6 +139,7 @@ void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* pe
   row_ = 0;
   slice_ch_ = 0;
   shift_slice_ = false;
+  shift_oct_ = false;
   flash_until_ = 0;
   aud_ = 0;
   g_sd = SampleData{};  // a restarted app starts from the defaults
@@ -161,6 +163,7 @@ const ui::Theme* SampleScreen::theme(const app::Context&) const noexcept { retur
 void SampleScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
   shift_slice_ = false;  // SHIFT may have been let go on another screen, where update() did not see it
+  shift_oct_ = false;
   ctx.redraw();
 }
 
@@ -170,6 +173,7 @@ void SampleScreen::pad_leave(app::Context& ctx) noexcept {
   release_all(ctx);
   if (perform_ != nullptr) {
     perform_->audition_release_all(ctx);  // the layout pads' notes let go
+    perform_->release_closures(ctx);      // a held CL strip closure opens again (CLOSE and the sequencer's mouth hold)
   }
   aud_ = 0;
 }
@@ -479,16 +483,24 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
     if (in.shift) {
+      const bool again_oct = shift_oct_ && k == kKeyOctave;
       shift_slice_ = k == kKeySliceCh;
+      shift_oct_ = k == kKeyOctave;
       if (k == kKeyPlays) {  // SHIFT + F1: ROW
         flip_row(ctx);
       } else if (k == kKeySliceCh) {  // SHIFT + F2: SLICE CH, a tap steps on and wraps (SAME, 1 .. 16, OFF), the encoder steps without wrapping
         slice_ch_ = slice_ch_ >= midislice::kOff ? midislice::kSame : static_cast<std::uint8_t>(slice_ch_ + 1u);
         ctx.redraw();
+      } else if (k == kKeyOctave) {  // SHIFT + F3: OCTAVE takes the encoder and the arrows; a second tap steps it up
+        if (again_oct && perform_ != nullptr) {
+          perform_->step_octave(ctx, 1);
+        }
+        ctx.redraw();
       }
       return;
     }
     shift_slice_ = false;
+    shift_oct_ = false;
     if (k == focus_ || (k >= 3u && k <= 6u)) {  // a second tap steps the value on (DIR, LOOP, TRIG and CHOKE have nothing else to do)
       key_tap_ = true;
       turn(ctx, k, 1);
@@ -500,12 +512,7 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   if (in.turn()) {
     key_tap_ = false;
-    if (in.shift && shift_slice_) {
-      slice_ch_ = midislice::step(slice_ch_, static_cast<int>(in.delta()));
-      ctx.redraw();
-      return;
-    }
-    turn(ctx, focus_, in.delta());
+    step_value(ctx, in.shift, in.delta());
     return;
   }
   if (in.press(Button::Up)) {
@@ -514,11 +521,34 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   } else if (in.press(Button::Down)) {
     slot_ = static_cast<std::uint8_t>(slot_ < 3u ? slot_ + 1u : 3u);
     ctx.redraw();
-  } else if ((in.press(Button::Left) || in.press(Button::Right)) && perform_ != nullptr) {  // repeats arrive as presses (repeat_buttons)
-    perform_->step_octave(ctx, in.press(Button::Left) ? -1 : 1);
+  } else if (in.press(Button::Left) || in.press(Button::Right)) {  // the focused value one step down or up, as a detent (AK1); repeats arrive as presses (repeat_buttons)
+    key_tap_ = false;
+    step_value(ctx, in.shift, in.press(Button::Left) ? -1 : 1);
   } else {
     (void)pad_input(ctx, in);
   }
+}
+
+// The encoder's detents or an arrow: the SHIFT-row value in focus while SHIFT is held (SLICE CH, OCTAVE), else the F key's value. With SHIFT held and no
+// SHIFT value focused the plain value steps, as it always did. `jump` (SHIFT + the encoder on F1) moves F1 by a group of the list.
+void SampleScreen::step_value(app::Context& ctx, bool shift, int delta) noexcept {
+  if (shift && shift_slice_) {
+    slice_ch_ = midislice::step(slice_ch_, delta);
+    ctx.redraw();
+    return;
+  }
+  if (shift && shift_oct_) {
+    if (perform_ != nullptr) {
+      perform_->step_octave(ctx, delta);
+    }
+    return;
+  }
+  if (focus_ == kKeyPlays && shift) {
+    step_plays(ctx, delta, false, true);
+    ctx.redraw();
+    return;
+  }
+  turn(ctx, focus_, delta);
 }
 
 // The pads, here and on SAMPLE EDIT: the top rows play the selected slot's slices, the bottom rows PERFORM's layout rows A and B.
@@ -542,13 +572,22 @@ bool SampleScreen::pad_input(app::Context& ctx, const app::Input& in) noexcept {
 }
 
 // Pad 24..47 is column pad % 12 of row A (24..35) or B (36..47), as PATTERN's palette rows 0 and 1 are: the layout says what it plays (a note, a chord,
-// a piano key, nothing on OFF or a gap) at PERFORM's octave, and PERFORM's audition entry sounds it (ids 0..23: pad - 24, no widening needed).
+// nothing on OFF or a gap) at PERFORM's octave, and PERFORM's audition entry sounds it (ids 0..23: pad - 24, no widening needed). A row that is a
+// parameter strip (TP1) sets its value through PERFORM's strip press instead (a held closure ends with its pad).
 void SampleScreen::play_pad(app::Context& ctx, unsigned pad) noexcept {
   if (perform_ == nullptr || !sm::layout_pad(pad) || pad >= app::kPadCount) {
     return;
   }
   const unsigned p = pad - sm::kTopPads;  // 0..23
-  const pads::PadPlay pp = pads::pad_play(perform_->layout(), p < app::kPadCols ? pads::Row::A : pads::Row::B, p % app::kPadCols, perform_->octave());
+  const pads::Row prow = p < app::kPadCols ? pads::Row::A : pads::Row::B;
+  const char* why = nullptr;
+  if (perform_->strip_pad(ctx, prow, p % app::kPadCols, pad, true, &why)) {
+    if (why != nullptr) {  // a strip of another mode's parameter: dark, and it says where it lives
+      say(ctx, why);
+    }
+    return;
+  }
+  const pads::PadPlay pp = pads::pad_play(perform_->layout(), prow, p % app::kPadCols, perform_->octave());
   if (pp.note < 1) {
     return;
   }
@@ -561,15 +600,19 @@ void SampleScreen::release_play(app::Context& ctx, unsigned pad) noexcept {
     return;
   }
   const unsigned p = pad - sm::kTopPads;
+  if (perform_->strip_pad(ctx, p < app::kPadCols ? pads::Row::A : pads::Row::B, p % app::kPadCols, pad, false)) {
+    return;
+  }
   if (((aud_ >> p) & 1u) != 0u) {
     aud_ &= ~(std::uint32_t{1} << p);
     perform_->audition_release(ctx, p);
   }
 }
 
-// F1: PLAYS of the row of the lowest layout pad that sounds (row A's first), else of the chosen row; ROW follows. A tap steps and wraps, a detent stops at
-// the ends. A new value ends the notes: the old meaning started them (the held pad stays down and sounds again at its next press).
-void SampleScreen::step_plays(app::Context& ctx, int delta, bool tap) noexcept {
+// F1: PLAYS of the row of the lowest layout pad that sounds (row A's first), else of the chosen row; ROW follows. The list is PERFORM's (the notes and OFF,
+// then every parameter strip the mode uses). A tap steps and wraps, a detent stops at the ends, `jump` (SHIFT + a detent) moves a group. A new value ends
+// the notes and held strips: the old meaning started them (the held pad stays down and sounds again at its next press).
+void SampleScreen::step_plays(app::Context& ctx, int delta, bool tap, bool jump) noexcept {
   if (perform_ == nullptr) {
     return;
   }
@@ -581,11 +624,22 @@ void SampleScreen::step_plays(app::Context& ctx, int delta, bool tap) noexcept {
   }
   row_ = static_cast<std::uint8_t>(r);
   const pads::Row row = static_cast<pads::Row>(r);
-  const pads::Plays cur = perform_->layout().row[r];
-  const pads::Plays next = tap ? pads::plays_tap(row, cur) : pads::plays_step(row, cur, delta);
-  if (next != cur && perform_->set_plays(row, next)) {
+  const unsigned mode = perform_->layout_mode();
+  const pads::Layout cur_l = perform_->layout();
+  const unsigned cur = strip::entry_index(row, mode, cur_l.row[r], cur_l.strip[r]);
+  const unsigned next = tap ? strip::entry_tap(row, mode, cur) : (jump ? strip::entry_jump(row, mode, cur, delta) : strip::entry_step(row, mode, cur, delta));
+  if (next != cur) {
+    pads::Layout l = cur_l;
+    strip::apply_entry(l, row, mode, next);
     perform_->audition_release_all(ctx);
+    for (unsigned p = 0; p < 2u * app::kPadCols; ++p) {  // a held strip's closure goes with the old meaning
+      (void)perform_->strip_pad(ctx, p < app::kPadCols ? pads::Row::A : pads::Row::B, p % app::kPadCols, sm::kTopPads + p, false);
+    }
     aud_ = 0;
+    perform_->set_layout(l);
+    const strip::Entry e = strip::entry_at(row, mode, next);
+    note_ = jump && e.group != strip::kGroupNotes ? strip::kGroupNames[e.group] : nullptr;
+    note_until_ = ctx.uptime_ms() + 900u;
   }
   ctx.redraw();
 }
@@ -605,6 +659,7 @@ void SampleScreen::pad_update(app::Context& ctx) noexcept {
 void SampleScreen::update(app::Context& ctx) noexcept {
   if (!ctx.panel().shift()) {
     shift_slice_ = false;
+    shift_oct_ = false;
   }
   pad_update(ctx);
   if (note_ != nullptr && ctx.uptime_ms() >= note_until_) {
@@ -631,6 +686,11 @@ void SampleScreen::pad_leds(app::Context& ctx, app::PadLeds& leds) noexcept {
       const unsigned row = p / app::kPadCols;
       const pads::PadPlay pp = pads::pad_play(perform_->layout(), static_cast<pads::Row>(row), p % app::kPadCols, perform_->octave());
       std::uint8_t level = app::kLedOff;
+      if (perform_->layout().row[row] == pads::Plays::Strip) {  // a parameter strip: the value's pad on, the others dim (a held closure's on)
+        level = flash && row == row_ ? app::kLedOff : perform_->strip_led(e, static_cast<pads::Row>(row), p % app::kPadCols, pad);
+        leds.set(pad, level);
+        continue;
+      }
       if (pp.note > 0 && !(flash && row == row_)) {
         const unsigned pc = static_cast<unsigned>(pp.note) % 12u;
         level = pc == key ? app::kLedLow : (((cols >> pc) & 1u) != 0u ? app::kLedDim : app::kLedOff);
@@ -669,9 +729,9 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "SLOT BEFORE", nullptr},
       {Button::Down, "SLOT AFTER", nullptr},
-      {Button::Left, "OCTAVE DOWN, HOLD REPEATS", nullptr},
-      {Button::Right, "OCTAVE UP, HOLD REPEATS", nullptr},
-      {Button::Shift, "F1: ROW A OR B; F2: SLICE CH", nullptr},
+      {Button::Left, "F VALUE DOWN, HOLD REPEATS", nullptr},
+      {Button::Right, "F VALUE UP, HOLD REPEATS", nullptr},
+      {Button::Shift, "F1 ROW, F2 SLICE, F3 OCTAVE", nullptr},
       {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
@@ -698,8 +758,8 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   const pads::Layout layout = perform_ != nullptr ? perform_->layout() : pads::Layout{};
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
   g_sd.groups[0] = {"SLICES", "A SLICE PLAYS ITS CUT ONCE; A HIT RESTARTS IT", ui::Color::Accent};
-  g_sd.groups[1] = {pads::kPlaysNames[pads::idx(layout.row[0])], "ROW A: F1 PLAYS SETS WHAT IT PLAYS", ui::Color::Vol};
-  g_sd.groups[2] = {pads::kPlaysNames[pads::idx(layout.row[1])], "ROW B: SHIFT + F1 CHOOSES THE ROW", ui::Color::Fx};
+  g_sd.groups[1] = {strip::row_name(layout, pads::Row::A), "ROW A: F1 PLAYS SETS WHAT IT PLAYS", ui::Color::Vol};
+  g_sd.groups[2] = {strip::row_name(layout, pads::Row::B), "ROW B: SHIFT + F1 CHOOSES THE ROW", ui::Color::Fx};
   h.groups = g_sd.groups;
   h.group_count = 3;
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
@@ -710,8 +770,14 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
       cat_uint(l, sizeof g_sd.pad_name[pad], pad + 1u);
     } else {
       const unsigned p = pad - sm::kTopPads;
-      const pads::PadPlay pp = pads::pad_play(layout, p < app::kPadCols ? pads::Row::A : pads::Row::B, p % app::kPadCols, oct);
-      if (pp.note > 0) {  // the root and the kind after it: "C", "C7TH", "C#PWR"
+      const pads::Row prow = p < app::kPadCols ? pads::Row::A : pads::Row::B;
+      const pads::PadPlay pp = pads::pad_play(layout, prow, p % app::kPadCols, oct);
+      const strip::StripDef* sd = layout.row[pads::idx(prow)] == pads::Plays::Strip ? strip::find(layout.strip[pads::idx(prow)]) : nullptr;
+      if (sd != nullptr) {  // a parameter strip: the value each pad sets
+        char t[12];
+        strip::pad_text(*sd, p % app::kPadCols, t);
+        cat(l, sizeof g_sd.pad_name[pad], t);
+      } else if (pp.note > 0) {  // the root and the kind after it: "C", "C7TH", "C#PWR"
         cat(l, sizeof g_sd.pad_name[pad], pt::kPitchClass[static_cast<unsigned>(pp.note) % 12u]);
         if (pp.kind != 0u) {
           cat(l, sizeof g_sd.pad_name[pad], pt::kCellKind[(pp.kind - 1u) & 3u]);
@@ -724,6 +790,7 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[0] = "WHAT THE ROW PLAYS";
   h.fkey_shift[0] = kShiftNames[0];
   h.fkey_shift[1] = kShiftNames[1];
+  h.fkey_shift[2] = kShiftNames[2];
   h.fkey[1] = "SPEAKS, SOUNDS, NONE";
   h.fkey[2] = "0.5X, 1X, 2X";
   h.fkey[3] = "FORWARD, REVERSE";
@@ -837,7 +904,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     keys[i].name = kKeyNames[i];
     keys[i].hot = i == focus_;
   }
-  cat(keys[0].value, sizeof keys[0].value, pads::kPlaysShort[pads::idx(layout.row[row])]);
+  cat(keys[0].value, sizeof keys[0].value, strip::row_name(layout, static_cast<pads::Row>(row)));
   cat(keys[1].value, sizeof keys[1].value, sm::kSideNames[static_cast<unsigned>(side)]);
   keys[1].role = side == sm::Side::Speaks ? ornoir::KeyRole::Voice : (side == sm::Side::Sounds ? ornoir::KeyRole::Carrier : ornoir::KeyRole::Plain);
   cat(keys[2].value, sizeof keys[2].value, sm::kSpeedNames[ls.speed < sm::kSpeedCount ? ls.speed : 1u]);
@@ -857,11 +924,26 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
       keys[i] = ornoir::FKey{};
       keys[i].name = kShiftNames[i];
-      keys[i].dim = i != kKeyPlays && i != kKeySliceCh;
+      keys[i].dim = i != kKeyPlays && i != kKeySliceCh && i != kKeyOctave;
     }
     cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, pads::kRowNames[row]);
     midislice::format(slice_ch_, keys[kKeySliceCh].value);
     keys[kKeySliceCh].hot = shift_slice_;
+    {
+      const int oct = perform_ != nullptr ? perform_->octave() : 0;
+      char num[3];
+      std::size_t n = 0;
+      if (oct > 0) {
+        num[n++] = '+';
+      } else if (oct < 0) {
+        num[n++] = '-';
+      }
+      num[n++] = static_cast<char>('0' + (oct < 0 ? -oct : oct));
+      num[n] = '\0';
+      cat(keys[kKeyOctave].value, sizeof keys[kKeyOctave].value, num);
+      keys[kKeyOctave].pct = pl::bar_percent(static_cast<float>(oct), static_cast<float>(kMinOctave), static_cast<float>(kMaxOctave));
+      keys[kKeyOctave].hot = shift_oct_;
+    }
   }
 
   ui::plot::Canvas c(r);

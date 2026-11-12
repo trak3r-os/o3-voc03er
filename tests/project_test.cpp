@@ -97,11 +97,9 @@ void with_stat(Project& p) {
   p.follow = 1;
   set_project_preset(p, 1);  // CHOIR
   pads::Layout l;
-  l.row[0] = pads::Plays::PianoOpen;
-  l.row[1] = pads::Plays::PianoOpen;
+  l.row[0] = pads::Plays::Open;
+  l.row[1] = pads::Plays::Seventh;
   l.row[2] = pads::Plays::Bend;
-  l.last[0] = pads::Plays::Seventh;
-  l.last[1] = pads::Plays::Power;
   set_project_layout(p, l);
 }
 
@@ -689,7 +687,7 @@ Bytes stat11(unsigned version = 0x0101) {
   for (const char ch : {'C', 'H', 'O', 'I', 'R'}) {
     b.push_back(static_cast<std::uint8_t>(ch));
   }
-  for (const unsigned v : {1u, 2u, 12u, 0u, 1u}) {  // A TRIAD, B 7TH, C BEND, last NOTE, TRIAD
+  for (const unsigned v : {1u, 2u, 12u, 0u, 1u}) {  // A TRIAD, B 7TH, C BEND, two spare bytes
     b.push_back(static_cast<std::uint8_t>(v));
   }
   return b;
@@ -726,11 +724,9 @@ TEST_CASE("project: P3 the 1.1 STAT and SLOT fields round-trip one by one") {
   CHECK(std::memcmp(q.preset, "CHOIR", 5) == 0);
   CHECK(project_preset_index(q) == 1);
   const pads::Layout l = project_layout(q);
-  CHECK(l.row[0] == pads::Plays::PianoOpen);
-  CHECK(l.row[1] == pads::Plays::PianoOpen);
+  CHECK(l.row[0] == pads::Plays::Open);
+  CHECK(l.row[1] == pads::Plays::Seventh);
   CHECK(l.row[2] == pads::Plays::Bend);
-  CHECK(l.last[0] == pads::Plays::Seventh);
-  CHECK(l.last[1] == pads::Plays::Power);
   CHECK(q.slot[1].gate == 1u);
   CHECK(q.slot[2].choke_off == 1u);  // the empty slot's TRIG and CHOKE ride too
   CHECK(q.slot[0].gate == 0u);
@@ -789,7 +785,7 @@ TEST_CASE("project: P3 a preset is matched by name, an unknown name is none") {
 
 TEST_CASE("project: P3 a 1.0 STAT loads with the defaults of today and the layout its pads mode and chord kind meant") {
   const Bytes base = write(stat_base());
-  // KEYS: a piano on A and B, FORMANT on C, whatever the chord kind.
+  // KEYS: A and B plain notes (the piano is gone), FORMANT on C, whatever the chord kind.
   {
     Project got = {};
     REQUIRE(read(rebuild(base, Edit{nullptr, "STAT", stat10(2, 1), false}), got));
@@ -805,8 +801,8 @@ TEST_CASE("project: P3 a 1.0 STAT loads with the defaults of today and the layou
     CHECK(got.preset_len == 0);
     CHECK(project_preset_index(got) == -1);
     const pads::Layout l = project_layout(got);
-    CHECK(l.row[0] == pads::Plays::PianoNote);
-    CHECK(l.row[1] == pads::Plays::PianoNote);
+    CHECK(l.row[0] == pads::Plays::Note);
+    CHECK(l.row[1] == pads::Plays::Note);
     CHECK(l.row[2] == pads::Plays::Formant);
   }
   // CHORDS: the layout of pads::layout_from_legacy for each chord kind.
@@ -818,8 +814,6 @@ TEST_CASE("project: P3 a 1.0 STAT loads with the defaults of today and the layou
     for (unsigned r = 0; r < pads::kRows; ++r) {
       CHECK(l.row[r] == want.row[r]);
     }
-    CHECK(l.last[0] == want.last[0]);
-    CHECK(l.last[1] == want.last[1]);
     CHECK(got.voicing == 3);
     CHECK(got.bend_range == 2);
   }
@@ -934,11 +928,8 @@ TEST_CASE("project: P3 a STAT field out of range refuses the file and leaves the
   refused("layout A FORMANT (C only)", 21, static_cast<unsigned>(pads::Plays::Formant));
   refused("layout A BEND (C only)", 21, static_cast<unsigned>(pads::Plays::Bend));
   refused("layout B FORMANT", 22, static_cast<unsigned>(pads::Plays::Formant));
-  refused("layout C a piano value", 23, static_cast<unsigned>(pads::Plays::PianoNote));
-  refused("layout last A BEND", 24, static_cast<unsigned>(pads::Plays::Bend));
   refused("layout A MOUTH (C only)", 21, static_cast<unsigned>(pads::Plays::Mouth));
   refused("layout B MOUTH (C only)", 22, static_cast<unsigned>(pads::Plays::Mouth));
-  refused("layout last B MOUTH", 25, static_cast<unsigned>(pads::Plays::Mouth));
   // A STAT cut short of its 1.1 fields (a 1.1 version over 1.0's length) is damaged, not a 1.0.
   Bytes cut = stat11();
   cut.resize(cut.size() - 3);
@@ -964,7 +955,6 @@ TEST_CASE("project: P3 a STAT field out of range refuses the file and leaves the
   wrefused([](Project& p) { p.preset_len = static_cast<std::uint8_t>(kPresetNameMax + 1); });
   wrefused([](Project& p) { p.preset_len = 1; p.preset[0] = '\n'; });
   wrefused([](Project& p) { p.layout[0] = pads::kPlaysCount; });
-  wrefused([](Project& p) { p.layout[2] = static_cast<std::uint8_t>(pads::Plays::PianoNote); });
   wrefused([](Project& p) { p.layout[0] = static_cast<std::uint8_t>(pads::Plays::Mouth); });
   wrefused([](Project& p) { p.layout[1] = static_cast<std::uint8_t>(pads::Plays::Mouth); });
 }
@@ -985,6 +975,149 @@ TEST_CASE("project: V2 a layout with row C on MOUTH round-trips whatever the mod
   // A and B take their own values only: the legacy row of a MOUTH layout is a plain NOTE / TRIAD one
   const pads::LegacyFields lf = pads::legacy_fields(l);
   CHECK_FALSE(lf.bend_row);
+}
+
+TEST_CASE("project: NP1 a retired piano value 6..10 in STAT loads as the plain value of the same kind, a value past 14 is refused") {
+  const Bytes f = write(stat_base());
+  const pads::Plays plain[5] = {pads::Plays::Note, pads::Plays::Triad, pads::Plays::Seventh, pads::Plays::Open, pads::Plays::Power};
+  for (unsigned k = 0; k < 5; ++k) {
+    Bytes st = stat11();
+    st[21] = static_cast<std::uint8_t>(6 + k);
+    st[22] = static_cast<std::uint8_t>(6 + k);
+    Project got = {};
+    INFO("piano value " << 6 + k);
+    // Power on a row is fine for A and B; every plain value is offered by every row
+    REQUIRE(read(rebuild(f, Edit{nullptr, "STAT", st, false}), got));
+    CHECK(project_layout(got).row[0] == plain[k]);
+    CHECK(project_layout(got).row[1] == plain[k]);
+    CHECK(got.layout[0] == 6 + k);  // the saved byte is kept as read; it is rewritten as the plain id on the next save
+    CHECK(write(got).size() > 0);
+    Project again = {};
+    REQUIRE(read(write(got), again));
+    CHECK(project_layout(again).row[0] == plain[k]);
+  }
+  Bytes st = stat11();
+  st[21] = 15;
+  Project got = {};
+  CHECK(!read(rebuild(f, Edit{nullptr, "STAT", st, false}), got));
+}
+
+namespace {
+void pads_layouts(unsigned m, pads::Layout (&out)[kModeCount]) {
+  for (unsigned i = 0; i < kModeCount; ++i) {
+    out[i] = pads::Layout{};
+  }
+  out[m].row[0] = pads::Plays::Strip;
+  out[m].strip[0] = pads::strip_id(1, 3);
+  out[m].row[1] = pads::Plays::Off;
+  out[m].row[2] = pads::Plays::Mouth;
+  out[kModeCount - 1].row[0] = pads::Plays::Strip;
+  out[kModeCount - 1].strip[0] = pads::strip_id(2, 0);
+  out[kModeCount - 1].row[1] = pads::Plays::Strip;
+  out[kModeCount - 1].strip[1] = pads::strip_id(2, 1);
+  out[kModeCount - 1].row[2] = pads::Plays::Strip;
+  out[kModeCount - 1].strip[2] = pads::strip_id(4, 2);
+}
+}  // namespace
+
+TEST_CASE("project: TP1 the five layouts round-trip through PADS, strip ids included, and STAT keeps the BANDS layout for an older reader") {
+  Project p = stat_base();
+  pads::Layout l[kModeCount];
+  pads_layouts(1, l);
+  l[0].row[0] = pads::Plays::Power;
+  l[0].row[1] = pads::Plays::Strip;
+  l[0].strip[1] = pads::strip_id(1, 5);
+  set_project_pads(p, l);
+  const Bytes b = write(p);
+  REQUIRE(!b.empty());
+  Project q = {};
+  REQUIRE(read(b, q));
+  CHECK(q.pads == 1);
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    const pads::Layout got = project_pads_layout(q, m);
+    for (unsigned r = 0; r < pads::kRows; ++r) {
+      CHECK(got.row[r] == l[m].row[r]);
+      if (l[m].row[r] == pads::Plays::Strip) {
+        CHECK(got.strip[r] == l[m].strip[r]);
+      }
+    }
+  }
+  CHECK(write(q) == b);
+  // STAT: the BANDS layout, a strip row as the row's default
+  const pads::Layout st = project_layout(q);
+  CHECK(st.row[0] == pads::Plays::Power);
+  CHECK(st.row[1] == pads::Layout{}.row[1]);
+  CHECK(st.row[2] == pads::Layout{}.row[2]);
+  // A file without PADS (an older image's, or one that never set it) loads with pads 0
+  Project old = {};
+  REQUIRE(read(rebuild(b, Edit{"PADS", nullptr, {}, false}), old));
+  CHECK(old.pads == 0);
+  CHECK(project_layout(old).row[0] == pads::Plays::Power);
+}
+
+TEST_CASE("project: TP1 a damaged PADS refuses the file, an unknown chunk beside it is skipped, a write of a bad layout is refused") {
+  Project p = stat_base();
+  pads::Layout l[kModeCount];
+  pads_layouts(0, l);
+  set_project_pads(p, l);
+  const Bytes f = write(p);
+  REQUIRE(!f.empty());
+  Bytes pd;
+  {
+    chunk::Reader r;
+    REQUIRE(r.open(f.data(), f.size(), "VOCP") == chunk::Error::None);
+    chunk::Chunk c{};
+    while (r.next(c)) {
+      if (std::memcmp(c.id, "PADS", 4) == 0) {
+        pd.assign(c.data, c.data + c.size);
+      }
+    }
+  }
+  REQUIRE(pd.size() == 2 + 1 + kModeCount * pads::kRows * 3);
+  const auto bad = [&](const char* what, unsigned at, unsigned value) {
+    Bytes b = pd;
+    b[at] = static_cast<std::uint8_t>(value);
+    Project into = full();
+    const Project sentinel = into;
+    INFO(what);
+    CHECK(!read(rebuild(f, Edit{nullptr, "PADS", b, false}), into));
+    CHECK(same(into, sentinel));
+  };
+  bad("count 4", 2, 4);
+  bad("count 6", 2, 6);
+  bad("a retired piano byte", 3, 6);
+  bad("a byte past 14", 3, 15);
+  bad("row A FORMANT is C only", 3, static_cast<unsigned>(pads::Plays::Formant));
+  // a newer major is refused, an unknown strip id loads (the screen drops it)
+  Bytes major = pd;
+  major[0] = 2;
+  Project into = {};
+  CHECK(!read(rebuild(f, Edit{nullptr, "PADS", major, false}), into));
+  Bytes unknown = pd;  // mode 0 row A is a STRIP: give it an id this build does not know
+  unknown[6] = 0x7F;
+  unknown[7] = 0x7F;
+  Project u = {};
+  CHECK(read(rebuild(f, Edit{nullptr, "PADS", unknown, false}), u));
+  CHECK(u.pads == 1);
+  CHECK(u.pad_strip[0][0] == 0x7F7F);
+  // At write: a bad row, or a STRIP row without an id, is refused
+  alignas(4) std::array<std::uint8_t, kProjectFileMax> buf = {};
+  Project w = p;
+  w.pad_row[1][0] = 15;
+  CHECK(write_project(w, buf.data(), buf.size()) == 0u);
+  w = p;
+  w.pad_strip[0][0] = 0;
+  CHECK(write_project(w, buf.data(), buf.size()) == 0u);
+  w = p;
+  w.pads = 2;
+  CHECK(write_project(w, buf.data(), buf.size()) == 0u);
+}
+
+TEST_CASE("project: TP1 the file with the worst case of every chunk, PADS included, still fits kProjectFileMax and a zero Project has no PADS") {
+  const Project z = {};
+  CHECK(z.pads == 0);
+  const Bytes f = write(full());
+  CHECK(f.size() <= kProjectFileMax);
 }
 
 TEST_CASE("project: P3 a file without STAT keeps the header's rule, the 1.1 fields are not read") {

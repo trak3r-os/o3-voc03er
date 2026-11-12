@@ -15,7 +15,9 @@
 namespace o3_voc03er::pads {
 
 // What a row plays. The numbers are saved in the project: append, never renumber. 0..4 are the step's stored kind (0 a note, 1..4 the ChordKind + 1);
-// 6..10 are the same on the piano, kind = value - 6; 11 FORMANT, 12 BEND and 13 MOUTH (V2: the tract's vowels and closures, TRACT mode) are row C's.
+// 6..10 were the piano values (removed, NP1): never reused, and a file that holds one loads it as the plain value of the same kind (plays_from_saved);
+// 11 FORMANT, 12 BEND and 13 MOUTH (V2: the tract's vowels and closures, TRACT mode) are row C's; 14 STRIP (TP1) is any row's: the row's `strip` id
+// names the parameter its twelve pads set.
 enum class Plays : std::uint8_t {
   Note = 0,
   Triad = 1,
@@ -23,21 +25,20 @@ enum class Plays : std::uint8_t {
   Open = 3,
   Power = 4,
   Off = 5,
-  PianoNote = 6,
-  PianoTriad = 7,
-  PianoSeventh = 8,
-  PianoOpen = 9,
-  PianoPower = 10,
   Formant = 11,
   Bend = 12,
   Mouth = 13,
+  Strip = 14,
 };
-inline constexpr unsigned kPlaysCount = 14;
-inline constexpr const char* kPlaysNames[kPlaysCount] = {"NOTE",        "TRIAD",       "7TH",         "OPEN",       "POWER",   "OFF", "PIANO NOTE",
-                                                         "PIANO TRIAD", "PIANO 7TH",   "PIANO OPEN",  "PIANO POWER", "FORMANT", "BEND", "MOUTH"};
+inline constexpr unsigned kPlaysCount = 15;
+inline constexpr const char* kPlaysNames[kPlaysCount] = {"NOTE", "TRIAD", "7TH", "OPEN", "POWER", "OFF", "", "", "", "", "", "FORMANT", "BEND", "MOUTH", "PARAM"};
 // The same for a soft key's value (the Data face holds about eight characters in a 100 px key).
-inline constexpr const char* kPlaysShort[kPlaysCount] = {"NOTE",     "TRIAD",   "7TH",     "OPEN",    "POWER",   "OFF",  "PNO NOTE",
-                                                         "PNO TRI",  "PNO 7TH", "PNO OPEN", "PNO PWR", "FORMANT", "BEND", "MOUTH"};
+inline constexpr const char* kPlaysShort[kPlaysCount] = {"NOTE", "TRIAD", "7TH", "OPEN", "POWER", "OFF", "", "", "", "", "", "FORMANT", "BEND", "MOUTH", "PARAM"};
+
+// A saved byte as a value. 6..10 are the retired piano values and read as the plain value of the same kind (PIANO 7TH is 7TH); a byte that is no
+// value at all (above 14) is not valid (valid_saved).
+constexpr bool valid_saved(std::uint8_t v) noexcept { return v <= 14u; }
+constexpr Plays plays_from_saved(std::uint8_t v) noexcept { return static_cast<Plays>(v >= 6u && v <= 10u ? v - 6u : v); }
 
 // Row A is the top of the three, C the bottom (the lowest, the one that plays at the pad's own octave).
 enum class Row : std::uint8_t { A, B, C };
@@ -47,37 +48,35 @@ inline constexpr const char* kRowNames[kRows] = {"A", "B", "C"};
 constexpr unsigned idx(Row r) noexcept { return static_cast<unsigned>(r); }
 constexpr unsigned idx(Plays p) noexcept { return static_cast<unsigned>(p); }
 
-// `last` holds the grid values of A and B while they are joined into a piano, for the split.
+// A strip's stable id (TP1): (tag << 8) | the parameter id of its owner, tag 1 the vocoder unit, 2 the tract unit, 3 the app's own values; 0 is none.
+// It is what the project saves (never a list position), so the parameter tables may grow. strip_logic.h holds the table.
+inline constexpr std::uint16_t kNoStrip = 0;
+constexpr std::uint16_t strip_id(unsigned tag, unsigned param) noexcept { return static_cast<std::uint16_t>((tag << 8) | (param & 0xFFu)); }
+
+// `strip[r]` is meaningful only while `row[r]` is STRIP. No other state: one layout is three values and three ids.
 struct Layout {
   Plays row[kRows] = {Plays::Note, Plays::Triad, Plays::Formant};
-  Plays last[2] = {Plays::Note, Plays::Triad};
+  std::uint16_t strip[kRows] = {kNoStrip, kNoStrip, kNoStrip};
 };
 
-constexpr bool is_piano_value(Plays p) noexcept { return p >= Plays::PianoNote && p <= Plays::PianoPower; }
-// A value that sounds from its pads (a note, a chord or a piano key): not OFF, FORMANT, BEND or MOUTH.
-constexpr bool plays_notes(Plays p) noexcept { return p <= Plays::Power || is_piano_value(p); }
-constexpr bool is_piano(const Layout& l) noexcept { return is_piano_value(l.row[idx(Row::A)]) && is_piano_value(l.row[idx(Row::B)]); }
+// A value that sounds from its pads (a note or a chord): not OFF, FORMANT, BEND, MOUTH or a parameter strip.
+constexpr bool plays_notes(Plays p) noexcept { return p <= Plays::Power; }
 
-// Every row offers NOTE..OFF; A and B also the piano values; only C FORMANT, BEND and MOUTH.
+// Every row offers NOTE..OFF and STRIP; only C FORMANT, BEND and MOUTH.
 constexpr bool offered(Row r, Plays p) noexcept {
-  if (p <= Plays::Off) {
+  if (p <= Plays::Off || p == Plays::Strip) {
     return true;
-  }
-  if (is_piano_value(p)) {
-    return r != Row::C;
   }
   return (p == Plays::Formant || p == Plays::Bend || p == Plays::Mouth) && r == Row::C;
 }
 
-// The order PLAYS steps through, per row.
-inline constexpr Plays kOrderAB[11] = {Plays::Note,       Plays::Triad,      Plays::Seventh,     Plays::Open,       Plays::Power,    Plays::PianoNote,
-                                       Plays::PianoTriad, Plays::PianoSeventh, Plays::PianoOpen, Plays::PianoPower, Plays::Off};
-inline constexpr Plays kOrderC[9] = {Plays::Note,    Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power,
-                                    Plays::Formant, Plays::Bend,  Plays::Mouth,   Plays::Off};
+// The notes PLAYS steps through, per row (the parameter strips follow them in strip_logic.h's entry list).
+inline constexpr Plays kOrderAB[6] = {Plays::Note, Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power, Plays::Off};
+inline constexpr Plays kOrderC[9] = {Plays::Note, Plays::Triad, Plays::Seventh, Plays::Open, Plays::Power, Plays::Formant, Plays::Bend, Plays::Mouth, Plays::Off};
 
 constexpr const Plays* order_of(Row r) noexcept { return r == Row::C ? kOrderC : kOrderAB; }
-constexpr unsigned order_count(Row r) noexcept { return r == Row::C ? 9u : 11u; }
-// The place of `p` in the row's order; a value the row does not offer is taken as the first (NOTE).
+constexpr unsigned order_count(Row r) noexcept { return r == Row::C ? 9u : 6u; }
+// The place of `p` in the row's order; a value the row does not offer there (a STRIP too) is taken as the first (NOTE).
 constexpr unsigned order_index(Row r, Plays p) noexcept {
   const Plays* o = order_of(r);
   for (unsigned i = 0; i < order_count(r); ++i) {
@@ -98,40 +97,32 @@ constexpr Plays plays_step(Row r, Plays cur, int delta) noexcept {
 // A tap: the next one, wrapping to the first after the last.
 constexpr Plays plays_tap(Row r, Plays cur) noexcept { return order_of(r)[(order_index(r, cur) + 1u) % order_count(r)]; }
 
-// Sets a row's value. A piano value on A or B joins them (both take it; the grid values they had are kept in `last`), a grid value on A or B
-// while they are joined splits them (the other row gets its `last` value back). False, and nothing changed, when the row does not offer it.
+// Sets a row's value (a note kind, OFF, FORMANT, BEND or MOUTH) and drops its strip. False, and nothing changed, when the row does not offer it.
+// A STRIP goes through set_strip.
 constexpr bool set_plays(Layout& l, Row r, Plays p) noexcept {
-  if (!offered(r, p)) {
+  if (!offered(r, p) || p == Plays::Strip) {
     return false;
   }
-  const unsigned a = idx(Row::A);
-  const unsigned b = idx(Row::B);
-  if (is_piano_value(p)) {  // only A and B offer it
-    if (!is_piano(l)) {
-      l.last[0] = l.row[a];
-      l.last[1] = l.row[b];
-    }
-    l.row[a] = p;
-    l.row[b] = p;
-  } else if (r != Row::C && is_piano(l)) {
-    const unsigned other = r == Row::A ? b : a;
-    l.row[idx(r)] = p;
-    l.row[other] = l.last[other];
-  } else {
-    l.row[idx(r)] = p;
+  l.row[idx(r)] = p;
+  l.strip[idx(r)] = kNoStrip;
+  return true;
+}
+// Makes the row a parameter strip of `id` (not none).
+constexpr bool set_strip(Layout& l, Row r, std::uint16_t id) noexcept {
+  if (id == kNoStrip) {
+    return false;
   }
+  l.row[idx(r)] = Plays::Strip;
+  l.strip[idx(r)] = id;
   return true;
 }
 
-// The octaves above the base a row plays: one above each playing row below it (C is the lowest, then B, then A), the joined piano counting as
-// one row and both its halves reporting its octave. Defined on the layout, so a pad gives the same note on every screen.
+// The octaves above the base a row plays: one above each playing row below it (C is the lowest, then B, then A). Defined on the layout, so a pad gives
+// the same note on every screen.
 constexpr int row_octave(const Layout& l, Row r) noexcept {
   const int c = plays_notes(l.row[idx(Row::C)]) ? 1 : 0;
   if (r == Row::C) {
     return 0;
-  }
-  if (is_piano(l)) {
-    return c;
   }
   if (r == Row::B) {
     return c;
@@ -139,11 +130,7 @@ constexpr int row_octave(const Layout& l, Row r) noexcept {
   return c + (plays_notes(l.row[idx(Row::B)]) ? 1 : 0);
 }
 
-// The piano's keys, by column, in semitones above the C of the octave: B holds the white keys, A the black ones (-1: no key).
-inline constexpr int kWhiteOffset[12] = {0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19};     // C D E F G A B C D E F G
-inline constexpr int kBlackOffset[12] = {-1, 1, 3, -1, 6, 8, 10, -1, 13, 15, -1, 18};  // C# D# . F# G# A# . C# D# . F#; -1 no key
-
-// What a pad plays: `note` 1..127 (0 is a rest in a step, so never returned; -1 plays nothing: OFF, FORMANT, BEND, MOUTH, a piano gap, a note out of
+// What a pad plays: `note` 1..127 (0 is a rest in a step, so never returned; -1 plays nothing: OFF, FORMANT, BEND, MOUTH, a strip, a note out of
 // range) and the step's stored `kind` (0 a note, 1..4 the ChordKind + 1).
 struct PadPlay {
   int note = -1;
@@ -157,18 +144,8 @@ constexpr PadPlay pad_play(const Layout& l, Row r, unsigned col, int octave) noe
   if (col >= 12u || !plays_notes(p)) {
     return out;
   }
-  int offset = static_cast<int>(col);
-  unsigned kind = idx(p);
-  if (is_piano_value(p)) {
-    if (r == Row::C) {
-      return out;
-    }
-    offset = r == Row::B ? kWhiteOffset[col] : kBlackOffset[col];
-    if (offset < 0) {
-      return out;
-    }
-    kind -= idx(Plays::PianoNote);
-  }
+  const int offset = static_cast<int>(col);
+  const unsigned kind = idx(p);
   const int note = kChordBaseNote + 12 * (octave + row_octave(l, r)) + offset;
   if (note < 1 || note > 127) {
     return out;
@@ -180,14 +157,14 @@ constexpr PadPlay pad_play(const Layout& l, Row r, unsigned col, int octave) noe
 
 constexpr Plays plays_of_kind(ChordKind k) noexcept { return static_cast<Plays>(static_cast<unsigned>(k) + 1u); }
 
-// The layout an older file's settings meant (Q8): PADS = KEYS is a piano on A and B with the formant strip (BEND with BEND ROW) on C; PADS = CHORDS
+// The layout an older file's settings meant (Q8): PADS = KEYS is two note rows A and B (the piano is gone, NP1) with the formant strip (BEND with BEND ROW) on C; PADS = CHORDS
 // gave PERFORM's rows 1, 2 and 3 the kinds kind_for_row chose: C `bottom` and the next kinds above, or, with BEND ROW (the strip on row 3), B
 // `bottom`, A the next and C BEND.
 constexpr Layout layout_from_legacy(bool keys, ChordKind bottom, bool bend_row) noexcept {
   Layout l;
   if (keys) {
-    l.row[idx(Row::A)] = Plays::PianoNote;
-    l.row[idx(Row::B)] = Plays::PianoNote;
+    l.row[idx(Row::A)] = Plays::Note;
+    l.row[idx(Row::B)] = Plays::Note;
     l.row[idx(Row::C)] = bend_row ? Plays::Bend : Plays::Formant;
     return l;
   }
@@ -201,8 +178,8 @@ constexpr Layout layout_from_legacy(bool keys, ChordKind bottom, bool bend_row) 
 // The chosen row's LEDs go dark this long when F6 changes the row, a short off-on (PATTERN and PERFORM).
 inline constexpr std::uint64_t kRowFlashMs = 150;
 
-// The settings of the 1.0 STAT that a 1.1 file still carries, derived from the layout on save so an older reader finds something sensible: `keys` 1
-// for a piano, `chord` the ChordKind of the lowest chord row (C, then B, then A; a piano chord counts; none gives 0), `bend_row` 1 when C is BEND.
+// The settings of the 1.0 STAT that a 1.1 file still carries, derived from the layout on save so an older reader finds something sensible: `keys` always 0 (no piano
+// now), `chord` the ChordKind of the lowest chord row (C, then B, then A; none gives 0), `bend_row` 1 when C is BEND.
 // A 1.1 file loads through the layout alone; these three are ignored there.
 struct LegacyFields {
   std::uint8_t keys = 0;
@@ -211,16 +188,11 @@ struct LegacyFields {
 };
 constexpr LegacyFields legacy_fields(const Layout& l) noexcept {
   LegacyFields f;
-  f.keys = is_piano(l) ? 1u : 0u;
   f.bend_row = l.row[idx(Row::C)] == Plays::Bend ? 1u : 0u;
   for (unsigned r = kRows; r-- > 0;) {  // C first, then B, then A
     const Plays p = l.row[r];
     if (p >= Plays::Triad && p <= Plays::Power) {
       f.chord = static_cast<std::uint8_t>(idx(p) - idx(Plays::Triad));
-      break;
-    }
-    if (p >= Plays::PianoTriad && p <= Plays::PianoPower) {
-      f.chord = static_cast<std::uint8_t>(idx(p) - idx(Plays::PianoTriad));
       break;
     }
   }

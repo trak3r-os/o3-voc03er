@@ -99,13 +99,11 @@ TEST_CASE("pattern: the palette plays what the layout says, row 0 is A and row 1
   CHECK(pt::palette_play(b_pad, 0, def).note == 48 + 3);
   CHECK(pt::palette_play(b_pad, 0, def).kind == 1);
   CHECK(pt::palette_play(b_pad, 2, def).note == 48 + 24 + 3);
-  // A piano: B the white keys, A the black ones, one gap in the black row.
-  pd::Layout piano;
-  pd::set_plays(piano, pd::Row::A, pd::Plays::PianoSeventh);
-  CHECK(pt::palette_play(o3sdk::app::pad_at(1, 2), 0, piano).note == 48 + 4);
-  CHECK(pt::palette_play(o3sdk::app::pad_at(1, 2), 0, piano).kind == 2);
-  CHECK(pt::palette_play(o3sdk::app::pad_at(0, 1), 0, piano).note == 48 + 1);
-  CHECK(pt::palette_play(o3sdk::app::pad_at(0, 0), 0, piano).note == -1);
+  // A parameter strip row plays nothing and writes nothing, and the rows left alone keep their octave (a strip gives none).
+  pd::Layout strip;
+  pd::set_strip(strip, pd::Row::A, pd::strip_id(2, 0));
+  CHECK(pt::palette_play(a_pad, 0, strip).note == -1);
+  CHECK(pt::palette_play(b_pad, 0, strip).note == 48 + 3);
   // OFF plays nothing.
   pd::Layout off;
   pd::set_plays(off, pd::Row::B, pd::Plays::Off);
@@ -274,7 +272,7 @@ TEST_CASE("pattern: the palette writes the layout: a note on A, a triad on B, th
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("pattern: F6 ROW picks A or B and F7 PLAYS steps that row, 7TH then PIANO NOTE") {
+TEST_CASE("pattern: F6 ROW picks A or B and F7 PLAYS steps that row through the notes and then the mode's parameters") {
   Rig rig;
   tap(*rig.h, app::Button::F6);  // focus ROW
   tap(*rig.h, app::Button::F6);  // a second tap: B
@@ -292,46 +290,44 @@ TEST_CASE("pattern: F6 ROW picks A or B and F7 PLAYS steps that row, 7TH then PI
   pad(*rig.h, step_pad(1));
   CHECK(rig.led(3) == app::kLedMid);
   CHECK(rig.led(15) != app::kLedMid);  // B plays 7TH: the step's kind 1 is not its pad's
-  // The encoder on PLAYS steps and stops at the ends: OFF at the top, NOTE at the bottom.
+  // The encoder on PLAYS steps and stops at the ends: the last parameter strip at the top (it writes nothing here, so the row is dark), NOTE at the bottom.
   rig.h->turn(30);
   rig.h->run_ms(60);
-  CHECK(rig.count(0, 11, app::kLedOff) == 12u);  // A plays OFF: its row is dark
+  CHECK(rig.count(0, 11, app::kLedOff) == 12u);  // A plays a strip: its row is dark
   tap(*rig.h, app::Button::F6);
   tap(*rig.h, app::Button::F6);  // ROW to B
   rig.h->turn(30);
   rig.h->run_ms(60);
-  CHECK(rig.count(12, 23, app::kLedOff) == 12u);  // B plays OFF too
+  CHECK(rig.count(12, 23, app::kLedOff) == 12u);  // B plays a strip too
   rig.h->turn(-30);
   rig.h->run_ms(60);
   CHECK(rig.count(12, 23, app::kLedOff) < 12u);  // and NOTE at the bottom: lit again
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("pattern: a piano on A and B writes its keys, a gap or an OFF row writes nothing") {
+TEST_CASE("pattern: a parameter strip or an OFF row writes nothing and its pads are dark") {
   Rig rig;
   tap(*rig.h, app::Button::F6);
   tap(*rig.h, app::Button::F6);  // ROW B
   tap(*rig.h, app::Button::F7);  // focus PLAYS
-  for (unsigned i = 0; i < 6; ++i) {
-    tap(*rig.h, app::Button::F7);  // TRIAD, 7TH, OPEN, POWER, PIANO NOTE, PIANO TRI
-  }
-  rig.h->turn(-1);  // PIANO NOTE
+  rig.h->turn(30);               // B to the last parameter strip
   rig.h->run_ms(60);
+  CHECK(rig.count(12, 23, app::kLedOff) == 12u);
   CHECK(rig.led(24) == app::kLedMid);
-  pad(*rig.h, 0);  // A's first pad is a gap between black keys: nothing written, the cursor stays
+  pad(*rig.h, 14);  // a strip row's pad writes nothing: the cursor stays on step 1
   CHECK(rig.led(24) == app::kLedMid);
   CHECK(rig.led(25) == app::kLedOff);
-  pad(*rig.h, 14);  // B: a white key (E), step 1
-  pad(*rig.h, 1);   // A: a black key (C#), step 2
-  CHECK(rig.led(25) == app::kLedDim);
+  pad(*rig.h, 3);  // A is still NOTE: it writes step 1 and the cursor moves on
   pad(*rig.h, step_pad(0));
-  CHECK(rig.led(14) == app::kLedMid);
-  CHECK(rig.led(1) != app::kLedMid);
-  pad(*rig.h, step_pad(1));
-  CHECK(rig.led(1) == app::kLedMid);
-  // B to OFF: its pads are dark and write nothing.
-  rig.h->turn(30);
+  CHECK(rig.led(3) == app::kLedMid);
+  // B to OFF (the sixth entry): the same, dark and silent.
+  rig.h->turn(-30);
   rig.h->run_ms(60);
+  for (unsigned i = 0; i < 5; ++i) {
+    rig.h->turn(1);
+  }
+  rig.h->run_ms(60);
+  CHECK(rig.count(12, 23, app::kLedOff) == 12u);
   pad(*rig.h, step_pad(5));
   pad(*rig.h, 14);
   CHECK(rig.led(step_pad(5)) == app::kLedMid);
@@ -747,6 +743,8 @@ TEST_CASE("pattern: FX goes SLICE, MOUTH, SLICE; F2 taps through the five lanes"
   }
   CHECK(rig.count(0, 23, app::kLedOff) == 3u);
   tap(*rig.h, app::Button::F2);  // wraps to NOTE
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // TRACT's own layout is parameter strips (A VOWEL, B TONGUE): they write no notes, so the palette is dark
+  set_mode(*rig.h, 0.0f);  // BANDS has its own layout (A NOTE, B TRIAD): the palette is lit
   CHECK(rig.count(0, 23, app::kLedOff) < 24u);
   CHECK(rig.count(0, 23, app::kLedOff) != 3u);
   CHECK(rig.h->runtime().frame_failures() == 0u);

@@ -297,7 +297,7 @@ void FileScreen::capture(app::Context& ctx) noexcept {
   p.pattern = static_cast<std::uint8_t>(pattern_->shown() & 7u);
   p.octave = static_cast<std::int8_t>(perform_->octave());
   // The three 1.0 fields (chord kind, pads mode, bend row) are derived from the layout, which is what a 1.1 file loads through.
-  const pads::LegacyFields lf = pads::legacy_fields(perform_->layout());
+  const pads::LegacyFields lf = pads::legacy_fields(perform_->layouts()[0]);
   p.chord = lf.chord;
   p.keys = lf.keys;
   p.voicing = static_cast<std::uint8_t>(perform_->voicing());
@@ -305,7 +305,7 @@ void FileScreen::capture(app::Context& ctx) noexcept {
   p.bend_range = static_cast<std::uint8_t>(perform_->bend_range());
   p.follow = pattern_->follow() ? 1u : 0u;
   set_project_preset(p, perform_->preset());
-  set_project_layout(p, perform_->layout());
+  set_project_pads(p, perform_->layouts());
   for (unsigned s = 0; s < route::kSlots; ++s) {
     const sample::SliceTable& t2 = sample_->table(s);
     const std::uint32_t len = t2.length != 0u ? t2.length : sample_->status(s).length;
@@ -557,7 +557,9 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
     pattern_->set_follow(g_proj.follow != 0u);
     const int preset = project_preset_index(g_proj);
     perform_->set_preset(preset < 0 ? perform::kNoPreset : static_cast<unsigned>(preset));
-    perform_->set_layout(project_layout(g_proj));
+    pads::Layout lay[kModeCount];
+    fl::project_layouts(g_proj, lay);  // an older file's one layout serves every mode but TRACT
+    perform_->set_layouts(lay);
   }
   for (unsigned s = 0; s < route::kSlots; ++s) {  // TRIG and CHOKE ride with every record, audio or not (a record without them is ONE SHOT, CHOKE ON)
     sample_->set_gate(s, g_proj.slot[s].gate != 0u);

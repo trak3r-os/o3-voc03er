@@ -1,5 +1,5 @@
 # PATTERN (U6b, Q2): a pattern built by hand with the pads (notes, carriers, levels, a rest), the NOTE palette set with F6 ROW and F7 PLAYS (B to 7TH,
-# then a piano), the SHIFT row (CLR LANE, FOLLOW), played with FOLLOW, then pattern B and a rest, F2 LANE and F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
+# then POWER), the SHIFT row (CLR LANE, FOLLOW), played with FOLLOW, then pattern B and a rest, F2 LANE and F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -57,12 +57,11 @@ wait 40
 padup 14
 wait 40
 snap 02e_b_7th_written
-# F7 on to PIANO NOTE: B holds the white keys, A the black ones
-tap f7
+# F7 on to POWER (two steps on from 7TH)
 tap f7
 tap f7
 wait 100
-snap 02f_piano
+snap 02f_power
 paddown 1
 wait 40
 padup 1
@@ -159,7 +158,7 @@ wait 100
 tap f1
 wait 100
 snap 10c_cleared
-# COPY, INSERT and DELETE (Fable's finding 5): two piano keys, step 1 copied and inserted at step 1, step 2 emptied, then SHIFT + DELETE asks and F1 empties
+# COPY, INSERT and DELETE (Fable's finding 5): two notes, step 1 copied and inserted at step 1, step 2 emptied, then SHIFT + DELETE asks and F1 empties
 tap note
 paddown 24
 wait 40

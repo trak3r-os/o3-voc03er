@@ -1,0 +1,44 @@
+# The arrow keys on PERFORM (AK1): LEFT and RIGHT step the focused F value like one encoder detent (F6 ROW has the focus at start), UP and DOWN do the same; the octave
+# moved to SHIFT + F7 (a focused value, range -3 to 2, the OCT- and OCT+ pads still step it). The WAV carries a note at the shifted octave. F1 MODE ignores the arrows (the encoder or a tap of F1 changes it).
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/arrows.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+snap 01_start_row_focused
+tap right
+wait 300
+snap 02_right_row_b
+tap left
+wait 300
+snap 03_left_row_a
+tap f4
+tap down
+tap down
+wait 200
+snap 04_key_by_arrows
+tap up
+wait 200
+snap 05_up_one_back
+press shift
+tap f7
+release shift
+wait 200
+snap 06_shift_f7_octave_focused
+tap right
+tap right
+wait 200
+snap 07_octave_plus_two
+pad 12 300
+wait 400
+turn -5
+wait 200
+snap 08_octave_by_encoder_minus_three
+pad 12 300
+wait 300
+tap f1
+tap right
+tap up
+wait 200
+snap 09_arrows_leave_mode_alone
+record off
+wav arrows

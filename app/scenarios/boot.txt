@@ -17,7 +17,10 @@ turn 20
 snap 03_decay
 tap f3
 turn -10
-tap left
+press shift
+tap f7
+release shift
+turn -1
 pad 37 200
 wait 300
 snap 04_octave_down

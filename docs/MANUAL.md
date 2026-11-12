@@ -128,7 +128,7 @@ now.
 | F4 KEY | The root of the key. Chords and pitch correction share it |
 | F5 SCALE | The scale: the chords and TUNE stay in it |
 | F6 ROW | Which pad row F7 sets: A, B or C. A tap steps and wraps; the encoder stops at the ends. The row's pads flash once |
-| F7 PLAYS | What the chosen row plays (below). Hold a pad of A, B or C and F7 changes that pad's row at once |
+| F7 PLAYS | What the chosen row plays: notes, chords or a parameter strip (below). Hold a pad of A, B or C and F7 changes that pad's row at once |
 | F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL |
 | SHIFT + F1 | FREEZE the vowel |
 | SHIFT + F2 | GATE: chops the sound in time (OFF, 1/4, 1/8, 1/16, 1/32) |
@@ -136,7 +136,7 @@ now.
 | SHIFT + F4 | GLIDE: slides between notes |
 | SHIFT + F5 | FORMANT: moves the voice's colour up or down, as if the singer were smaller or bigger |
 | SHIFT + F6 | THRU: lets some of the voice's top through |
-| SHIFT + F7 | Empty |
+| SHIFT + F7 | OCTAVE: the octave of the pads, -3 to +2 (the same value the OCT- and OCT+ pads step) |
 | SHIFT + F8 | PRESET: eight factory sounds |
 
 ![PERFORM in TALK mode with a chord held](manual/img/perform-talk.png)
@@ -149,31 +149,49 @@ BND- and BND+ (bend while held). Below it are three rows, A, B and C from the to
 the key and scale of F4 and F5. Each row has a PLAYS value. F6 ROW chooses the row (the row's pads flash once) and F7 PLAYS chooses what it
 plays, in this order:
 
-- **Rows A and B:** NOTE, TRIAD, 7TH, OPEN, POWER, PIANO NOTE, PIANO TRIAD, PIANO 7TH, PIANO OPEN, PIANO POWER, OFF.
-- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF.
+- **Rows A and B:** NOTE, TRIAD, 7TH, OPEN, POWER, OFF, then the parameter strips of the current mode (below).
+- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF, then the parameter strips.
 
-A tap on F7 steps on and wraps round; the encoder stops at the ends.
+A tap on F7 steps on and wraps round; the encoder stops at the ends, and SHIFT with the encoder jumps from one group of the list to the next
+(NOTES, CARRIER, SHAPE, TUNE, TRACT, PLAY; the screen names the group). The row's name sits beside it on the screen: a note value shows its
+kind, a strip shows the parameter's name.
 
 - NOTE: one note per pad. TRIAD, 7TH (the seventh chord), OPEN (root, fifth, ninth: open and airy) and POWER (root, fifth, octave: the
   classic robot fifth): a chord per pad, the one the scale gives on that root.
-- The PIANO values (rows A and B only): a piano. A is the black keys and B the white keys, each key a note or a chord of the kind named;
-  choosing a piano value on either row sets both, and choosing a plain value on one of them splits the piano again.
+- **A parameter strip** (any row): the twelve pads of the row are one parameter of the current mode, the same value PARAMS shows. A press sets
+  the value and it stays when you let go; PARAMS shows it and the project saves it, as a turn of the encoder would. Pad 1 is the lowest value
+  and pad 12 the highest; a value that crosses zero (TILT, TONGUE, JAW, LIPS) has the middle pair both at 0. A parameter with twelve choices or
+  fewer gets one pad per choice (the rest dark); one with more spreads the twelve pads over the choices. The nearest pad to the current value is
+  the brighter one. A strip row plays no notes, like MOUTH, so the rows above keep the octave to themselves.
+  - BANDS, TALK and ROBOT offer SHAPE, SPREAD, SUB, TILT, NOISE, ATTACK, RELEASE, DRY, VOICING, KEY, SCALE, THRU, GLIDE, GATE and ARP; TALK also
+    FREEZE. TUNE offers DRY, VOICING, KEY, SCALE, SPEED, AMOUNT, NOTES IN, GLIDE, GATE and ARP.
+  - TRACT offers DRY, VOICING, KEY, SCALE, GLIDE, GATE, ARP, the mouth's VOWEL, TONGUE, JAW, LIPS, T GLIDE, SIZE, RES, HISS, ACCENT and SOURCE,
+    and the three closures CL LIPS, CL TIP and CL BACK (the whole row is that closure: held while a pad is down, open again on let-go, the
+    last pad pressed wins), besides the MOUTH value.
+  - Left out, because a wrong pad would do harm or another control owns it: MODE, QUALITY (a cost and a reallocation), LEVEL (the VOL pads), VIB (the
+    MOD pad), BEND and FORMANT (their own values), the carrier and modulator sources and the live channel (SOUNDS, SPEAKS and SAMPLE), TRACT's CLOSE
+    as a number (the closure strips), SLIDE and MIX (written by the word line and the mode change).
 - FORMANT and BEND (row C only): FORMANT is a strip of semitones: a tap sets the formant and nothing is held. BEND is the pitch-bend strip:
   the middle pair is zero, each pad outwards is a semitone, and it springs back when you let go.
 - MOUTH (row C only): the mouth strip of TRACT (section 5b). In the other modes the row is dark and the screen says MOUTH SPEAKS IN TRACT.
 - OFF: the row is dark and silent.
 
-The default is A NOTE, B TRIAD and C FORMANT. **Each row that plays notes sits one octave above the playing rows under it**, so a note on row
-B is one octave over the same pad on row C, and a joined piano counts as one row. LEFT and RIGHT move the octave of all of them. VOICING SMOOTH
-keeps to the pad's own octave: a progression along a row still moves smoothly, and a row higher sounds higher.
+**Each mode keeps its own three rows.** Switching mode with F1 shows that mode's layout and keeps the edits of every other. The default is A NOTE,
+B TRIAD and C FORMANT in BANDS, TALK, TUNE and ROBOT, and A VOWEL, B TONGUE and C CL TIP in TRACT. A strip of a parameter another mode uses is
+dark and the screen says where it lives (for example "... IN TRACT").
+
+**Each row that plays notes sits one octave above the playing rows under it**, so a note on row B is one octave over the same pad on row C. The
+OCT- and OCT+ pads and SHIFT + F7 move the octave of all of them. VOICING SMOOTH keeps to the pad's own octave: a progression along a row still
+moves smoothly, and a row higher sounds higher.
+
+**The arrow keys.** LEFT and RIGHT step the value of the F key that has the focus, one click of the encoder each; UP and DOWN do the same (RIGHT and
+UP raise, LEFT and DOWN lower). On PATTERN the arrows keep their own jobs (LEFT and RIGHT the cursor, UP and DOWN the octave); on SAMPLE LEFT and
+RIGHT step the F value and UP and DOWN pick the slot. The arrows leave three values to a tap of their key or the encoder, since a stray press there
+changes the sound's character: F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET.
 
 **The shortcut:** while you hold a pad of A, B or C, F7 changes that pad's row at once, and F6 follows it. SHIFT tapped while a pad is held
-latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it. **The layout is saved with the
-project** (section 9) and F4 NEW puts it back to the default.
-
-![PERFORM with a piano on rows A and B: two keys held, the control row drawn above the piano](manual/img/perform-keys.png)
-
-*A piano on rows A and B with the formant strip on C. The grid above the F keys draws the controls; the pad lights show the held keys.*
+latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it. **The five layouts are saved with the
+project** (section 9) and F4 NEW puts them back to the default. Recording a strip into a PATTERN lane is not built: a strip sets the value live.
 
 **Pitch bend.** The encoder bends the synth once it is free: press PERFORMANCE while on PERFORM to free it, and tap any F key to take it
 back. It springs back to the middle about a tenth of a second after you stop turning. SHIFT makes the steps larger. Set row C to BEND
@@ -294,7 +312,9 @@ into a pattern; it does not give you a voice you can talk through.
 
 **Playing it by hand.** There are three ways, and they all move the same mouth.
 
-- **The strip.** Set row C to MOUTH (F6 until it says C, then F7 until it says MOUTH). Columns 1 to 9 of the row are the vowels A, A-E, E, E-I, I,
+- **The strips.** In TRACT row A starts as a VOWEL strip, B as TONGUE and C as the TIP closure (section 4, PERFORM: every parameter of the mode is
+  a strip, and the layout is kept for TRACT apart from the other modes); change a row with F6 and F7. The MOUTH value below is the old way to
+  put everything on one row. Set row C to MOUTH (F6 until it says C, then F7 until it says MOUTH). Columns 1 to 9 of the row are the vowels A, A-E, E, E-I, I,
   I-O, O, O-U and U: a press sets the vowel and it stays when you let go. Columns 10, 11 and 12 are the closures LIPS, TIP and BACK: the mouth
   shuts while the pad is held and opens when you let go, and if two are held the last pressed wins. The row plays no notes, so the rows above it
   keep the octave to themselves. Outside TRACT the row is dark and the screen says MOUTH SPEAKS IN TRACT.
@@ -426,7 +446,7 @@ bar and throws it away. DELETE with no take running empties the slot.
 *SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom two rows play PERFORM's rows A and B. One slice is sounding.*
 
 The top two pad rows are the slices of the selected slot. The bottom two rows play PERFORM's layout (section 4, PERFORM), row A on the upper one and row B
-on the lower one, at PERFORM's octave (LEFT and RIGHT move it). A pad sounds while it is held, and
+on the lower one, at PERFORM's octave (SHIFT + F3 moves it). A pad sounds while it is held, and
 leaving the screen lets everything go. **Hold a slice and a layout pad together, and the slice sings that note or chord.** There is no latch on
 this screen: the hand holds the pad. Four slices can sound at once.
 
@@ -513,7 +533,7 @@ On the VOL lane a palette pad also sounds the step's note or chord at that level
 fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
 
 On the NOTE lane the palette is PERFORM's rows A and B as they play (the pads layout, section 4, PERFORM; F6 chooses A or B here, F7 what it plays).
-A pad writes what PERFORM would play there: a note, a chord of the row's kind, a piano key, or nothing when the row is OFF. **For a bass line of
+A pad writes what PERFORM would play there: a note, a chord of the row's kind, or nothing when the row is OFF. **For a bass line of
 single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held, and keeps sounding when the pattern plays the same note
 (its gate off, a repeat or Stop does not cut it; needs more testing); SHIFT + a palette pad sounds
 and writes nothing.
@@ -582,12 +602,14 @@ Clock: set FOLLOW in Config, and FOLLOW PORT to the port the clock comes from. U
 
 A project is a folder under `Apps/o3_voc03er/` that holds one project file. It keeps the eight patterns, the song chain, the route, the
 vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, VOICING, the BEND ROW and its range,
-the pads layout (the three rows' plays and the two last-used chord pads), the preset's name, PATTERN's FOLLOW, the MOUTH lane, TRACT's
+the pads layout of each of the five modes (the three rows' plays, a strip being kept by the parameter it sets), the preset's name, PATTERN's FOLLOW, the MOUTH lane, TRACT's
 PARAMS page (section 5b says what is not kept), and each slot's cuts,
 trim, speed, direction, level, TRIG, CHOKE and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
-writes the sounds into the project folder. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
+writes the sounds into the project folder. ACCENT and SOURCE set from a strip are not saved with the project. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
 becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and CHOKE ON. The preset is kept by name: a
-name this build does not know opens as no preset. F4 NEW puts all of these back to their defaults.
+name this build does not know opens as no preset. A project saved before the layouts were per mode opens with its one layout on BANDS, TALK, TUNE
+and ROBOT and the TRACT default (A VOWEL, B TONGUE, C TIP); a saved piano value opens as the plain note, chord or OFF of the same kind. An older
+image that opens a new project reads the BANDS layout and ignores the rest (needs more testing). F4 NEW puts all of these back to their defaults.
 
 ![FILE: the list of projects](manual/img/file.png)
 

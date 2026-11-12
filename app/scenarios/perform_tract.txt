@@ -1,60 +1,79 @@
-# PERFORM in TRACT (V2, docs/TRACT-KNOBS-PLAN.md 4.2 and 4.3, docs/REVIEW-2026-11-11.md section 3): row C set to MOUTH is the mouth strip, VOWEL on columns
-# 0..8 (A to U, the nearest one lit, the five pure vowels dim-bright), LIPS, TIP and BACK closures on 9..11 (held, then back to OPEN), F8 is VOWEL, and the
-# voiceprint draws the mouth's profile (SPEAKS dimmed: no input, the mouth is played). Outside TRACT the MOUTH row is dark (snap 01). A chord is held on
-# row B so the WAV carries a tone through the tube. The simulator shows the screen and that the engine takes the values; the strip by hand and the pop of
-# a closure are for the unit.
+# PERFORM in TRACT (V2, docs/TRACT-KNOBS-PLAN.md 4.2 and 4.3, docs/REVIEW-2026-11-11.md section 3, TP1): TRACT keeps its own layout, A VOWEL, B TONGUE, C TIP
+# (parameter strips, 12 pads over the range). Then B is set to a TRIAD and C to MOUTH: VOWEL on columns 0..8 (A to U, the nearest one lit, the five pure vowels
+# dim-bright), LIPS, TIP and BACK closures on 9..11 (held, then back to OPEN), F8 is VOWEL, and the voiceprint draws the mouth's profile (SPEAKS dimmed: no
+# input, the mouth is played). A chord is held on row B so the WAV carries a tone through the tube. The simulator shows the screen and that the engine takes
+# the values; the strip by hand and the pop of a closure are for the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/perform_tract.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
 record on
-tap f6
-tap f6
-tap f7
-turn 2
-wait 300
-snap 01_mouth_row_dark_in_bands
 tap f1
 turn 8
 wait 600
-snap 02_tract_strip_a
+snap 01_tract_default_strips
+paddown 16
+wait 400
+snap 02_a_vowel_strip_pad_4
+padup 16
+paddown 35
+wait 400
+snap 03_b_tongue_strip_pad_max
+padup 35
+paddown 42
+wait 400
+snap 04_c_tip_strip_pad_6
+padup 42
+tap f6
+tap f6
+tap f7
+turn -80
+turn 1
+wait 100
+tap f6
+tap f6
+tap f7
+turn -80
+turn 7
+wait 400
+snap 05_b_triad_c_mouth
 paddown 26
 wait 600
-snap 03_chord_held
+snap 06_chord_held
 paddown 40
 wait 400
-snap 04_vowel_i_held
+snap 07_vowel_i_held
 padup 40
 wait 400
-snap 05_vowel_stays
+snap 08_vowel_stays
 paddown 45
 wait 300
-snap 06_lips_closure_held
+snap 09_lips_closure_held
 padup 45
 wait 300
 paddown 46
 wait 300
-snap 07_tip_closure_held
+snap 10_tip_closure_held
 paddown 47
 wait 300
-snap 08_back_over_tip
+snap 11_back_over_tip
 padup 47
 wait 200
-snap 09_tip_again
+snap 12_tip_again
 padup 46
 wait 300
-snap 10_open
+snap 13_open
 tap f8
 turn 7
 wait 300
-snap 11_f8_vowel_7
+snap 14_f8_vowel_7
 turn 80
 wait 300
-snap 12_f8_vowel_u
+snap 15_f8_vowel_u
 padup 26
 wait 600
 press shift
 tap config
 release shift
 wait 300
-snap 13_help_in_tract
+snap 16_help_in_tract
 wav perform_tract

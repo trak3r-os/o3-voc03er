@@ -108,12 +108,12 @@ snap 13b_help_note_pads
 tap config
 wait 50
 
-# PERFORM's PADS legend with a piano on A and B (F7 PLAYS to PIANO NOTE): the groups are the controls, A's black keys, B's white keys and C's formant strip;
+# PERFORM's PADS legend with A on the SHAPE strip (F7 PLAYS, the first parameter after the notes): the groups are the controls, A's strip, B's chords and C's formant strip;
 # then with C on BEND (F6 ROW to C, F7 PLAYS one step on).
 tap performance
 wait 50
 tap f7
-turn 5
+turn 6
 wait 50
 press shift
 tap config
@@ -137,11 +137,11 @@ snap 15_perform_keys_bend
 tap f8
 wait 50
 
-# Back to chords with C still on BEND and A on OPEN: the groups are the controls, A OPEN, B TRIAD (the piano split gave it back) and the strip.
+# Back to chords with C still on BEND and A on OPEN: the groups are the controls, A OPEN, B TRIAD and the strip.
 tap f6
 turn -2
 tap f7
-turn -2
+turn -3
 wait 300
 press shift
 tap config

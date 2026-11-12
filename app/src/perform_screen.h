@@ -11,15 +11,18 @@
 //               A dimmed row (a second LIVE source) arms a capture. REC records the live source for two bars into the first empty slot, which then takes
 //               the side that held LIVE (route.h; the capture is a state machine run by update()).
 //   pads          row 0 is KEYS' controls in every layout (OCT, VOL, ROOT, MOD, BND); rows 1, 2 and 3 are the layout's A, B and C (pads_logic.h), each with its PLAYS
-//                 value: a note, a chord kind, a piano (A the black keys, B the white ones), OFF, and on C the FORMANT strip, the BEND strip or the MOUTH strip (TRACT: nine vowel pads and the closures LIPS, TIP, BACK). F6 ROW picks
-//                 A, B or C (a tap steps and wraps, the encoder stops at the ends; the row's LEDs flash once); F7 PLAYS sets that row. Holding a pad of a
+//                 value: a note, a chord kind, OFF, on C the FORMANT strip, the BEND strip or the MOUTH strip (TRACT: nine vowel pads and the closures LIPS, TIP,
+//                 BACK), or a PARAMETER STRIP on any row (strip_logic.h: twelve pads over one parameter's range, or a closure held while pressed). There is one
+//                 layout per mode (BANDS, TALK, TUNE, ROBOT, TRACT), kept when the mode changes and saved in the project. F6 ROW picks
+//                 A, B or C (a tap steps and wraps, the encoder stops at the ends; the row's LEDs flash once); F7 PLAYS sets that row (SHIFT + the encoder jumps
+//                 by group). Holding a pad of a
 //                 row and tapping F7 (or turning) changes THAT row at once, and F6 follows it. A row above plays one octave higher per playing row below it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
 //                 about 120 ms after the last one. A tap on an F key takes the encoder back. MIDI pitch bend adds to it (set_wheel)
-//   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, -, PRESET); SHIFT + F key focuses
+//   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, OCTAVE, PRESET); SHIFT + F key focuses
 //                 its value, shown while it has the focus; a plain F tap goes back (perform_logic.h kShiftKeys)
 //   SHIFT         latches the held pad's note or chord (it keeps sounding); DELETE releases it
-//   LEFT / RIGHT  the octave (they repeat when held)
+//   LEFT / RIGHT  one step down / up of the focused F value (the encoder's detent; they repeat when held); UP / DOWN the same when no list is open
 //   PLAY          the transport (the app's); the other screen buttons open their screen (app.cpp), MODE is F1
 //
 // Everything runs in the main loop (o3-sdk app/screen.h). The tables (labels, the chord of each pad, the peak holds) are one O3SDK_BIG struct
@@ -28,8 +31,10 @@
 #include "pads_logic.h"
 #include "perform_logic.h"
 #include "skin/ornoir.h"
+#include "strip_logic.h"
 
 #include <o3_voc03er/input.h>
+#include <o3_voc03er/modes.h>
 #include <o3_voc03er/pad_map.h>
 #include <o3_voc03er/presets.h>
 #include <o3_voc03er/route.h>
@@ -112,21 +117,41 @@ class PerformScreen final : public o3sdk::app::Screen {
   void set_voicing(unsigned v) noexcept { voicing_ = v > 3u ? 3u : v; }
   // FILE (U9c2) restores these: the octave is clamped as the keys clamp it.
   void set_octave(int o) noexcept { octave_ = clamp_octave(o); }
-  // FILE (P3) restores these too. The layout is taken as it is (the caller has checked it with pads::offered; PERFORM is not on screen, so no pad is
-  // held); the preset is an index of presets.h, anything past the table is none (the window shows ---).
-  void set_layout(const pads::Layout& l) noexcept { layout_ = l; }
+  // FILE (P3) restores these too. The layouts (one per mode) are taken as they are (the caller has checked them with strip::layout_valid; PERFORM is
+  // not on screen, so no pad is held); the preset is an index of presets.h, anything past the table is none (the window shows ---).
+  void set_layouts(const pads::Layout (&l)[kModeCount]) noexcept {
+    for (unsigned m = 0; m < kModeCount; ++m) {
+      layouts_[m] = l[m];
+    }
+  }
+  const pads::Layout (&layouts() const noexcept)[kModeCount] { return layouts_; }
   unsigned preset() const noexcept { return preset_; }
   void set_preset(unsigned index) noexcept { preset_ = index < kPresetCount ? index : perform::kNoPreset; }
   // FILE's load marks the slots whose WAV is still on its way (bit n: slot n): PERFORM and FILE draw them grey (ornoir::kSlotWaiting). Main loop only.
   void set_slots_waiting(unsigned mask) noexcept { slots_waiting_ = static_cast<std::uint8_t>(mask & 0xFu); }
   unsigned slots_waiting() const noexcept { return slots_waiting_; }
   unsigned focus() const noexcept { return focus_; }
-  // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play. PERFORM's own pads (rows 1, 2 and 3), PATTERN's palette (rows A
-  // and B) and, from Q7, SAMPLE's follow it. Main loop only. Saved in the project (STAT 1.1); init() sets the default: A NOTE, B TRIAD, C FORMANT.
+  // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play, the current mode's of the five (`layouts()`). PERFORM's own pads
+  // (rows 1, 2 and 3), PATTERN's palette (rows A and B) and SAMPLE's follow it. Main loop only. Saved in the project (PADS); init() sets the defaults
+  // (strip::default_layout: TRACT A VOWEL, B TONGUE, C TIP; the others A NOTE, B TRIAD, C FORMANT). The mode is read in service() (every main-loop pass),
+  // in enter() and on a pad press, so another screen's layout() is the mode of the last pass.
   // set_plays is for the screens that are not PERFORM (PATTERN's F7): false, changing nothing, for a value the row does not offer. PERFORM's own F7 lets
   // the held pads go first (step_plays).
-  const pads::Layout& layout() const noexcept { return layout_; }
-  bool set_plays(pads::Row row, pads::Plays value) noexcept { return pads::set_plays(layout_, row, value); }
+  const pads::Layout& layout() const noexcept { return layouts_[mode_]; }
+  bool set_plays(pads::Row row, pads::Plays value) noexcept { return pads::set_plays(layouts_[mode_], row, value); }
+  unsigned layout_mode() const noexcept { return mode_; }
+  // SAMPLE's pads of a parameter strip (rows A and B there): the same press and release as PERFORM's pad of that row and column. False when the row
+  // does not hold a strip (nothing done).
+  // `why`, when given, receives the text of a dark strip's refusal ("... IN <MODE>", valid until the next refusal) for the caller to show with its own say();
+  // it stays null on any other press.
+  bool strip_pad(o3sdk::app::Context& ctx, pads::Row row, unsigned col, unsigned pad_id, bool press, const char** why = nullptr) noexcept;
+  // Every held closure (the MOUTH strip's and the CL strips', from PERFORM or SAMPLE) opens: CLOSE goes back to OPEN and the sequencer's mouth line is free.
+  // A screen that plays strips calls it when it is left (SAMPLE's pad_leave); PERFORM's own release_all does it too.
+  void release_closures(o3sdk::app::Context& ctx) noexcept;
+  // The LED level of that pad (the value's pad on, the others dim, those past the choices dark; a held closure's pad on); dark for a row without a strip.
+  std::uint8_t strip_led(const o3sdk::dsp::Engine& e, pads::Row row, unsigned col, unsigned pad_id) const noexcept;
+  // SAMPLE's F1 sets the current mode's layout whole (after PERFORM's own checks in strip_logic.h); the held notes and strips are the caller's to let go.
+  void set_layout(const pads::Layout& l) noexcept { layouts_[mode_] = l; }
   // The row F6 points at (A, B or C) and the one whose LEDs flash.
   pads::Row row() const noexcept { return row_; }
   int latched() const noexcept { return latched_; }
@@ -164,12 +189,18 @@ class PerformScreen final : public o3sdk::app::Screen {
   void apply_vib(o3sdk::app::Context& ctx) noexcept;
   void mouth_press(o3sdk::app::Context& ctx, unsigned pad, const perform::PadSpec& sp) noexcept;
   void mouth_release(o3sdk::app::Context& ctx, unsigned pad) noexcept;
+  void close_press(o3sdk::app::Context& ctx, unsigned pad, unsigned close) noexcept;
+  void param_press(o3sdk::app::Context& ctx, unsigned pad, const perform::PadSpec& sp, char* why = nullptr) noexcept;
+  void sync_mode(o3sdk::app::Context& ctx) noexcept;
+  pads::Layout& lay() noexcept { return layouts_[mode_]; }
+  int strip_current(const o3sdk::dsp::Engine& e, const strip::StripDef& d) const noexcept;
   void write_close(o3sdk::app::Context& ctx) noexcept;
   void sync_mouth_hold() noexcept;
   void control_press(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void control_release(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void choose_row(o3sdk::app::Context& ctx, pads::Row row) noexcept;
-  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;
+  void step_focused(o3sdk::app::Context& ctx, int delta, bool coarse) noexcept;
+  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap, bool jump = false) noexcept;
   pads::Row pressed_row() const noexcept;
   void show_flash(o3sdk::app::Context& ctx, const char* name, const char* value) noexcept;
   void refresh_labels(const o3sdk::dsp::Engine& e) noexcept;
@@ -193,17 +224,19 @@ class PerformScreen final : public o3sdk::app::Screen {
   // under a held pad still lets it go. Main loop only.
   std::uint64_t mouth_pads_ = 0;
   StepSeq* seq_ = nullptr;  // told whether a mouth pad is held (set_mouth_hold_sink)
-  perform::MouthHold mouth_;
+  char why_[40] = {};  // strip_pad's refusal text
+  perform::CloseHold mouth_;  // the held closures (the MOUTH strip's and the CL strips'), by pad
   const InputMeter* meter_ = nullptr;
   const Vocoder* voc_ = nullptr;
   SourceStep step_source_ = nullptr;
   void* source_user_ = nullptr;
   unsigned preset_ = perform::kNoPreset;  // the last factory sound chosen (SHIFT + F8), or kNoPreset: the window shows ---
-  unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (1 GATE, 2 ARP, 3 GLIDE, 4 FORMANT, 5 THRU, 7 PRESET), or kNoShiftFocus; the row stays shown while set
+  unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (1 GATE, 2 ARP, 3 GLIDE, 4 FORMANT, 5 THRU, 6 OCTAVE, 7 PRESET), or kNoShiftFocus; the row stays shown while set
   unsigned focus_ = 5;       // the F key the encoder drives (default F6, ROW); perform::kBendFocus (8): none, the encoder bends
   int octave_ = 0;
   unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
-  pads::Layout layout_{};    // see layout()
+  pads::Layout layouts_[kModeCount] = {};  // see layout(); init() fills the defaults
+  unsigned mode_ = 0;        // the mode whose layout is in force (sync_mode)
   pads::Row row_ = pads::Row::A;  // F6: the row F7 and the encoder set (main loop only)
   std::uint64_t row_flash_until_ = 0;  // the chosen row's LEDs are dark until then, a short off-on when F6 changes the row (leds() checks it)
   std::uint8_t slots_waiting_ = 0;  // see set_slots_waiting

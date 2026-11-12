@@ -6,6 +6,7 @@
 #include "perform_logic.h"
 #include "sample_rec_logic.h"
 #include "sample_screen.h"
+#include "strip_logic.h"
 #include "song_screen.h"
 #include "skin/ornoir.h"
 
@@ -286,8 +287,8 @@ void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noe
 }
 
 // A palette pad writes into the cursor's step, and the cursor moves on. With step pads held (Q4) it writes every held step instead and the cursor stays.
-// On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or a chord of PATTERN's voicing); a pad that plays nothing (OFF, a piano
-// gap, out of range) writes nothing and sounds nothing. The pad sounds while it is held (the audition, Q3); SHIFT + a pad sounds and writes nothing.
+// On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or a chord of PATTERN's voicing); a pad that plays nothing (OFF, a parameter strip,
+// out of range) writes nothing and sounds nothing. The pad sounds while it is held (the audition, Q3); SHIFT + a pad sounds and writes nothing.
 void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) noexcept {
   PatternData& p = pattern_now();
   const unsigned len = length_of(p);
@@ -458,9 +459,19 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
           flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
         }
       } else {
+        // The entry list is the mode's (notes, then its parameter strips, TP1); a strip row writes nothing here, so the palette goes dark on it.
         const pads::Row r = static_cast<pads::Row>(row_);
-        const pads::Plays cur = perform_->layout().row[row_];
-        (void)perform_->set_plays(r, tap ? pads::plays_tap(r, cur) : pads::plays_step(r, cur, delta));
+        const unsigned mode = perform_->layout_mode();
+        const pads::Layout& cur = perform_->layout();
+        const unsigned at = strip::entry_index(r, mode, cur.row[row_], cur.strip[row_]);
+        const unsigned to = tap ? strip::entry_tap(r, mode, at) : strip::entry_step(r, mode, at, delta);
+        if (to != at) {
+          pads::Layout l = cur;
+          strip::apply_entry(l, r, mode, to);
+          perform_->audition_release_all(ctx);  // a pad held under the old value ends with it
+          aud_ = 0;
+          perform_->set_layout(l);
+        }
       }
       break;
     }
@@ -1030,7 +1041,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     const bool note_lane = lane() == pt::Lane::Note;
     const unsigned row = row_ & 1u;
     cat(keys[kKeyRow].value, sizeof keys[kKeyRow].value, pads::kRowNames[row]);
-    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, pads::kPlaysShort[pads::idx(layout_now().row[row])]);
+    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, strip::row_name(layout_now(), static_cast<pads::Row>(row)));
     keys[kKeyRow].dim = keys[kKeyPlays].dim = !note_lane;  // the NOTE lane's palette; dim elsewhere
     keys[kKeyRow].hot = keys[kKeyRow].hot && note_lane;
     keys[kKeyPlays].hot = keys[kKeyPlays].hot && note_lane;

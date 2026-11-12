@@ -97,7 +97,7 @@ TEST_CASE("perform: HELP names every control, and its legend is the page in forc
     }
     for (unsigned k = 0; k < 8; ++k) {
       CHECK(help.fkey[k] != nullptr);
-      CHECK((help.fkey_shift[k] != nullptr) == (k != 6u));  // the SHIFT row: seven labels, F7's key is empty since Q6
+      CHECK(help.fkey_shift[k] != nullptr);  // the SHIFT row: all eight keys are live (F7 is the OCTAVE)
     }
     CHECK(help.encoder != nullptr);
     CHECK(help.group_count == 5u);  // the controls, rows A, B and C, the LEDs
@@ -110,9 +110,9 @@ TEST_CASE("perform: HELP names every control, and its legend is the page in forc
   tap(*h, app::Button::Config);
   REQUIRE_FALSE(h->runtime().help_open());
 
-  // A piano on A and B (F7 takes the focus, the encoder steps A to PIANO NOTE), then C to BEND (F6 to row C, F7 steps it): the legend follows.
+  // A as a parameter strip (F7 takes the focus, the encoder steps A past OFF to the first strip), then C to BEND (F6 to row C, F7 steps it): the legend follows.
   tap(*h, app::Button::F7);
-  h->turn(5);
+  h->turn(6);
   tap(*h, app::Button::F6);
   tap(*h, app::Button::F6);
   tap(*h, app::Button::F6);
@@ -176,7 +176,7 @@ void shift_tap(sim::Harness& h, app::Button b) {
   h.release(app::Button::Shift);
   h.run_ms(20);
 }
-constexpr std::uint16_t kFreeze = 9, kDetune = 6, kFormant = 40, kThru = 41, kGlide = 44, kGate = 45, kArp = 46;
+constexpr std::uint16_t kWave = 0, kFreeze = 9, kDetune = 6, kFormant = 40, kThru = 41, kGlide = 44, kGate = 45, kArp = 46;
 }  // namespace
 
 TEST_CASE("perform: the SHIFT row focuses FORMANT, THRU, GATE, ARP, GLIDE and PRESET, and FREEZE toggles") {
@@ -503,7 +503,7 @@ TEST_CASE("perform: F6 steps the row and wraps on a tap, the encoder stops at th
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, BEND takes C, a piano joins A and B and a grid value splits them") {
+TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, BEND takes C, a parameter strip sets its parameter from its pads") {
   Rig rig;
   sim::Harness& h = *rig.h;
   // Defaults: A NOTE, B TRIAD, C FORMANT (the major scale is the rig's: the root 70, in-scale pads 24, the others dark).
@@ -515,7 +515,7 @@ TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, B
   tap(h, app::Button::F7);  // F7 takes the focus and changes nothing
   h.run_ms(300);
   CHECK(h.leds().level(24 + 0) == 70);
-  h.turn(10);  // B stops at OFF
+  h.turn(4);  // B: TRIAD to OFF
   h.run_ms(300);
   CHECK(row_dark(h, 2));
   CHECK(h.leds().level(12 + 0) == 70);  // A is as it was
@@ -536,23 +536,83 @@ TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, B
   tap(h, app::Button::F6);  // focus
   tap(h, app::Button::F6);  // C wraps to A
   tap(h, app::Button::F7);  // focus
-  h.turn(5);                // A: NOTE to PIANO NOTE, and B (which was OFF) joins it
+  h.turn(6);                // A: NOTE past OFF to the first parameter strip, SHAPE: twelve pads, none dark
   h.run_ms(300);
-  CHECK(h.leds().level(12 + 0) == 0);   // A holds the black keys: no key at column 0
-  CHECK(h.leds().level(24 + 0) == 70);  // B's white C
-  CHECK(h.leds().level(24 + 1) == 24);  // D, in the scale
+  for (unsigned pad = 12; pad < 24; ++pad) {
+    CHECK(h.leds().level(pad) != 0);
+  }
+  h.pad_down(12 + 11);  // the top of the range: sets SHAPE, and nothing sounds
+  CHECK(rig.listen(300) < kSound);
+  h.pad_up(12 + 11);
+  h.run_ms(100);
+  CHECK(unit_param(h, kWave) == doctest::Approx(2.0f));
+  CHECK(h.leds().level(12 + 11) == 255);  // the nearest pad to the value is the bright one
+  h.turn(-1);  // back to OFF: A is dark again, and B (OFF) too
+  h.run_ms(300);
+  CHECK(row_dark(h, 1));
+  CHECK(row_dark(h, 2));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+namespace {
+// The tract unit's own parameter (the unit named TRACT; `unit_param` skips it).
+float tract_param(sim::Harness& h, std::uint16_t id) {
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(h, u)) {
+      return h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
+    }
+  }
+  return -1.0e9f;
+}
+}  // namespace
+
+TEST_CASE("perform: each mode keeps its own rows, TRACT starts on VOWEL, TONGUE and TIP, and a switch shows the layout of the mode it lands on") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F7);  // row A is the chosen one at start; F7 takes the focus
+  h.turn(6);                // BANDS, row A: the SHAPE strip
+  h.run_ms(300);
+  h.pad_down(12 + 11);
+  h.run_ms(60);
+  h.pad_up(12 + 11);
+  h.run_ms(60);
+  CHECK(unit_param(h, kWave) == doctest::Approx(2.0f));
+
+  tap(h, app::Button::F1);
+  h.turn(8);  // TRACT: its own layout, A VOWEL, B TONGUE, C TIP, whatever BANDS was set to
+  h.run_ms(300);
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(4.0f));
+  h.pad_down(12 + 11);
+  h.run_ms(60);
+  h.pad_up(12 + 11);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(1.0f));
+  h.pad_down(24 + 0);
+  h.run_ms(60);
+  h.pad_up(24 + 0);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Tongue) == doctest::Approx(-1.0f));
+  CHECK(unit_param(h, kWave) == doctest::Approx(2.0f));  // the pads of TRACT did not touch BANDS' SHAPE
+  h.pad_down(36 + 3);  // C: TIP held
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(2.0f));
+  h.pad_up(36 + 3);
+  h.run_ms(60);
+  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
+
+  h.turn(-80);  // BANDS again (F1 still has the focus): row A is the SHAPE strip as it was left, the other rows the defaults
+  h.run_ms(300);
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(0.0f));
   h.pad_down(12 + 0);
-  CHECK(rig.listen(300) < kSound);  // no key: no sound
+  h.run_ms(60);
   h.pad_up(12 + 0);
-  h.run_ms(100);
-  h.pad_down(24 + 4);
-  CHECK(rig.listen(300) > kSound);
-  h.pad_up(24 + 4);
-  h.run_ms(100);
-  h.turn(-1);  // PIANO NOTE back to POWER: a grid value splits A from B, and B takes the value it had at the join (OFF)
+  h.run_ms(60);
+  CHECK(unit_param(h, kWave) == doctest::Approx(0.0f));
+  CHECK(h.leds().level(24 + 0) == 70);  // B is the default TRIAD
+  h.turn(1);  // TALK: the default layout, row A plays notes
   h.run_ms(300);
   CHECK(h.leds().level(12 + 0) == 70);
-  CHECK(row_dark(h, 2));
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
@@ -575,17 +635,14 @@ TEST_CASE("perform: every row value plays what it says, and row C FORMANT holds 
   h.pad_up(36 + 8);
   h.run_ms(100);
   CHECK(unit_param(h, kFormant) == doctest::Approx(4.0f));
-  // A as a PIANO TRIAD: a chord on a black key; a gap is silent.
+  // A as a 7TH: a chord on a pad, the stored kind is the row's.
   tap(h, app::Button::F7);
-  h.turn(6);  // NOTE .. POWER, PIANO NOTE, PIANO TRIAD
+  h.turn(2);  // NOTE, TRIAD, 7TH
   h.run_ms(100);
   h.pad_down(12 + 1);
   CHECK(rig.listen(300) > kSound);
   h.pad_up(12 + 1);
   h.run_ms(900);
-  h.pad_down(12 + 3);
-  CHECK(rig.listen(300) < kSound);
-  h.pad_up(12 + 3);
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
@@ -612,7 +669,7 @@ TEST_CASE("perform: a held pad's row takes F7 at once, and ROW follows it") {
   tap(h, app::Button::F7);  // focus
   h.pad_down(12 + 0);
   h.run_ms(100);
-  h.turn(10);
+  h.turn(5);
   h.run_ms(300);
   CHECK(row_dark(h, 1));
   CHECK(h.leds().level(24 + 0) == 70);  // B is as it was
@@ -620,45 +677,72 @@ TEST_CASE("perform: a held pad's row takes F7 at once, and ROW follows it") {
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("perform: SHIFT latches a piano key too, and DELETE lets it go") {
+TEST_CASE("perform: SHIFT latches a chord pad, DELETE lets it go, and a strip pad has nothing to latch") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F7);
-  h.turn(5);  // A and B are a piano
+  h.pad_down(24 + 2);  // row B: a triad
   h.run_ms(100);
-  h.pad_down(12 + 1);  // a black key
-  h.run_ms(100);
-  CHECK(h.leds().level(12 + 1) == 255);
-  tap(h, app::Button::Shift);
-  h.pad_up(12 + 1);
-  h.run_ms(100);
-  CHECK(h.leds().level(12 + 1) == 140);
-  CHECK(rig.listen(300) > kSound);
-  tap(h, app::Button::Delete);
-  h.run_ms(100);
-  CHECK(h.leds().level(12 + 1) != 140);
-  // A white key latches too; a gap has nothing to latch.
-  h.pad_down(24 + 2);
+  CHECK(h.leds().level(24 + 2) == 255);
   tap(h, app::Button::Shift);
   h.pad_up(24 + 2);
   h.run_ms(100);
   CHECK(h.leds().level(24 + 2) == 140);
+  CHECK(rig.listen(300) > kSound);
   tap(h, app::Button::Delete);
-  h.pad_down(12 + 0);  // a gap
-  tap(h, app::Button::Shift);
-  h.pad_up(12 + 0);
   h.run_ms(100);
-  CHECK(h.leds().level(12 + 0) == 0);
+  CHECK(h.leds().level(24 + 2) != 140);
+  // A parameter strip on A: SHIFT with a strip pad held latches nothing and sets the value as a plain press does.
+  tap(h, app::Button::F7);
+  h.turn(6);
+  h.run_ms(100);
+  h.pad_down(12 + 11);
+  tap(h, app::Button::Shift);
+  h.pad_up(12 + 11);
+  h.run_ms(100);
+  CHECK(h.leds().level(12 + 11) != 140);
+  CHECK(unit_param(h, kWave) == doctest::Approx(2.0f));
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("perform: SHIFT + F7 is empty and a layout's OCT and VOL pads keep working on row 0") {
+namespace {
+// The app's octave as the console's state line says it.
+int state_octave(sim::Harness& h) {
+  char line[400];
+  const std::size_t n = h.runtime().state_line(line, sizeof line);
+  const std::string text(line, n);
+  const std::size_t at = text.find("octave=");
+  return at == std::string::npos ? -99 : std::atoi(text.c_str() + at + 7);
+}
+}  // namespace
+
+TEST_CASE("perform: SHIFT + F7 is OCTAVE, a focused value the encoder and the arrows step, and a layout's OCT and VOL pads keep working on row 0") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  shift_tap(h, app::Button::F7);  // nothing: no BEND ROW any more
+  CHECK(state_octave(h) == 0);
+  tap(h, app::Button::Left);  // nothing focused: the arrows do nothing now (they were the octave)
+  tap(h, app::Button::Right);
+  CHECK(state_octave(h) == 0);
+  shift_tap(h, app::Button::F7);  // SHIFT + F7: OCTAVE takes the focus and changes nothing
+  CHECK(state_octave(h) == 0);
+  h.turn(-1);
+  h.run_ms(20);
+  CHECK(state_octave(h) == -1);
+  tap(h, app::Button::Left);
+  CHECK(state_octave(h) == -2);
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Right);
+  CHECK(state_octave(h) == 0);
+  for (unsigned i = 0; i < 4; ++i) {  // the range is -3..2 and stops at its ends
+    tap(h, app::Button::Right);
+  }
+  CHECK(state_octave(h) == 2);
+  for (unsigned i = 0; i < 7; ++i) {
+    tap(h, app::Button::Left);
+  }
+  CHECK(state_octave(h) == -3);
   h.run_ms(60);
   CHECK(h.leds().level(36 + 5) == 255);
-  CHECK(h.leds().level(0) == 24);  // OCT-: dim
+  CHECK(h.leds().level(0) == 0);   // OCT- at the lowest octave: dark
   h.pad_down(1);                   // OCT+
   h.pad_up(1);
   h.run_ms(60);
@@ -666,29 +750,77 @@ TEST_CASE("perform: SHIFT + F7 is empty and a layout's OCT and VOL pads keep wor
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
+TEST_CASE("perform: the arrows step the focused F value as a detent does, and UP and DOWN do too") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  // F4 is GLIDE's key on the plain row (it holds the focus after a tap): focus F6 THRU is not there in BANDS? Use SHIFT + F4 GLIDE, 10 ms a detent.
+  shift_tap(h, app::Button::F4);
+  const float g0 = unit_param(h, kGlide);
+  tap(h, app::Button::Right);
+  CHECK(unit_param(h, kGlide) == doctest::Approx(g0 + 10.0f));
+  tap(h, app::Button::Up);
+  CHECK(unit_param(h, kGlide) == doctest::Approx(g0 + 20.0f));
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Down);
+  CHECK(unit_param(h, kGlide) == doctest::Approx(g0));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: an arrow does not change F1 MODE, QUALITY in TALK or the PRESET; the encoder still does") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  constexpr std::uint16_t kMode = o3_voc03er::Vocoder::Mode, kQuality = o3_voc03er::Vocoder::Quality;
+  tap(h, app::Button::F1);  // the first tap takes the focus and changes nothing
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Up);
+  h.run_ms(20);
+  CHECK(unit_param(h, kMode) == doctest::Approx(0.0f));
+  h.turn(1);  // TALK
+  h.run_ms(20);
+  CHECK(unit_param(h, kMode) == doctest::Approx(1.0f));
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Down);
+  h.run_ms(20);
+  CHECK(unit_param(h, kMode) == doctest::Approx(1.0f));
+  tap(h, app::Button::F8);  // QUALITY on TALK's page
+  const float q = unit_param(h, kQuality);
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Up);
+  CHECK(unit_param(h, kQuality) == doctest::Approx(q));
+  h.turn(1);  // the encoder is the deliberate way
+  h.run_ms(20);
+  CHECK(unit_param(h, kQuality) != doctest::Approx(q));
+  float before[o3_voc03er::Vocoder::kParamCount];
+  shift_tap(h, app::Button::F8);  // PRESET
+  for (unsigned i = 0; i < o3_voc03er::Vocoder::kParamCount; ++i) {
+    before[i] = unit_param(h, static_cast<std::uint16_t>(i));
+  }
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Up);
+  h.run_ms(20);
+  for (unsigned i = 0; i < o3_voc03er::Vocoder::kParamCount; ++i) {
+    CHECK(unit_param(h, static_cast<std::uint16_t>(i)) == doctest::Approx(before[i]));
+  }
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
 // ---- V2: the mouth strip, F8 VOWEL and the voiceprint in TRACT ----------------------------------------------------------------------------
 
 namespace {
-// The tract unit's own parameter (the unit named TRACT; `unit_param` skips it).
-float tract_param(sim::Harness& h, std::uint16_t id) {
-  for (unsigned u = 0; u < 8; ++u) {
-    if (o3_voc03er::test::is_tract_unit(h, u)) {
-      return h.engine().param(static_cast<o3sdk::dsp::UnitId>(u), id);
-    }
-  }
-  return -1.0e9f;
-}
 constexpr unsigned kRowC = 36;  // the pad of row C's column 0
 
-// Row C to MOUTH (F6 holds the focus at start: A, B, C; F7 steps FORMANT, BEND, MOUTH), then the mode `mode` under F1.
+// The mode `mode_turn` steps from BANDS under F1, then row C of that mode's layout to MOUTH (F6 takes the focus and steps A, B, C; F7 turned to the
+// top of the list is NOTE, and MOUTH is the eighth value). Each mode has its own layout (TP1), so the mode comes first.
 void mouth_setup(sim::Harness& h, int mode_turn) {
-  tap(h, app::Button::F6);
-  tap(h, app::Button::F6);
-  tap(h, app::Button::F7);
-  h.turn(2);
-  h.run_ms(40);
   tap(h, app::Button::F1);
   h.turn(mode_turn);
+  h.run_ms(300);
+  tap(h, app::Button::F6);  // takes the focus (F1 had it)
+  tap(h, app::Button::F6);  // B
+  tap(h, app::Button::F6);  // C
+  tap(h, app::Button::F7);
+  h.turn(-80);
+  h.turn(7);
   h.run_ms(300);
 }
 }  // namespace
@@ -784,6 +916,9 @@ TEST_CASE("perform: outside TRACT a MOUTH row is dark and writes nothing") {
   tap(h, app::Button::F1);
   h.turn(8);
   h.run_ms(100);
+  h.turn(-80);  // TRACT has its own layout (C is TIP): the focus is still on PLAYS of row C, so the encoder walks C to MOUTH
+  h.turn(7);
+  h.run_ms(60);
   h.pad_down(kRowC + 10);
   h.run_ms(60);
   CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(2.0f));

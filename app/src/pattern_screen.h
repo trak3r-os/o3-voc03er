@@ -6,7 +6,7 @@
 //
 //   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
 //   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of PERFORM's two upper pad rows (A or B)
-//   F7 changes, F7 PLAYS is that row's value (NOTE, TRIAD, 7TH, OPEN, POWER, OFF or a piano value: pads::Layout, PERFORM holds it); both are dim off the
+//   F7 changes, F7 PLAYS is that row's value (NOTE, TRIAD, 7TH, OPEN, POWER, OFF, or one of the mode's parameter strips: pads::Layout, PERFORM holds it); both are dim off the
 //   NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
 //   The encoder starts on F5, the cursor step's value in the lane. SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected
 //   and writes the nearest of TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press
