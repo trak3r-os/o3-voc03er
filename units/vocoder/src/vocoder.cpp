@@ -154,6 +154,7 @@ void Vocoder::prepare(float sample_rate) noexcept {
   gate_g_ = 1.0f;
   clock_on_ = false;
   nheld_ = 0;
+  owners_reset();
   arp_note_ = 0xFFu;
   arp_pos_ = 0xFFu;
   glide_n_ = 0;
@@ -405,6 +406,14 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
         notein_[w % kNoteInDepth].store(note_in_pack(n), std::memory_order_relaxed);
         notein_w_.store(w + 1u, std::memory_order_release);
       }
+      // Another owner already holds the note (NO1): the voice is shared, so the note sounds on as it is (no retrigger, no new level). Only
+      // while a voice really holds it: a note whose voice was stolen (a ninth note) or that the arp plays in turns is taken again as before.
+      const unsigned owner = (static_cast<unsigned>(e.flags) >> kOwnerShift) & 3u;
+      const unsigned others = note_owners(e.note) & ~(1u << owner);
+      owner_set(e.note, owner);
+      if (others != 0u && carrier_.holds(e.note)) {
+        break;
+      }
       // The last note sets the synth's level (one gain: a chord step shares its velocity). 100 and up is the full level, so pads and
       // old patterns are unchanged, and it costs nothing a sample: the gain is the synth_gain_ ramp that is there anyway.
       const float vg = e.velocity >= 100u ? 1.0f : static_cast<float>(e.velocity) * 0.01f;
@@ -429,6 +438,13 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
         midi_fired_ &= ~(1u << (e.note - kSliceNoteLow));  // a fired slice is one shot: its key's release is not the carrier's
         break;
       }
+      {  // NO1: the note ends when its last owner lets go (an unowned NoteOff of a note nobody holds is what it was: harmless)
+        const unsigned owner = (static_cast<unsigned>(e.flags) >> kOwnerShift) & 3u;
+        owner_clear(e.note, owner);
+        if (note_owners(e.note) != 0u) {
+          break;
+        }
+      }
       held_remove(e.note);
       if (arp_ == 0u) {
         car_off(e.note);
@@ -451,6 +467,7 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       break;
     case EventKind::AllNotesOff:
       midi_fired_ = 0;
+      owners_reset();
       carrier_.all_notes_off();
       nheld_ = 0;
       arp_note_ = 0xFFu;

@@ -465,7 +465,8 @@ fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPE
 
 On the NOTE lane the palette is PERFORM's rows A and B as they play (the pads layout, section 4, PERFORM; F6 chooses A or B here, F7 what it plays).
 A pad writes what PERFORM would play there: a note, a chord of the row's kind, a piano key, or nothing when the row is OFF. **For a bass line of
-single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held; SHIFT + a palette pad sounds
+single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held, and keeps sounding when the pattern plays the same note
+(its gate off, a repeat or Stop does not cut it; needs more testing); SHIFT + a palette pad sounds
 and writes nothing.
 
 | Key | What it does |

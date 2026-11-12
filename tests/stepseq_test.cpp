@@ -423,10 +423,10 @@ TEST_CASE("step hook: NOTE, CARRIER and LEVEL lanes land on the step's frame, th
   CHECK(on[0].note == 60);
   CHECK(on[0].vel == 90);  // LEVEL is the velocity
   for (const Seen& s : on) {
-    CHECK(s.flags == Vocoder::kNoteLocal);  // the unit tells the hook's notes from a MIDI key by this mark
+    CHECK(s.flags == Vocoder::owner_flags(Vocoder::Owner::Seq));  // the unit tells the hook's notes from a MIDI key by this mark, and holds them as the sequencer's (NO1)
   }
   for (const Seen& s : off) {
-    CHECK(s.flags == Vocoder::kNoteLocal);
+    CHECK(s.flags == Vocoder::owner_flags(Vocoder::Owner::Seq));  // the NoteOff names the same owner
   }
   CHECK(on[0].at == kBlock);
   std::uint8_t want[kChordMaxNotes] = {};

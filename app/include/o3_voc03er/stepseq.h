@@ -715,7 +715,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       const unsigned count = step_notes(s, key_.load(std::memory_order_relaxed), scale_.load(std::memory_order_relaxed), notes, pp);
       const std::uint8_t vel = step_velocity(s);
       for (unsigned n = 0; n < count; ++n) {
-        (void)ctx.emit(unit_, dsp::note_on(notes[n], vel, Vocoder::kNoteLocal, static_cast<std::uint16_t>(frame)));
+        (void)ctx.emit(unit_, Vocoder::note_on_owned(notes[n], vel, Vocoder::Owner::Seq, static_cast<std::uint16_t>(frame)));
         last_[n] = notes[n];
       }
       if (count != 0u) {
@@ -924,7 +924,7 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       return;
     }
     for (unsigned n = 0; n < last_count_; ++n) {
-      (void)ctx.emit(unit_, Vocoder::note_off_local(last_[n], frame));
+      (void)ctx.emit(unit_, Vocoder::note_off_owned(last_[n], Vocoder::Owner::Seq, frame));
     }
     sounding_ = false;
   }

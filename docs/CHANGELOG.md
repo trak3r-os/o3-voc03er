@@ -13,6 +13,15 @@
 
 ### Fixed
 
+- **NO1: a note sounds until its last holder lets go.** The vocoder unit keeps an owner mask per note (0 MIDI, 1 pads, 2 step sequencer,
+  3 console; carried in `Event.flags` bits 4-5, 64 B of SRAM). A NoteOn under another owner's hold only sets the owner's bit and does not
+  retrigger; a NoteOff clears the bit and the note ends only when no owner is left; AllNotesOff and the unit's reset clear the masks. The
+  pad, sequencer (including ratchets) and console senders set their owner on both the on and the off. So a held audition pad no longer
+  loses its note to the step's gate off, to Stop, or to a repeat of the same note in the pattern, and the other way round. Per event the
+  cost is an OR over four words; nothing per sample. Two things follow from it: a shared note keeps the level it started with (a step's
+  LEVEL does nothing to a note a pad already holds), and a MIDI note whose release never arrived (a cable pulled) is no longer ended by
+  pressing its pad: play the key again, or send all notes off. Needs more testing on the unit (`tests/note_owner_test.cpp`,
+  `tests/pattern_audition_test.cpp`; `tests/stepseq_test.cpp` now expects the sequencer's owner flags).
 - **LS1: a slot's loop stays on the bar.** A playing loop that was recorded (or loaded as a WAV) in whole bars is re-synced at the exact
   frame of every bar line, with a crossfade of up to 64 samples, so it no longer drifts against the tempo; at half speed, double speed and
   reverse too. A FREE take and a WAV that is not a whole number of bars run free as before; at a constant tempo whose bar is a whole number of samples (120 BPM) the loop is bit-exact, at others (123 BPM) a seam off by up to 8 half-samples is snapped without a crossfade and a larger one crossfades. No time-stretch: when

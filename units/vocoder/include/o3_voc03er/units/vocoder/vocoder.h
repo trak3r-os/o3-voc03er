@@ -145,7 +145,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   }
 
   // MIDI slices (M2). A unit has one route, so the user's channel arrives as plain NoteOn / NoteOff and the unit tells them from the app's own
-  // senders (pads, the step sequencer, the chord latch) by flags: those carry kNoteLocal on both the NoteOn and the NoteOff (note_off_local).
+  // senders (pads, the step sequencer, the chord latch) by flags: those carry kNoteLocal and their owner on both the NoteOn and the NoteOff (note_off_owned).
   // An unmarked NoteOn of the notes kSliceNoteLow .. kSliceNoteLow + count - 1 fires slice 1 .. count of the published source (bind_slices) on
   // that source's reader at the note's frame, one shot (the NoteOff does not end it), its velocity the slice's level (100 and up full,
   // below v * 0.01). Any other note, marked or not, is the carrier's. A fired note never touches held notes, the carrier or the velocity
@@ -157,8 +157,28 @@ class Vocoder final : public o3sdk::dsp::Unit {
   static constexpr std::uint8_t kNoteLocal = 1u << 7;  // the kit uses bits 0 and 1 of flags
   static constexpr std::uint8_t kNoteSlice = 1u << 6;
   static constexpr unsigned kSliceNoteLow = 36;
+  // Note owners (NO1). The unit holds a note until its last holder lets go: a note has four owners, each with one bit per note, named in bits
+  // 4-5 of flags (the kit uses bits 0 and 1). A NoteOn sets its owner's bit and a NoteOff clears it; only when no owner is left does the note end
+  // (held notes, carrier, TUNE's NOTES IN). A NoteOn while another owner holds the note does not retrigger it: the voice is shared and sounds on
+  // (a pad held under a pattern that plays the same note keeps its sustain; a repeat or ratchet of the sequencer's does not restart it). The
+  // same owner's repeat is as it was (a retrigger), and one NoteOff of it ends that owner's hold however many NoteOns came. A sender names its
+  // owner on both events: owner_flags() for the NoteOn (with note_on(), or Engine::note_on), note_off_owned() for the NoteOff. Owner Midi is
+  // 0: every unmarked event, so a sender that names nothing is one owner. AllNotesOff clears every owner.
+  enum class Owner : std::uint8_t { Midi = 0, Pads = 1, Seq = 2, Console = 3 };
+  static constexpr unsigned kOwnerShift = 4;
+  static constexpr std::uint8_t kOwnerBits = 3u << kOwnerShift;
+  static constexpr std::uint8_t owner_bits(Owner o) noexcept { return static_cast<std::uint8_t>(static_cast<unsigned>(o) << kOwnerShift); }
+  // The flags of an app sender's NoteOn: kNoteLocal and its owner (the NoteOff is note_off_owned with the same owner).
+  static constexpr std::uint8_t owner_flags(Owner o) noexcept { return static_cast<std::uint8_t>(kNoteLocal | owner_bits(o)); }
+  static constexpr o3sdk::dsp::Event note_on_owned(std::uint8_t note, std::uint8_t velocity, Owner o, std::uint16_t frame = 0) noexcept {
+    return o3sdk::dsp::Event{frame, o3sdk::dsp::EventKind::NoteOn, note, velocity, owner_flags(o), 0u, 0.0f};
+  }
+  static constexpr o3sdk::dsp::Event note_off_owned(std::uint8_t note, Owner o, std::uint16_t frame = 0) noexcept {
+    return o3sdk::dsp::Event{frame, o3sdk::dsp::EventKind::NoteOff, note, 0u, owner_flags(o), 0u, 0.0f};
+  }
+  // The NoteOff of a local NoteOn of owner Midi (kNoteLocal alone): what it was before owners.
   static constexpr o3sdk::dsp::Event note_off_local(std::uint8_t note, std::uint16_t frame = 0) noexcept {
-    return o3sdk::dsp::Event{frame, o3sdk::dsp::EventKind::NoteOff, note, 0u, kNoteLocal, 0u, 0.0f};
+    return note_off_owned(note, Owner::Midi, frame);
   }
   // MIDI notes in, for PATTERN's recording (M3, docs/UI-DESIGN.md 7c). The kit's route takes the user's channel to the unit and never to
   // App::midi(), so the unit keeps what the app needs of the carrier's own notes (unmarked NoteOns that are not slices): a small ring the render
@@ -260,6 +280,9 @@ class Vocoder final : public o3sdk::dsp::Unit {
   const Bands& bands() const noexcept { return bands_; }
   const Talk& talk() const noexcept { return talk_; }
   const Autotune& tune() const noexcept { return tune_; }
+  // Held notes and the owners of a note (bit 0 Midi .. bit 3 Console), as of the last block: render-context state, for tests and the console.
+  unsigned held_count() const noexcept { return nheld_; }
+  unsigned owners_of(std::uint8_t note) const noexcept { return note_owners(note); }
 
  private:
   void apply(const o3sdk::dsp::Event& e) noexcept;
@@ -362,6 +385,19 @@ class Vocoder final : public o3sdk::dsp::Unit {
   bool clock_on_ = false;
   bool playing_ = false;  // the transport's state at this block's start, for the arp's first note
   std::uint8_t held_[Carrier::kVoices] = {};
+  // Owners of the notes (NO1): one 128-bit set per owner (bit = note), 64 B. Render context only, like held_. The mask of a note is the OR of the sets.
+  std::uint32_t owners_[4][4] = {};
+  unsigned note_owners(std::uint8_t note) const noexcept {
+    const unsigned w = (note & 0x7Fu) >> 5, b = note & 31u;
+    unsigned m = 0;
+    for (unsigned o = 0; o < 4u; ++o) m |= ((owners_[o][w] >> b) & 1u) << o;
+    return m;
+  }
+  void owner_set(std::uint8_t note, unsigned o) noexcept { owners_[o][(note & 0x7Fu) >> 5] |= 1u << (note & 31u); }
+  void owner_clear(std::uint8_t note, unsigned o) noexcept { owners_[o][(note & 0x7Fu) >> 5] &= ~(1u << (note & 31u)); }
+  void owners_reset() noexcept {
+    for (auto& set : owners_) for (std::uint32_t& w : set) w = 0u;
+  }
   o3sdk::dsp::Ramp loop_car_[Loop::kCount];
   struct Retarget {
     std::uint16_t frame = 0;

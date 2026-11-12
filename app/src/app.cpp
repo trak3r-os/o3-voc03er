@@ -677,11 +677,11 @@ class MyApp final : public app::App {
     (void)e.set_param(voc_id_, o3_voc03er::Vocoder::Mode, static_cast<float>(c.mode));
     apply_mode(e);
     for (unsigned i = 0; i < console_notes_; ++i) {
-      (void)e.send(voc_id_, o3_voc03er::Vocoder::note_off_local(o3_voc03er::kVocChord[i]));
+      (void)e.send(voc_id_, o3_voc03er::Vocoder::note_off_owned(o3_voc03er::kVocChord[i], o3_voc03er::Vocoder::Owner::Console));
     }
     console_notes_ = c.notes;
     for (unsigned i = 0; i < console_notes_; ++i) {
-      (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100, o3_voc03er::Vocoder::kNoteLocal);
+      (void)e.note_on(voc_id_, o3_voc03er::kVocChord[i], 100, o3_voc03er::Vocoder::owner_flags(o3_voc03er::Vocoder::Owner::Console));
     }
     out.text("voc: ").text(o3_voc03er::kModeWords[c.mode < o3_voc03er::kModeCount ? c.mode : 0u]).text(" notes ").dec(console_notes_).nl();
     ctx_->redraw();

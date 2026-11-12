@@ -285,7 +285,7 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   }
   held_ |= std::uint64_t{1} << pad;
   for (unsigned i = 0; i < g_pd.count[pad]; ++i) {
-    (void)e.note_on(voice_, g_pd.notes[pad][i], kVelocity, o3_voc03er::Vocoder::kNoteLocal);
+    (void)e.note_on(voice_, g_pd.notes[pad][i], kVelocity, o3_voc03er::Vocoder::owner_flags(o3_voc03er::Vocoder::Owner::Pads));
   }
   ctx.redraw();
 }
@@ -402,7 +402,7 @@ void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned not
   }
   held_ |= std::uint64_t{1} << pad;
   for (unsigned i = 0; i < g_pd.count[pad]; ++i) {
-    (void)e.note_on(voice_, g_pd.notes[pad][i], velocity, o3_voc03er::Vocoder::kNoteLocal);
+    (void)e.note_on(voice_, g_pd.notes[pad][i], velocity, o3_voc03er::Vocoder::owner_flags(o3_voc03er::Vocoder::Owner::Pads));
   }
 }
 
@@ -413,7 +413,7 @@ void PerformScreen::audition_release(app::Context& ctx, unsigned pad) noexcept {
   held_ &= ~(std::uint64_t{1} << pad);
   for (unsigned i = 0; i < g_pd.count[pad] && i < kChordMaxNotes; ++i) {
     if (!note_in_use(g_pd.notes[pad][i], app::kPadCount)) {  // a note another held pad still holds stays on
-      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.notes[pad][i]));
+      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_owned(g_pd.notes[pad][i], o3_voc03er::Vocoder::Owner::Pads));
     }
   }
 }
@@ -457,7 +457,7 @@ void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
   }
   for (unsigned i = 0; i < g_pd.count[pad]; ++i) {
     if (!note_in_use(g_pd.notes[pad][i], app::kPadCount)) {  // a note another held pad or the latch still holds stays on
-      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.notes[pad][i]));
+      (void)ctx.engine().send(voice_, o3_voc03er::Vocoder::note_off_owned(g_pd.notes[pad][i], o3_voc03er::Vocoder::Owner::Pads));
     }
   }
   ctx.redraw();
@@ -486,7 +486,7 @@ void PerformScreen::latch(app::Context& ctx, bool on) noexcept {
   }
   for (unsigned i = 0; i < old_count && i < kChordMaxNotes; ++i) {  // the old latch's notes the new state does not hold
     if (!note_in_use(old[i], app::kPadCount)) {
-      (void)e.send(voice_, o3_voc03er::Vocoder::note_off_local(old[i]));
+      (void)e.send(voice_, o3_voc03er::Vocoder::note_off_owned(old[i], o3_voc03er::Vocoder::Owner::Pads));
     }
   }
   ctx.redraw();
@@ -497,13 +497,13 @@ void PerformScreen::release_all(app::Context& ctx) noexcept {
   for (unsigned p = 0; p < app::kPadCount; ++p) {
     if (((held_ >> p) & 1u) != 0u) {
       for (unsigned i = 0; i < g_pd.count[p]; ++i) {
-        (void)e.send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.notes[p][i]));
+        (void)e.send(voice_, o3_voc03er::Vocoder::note_off_owned(g_pd.notes[p][i], o3_voc03er::Vocoder::Owner::Pads));
       }
     }
   }
   if (latched_ >= 0) {
     for (unsigned i = 0; i < g_pd.lat_count && i < kChordMaxNotes; ++i) {
-      (void)e.send(voice_, o3_voc03er::Vocoder::note_off_local(g_pd.lat_notes[i]));
+      (void)e.send(voice_, o3_voc03er::Vocoder::note_off_owned(g_pd.lat_notes[i], o3_voc03er::Vocoder::Owner::Pads));
     }
   }
   held_ = 0;

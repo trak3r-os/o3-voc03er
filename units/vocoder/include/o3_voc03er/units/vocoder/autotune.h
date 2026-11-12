@@ -68,6 +68,7 @@ class Autotune {
   float shift_cents() const { return c_; }
   float delay() const { return d_; }
   int target_note() const { return cur_; }  // the MIDI note being aimed at, -1 before the first voiced estimate
+  unsigned held_count() const { return held_n_; }  // the NOTES IN targets (a test reads it)
   bool voiced() const { return tune_.voiced(); }
 
   // VOICE (the vocoder's CarSrc 8): the sung note, for the synth carrier to play. set_voice(true) makes the control step (process or detect)

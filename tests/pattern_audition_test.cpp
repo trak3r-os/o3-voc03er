@@ -150,6 +150,37 @@ TEST_CASE("audition: with the transport playing a step's note-off does not cut a
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
+// NO1: the audition holds the very note the pattern plays. The unit holds a note until its last owner lets go, so the sequencer's gate off and its
+// Stop do not cut the pad. (Before NO1 both cut it: the voice was one per note.)
+TEST_CASE("audition: a pad on the very note the pattern plays sounds through the step's gate off and through Stop") {
+  Rig rig;
+  tap(*rig.h, app::Button::Performance);
+  tap(*rig.h, app::Button::Pattern);
+  rig.h->pad_down(kNoteA);  // step 1 gets note A
+  rig.h->run_ms(20);
+  rig.h->pad_up(kNoteA);
+  rig.h->run_ms(900);
+  tap(*rig.h, app::Button::Play);
+  const double first = rig.listen(150);
+  CHECK(first > kSound);  // the step's note
+  rig.h->run_ms(550);
+  rig.h->press(app::Button::Shift);  // audition: sounds, writes nothing
+  rig.h->run_ms(5);
+  rig.h->pad_down(kNoteA);  // the same note the step plays, held across the next bar's start and its gate off
+  rig.h->run_ms(100);
+  for (int w = 0; w < 8; ++w) {  // 4 s: more than a bar, whose release tail would otherwise leave a silent window
+    CHECK(rig.listen(500) > kSound);
+  }
+  tap(*rig.h, app::Button::Play);  // Stop: the sequencer's notes let go, the pad's does not
+  rig.h->run_ms(900);              // past the release tail of a note that had been cut
+  CHECK(rig.listen(300) > kSound);
+  rig.h->pad_up(kNoteA);
+  rig.h->release(app::Button::Shift);
+  rig.h->run_ms(900);
+  CHECK(rig.listen(200) < kSound);  // the last holder let go: silent
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
 // Q4. A step pad held while a palette pad is pressed: every held step takes it and the cursor stays.
 TEST_CASE("held steps: a palette pad writes every held step and the cursor does not advance") {
   Rig rig;
