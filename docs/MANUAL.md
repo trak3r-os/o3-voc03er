@@ -362,6 +362,21 @@ The pads play PERFORM's layout (section 4, PERFORM), so you can play the synth u
 | F6 MONITOR | Hear the live input while you record |
 | F7 SLOT | Which slot, 1 to 4 (UP and DOWN too) |
 
+A take of 1, 2, 4 or 8 bars plays back **on the bar**: the loop is brought back to the exact frame of every bar line, with a short
+crossfade, so it stays with the tempo (and at half speed, double speed or reverse). A FREE take, and a WAV that is not a whole number of
+bars, run free. If the tempo falls, the loop wraps and plays its start again until the line; if it rises, the loop is cut at the line; there
+is no time-stretch. Stopping the transport does not stop the loop: it goes on free-running and the next START puts it back on bar 1. A
+slot holds 16 seconds, so 8 bars need at least 120 BPM, 4 bars 60 and 2 bars 30. Below that REC does not arm and the strip says
+TOO LONG AT THIS TEMPO (you can still choose the LENGTH). Only the LENGTH decides, not every tempo change: if a change makes the
+LENGTH no longer fit (more than 0.5 BPM under the limit; REC itself arms right at the limit), an armed take is cancelled and one that is
+recording ends at the next bar line, shorter than LENGTH, and the strip says TEMPO CUT THE TAKE SHORT. If the tempo falls so late that the slot
+fills before the next bar line, the take ends there instead and runs free, not on the bar, and the strip says TEMPO FILLED THE SLOT. A tempo
+change that still fits leaves the take alone (it keeps its bars). A WAV or a project's slot counts as whole bars if its length is a whole
+number of bars at the tempo of the moment (a project sets its tempo before its WAVs load); a slot whose length does not change keeps its bar
+count, and a copy of a slot with the same length keeps it too. At a tempo that is not a whole number of samples per bar (123 BPM, say), a
+bar line can fall a few samples off: a slip of 8 half-samples or less is absorbed without a crossfade, a larger one crossfades. Stopping a loop
+fades it over a few milliseconds instead of cutting it.
+
 DELETE while a take waits for the bar line cancels it, as REC does, and the slot keeps its sound. DELETE while it records ends it at the
 bar and throws it away. DELETE with no take running empties the slot.
 
@@ -569,6 +584,9 @@ been read there, but several things need more testing, most of all by ear. In pa
   its combinations.
 - **A WAV that is not 16-bit 44.1 kHz** is refused. A file longer than 16 seconds is cut to its first 16.
 - **Bending a slot** is not possible: a recording plays at three fixed speeds.
+- **Loops on the bar.** The re-sync at each bar line (the crossfade and the snap by ear, the load on the bar-line blocks, a tempo change during a take, the
+  edge of 8 bars at 120 BPM, a slow or fast tempo against a loop, FOLLOW jitter around the edge, which two slots of one length count as a copy) needs more testing on a unit. A REC press a little after a bar line
+  waits for the next line; there is no early-press tolerance.
 - **The voiceprint in the pictures** comes from plain tones. A voice draws more bars.
 
 If something here fails on your unit, the card and the reset button are the way back (section 2).

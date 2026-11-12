@@ -20,6 +20,25 @@
 // slope changes, and going to 1x forward drops an odd half sample). A level change ramps linearly over the next chunk. start() begins at
 // the first sample (the last one in reverse) at the loop's own speed.
 //
+// Bars. A loop knows how many whole bars it is (set_bars, 0 = free: a take that is not a count of bar lines, or a WAV that is not whole bars).
+// Only the owner knows that (Vocoder counts the bar lines a take spans, and judges a loaded WAV against the transport's tempo). For a loop of N
+// bars the owner calls bar_line(i, frame, k) at every bar line of the transport (k the bar index, `frame` in the next mix() block): the loop
+// puts its position where its cycle stands at that line, so it restarts with the bar whatever the tempo did meanwhile. The cycle is anchored
+// at the bar start() was given (k0, the transport's bar when it started, 0 when the transport was stopped); bar k is j = k - k0 bars into it,
+// and a loop at speed s (half samples a sample: 1, 2 or 4) is at half position (j * s * length / N) mod 2*length there (reverse: counted down
+// from 2*(length-1)), rounded to the nearest. A bar line number 0 (the transport started again) re-anchors k0 to 0 (reanchor(), for every slot). The position it already has
+// within 4 half samples of that is left alone, so at a constant tempo that is a whole number of samples a bar (120 BPM) bar_line() changes
+// nothing and the output is bit-for-bit the free running loop's; at another tempo (123 BPM: 86048.78 samples a bar) the loop slips a
+// fraction of a sample a cycle, and once the slip is past the tolerance a line on the loop's seam (the first sample, where the baked fades
+// are at about zero) snaps it back by up to 8 half samples with no fade: nothing to hear. Any other line stages a jump at `frame`: the
+// old position goes on for kFadeSamples (a ghost) fading out while the new one fades in, linearly, so the jump does not click;
+// there is no time-stretch (a slower tempo replays the start of the loop until the line, a faster one cuts it at the line). A free loop, a loop that is not playing, one with a region or a ghost still running ignores the line. The
+// transport stopping is not a bar line: the loop goes on, free, until the next start.
+//
+// Stop. stop() does not cut: the loop keeps playing from where it was for kFadeSamples more, fading to zero (the same ghost), so playing() is
+// false at once but sounding() stays true until the tail ends. The caller keeps mixing while sounding(), not only while playing(). A start()
+// inside the tail plays from the first sample at once and the tail fades out under it.
+//
 // Memory. The buffer is `kCount * per_loop` int16, 5.6 MB for the full size (kBankSamples): the app declares it with O3SDK_BIG (SDRAM) and
 // gives it here; a unit never places memory itself. Real-time rules: nothing here allocates or blocks; record() and mix() are bounded by
 // the block. mix() reads a loop's samples in one sequential pass (an SDRAM read is about 29 cycles sequential, 35 random, measured) and
@@ -46,6 +65,7 @@ class Loop {
   static constexpr std::uint32_t kMaxSamples = 16u * 44100u;  // one loop: 16 s at 44.1 kHz
   static constexpr std::uint32_t kBankSamples = kCount * kMaxSamples;
   static constexpr std::uint32_t kFadeSamples = 64;
+  static constexpr std::uint64_t kSnap = 8;  // half samples: the slip a seam line puts right with a snap instead of a crossfade (bar_line)
 
   // `mem` holds kCount loops of `per_loop` samples (clamped to kMaxSamples), 2-byte aligned. nullptr or 0: unbound (every call is a no-op).
   // Empties all loops. The memory itself is not touched.
@@ -71,10 +91,20 @@ class Loop {
 
   // Playing. start() plays loop i from its first sample (false when it is empty, bound or not); stop() halts it; mix() writes (add false) or
   // adds (add true) `n` samples of loop i, scaled to +-1, to dst and advances it, wrapping at the length. A loop that is not playing: no-op.
-  bool start(unsigned i) noexcept;
+  // `bar` is the transport's bar index when it starts (the anchor of the loop's bar grid, see Bars above); 0 for a free loop or a stopped transport.
+  bool start(unsigned i, std::uint32_t bar = 0) noexcept;
   void stop(unsigned i) noexcept;
   void mix(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
   bool playing(unsigned i) const noexcept { return i < kCount && playing_[i]; }
+  // playing() or a stop tail / jump fade still running: the caller mixes while this is true.
+  bool sounding(unsigned i) const noexcept { return i < kCount && (playing_[i] || gn_[i] != 0u); }
+
+  // Bars (render context, see above). set_bars: 0 = free, else the loop is that many whole bars (reset by every take, clear, forget and adopt).
+  void set_bars(unsigned i, std::uint32_t bars) noexcept;
+  std::uint32_t bars(unsigned i) const noexcept { return i < kCount ? bars_[i] : 0u; }
+  void bar_line(unsigned i, std::uint32_t frame, std::uint32_t bar) noexcept;
+  // The transport's bar-0 line passed (it started again): the cycle is anchored at bar 0 again, for a loop under a region or one that is free too.
+  void reanchor(unsigned i) noexcept;
 
   // Per loop, any time (render context): speed 0 = 0.5x, 1 = 1x, 2 = 2x (others clamp to 1x); reverse; gain, linear (default 1).
   void set_speed(unsigned i, unsigned speed) noexcept;
@@ -106,6 +136,12 @@ class Loop {
   std::uint32_t advance(unsigned i, float* dst, std::uint32_t from, std::uint32_t to, bool add) noexcept;
   void mix_region(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
   void region_off(unsigned i) noexcept;
+  void mix_plain(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  void mix_slow(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  void ghost_off(unsigned i) noexcept {
+    gn_[i] = 0;
+    sf_[i] = -1;
+  }
   std::int16_t* mem_ = nullptr;
   std::uint32_t cap_ = 0;
   std::uint32_t len_[kCount] = {};
@@ -116,6 +152,20 @@ class Loop {
   float gcur_[kCount] = {1.0f, 1.0f, 1.0f, 1.0f};   // what the last chunk ended at
   bool rec_[kCount] = {};
   bool playing_[kCount] = {};
+  // Bars and the ghost (render context only). bars_ 0 = free; k0_ the transport bar the cycle is anchored at. The ghost is a second read
+  // position (gh_, gs_ half samples a sample, gv_ reverse) fading out over gn_ more samples (kFadeSamples at the start; 0 = none); gm_ true:
+  // the main position fades in under it (a jump), false: the main is silent or full (a stop tail). sf_ >= 0: a jump staged at that frame
+  // of the next mix() to half position sj_ (a plain snap, no ghost, when sn_).
+  std::uint16_t bars_[kCount] = {};
+  std::uint32_t k0_[kCount] = {};
+  std::uint32_t gh_[kCount] = {};
+  std::uint8_t gn_[kCount] = {};
+  std::uint8_t gs_[kCount] = {};
+  bool gv_[kCount] = {};
+  bool gm_[kCount] = {};
+  std::int32_t sf_[kCount] = {-1, -1, -1, -1};
+  std::uint32_t sj_[kCount] = {};
+  bool sn_[kCount] = {};  // the staged jump is a snap (no ghost, no fade): see bar_line
   // Regions: staged span, the sounding one (rs_, rl_, rh_ in half samples from its start), the level it ended the last chunk at, the fade
   // (fn_ of kFadeSamples, dir_ +1 in, 0 steady, -1 out), a retrigger waiting for the fade-out (rst_), the command and its frame.
   std::uint32_t st_s_[kCount] = {};

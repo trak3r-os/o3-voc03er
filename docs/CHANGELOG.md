@@ -11,6 +11,30 @@
   SAME). With IN CHANNEL on OMNI it cannot work, and SAMPLE shows SET MIDI CH. Needs more testing with a real controller, USB and DIN;
   run in the simulator only (`app/scenarios/midi_slice_channel.txt`, `tests/midi_slices_test.cpp`, `tests/midi_slice_logic_test.cpp`).
 
+### Fixed
+
+- **LS1: a slot's loop stays on the bar.** A playing loop that was recorded (or loaded as a WAV) in whole bars is re-synced at the exact
+  frame of every bar line, with a crossfade of up to 64 samples, so it no longer drifts against the tempo; at half speed, double speed and
+  reverse too. A FREE take and a WAV that is not a whole number of bars run free as before; at a constant tempo whose bar is a whole number of samples (120 BPM) the loop is bit-exact, at others (123 BPM) a seam off by up to 8 half-samples is snapped without a crossfade and a larger one crossfades. No time-stretch: when
+  the tempo drops the loop wraps and replays its start until the line, when it rises the loop is cut at the line. On transport Stop the loop
+  keeps sounding free-running, and the next Start re-anchors it at bar 1. The loop's cost on a block without a bar line is one load and
+  compare per slot.
+- **LS1: a take that cannot fit is refused.** LENGTH 8 needs at least 120 BPM, 4 at least 60, 2 at least 30 (a slot holds 16 s). REC does
+  not arm and the strip says TOO LONG AT THIS TEMPO (PERFORM: TOO LONG, AT THIS TEMPO). Only the LENGTH no longer fitting acts (a tempo change that still fits
+  leaves the take alone), and with a 0.5 BPM margin under the limit against FOLLOW jitter (REC arms at the exact limit): an armed take is cancelled; a
+  recording one ends at the next bar line, shorter than LENGTH, and says TEMPO CUT THE TAKE SHORT; if the slot fills first it ends free and says
+  TEMPO FILLED THE SLOT.
+- **LS1: whole-bar status is judged again at every load.** A WAV, a project slot or a take is whole bars if its length is a whole number of
+  bars at the transport tempo of that moment; the count survives a load of the same length, a copy of a slot of the same length carries it, and
+  every slot's anchor is reset when bar 0 passes. A new status bit (`on_bar`) tells the screen which take ended on the bar. Two slots of exactly
+  equal length count as a copy: the one history dependence of a project load.
+- **LS1: stopping a loop is a 64-sample ramp**, not a cut, so it no longer clicks; starting it again during the ramp works and `playing()`
+  is false from the stop on.
+  Tests: `tests/loop_sync_test.cpp` (123 BPM over 40 bars, seam snap, adopt and copy, re-anchor, stop tail, take outcomes), `tests/sample_rec_test.cpp`
+  (`fits`, `still_fits` margin, screen cases), `tests/loop_test.cpp` (tail drained); scenario `app/scenarios/sample_rec_long.txt` (TOO LONG, and
+  TEMPO CUT THE TAKE SHORT under a MIDI master). Needs more testing on a unit: the crossfade and the snap by ear, FOLLOW jitter around the edge, the CPU on bar-line blocks, the edge at
+  8 bars and 120 BPM. Left out on purpose: a tolerance for a REC press just after the line (it would break the whole-bar length).
+
 ## v0.4.0 (pre-release)
 
 A mode release: TRACT, a fifth mode that plays a mouth after the carrier, with a MOUTH lane in the pattern; PERFORM plays a layout of

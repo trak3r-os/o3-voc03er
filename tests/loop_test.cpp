@@ -155,6 +155,8 @@ TEST_CASE("loop: the seam is silent, the length is exact, playback repeats sampl
   l.mix(0, acc.data(), 8, true);
   CHECK(acc[0] > 0.99f);
   l.stop(0);
+  float tail[Loop::kFadeSamples];
+  l.mix(0, tail, Loop::kFadeSamples, false);  // stop() ramps out over kFadeSamples (loop_sync_test.cpp); after that it is silent and untouched
   l.mix(0, acc.data(), 8, false);
   CHECK(acc[7] == doctest::Approx(acc[7]));
   CHECK(acc[0] > 0.99f);
@@ -630,6 +632,8 @@ TEST_CASE("loop: word reads are bit-identical to per-sample reads at any alignme
             for (const bool add : {false, true}) {
               INFO("per " << per << " loop " << i << " speed " << speed << " rev " << rev << " ramp " << ramp << " add " << add);
               l.stop(i);
+              float drain[Loop::kFadeSamples];
+              l.mix(i, drain, Loop::kFadeSamples, false);  // the stop tail runs out first: this compares the plain reads
               l.set_speed(i, speed);
               l.set_reverse(i, rev);
               l.set_gain(i, 0.8f);
@@ -677,6 +681,8 @@ TEST_CASE("loop: the level scales the output, the default is exactly the stored 
   l.mix(0, b.data() + 64, 64, false);  // settled, the fast path again
   CHECK(b[127] == doctest::Approx(0.5f * static_cast<float>(mem[255]) * kToFloat16));
   l.stop(0);
+  float tail[Loop::kFadeSamples];
+  l.mix(0, tail, Loop::kFadeSamples, false);  // the stop ramp runs out, so the next read is the plain one
   REQUIRE(l.start(0));  // start() takes the level at once
   l.mix(0, a.data(), 128, false);
   CHECK(a[40] == doctest::Approx(0.5f * static_cast<float>(mem[40]) * kToFloat16));

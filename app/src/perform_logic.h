@@ -7,6 +7,7 @@
 #include <o3_voc03er/chords.h>
 #include <o3_voc03er/modes.h>
 #include <o3_voc03er/pad_map.h>
+#include <o3_voc03er/units/vocoder/loop.h>
 #include <o3_voc03er/units/vocoder/scale.h>
 
 #include <o3sdk/app/pad_leds.h>
@@ -42,6 +43,22 @@ inline float bar_samples(unsigned mbpm) noexcept {
 inline float capture_stop_at(unsigned bars, float bar, bool playing) noexcept {
   return playing ? (static_cast<float>(bars) - 0.5f) * bar : static_cast<float>(bars) * bar;
 }
+
+// Whether a take of `bars` bars at `mbpm` fits a slot's buffer (Loop::kMaxSamples, 16 s): 8 bars from 120 BPM, 4 from 60, 2 from 30, 1 always (a
+// tempo under 20 reads 20, as in bar_samples: a 12 s bar). 0 bars is FREE: no length to fit. Exact in integers, so 8 bars at exactly 120 BPM fits to the sample.
+inline bool fits(unsigned bars, unsigned mbpm) noexcept {
+  if (mbpm < 20000u) {
+    mbpm = 20000u;
+  }
+  const std::uint64_t need = static_cast<std::uint64_t>(bars) * static_cast<std::uint64_t>(o3sdk::core::kRefRateHz) * 240000u;
+  return bars == 0u || need <= static_cast<std::uint64_t>(Loop::kMaxSamples) * mbpm;
+}
+
+// The tempo may be jittering around the exact edge (MIDI FOLLOW at LENGTH 8 and 120.000 BPM): a take that is armed or recording is given up only when the
+// tempo is a real margin under the edge (0.5 BPM), while REC arms at the exact edge. Between the two a recording take may fill the buffer a little
+// before its last bar line: the unit then ends it free-running, not on the bar, and the strip says so (the loop's on_bar flag).
+constexpr unsigned kFitMarginMbpm = 500u;
+inline bool still_fits(unsigned bars, unsigned mbpm) noexcept { return fits(bars, mbpm + kFitMarginMbpm); }
 
 using o3_voc03er::mode_index;  // modes.h: the unit's Mode value to 0..kModeCount - 1
 // What a mode draws and which F8 value it has: ROBOT is BANDS with a compressor after it, so it draws BANDS' page. TRACT (V2) has its own page: F8 is

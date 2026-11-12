@@ -220,6 +220,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
     bool reverse = false;
     float level_db = 0.0f;
     std::uint32_t length = 0;  // samples recorded so far (while recording) or in the loop
+    bool on_bar = false;       // the loop holds a whole number of bars and is re-synced at the bar lines (a take that filled the buffer early is not)
     bool region = false;       // sounding a region (the whole loop, if it was playing, is paused under it)
     std::uint32_t position = 0;  // where the reader is, in samples from the start of the bank (the region's, else the loop's), as of the block's end
   };
@@ -303,6 +304,8 @@ class Vocoder final : public o3sdk::dsp::Unit {
     bool reverse = false;
     float level_db = 0.0f;
     std::uint16_t req = 0;    // the frame of the event that asked, this block only (0 afterwards): a bar line before it does not count
+    bool rec_ok = false;      // the take so far has run under a playing transport the whole way: its bar lines are a count of whole bars
+    std::uint16_t rec_bars = 0;  // the bar lines it has crossed since it began (the line that ends it included)
   };
 
   Carrier carrier_;
@@ -340,6 +343,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   // GLIDE, GATE, ARP: the render context only. One step clock for GATE and ARP: clock_cnt_ samples to the next half-step edge (fractional carry),
   // second_half_ the off half of the step; the step edge is the end of the second half. held_ is the sorted list of held notes.
   float fs_ = 44100.0f;
+  std::uint32_t tempo_mbpm_ = 120'000;  // the transport's tempo as of the last block (render context): what Load judges a WAV's bars against
   float glide_ms_ = 0.0f;
   float glide_coef_ = 0.0f;   // for glide_n_ samples
   std::uint32_t glide_n_ = 0;

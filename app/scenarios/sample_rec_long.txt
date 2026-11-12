@@ -1,0 +1,71 @@
+# SAMPLE REC (LS1, B): a LENGTH the 16 s buffer cannot hold at the tempo. At 100 BPM 8 BARS are 19.2 s: choosing it says TOO LONG AT THIS TEMPO on the
+# status strip, and REC refuses to arm (the screen stays EMPTY). 4 BARS fit (9.6 s) and arm. The simulator shows the screen and that the unit refuses;
+# the loops' sync to the bar lines is in tests/loop_sync_test.cpp, and how it sounds is the unit's.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_rec_long.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap pattern
+wait 200
+tap f4
+turn -20
+wait 200
+snap 01_tempo_100
+tap samplerec
+wait 200
+tap f3
+tap f3
+tap f3
+tap f3
+wait 100
+snap 02_length_8_bars
+tap rec
+wait 300
+snap 03_refused
+tap left
+wait 100
+tap play
+wait 300
+tap rec
+wait 300
+snap 04_four_bars_armed
+tap rec
+wait 200
+snap 05_cancelled
+# A tempo that falls under a recording take (LS1 fold). PATTERN's TEMPO cannot do it here (leaving SAMPLE REC ends a take), so a MIDI master does: FOLLOW on
+# in the Config, a master at 120 BPM, 4 BARS recording (8 s), then the master drops to 40 BPM (4 BARS fit down to 60 BPM; 0.5 BPM under that the take is given up): the screen
+# gives the take up as REC stopped (STOPPING) and the unit ends it at the next bar line; the status strip says TEMPO CUT THE TAKE SHORT (10_cut).
+# The simulator's only way to change the master's tempo is a new Start, which restarts the bar counter, so the take here is 1.4 bars of the new tempo; on a
+# master that only changes tempo, it ends on a whole bar. What the scenario shows is the strip and the order of events.
+tap config
+wait 50
+tap right
+wait 50
+snap 06a_config_midi
+tap down
+tap down
+tap down
+tap down
+tap down
+tap f1
+wait 50
+snap 06b_follow_on
+tap config
+wait 100
+tap samplerec
+wait 200
+clock 120 start
+wait 600
+tap rec
+wait 3500
+snap 06_recording_at_120
+clock 40 start
+wait 300
+snap 07_tempo_fell
+wait 1500
+snap 08_cut_a
+wait 3000
+snap 09_before_the_bar_line
+wait 1500
+snap 10_cut
+wait 1500
+snap 11_cut_later

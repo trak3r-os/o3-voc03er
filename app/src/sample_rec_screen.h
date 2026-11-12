@@ -82,6 +82,7 @@ class SampleRecScreen final : public o3sdk::app::Screen {
   Phase phase_ = Phase::Idle;
   bool stop_ = false;            // Rec 0 has been written: the take ends at its bar line
   std::uint32_t trim_ = 0;       // an auto-stopped take with the transport stopped: its exact length in samples (0: none), sent as Load by finish()
+  bool slow_ = false;            // the tempo changed under a recording take and it was stopped for that: finish() then says so
   bool drop_ = false;            // DELETE during a take: it ends and is thrown away
   std::uint8_t rec_slot_ = 0;    // the slot being taken
   std::uint64_t t0_ = 0;         // uptime_ms the Rec was written

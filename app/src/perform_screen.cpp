@@ -957,6 +957,10 @@ void PerformScreen::rec_press(app::Context& ctx) noexcept {
     show_flash(ctx, "REC", "NO EMPTY SLOT");
     return;
   }
+  if (!pl::fits(kCapBars, ctx.engine().stats().tempo_mbpm)) {
+    show_flash(ctx, "TOO LONG", "AT THIS TEMPO");  // two bars would fill the 16 s buffer (under 30 BPM)
+    return;
+  }
   cap_slot_ = static_cast<std::uint8_t>(slot);
   cap_stop_ = false;
   cap_t0_ = ctx.uptime_ms();
@@ -990,6 +994,18 @@ void PerformScreen::capture_tick(app::Context& ctx) noexcept {
         abort_capture(ctx, "FAILED");
       }
       return;
+    }
+    if (!cap_stop_ && !pl::still_fits(kCapBars, ctx.engine().stats().tempo_mbpm)) {
+      if (ls.rec == R::Armed) {  // the tempo fell under 30 BPM while it waited: cancelled, no slot taken
+        abort_capture(ctx, "CANCELLED");
+        show_flash(ctx, "TOO LONG", "AT THIS TEMPO");
+        return;
+      }
+      if (ls.rec == R::Recording) {  // stops as if REC were pressed: the unit ends it at the next bar line, shorter than two bars
+        loop_rec(ctx, cap_slot_, false);
+        cap_stop_ = true;
+        return;
+      }
     }
     if (ls.rec == R::Recording && !cap_stop_) {
       const dsp::Engine& e = ctx.engine();

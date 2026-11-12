@@ -25,6 +25,7 @@ namespace {
 
 constexpr std::uint64_t kStartMs = 250;  // the unit shows the Rec within this, or the take failed (as PERFORM's capture)
 constexpr std::uint64_t kNoteMs = 2500;
+constexpr const char* kTooLong = "TOO LONG AT THIS TEMPO";  // a LENGTH of bars that the 16 s buffer cannot hold at the tempo
 constexpr std::uint32_t kTrimMaxOver = 4410;  // a stopped take is trimmed to its mark only when it ran at most this far (100 ms) past it
 constexpr unsigned kGainTap = 5;  // a second tap on F2 moves the gain this much (a detent moves 1)
 constexpr int kPicX = 548, kPicY = 210;  // the overview picture (240 x 48), right of the slot cards, under the BAR chip
@@ -147,9 +148,15 @@ void SampleRecScreen::rec_press(app::Context& ctx) noexcept {
     say(ctx, "NO INPUT");
     return;
   }
+  if (!pl::fits(sr::kLengthBars[length_ < sr::kLengthCount ? length_ : 0u], ctx.engine().stats().tempo_mbpm)) {
+    say(ctx, kTooLong);  // the take would fill the 16 s buffer before its last bar line
+    return;
+  }
+  note_ = nullptr;  // an old TOO LONG does not stand next to ARMED
   rec_slot_ = slot_;
   stop_ = false;
   drop_ = false;
+  slow_ = false;
   t0_ = ctx.uptime_ms();
   phase_ = Phase::Starting;
   write_rec(ctx, false);  // the Rec parameter's stored value stays 1 after a stop: 0 then 1 records again
@@ -264,7 +271,12 @@ void SampleRecScreen::tick(app::Context& ctx) noexcept {
   if (phase_ == Phase::Active) {
     if (ls.rec == Rec::Idle) {
       if (ls.length != 0u || drop_) {
+        const bool cut = slow_ && !drop_;
+        slow_ = false;
         finish(ctx);
+        if (cut) {  // whole bars, shorter than LENGTH; or the tempo fell so late that the buffer filled first: the take then runs free, not on the bar
+          say(ctx, ls.on_bar ? "TEMPO CUT THE TAKE SHORT" : "TEMPO FILLED THE SLOT");
+        }
       } else {
         phase_ = Phase::Idle;
         say(ctx, "FAILED");
@@ -272,6 +284,24 @@ void SampleRecScreen::tick(app::Context& ctx) noexcept {
       return;
     }
     const unsigned bars = sr::kLengthBars[length_ < sr::kLengthCount ? length_ : 0u];
+    // A tempo change (MIDI follow, PATTERN's TEMPO) that makes the LENGTH no longer fit the buffer by a real margin (still_fits): an armed take is
+    // cancelled; a recording one stops as if REC were pressed (the unit ends it at the next bar line, shorter than LENGTH, still whole bars) and finish()
+    // says so.
+    if (!stop_ && !drop_ && !pl::still_fits(bars, ctx.engine().stats().tempo_mbpm)) {
+      if (ls.rec == Rec::Armed) {
+        write_rec(ctx, false);
+        phase_ = Phase::Idle;
+        say(ctx, kTooLong);
+        return;
+      }
+      if (ls.rec == Rec::Recording) {
+        write_rec(ctx, false);
+        stop_ = true;
+        slow_ = true;
+        say(ctx, kTooLong);
+        return;
+      }
+    }
     if (ls.rec == Rec::Recording && !stop_ && sr::auto_stops(length_)) {
       const dsp::Engine& e = ctx.engine();
       const float bar = pl::bar_samples(e.stats().tempo_mbpm);
@@ -331,6 +361,9 @@ void SampleRecScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept 
     }
     case 2:  // LENGTH
       length_ = static_cast<std::uint8_t>(tap ? (length_ + 1u) % sr::kLengthCount : sr::step_length(length_, delta));
+      if (!pl::fits(sr::kLengthBars[length_], ctx.engine().stats().tempo_mbpm)) {
+        say(ctx, kTooLong);  // allowed to choose, REC refuses until the tempo is faster
+      }
       break;
     case 3: {  // AFTER
       const int n = static_cast<int>(sr::kAfterCount);

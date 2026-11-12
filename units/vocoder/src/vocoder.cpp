@@ -127,8 +127,9 @@ inline float soft_clip(float x) noexcept {
 
 constexpr std::uint32_t kBarTicks = 4u * o3sdk::dsp::kPpqn;  // 4/4: the transport has no time signature
 
-// The frame of this block (below n) at which the transport reaches a bar line, -1 if none. A block is far shorter than a bar.
-int bar_frame(const o3sdk::dsp::Transport& t, std::uint32_t n) noexcept {
+// The frame of this block (below n) at which the transport reaches a bar line, -1 if none, and the line's bar index in `bar`. A block is far
+// shorter than a bar.
+int bar_frame(const o3sdk::dsp::Transport& t, std::uint32_t n, std::uint32_t& bar) noexcept {
   if (!t.playing || t.frames == 0u) {
     return -1;
   }
@@ -136,19 +137,11 @@ int bar_frame(const o3sdk::dsp::Transport& t, std::uint32_t n) noexcept {
   for (std::uint32_t c = k; c <= k + 1u; ++c) {
     const int f = o3sdk::dsp::frame_at(t, static_cast<std::uint64_t>(c) * kBarTicks);
     if (f >= 0 && static_cast<std::uint32_t>(f) < n) {
+      bar = c;
       return f;
     }
   }
   return -1;
-}
-
-// Where a loop action asked at frame `min` of this block happens: at the next bar line, or at once while the transport is stopped.
-int locate(const o3sdk::dsp::Transport& t, std::uint32_t n, std::uint32_t min) noexcept {
-  if (!t.playing) {
-    return static_cast<int>(min);
-  }
-  const int f = bar_frame(t, n);
-  return f >= static_cast<int>(min) ? f : -1;
 }
 
 }  // namespace
@@ -540,7 +533,48 @@ void Vocoder::load_event(float v) noexcept {
   if (n >= Loop::kCount || slot_[n].rec != Slot::Rec::Idle || slot_[n].want_play) {
     return;
   }
-  (void)loops_.adopt(n, len);
+  const std::uint32_t old_len = loops_.length(n);
+  const std::uint32_t old_bars = loops_.bars(n);
+  if (!loops_.adopt(n, len)) {
+    return;
+  }
+  // Whole bars, in this order, so that an edit, a copy or a trim does not forget what the loop was and the outcome never hangs on the tempo of
+  // the moment unless the loop is new:
+  //  1. the slot's length did not change (a resent Load, an edit that kept the length): the count it had;
+  //  2. another slot holds exactly this length with a count (a copy: the app copies slot to slot): the same count, whatever the tempo is now;
+  //  3. the slot had a count and the new length is a whole number of its own bars (a trim to bars) within two samples a bar: that many bars;
+  //  4. else a WAV is on the bars if its length is a whole number of bars at the transport's tempo as of the last block (within two samples a
+  //     bar's worth of tempo rounding and a writer's fade padding: the tolerance is 2 * mbpm in the units of len * mbpm), else it is free.
+  //     len / bar = len * mbpm / (240000 * fs); fs rounded to a whole number. A project's WAVs are judged here, at the project's own tempo:
+  //     FileScreen::apply sets it before the first WAV load.
+  if (old_len == len && old_bars != 0u) {
+    loops_.set_bars(n, old_bars);
+    return;
+  }
+  for (unsigned k = 0; k < Loop::kCount; ++k) {
+    if (k != n && loops_.length(k) == len && loops_.bars(k) != 0u) {
+      loops_.set_bars(n, loops_.bars(k));
+      return;
+    }
+  }
+  if (old_bars != 0u && old_len != 0u) {
+    const std::uint64_t lb = static_cast<std::uint64_t>(len) * old_bars;
+    const std::uint64_t nb = (2u * lb + old_len) / (2u * old_len);
+    const std::uint64_t exact = nb * old_len;
+    const std::uint64_t diff = lb > exact ? lb - exact : exact - lb;
+    if (nb >= 1u && nb < 0xFFFFu && diff <= 2ull * old_bars) {
+      loops_.set_bars(n, static_cast<std::uint32_t>(nb));
+      return;
+    }
+  }
+  const std::uint64_t num = 240000ull * static_cast<std::uint64_t>(static_cast<std::uint32_t>(fs_ + 0.5f));
+  const std::uint64_t lm = static_cast<std::uint64_t>(len) * tempo_mbpm_;
+  const std::uint64_t bars = (2u * lm + num) / (2u * num);
+  const std::uint64_t exact = bars * num;
+  const std::uint64_t diff = lm > exact ? lm - exact : exact - lm;
+  if (bars >= 1u && bars < 0xFFFFu && diff <= 2ull * tempo_mbpm_) {
+    loops_.set_bars(n, static_cast<std::uint32_t>(bars));
+  }
 }
 
 void Vocoder::region_param_event(std::uint16_t id, float v, std::uint32_t frame) noexcept {
@@ -944,7 +978,7 @@ void Vocoder::publish_loops() noexcept {
     } else if (s.rec == Slot::Rec::Recording) {
       rec = s.want_rec ? 2u : 3u;
     }
-    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.length(i) << 8);
+    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.bars(i) != 0u ? 64u : 0u) | (loops_.length(i) << 8);
     pos_[i].store(loops_.bank_position(i), std::memory_order_relaxed);
     status_[i].store(w, std::memory_order_relaxed);
     const std::uint32_t half_db = static_cast<std::uint32_t>(static_cast<int>(std::floor(s.level_db * 2.0f + 0.5f)) + 64);
@@ -963,6 +997,7 @@ Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
   st.pending = (w & 8u) != 0u;
   st.carrier = (w & 16u) != 0u;
   st.region = (w & 32u) != 0u;
+  st.on_bar = (w & 64u) != 0u;
   st.length = w >> 8;
   st.position = pos_[loop].load(std::memory_order_relaxed);
   const std::uint32_t o = opts_[loop].load(std::memory_order_relaxed);
@@ -986,43 +1021,86 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
     npend_ = 0;
     return;
   }
+  tempo_mbpm_ = t.tempo_mbpm;
   float tmp[Bands::kMaxFrames];
   std::uint32_t play_from[Loop::kCount] = {};
+  // The block's bar line (frame and bar index), found once and only when something asks: -1 none. A block holds at most one.
+  bool line_known = false;
+  int line_frame = -1;
+  std::uint32_t line_bar = 0;
+  const auto line = [&]() -> int {
+    if (!line_known) {
+      line_known = true;
+      line_frame = bar_frame(t, n, line_bar);
+    }
+    return line_frame;
+  };
+  // Where a loop action asked at frame `min` of this block happens: at the next bar line, or at once while the transport is stopped.
+  const auto locate = [&](std::uint32_t min) -> int {
+    if (!t.playing) {
+      return static_cast<int>(min);
+    }
+    const int f = line();
+    return f >= static_cast<int>(min) ? f : -1;
+  };
+  // The bar-0 line (the transport started again) anchors every slot's bar grid at 0, whatever the slot is doing (a loop under a region, one that
+  // is paused or free keeps no stale anchor). Only the first bar of a run looks: later blocks cost nothing here.
+  if (t.playing && (t.pos >> 32) < kBarTicks && line() >= 0 && line_bar == 0u) {
+    for (unsigned i = 0; i < Loop::kCount; ++i) {
+      loops_.reanchor(i);
+    }
+  }
   for (unsigned i = 0; i < Loop::kCount; ++i) {
     Slot& s = slot_[i];
     std::uint32_t from = 0;
+    bool began = false;
     if (s.rec == Slot::Rec::Armed) {
       if (!s.want_rec) {
         s.rec = Slot::Rec::Idle;
       } else {
-        const int f = locate(t, n, s.req);
+        const int f = locate(s.req);
         if (f >= 0) {
           loops_.begin_record(i);
           s.rec = Slot::Rec::Recording;
           s.want_play = false;
+          s.rec_ok = t.playing;
+          s.rec_bars = 0;
           from = static_cast<std::uint32_t>(f);
+          began = true;
         }
       }
     }
     if (s.rec == Slot::Rec::Recording) {
+      if (!began) {  // a take is a count of whole bars only if the transport ran under all of it
+        if (!t.playing) {
+          s.rec_ok = false;
+        } else if (s.rec_ok && line() >= 0) {
+          ++s.rec_bars;
+        }
+      }
       std::uint32_t end = n;
       bool stop = false;
       if (!s.want_rec) {
-        const int f = locate(t, n, s.req);
+        const int f = locate(s.req);
         if (f >= 0) {
           end = static_cast<std::uint32_t>(f);
           stop = true;
         }
       }
-      if (end > from) {
-        (void)loops_.record(i, mod + from, end - from);
-      }
-      if (!loops_.recording(i)) {  // full: the loop ended itself
+      const std::uint32_t want = end > from ? end - from : 0u;
+      const std::uint32_t taken = want != 0u ? loops_.record(i, mod + from, want) : 0u;
+      if (!loops_.recording(i)) {  // full: the loop ended itself; it is on the bars only if the line that stops it is the sample that filled it
         s.rec = Slot::Rec::Idle;
         s.want_rec = false;
+        if (stop && taken == want && s.rec_ok && s.rec_bars != 0u) {
+          loops_.set_bars(i, s.rec_bars);
+        }
       } else if (stop) {
         loops_.end_record(i);
         s.rec = Slot::Rec::Idle;
+        if (s.rec_ok && s.rec_bars != 0u) {
+          loops_.set_bars(i, s.rec_bars);
+        }
       }
     }
   }
@@ -1031,17 +1109,23 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
   for (unsigned i = 0; i < Loop::kCount; ++i) {
     Slot& s = slot_[i];
     if (s.want_play && s.rec == Slot::Rec::Idle) {
-      const int f = locate(t, n, s.req);
-      if (f >= 0 && loops_.start(i)) {
+      const int f = locate(s.req);
+      if (f >= 0 && loops_.start(i, t.playing ? line_bar : 0u)) {
         s.want_play = false;
         play_from[i] = static_cast<std::uint32_t>(f);
       }
     }
     // sel_ is the block's last word: a loop leaving the carrier stays on that side until its fade has run from the event's frame.
     const bool on_car = sel_ == 3u + i || (msel_ != 3u + i && (s.carrier || loop_car_[i].value() > 0.0f));
-    const bool sounds = loops_.playing(i) || loops_.region(i);
+    const bool sounds = loops_.sounding(i) || loops_.region(i);
     if (sounds) {
       const std::uint32_t pf = loops_.region(i) ? 0u : play_from[i];  // a region's command frames count from the block's start
+      if (t.playing && loops_.bars(i) != 0u && loops_.playing(i) && !loops_.region(i)) {  // a loop of whole bars restarts with the bar
+        const int lf = line();
+        if (lf >= static_cast<int>(pf)) {
+          loops_.bar_line(i, static_cast<std::uint32_t>(lf) - pf, line_bar);
+        }
+      }
       if (on_car) {
         mix_car(i, pf, n, car, tmp);
       } else {

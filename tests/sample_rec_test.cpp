@@ -60,6 +60,53 @@ TEST_CASE("sample_rec: AFTER places the slot where route::allowed lets it, and s
   CHECK(p.to.speaks == held.speaks);
 }
 
+TEST_CASE("sample_rec: a LENGTH of bars fits the 16 s buffer from its tempo up, FREE always") {
+  CHECK(pl::fits(8, 120000));  // 8 bars at 120 BPM are exactly 16 s: the stop line is the last sample
+  CHECK_FALSE(pl::fits(8, 119999));
+  CHECK_FALSE(pl::fits(8, 100000));
+  CHECK(pl::fits(8, 300000));
+  CHECK(pl::fits(4, 60000));
+  CHECK_FALSE(pl::fits(4, 59999));
+  CHECK(pl::fits(4, 120000));
+  CHECK(pl::fits(2, 30000));
+  CHECK_FALSE(pl::fits(2, 29999));
+  CHECK(pl::fits(1, 20000));
+  CHECK(pl::fits(0, 20000));  // FREE: there is no length to fit
+  CHECK(pl::fits(0, 0));
+  CHECK(pl::fits(1, 0));  // a stopped or odd tempo reads 20 BPM, as bar_samples does
+  CHECK_FALSE(pl::fits(2, 0));
+  for (unsigned i = 0; i < sr::kLengthCount; ++i) {  // agrees with the float bar the screen stops at
+    const unsigned bars = sr::kLengthBars[i];
+    for (unsigned bpm = 20; bpm <= 300; ++bpm) {
+      const float len = static_cast<float>(bars) * pl::bar_samples(bpm * 1000u);
+      if (bars != 0u && std::fabs(len - static_cast<float>(o3_voc03er::Loop::kMaxSamples)) > 2.0f) {
+        CHECK(pl::fits(bars, bpm * 1000u) == (len < static_cast<float>(o3_voc03er::Loop::kMaxSamples)));
+      }
+    }
+  }
+}
+
+TEST_CASE("sample_rec: a take in flight is given up only a real margin under the edge, REC arms at the exact edge (FOLLOW jitter at LENGTH 8 and 120.000 BPM)") {
+  CHECK(pl::fits(8, 120000));        // REC arms at the exact edge
+  CHECK(pl::still_fits(8, 119999));  // jitter below it does not cancel an arm or stop a take
+  CHECK(pl::still_fits(8, 119500));
+  CHECK_FALSE(pl::still_fits(8, 119499));  // 0.5 BPM under the edge: given up
+  CHECK(pl::still_fits(4, 59500));
+  CHECK_FALSE(pl::still_fits(4, 59499));
+  CHECK(pl::still_fits(2, 29500));
+  CHECK_FALSE(pl::still_fits(2, 29499));
+  CHECK(pl::still_fits(0, 0));  // FREE always
+  // a jittering tempo around the edge: no verdict flips, whichever way it wanders within the margin
+  unsigned flips = 0;
+  bool was = pl::still_fits(8, 120000);
+  for (unsigned mbpm = 119600u; mbpm <= 120400u; mbpm += 7u) {
+    const bool now = pl::still_fits(8, mbpm);
+    flips += now != was ? 1u : 0u;
+    was = now;
+  }
+  CHECK(flips == 0u);
+}
+
 TEST_CASE("sample_rec: bars to samples, bars done, seconds and the transport's bar") {
   const float bar = pl::bar_samples(120000);  // 2 s a bar at 120 BPM
   CHECK(bar == doctest::Approx(88200.0f).epsilon(0.001));
@@ -321,5 +368,51 @@ TEST_CASE("sample_rec: DELETE while a take is stopping (REC pressed, the bar lin
   CHECK(slot1_state(h) == "loop1=0");
   CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Play)) == doctest::Approx(0.0f));
   CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample_rec: a LENGTH that does not fit the buffer at the tempo is refused at REC, and fits again at 120 BPM") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  REQUIRE(h.engine().set_tempo(100000u));  // 8 bars at 100 BPM are 19.2 s: more than the 16 s a slot holds
+  h.run_ms(60);
+  length_to_free(h);
+  for (int i = 0; i < 4; ++i) {
+    tap(h, app::Button::Right);  // 1, 2, 4, 8 BARS
+  }
+  tap(h, app::Button::Rec);
+  h.run_ms(300);
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));  // nothing armed
+  CHECK(slot1_state(h) == "loop1=0");
+  tap(h, app::Button::Left);  // 4 BARS: 9.6 s at 100 BPM
+  tap(h, app::Button::Rec);
+  h.run_ms(300);
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(1.0f));  // armed
+  tap(h, app::Button::Rec);  // cancel
+  h.run_ms(100);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample_rec: a tempo change under a recording take that no longer fits ends it at the next bar line, shorter than LENGTH") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  length_to_free(h);
+  for (int i = 0; i < 3; ++i) {
+    tap(h, app::Button::Right);  // 1, 2, 4 BARS
+  }
+  tap(h, app::Button::Play);
+  h.run_ms(100);
+  REQUIRE(h.engine().playing());
+  tap(h, app::Button::Rec);  // armed, then records from the next bar line (at 2 s)
+  h.run_ms(2500);
+  REQUIRE(slot1_state(h) != "loop1=0");
+  REQUIRE(h.engine().set_tempo(50000u));  // 4 bars at 50 BPM are 19.2 s
+  h.run_ms(7000);                         // the take ends at the next line, 2.4 s on, instead of at 4 bars
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  const std::string s = slot1_state(h);
+  REQUIRE(s.size() > 6u);
+  const unsigned long len = std::stoul(s.substr(6));
+  CHECK(len > 88200u / 2u);
+  CHECK(len < 2u * 88200u + 88200u / 2u);  // a bar and a half of audio, nowhere near four bars or the full buffer
   CHECK(h.runtime().frame_failures() == 0u);
 }

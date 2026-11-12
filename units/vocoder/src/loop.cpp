@@ -31,6 +31,9 @@ void Loop::clear() noexcept {
     st_l_[i] = 0;
     st_v_[i] = 100;
     rv_[i] = 100;
+    bars_[i] = 0;
+    k0_[i] = 0;
+    ghost_off(i);
     region_off(i);
   }
 }
@@ -43,6 +46,8 @@ void Loop::forget(unsigned i) noexcept {
   rec_[i] = false;
   h_[i] = 0;
   len_[i] = 0;
+  bars_[i] = 0;
+  ghost_off(i);
   region_off(i);
 }
 
@@ -60,6 +65,8 @@ bool Loop::adopt(unsigned i, std::uint32_t length) noexcept {
   }
   h_[i] = 0;
   len_[i] = length;
+  bars_[i] = 0;
+  ghost_off(i);
   return true;
 }
 
@@ -71,6 +78,8 @@ void Loop::begin_record(unsigned i) noexcept {
   h_[i] = 0;
   len_[i] = 0;
   rec_[i] = true;
+  bars_[i] = 0;
+  ghost_off(i);
   region_off(i);
 }
 
@@ -111,19 +120,85 @@ void Loop::end_record(unsigned i) noexcept {
   }
 }
 
-bool Loop::start(unsigned i) noexcept {
+bool Loop::start(unsigned i, std::uint32_t bar) noexcept {
   if (mem_ == nullptr || i >= kCount || rec_[i] || len_[i] == 0u) {
     return false;
   }
   h_[i] = rev_[i] ? 2u * (len_[i] - 1u) : 0u;
   gcur_[i] = gain_[i];
+  k0_[i] = bar;
+  sf_[i] = -1;
   playing_[i] = true;
   return true;
 }
 
+// The loop does not cut: from where it is, the ghost carries it on for kFadeSamples more, fading to zero (mix_slow). Not when a region is
+// sounding over it (the loop is paused under the region: mix() is not what is heard), nor when a jump fade is still running.
 void Loop::stop(unsigned i) noexcept {
+  if (i >= kCount) {
+    return;
+  }
+  if (playing_[i] && !region(i) && gn_[i] == 0u) {
+    const unsigned sp = speed_[i];
+    gh_[i] = (sp == 1u && !rev_[i]) ? (h_[i] & ~1u) : h_[i];
+    gs_[i] = static_cast<std::uint8_t>(sp == 0u ? 1u : (sp == 1u ? 2u : 4u));
+    gv_[i] = rev_[i];
+    gm_[i] = false;
+    gn_[i] = static_cast<std::uint8_t>(kFadeSamples);
+  }
+  playing_[i] = false;
+  sf_[i] = -1;
+}
+
+void Loop::set_bars(unsigned i, std::uint32_t bars) noexcept {
   if (i < kCount) {
-    playing_[i] = false;
+    bars_[i] = static_cast<std::uint16_t>(bars < 0xFFFFu ? bars : 0xFFFFu);
+  }
+}
+
+// Where the cycle stands at bar `bar` (see loop.h), staged as a jump at `frame` unless the loop is already there.
+void Loop::bar_line(unsigned i, std::uint32_t frame, std::uint32_t bar) noexcept {
+  if (i >= kCount) {
+    return;
+  }
+  if (bar == 0u) {
+    reanchor(i);
+  }
+  const std::uint64_t n = bars_[i];
+  const std::uint32_t len = len_[i];
+  if (n == 0u || len == 0u || !playing_[i] || gn_[i] != 0u || region(i)) {
+    return;
+  }
+  const unsigned sp = speed_[i];
+  const bool rev = rev_[i];
+  const std::uint64_t step = sp == 0u ? 1u : (sp == 1u ? 2u : 4u);
+  const std::uint64_t len2 = 2ull * len;
+  const std::uint64_t m = 2ull * n;
+  const std::uint64_t j = (bar % m + m - k0_[i] % m) % m;
+  const std::uint64_t x = (j * step * len + n / 2u) / n % len2;
+  std::uint64_t e = rev ? (2ull * (len - 1u) + len2 - x) % len2 : x;
+  std::uint64_t cur = h_[i];
+  if (sp == 1u && !rev) {
+    e &= ~1ull;  // the plain pass plays whole samples
+    cur &= ~1ull;
+  }
+  const std::uint64_t adv = static_cast<std::uint64_t>(frame) * step % len2;
+  cur = rev ? (cur + len2 - adv) % len2 : (cur + adv) % len2;
+  const std::uint64_t d = (cur + len2 - e) % len2;
+  if (d <= 4u || len2 - d <= 4u) {
+    return;  // already on the grid: nothing to change, nothing to hear
+  }
+  // A seam line (the grid says the first sample) with the loop a few samples off: a bar that is not a whole number of samples (123 BPM) makes
+  // the loop slip a fraction of a sample a cycle, and once the slip is past the tolerance it is put back here, where the baked fades sit at
+  // about zero: a snap at `frame`, no ghost, nothing to hear. Anywhere else, or when the error is larger, the jump crossfades.
+  sn_[i] = x == 0u && (d <= kSnap || len2 - d <= kSnap);
+  sf_[i] = static_cast<std::int32_t>(frame);
+  sj_[i] = static_cast<std::uint32_t>(e);
+}
+
+void Loop::reanchor(unsigned i) noexcept {
+  if (i < kCount) {
+    k0_[i] = 0;
   }
 }
 
@@ -281,9 +356,19 @@ inline void fill_chunk(float* tmp, std::int16_t* buf, const std::int16_t* s, std
 }  // namespace
 
 void Loop::mix(unsigned i, float* dst, std::uint32_t n, bool add) noexcept {
-  if (i >= kCount || !playing_[i]) {
+  if (i >= kCount) {
     return;
   }
+  if (gn_[i] == 0u && sf_[i] < 0) {  // the common block: no ghost, no jump
+    if (playing_[i]) {
+      mix_plain(i, dst, n, add);
+    }
+    return;
+  }
+  mix_slow(i, dst, n, add);
+}
+
+void Loop::mix_plain(unsigned i, float* dst, std::uint32_t n, bool add) noexcept {
   const std::int16_t* s = mem_ + static_cast<std::size_t>(i) * cap_;
   const std::uint32_t len = len_[i];
   const std::uint32_t len2 = 2u * len;
@@ -350,6 +435,90 @@ void Loop::mix(unsigned i, float* dst, std::uint32_t n, bool add) noexcept {
   h_[i] = h;
 }
 
+// The blocks with a jump staged or a ghost running (a bar line the loop was off, or 64 samples after a stop), in chunks of at most kChunk
+// that end where something changes: a staged jump at its frame (the old position becomes the ghost, the new one the main), the ghost's end.
+// The ghost's weight w falls (gn - k) / kFadeSamples from 1; the main is full under a stop tail and 1 - w under a jump. One more span copy
+// a chunk, for at most two chunks a bar line.
+void Loop::mix_slow(unsigned i, float* dst, std::uint32_t n, bool add) noexcept {
+  const std::int16_t* s = mem_ + static_cast<std::size_t>(i) * cap_;
+  const std::uint32_t len = len_[i];
+  const std::uint32_t len2 = 2u * len;
+  const bool rev = rev_[i];
+  const unsigned sp = speed_[i];
+  const float g1 = gain_[i];
+  const bool on = playing_[i];
+  std::uint32_t h = h_[i];
+  if (sp == 1u && !rev) {
+    h &= ~1u;
+  }
+  const std::uint32_t step = sp == 0u ? 1u : (sp == 1u ? 2u : 4u);
+  alignas(4) std::int16_t buf[kSpanMax + 2];
+  float tmp[kChunk];
+  float gt[kChunk];
+  float g = gcur_[i];
+  std::uint32_t done = 0;
+  while (done < n) {
+    if (sf_[i] >= 0 && static_cast<std::uint32_t>(sf_[i]) <= done) {
+      if (on && gn_[i] == 0u && !sn_[i]) {
+        gh_[i] = h;
+        gs_[i] = static_cast<std::uint8_t>(step);
+        gv_[i] = rev;
+        gm_[i] = true;
+        gn_[i] = static_cast<std::uint8_t>(kFadeSamples);
+      }
+      h = sj_[i];
+      sf_[i] = -1;
+    }
+    std::uint32_t nn = n - done < kChunk ? n - done : kChunk;
+    if (sf_[i] >= 0 && static_cast<std::uint32_t>(sf_[i]) - done < nn) {
+      nn = static_cast<std::uint32_t>(sf_[i]) - done;
+    }
+    if (gn_[i] != 0u && gn_[i] < nn) {
+      nn = gn_[i];
+    }
+    if (on) {
+      fill_chunk(tmp, buf, s, len, h, rev, step, nn);
+      h = rev ? (h + len2 - (nn * step) % len2) % len2 : (h + nn * step) % len2;
+    } else {
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        tmp[k] = 0.0f;
+      }
+    }
+    if (gn_[i] != 0u) {
+      const std::uint32_t gstep = gs_[i];
+      fill_chunk(gt, buf, s, len, gh_[i], gv_[i], gstep, nn);
+      gh_[i] = gv_[i] ? (gh_[i] + len2 - (nn * gstep) % len2) % len2 : (gh_[i] + nn * gstep) % len2;
+      constexpr float kInvFade = 1.0f / static_cast<float>(kFadeSamples);  // a power of two: exact
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        const float w = static_cast<float>(gn_[i] - k) * kInvFade;
+        tmp[k] = (gm_[i] ? tmp[k] * (1.0f - w) : tmp[k]) + gt[k] * w;
+      }
+      gn_[i] = static_cast<std::uint8_t>(gn_[i] - nn);
+    }
+    const float dg = (g1 - g) / static_cast<float>(nn);
+    for (std::uint32_t k = 0; k < nn; ++k) {
+      g += dg;
+      tmp[k] *= kToFloat * g;
+    }
+    g = g1;
+    if (add) {
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        dst[done + k] += tmp[k];
+      }
+    } else {
+      for (std::uint32_t k = 0; k < nn; ++k) {
+        dst[done + k] = tmp[k];
+      }
+    }
+    done += nn;
+  }
+  sf_[i] = -1;
+  gcur_[i] = g;
+  if (on) {
+    h_[i] = h;
+  }
+}
+
 // ---- Regions ----
 
 void Loop::region_off(unsigned i) noexcept {
@@ -407,6 +576,7 @@ bool Loop::begin_region(unsigned i) noexcept {
   rh_[i] = rev_[i] ? 2u * (l - 1u) : 0u;
   rv_[i] = st_v_[i];
   rg_[i] = rv_[i] >= 100u ? gain_[i] : gain_[i] * (static_cast<float>(rv_[i]) * 0.01f);
+  ghost_off(i);  // the loop's own stop tail or jump fade is not carried under a region
   fn_[i] = 0;
   dir_[i] = 1;
   rst_[i] = false;
