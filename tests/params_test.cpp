@@ -7,6 +7,8 @@
 
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
+#include <o3sdk/app/midi.h>
+#include <o3sdk/platform/host/fake_midi.h>
 #include <o3sdk/app/runtime.h>
 #include <o3sdk/sim/harness.h>
 
@@ -481,4 +483,152 @@ TEST_CASE("header: a slot that speaks is named the same on every screen, not the
   h.run_ms(20);
   o3_voc03er::header_route(h.engine(), voice, "LINE", false, hs);
   CHECK(std::strcmp(hs.speaks, "LINE") == 0);
+}
+
+// ---- ML1: MIDI learn (SHIFT + F) ---------------------------------------------------------------------------------------------------
+
+TEST_CASE("params: learnable is a live-safe unit parameter (Value, Tract); MODE, QUALITY, VOICING, a Later key and a blank are not") {
+  CHECK_FALSE(pm::learnable(1, 0));  // MODE: swaps the layout and resets
+  CHECK_FALSE(pm::learnable(1, 1));  // QUALITY: reallocates TALK's LPC order
+  CHECK(pm::learnable(0, 7));        // LEVEL stays: pickup stops a jump
+  CHECK(pm::learnable(0, 0));
+  CHECK(pm::learnable(2, 4));  // NOTES IN
+  CHECK(pm::learnable(pm::kTractPage, 0));
+  CHECK(pm::learnable(1, 5));  // MOUTH: the tract unit's SOURCE
+  CHECK_FALSE(pm::learnable(1, 4));  // VOICING: the app's own setting
+  CHECK_FALSE(pm::learnable(1, 7));  // blank
+  CHECK_FALSE(pm::learnable(0, 8));
+  for (unsigned p = 0; p < pm::kPages; ++p) {
+    for (unsigned k = 0; k < pm::kKeys; ++k) {
+      const pm::Kind kind = pm::key_def(p, k).kind;
+      const pm::KeyDef& d = pm::key_def(p, k);
+      CHECK(pm::learnable(p, k) == (kind == pm::Kind::Tract || (kind == pm::Kind::Value && d.param != Vocoder::Mode && d.param != Vocoder::Quality)));
+      if (pm::learnable(p, k)) {
+        CHECK(pm::focusable(p, k));
+      }
+    }
+  }
+  CHECK(pm::learn_tap(false, false) == pm::LearnTap::Cannot);
+  CHECK(pm::learn_tap(false, true) == pm::LearnTap::Cannot);
+  CHECK(pm::learn_tap(true, false) == pm::LearnTap::Arm);
+  CHECK(pm::learn_tap(true, true) == pm::LearnTap::Cancel);
+}
+
+namespace {
+void shift_tap(sim::Harness& h, app::Button b) {
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, b);
+  h.release(app::Button::Shift);
+  h.run_ms(20);
+}
+}  // namespace
+
+TEST_CASE("params: SHIFT + F arms the kit's learn, the same keys cancel, a page or screen change cancels, a controller binds and then moves the value") {
+  using o3_voc03er::TractUnit;
+  o3sdk::platform::host::FakeMidi midi;
+  sim::Harness h(::o3sdk_app(), nullptr, &midi);
+  REQUIRE(h.start());
+  h.run_ms(100);
+  app::Midi& km = h.runtime().context().midi();
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  const float noise0 = param(h, Vocoder::Noise);
+
+  // SHIFT + NOISE (F5) arms; the focus and the value are untouched; the same keys again cancel
+  shift_tap(h, app::Button::F5);
+  CHECK(km.learning());
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise0));
+  shift_tap(h, app::Button::F5);
+  CHECK_FALSE(km.learning());
+
+  // another key re-aims (still one arm); DOWN leaves the page and cancels
+  shift_tap(h, app::Button::F1);
+  shift_tap(h, app::Button::F2);
+  CHECK(km.learning());
+  tap(h, app::Button::Down);
+  h.run_ms(40);
+  CHECK_FALSE(km.learning());
+
+  // VOICING (page 1, F5) is the app's: nothing arms
+  shift_tap(h, app::Button::F5);
+  CHECK_FALSE(km.learning());
+  // a blank key too
+  shift_tap(h, app::Button::F8);
+  CHECK_FALSE(km.learning());
+  // MODE and QUALITY are not live gestures: nothing arms, and an earlier arm on another key goes (FREEZE, then MODE)
+  shift_tap(h, app::Button::F1);
+  CHECK_FALSE(km.learning());
+  shift_tap(h, app::Button::F2);
+  CHECK_FALSE(km.learning());
+  shift_tap(h, app::Button::F3);  // FREEZE
+  REQUIRE(km.learning());
+  shift_tap(h, app::Button::F1);  // MODE: refused, and the arm on FREEZE is cancelled
+  CHECK_FALSE(km.learning());
+
+  // leaving the screen cancels
+  shift_tap(h, app::Button::F3);  // FREEZE
+  CHECK(km.learning());
+  tap(h, app::Button::Performance);
+  h.run_ms(60);
+  CHECK_FALSE(km.learning());
+
+  // a controller binds: the strip's LEARNED CC, the arm ends; then the controller moves the value (pickup: sweep through it)
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  tap(h, app::Button::Up);  // page 0 was left on page 1; one back: CARRIER
+  h.run_ms(40);
+  REQUIRE(km.bindings() == 0u);
+  shift_tap(h, app::Button::F5);  // NOISE
+  REQUIRE(km.learning());
+  midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 21, 0);
+  h.run_ms(60);
+  CHECK_FALSE(km.learning());
+  CHECK(km.bindings() == 1u);
+  const int sweep[] = {0, 32, 64, 96, 127};
+  for (const int v : sweep) {
+    midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 21, static_cast<std::uint8_t>(v));
+    h.run_ms(30);
+  }
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(1.0f).epsilon(0.02));
+
+  // the TRACT page's keys are the tract unit's own parameters
+  tap(h, app::Button::Up);  // CARRIER, one page back: TRACT
+  h.run_ms(40);
+  shift_tap(h, app::Button::F1);  // VOWEL
+  REQUIRE(km.learning());
+  midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 22, 0);
+  h.run_ms(60);
+  CHECK(km.bindings() == 2u);
+  for (const int v : sweep) {
+    midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 22, static_cast<std::uint8_t>(v));
+    h.run_ms(30);
+  }
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(1.0f).epsilon(0.02));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("params: HELP names LEARN on the F keys that can take it") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  tap(h, app::Button::Down);  // page 1: VOICING is F5, F8 is blank
+  h.run_ms(40);
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Config);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  REQUIRE(h.runtime().help_open());
+  const app::Help& help = h.runtime().help_overlay().help();
+  CHECK(help.fkey_shift[0] == nullptr);  // MODE
+  CHECK(help.fkey_shift[1] == nullptr);  // QUALITY
+  CHECK(help.fkey_shift[2] != nullptr);  // FREEZE
+  CHECK(help.fkey_shift[4] == nullptr);  // VOICING
+  CHECK(help.fkey_shift[7] == nullptr);
+  app::HelpProblem p;
+  const bool ok = app::help_check(help, &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
 }

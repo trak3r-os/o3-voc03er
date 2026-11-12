@@ -4,6 +4,10 @@
 
 ### Added
 
+- **ML1: MIDI learn on PARAMS.** SHIFT + an F key arms the kit's learn for that value, on all four pages (the TRACT page learns the tract unit's own values); the same
+  keys again cancel, and so does leaving the page or the screen. The armed key lights and the screen says LEARN and the value's name, MOVE A KNOB; the strip says
+  LEARNED CC n. A value that is not a live-safe unit parameter (VOICING, MODE, QUALITY) shows "-" on the held-SHIFT row and cannot be armed. `App::midi_learned_moved` redraws. MANUAL no
+  longer claims learn on any value: it is the PARAMS values. Scenario `midi_learn.txt`, tests in `params_test`. Needs more testing with a real controller.
 - **TP1: parameter strips in PLAYS, one saved layout per mode (NP1 and AK1 folded in).** F7 PLAYS gains a strip for every parameter PARAMS shows in the
   mode that makes sense played live: twelve pads, pad 1 the minimum and pad 12 the maximum (a bipolar range has the middle pair at 0), one pad per choice up to
   twelve choices and twelve pads spread over more. TRACT gets all its parameters, the closures CL LIPS, CL TIP and CL BACK (held, momentary, the last pad pressed

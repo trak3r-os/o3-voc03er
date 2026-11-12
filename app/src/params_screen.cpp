@@ -43,6 +43,9 @@ void ParamsScreen::init(dsp::UnitId voice, dsp::UnitId tract, PerformScreen* per
   tract_ = tract;
   perform_ = perform;
   page_ = 0;  // setup() can run again on this object (tests, `reboot`): PARAMS opens on its first page
+  learn_armed_ = false;
+  learn_page_ = 0;
+  learn_key_ = 0;
   focus_ = static_cast<std::uint8_t>(pr::first_focus(0));
   note_ = nullptr;
 }
@@ -55,6 +58,7 @@ void ParamsScreen::enter(app::Context& ctx) noexcept {
 }
 
 void ParamsScreen::leave(app::Context& ctx) noexcept {
+  learn_drop(ctx);
   if (perform_ != nullptr) {
     perform_->leave(ctx);  // releases the held pads
   }
@@ -66,7 +70,49 @@ void ParamsScreen::say(app::Context& ctx, const char* text) noexcept {
   ctx.redraw();
 }
 
+// ---- MIDI learn (ML1) ---------------------------------------------------------------------------------------------------------------
+
+void ParamsScreen::learn_drop(app::Context& ctx) noexcept {
+  if (learn_armed_ && ctx.midi().learning()) {
+    ctx.midi().learn_cancel();
+  }
+  learn_armed_ = false;
+}
+
+bool ParamsScreen::learn_on(const app::Context& ctx, unsigned key) const noexcept {
+  return learn_armed_ && learn_page_ == page_ && learn_key_ == key && ctx.midi().learning();
+}
+
+// SHIFT + F `key`: arm learn for its parameter, or cancel it when it is armed on that key; a value that is not a unit parameter says so.
+void ParamsScreen::learn_key(app::Context& ctx, unsigned key) noexcept {
+  const bool can = pr::learnable(page_, key);
+  switch (pr::learn_tap(can, can && learn_on(ctx, key))) {
+    case pr::LearnTap::Cannot:
+      learn_drop(ctx);  // an arm on another key goes too, so the message is not hidden under "MOVE A KNOB"
+      say(ctx, "CANNOT LEARN THIS VALUE");
+      return;
+    case pr::LearnTap::Cancel:
+      learn_drop(ctx);
+      say(ctx, "LEARN OFF");
+      return;
+    case pr::LearnTap::Arm:
+      break;
+  }
+  const pr::KeyDef& k = pr::key_def(page_, key);
+  learn_drop(ctx);  // an earlier arm (another key) goes whether or not this one takes
+  if (!ctx.midi().learn(unit_of(k, voice_, tract_), k.param)) {
+    say(ctx, "CANNOT LEARN THIS VALUE");
+    return;
+  }
+  learn_armed_ = true;
+  learn_page_ = static_cast<std::uint8_t>(page_);
+  learn_key_ = static_cast<std::uint8_t>(key);
+  note_ = nullptr;
+  ctx.redraw();
+}
+
 void ParamsScreen::next_page(app::Context& ctx, int delta) noexcept {
+  learn_drop(ctx);  // the arm is a page's: the next page's keys are other values
   page_ = static_cast<std::uint8_t>(pr::next_page(page_, delta));
   focus_ = static_cast<std::uint8_t>(pr::first_focus(page_));
   note_ = nullptr;
@@ -76,6 +122,9 @@ void ParamsScreen::next_page(app::Context& ctx, int delta) noexcept {
 void ParamsScreen::update(app::Context& ctx) noexcept {
   if (perform_ != nullptr) {
     perform_->update(ctx);  // the pads' bend and vibrato, as on PERFORM
+  }
+  if (learn_armed_ && !ctx.midi().learning()) {
+    learn_drop(ctx);  // a controller bound it (the strip says LEARNED CC n), or something else disarmed it
   }
   if (note_ != nullptr && ctx.uptime_ms() >= note_until_) {
     note_ = nullptr;
@@ -108,7 +157,11 @@ void ParamsScreen::step(app::Context& ctx, unsigned key, int delta, bool coarse,
 void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
-    if (in.shift || k >= pr::kKeys) {
+    if (k >= pr::kKeys) {
+      return;
+    }
+    if (in.shift) {  // ML1: SHIFT + F is MIDI learn (the focus and the value stay as they are)
+      learn_key(ctx, k);
       return;
     }
     const pr::KeyDef& def = pr::key_def(page_, k);
@@ -145,9 +198,10 @@ void ParamsScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   }
 }
 
-void ParamsScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
+void ParamsScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
+  const bool shift = ctx.panel().shift();
   for (unsigned i = 0; i < pr::kKeys; ++i) {
-    out.label[i] = pr::key_def(page_, i).name;
+    out.label[i] = shift ? (pr::learnable(page_, i) ? "LEARN" : "-") : pr::key_def(page_, i).name;
   }
 }
 
@@ -171,7 +225,7 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Instr, "PATTERN: CARRIER LANE", nullptr},
       {Button::Vol, "PATTERN: LEVEL LANE", nullptr},
       {Button::Fx, "PATTERN: SLICE LANE", nullptr},
-      {Button::Shift, "COARSE STEPS ON THE ENCODER", nullptr},
+      {Button::Shift, "COARSE STEPS; F KEYS: LEARN", nullptr},
   };
   if (perform_ != nullptr) {
     perform_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
@@ -179,11 +233,14 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       h.fkey_shift[i] = nullptr;
     }
   }
+  for (unsigned i = 0; i < app::kFKeyCount; ++i) {
+    h.fkey_shift[i] = pr::learnable(page_, i) ? "LEARN" : nullptr;
+  }
   h.summary = page_ == pr::kTractPage
                   ? "THE MOUTH OF TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS.\n"
-                    "THEY SPEAK IN TRACT MODE ONLY. THE VALUES ARE KEPT IN THE OTHER MODES."
+                    "THEY SPEAK IN TRACT MODE ONLY. SHIFT + F LEARNS A CONTROLLER ONTO A VALUE."
                   : "FOUR PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE, TRACT. PARAMS OR UP\n"
-                    "AND DOWN TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. PADS PLAY CHORDS.";
+                    "AND DOWN TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. SHIFT + F: LEARN.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     // a blank key has no row; MOUTH (LT1) says what it does: the pads and the lane, or the voice at the input, shape the tube
     h.fkey[i] = !pr::focusable(page_, i) ? nullptr : (pr::key_def(page_, i).fmt == pr::Fmt::Source ? "MOUTH: PADS OR LIVE VOICE" : "TAP: FOCUS, THEN STEP");
@@ -220,6 +277,7 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
 
   ornoir::FKey keys[ornoir::kFKeys];
   const pr::KeyDef* focused = nullptr;
+  const bool shift_row = ctx.panel().shift();  // ML1: held SHIFT turns the row into LEARN cells
   for (unsigned i = 0; i < pr::kKeys; ++i) {
     const pr::KeyDef& k = pr::key_def(page_, i);
     keys[i].name = k.name;
@@ -236,6 +294,22 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
       keys[i].hot = i == focus_;
       if (i == focus_) {
         focused = &k;
+      }
+    }
+  }
+
+  if (shift_row) {
+    for (unsigned i = 0; i < pr::kKeys; ++i) {
+      const pr::KeyDef& k = pr::key_def(page_, i);
+      keys[i] = ornoir::FKey{};
+      if (pr::learnable(page_, i)) {
+        keys[i].name = "LEARN";
+        std::strncpy(keys[i].value, k.name, sizeof keys[i].value - 1u);  // the value it would bind (the array starts zeroed: FKey{})
+        keys[i].hot = learn_on(ctx, i);
+      } else if (k.kind != pr::Kind::None) {
+        keys[i].name = "-";
+        std::memcpy(keys[i].value, "-", 2);  // the window shows the value's slot: a dash
+        keys[i].dim = true;
       }
     }
   }
@@ -263,7 +337,12 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   if (focused != nullptr) {
     r.text(kVpX, 292, focused->name, Color::Text, Face::Display);
   }
-  if (note_ != nullptr) {
+  if (learn_armed_ && learn_on(ctx, learn_key_)) {
+    char line[48] = "LEARN ";
+    std::strncat(line, pr::key_def(learn_page_, learn_key_).name, 16);
+    std::strncat(line, ": MOVE A KNOB", sizeof line - std::strlen(line) - 1u);
+    r.text(kVpX, 350, line, Color::Accent, Face::Label);
+  } else if (note_ != nullptr) {
     r.text(kVpX, 350, note_, Color::TextDim, Face::Label);
   } else if (page_ == pr::kTractPage && mode != kModeTract) {
     r.text(kVpX, 350, "TRACT MODE ONLY", Color::TextDim, Face::Label);  // the values are kept; the mouth speaks in TRACT

@@ -112,6 +112,24 @@ inline constexpr bool live_kind(Kind k) noexcept { return k == Kind::Value || k 
 
 inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && live_kind(key_def(page, key).kind); }
 
+// ML1, MIDI learn (SHIFT + an F key): only a unit parameter can be bound to a controller, the vocoder's (Value) or the tract unit's (Tract). An App key
+// (VOICING: PerformScreen's own setting), a Later key and a blank key cannot; their SHIFT cell reads "-". MODE and QUALITY are not live gestures either
+// (MODE swaps the layout and resets the engine, QUALITY reallocates TALK's LPC order: the same two the strips refuse, strip_logic's kExcludedVoice), so a
+// controller cannot move them. LEVEL may be learned: pickup stops a jump.
+inline constexpr bool live_safe_voice(std::uint16_t param) noexcept { return param != Vocoder::Mode && param != Vocoder::Quality; }
+inline constexpr bool learnable(unsigned page, unsigned key) noexcept {
+  if (key >= kKeys) {
+    return false;
+  }
+  const KeyDef& d = key_def(page, key);
+  return d.kind == Kind::Tract || (d.kind == Kind::Value && live_safe_voice(d.param));
+}
+
+// What SHIFT + F does with key `key` when `armed_here` says learn is armed on this very key (this page): arm it, cancel it (the same keys again), or
+// nothing a controller can bind (the screen says CANNOT LEARN).
+enum class LearnTap : std::uint8_t { Cannot, Arm, Cancel };
+inline constexpr LearnTap learn_tap(bool can, bool armed_here) noexcept { return !can ? LearnTap::Cannot : (armed_here ? LearnTap::Cancel : LearnTap::Arm); }
+
 // The key the encoder points at when a page opens: its first live one.
 inline constexpr unsigned first_focus(unsigned page) noexcept {
   for (unsigned k = 0; k < kKeys; ++k) {

@@ -410,6 +410,11 @@ class MyApp final : public app::App {
   }
   static bool save_bank_cb(void* user, app::Context& ctx) noexcept { return static_cast<MyApp*>(user)->save_bank(ctx); }
 
+  // ML1: a controller the user bound by MIDI learn moved a unit parameter. The kit has already written it to the engine, the one place every screen
+  // reads its values from each frame and the project's save reads them at SAVE (nothing is shadowed in a screen: VOICING is not learnable), and
+  // apply_mode() follows Mode in update(); so the news only asks for a redraw. Main loop.
+  void midi_learned_moved(app::Context& ctx, dsp::UnitId, std::uint16_t, float) noexcept override { ctx.redraw(); }
+
   // MIDI pitch bend and the mod wheel (docs/UI-DESIGN.md 7c), on the user's channel (0 is omni). The wheel is scaled into BEND RANGE and adds to the
   // screen's own bend (the encoder and the strip), so the encoder's spring leaves a held wheel where it is; CC1 is the vibrato depth, held apart
   // from the MOD pad (the larger wins). A controller the user bound by MIDI learn never reaches here (midi_learned_moved takes it). Main loop.

@@ -7,6 +7,8 @@
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on. SHIFT + the encoder: coarse steps.
 //   PARAMS pressed again (app.cpp calls next_page()), DOWN: the next page; UP: the one before.
 //   A key whose parameter the unit does not have yet is drawn dim with no value, and a tap says COMES LATER.
+//   MIDI learn (ML1): SHIFT + an F key arms the kit's learn for that value (the next controller binds, the strip says LEARNED CC n); the same keys
+//   again cancel. Held SHIFT turns the F row into LEARN cells ("-" where a value is not a unit parameter: VOICING). Leaving the page or the screen cancels.
 //
 //   The TRACT page writes the tract unit's own parameters (Kind::Tract); it is live in every mode and says TRACT MODE ONLY outside TRACT.
 //
@@ -55,6 +57,9 @@ class ParamsScreen final : public o3sdk::app::Screen {
  private:
   void step(o3sdk::app::Context& ctx, unsigned key, int delta, bool coarse, bool tap) noexcept;
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
+  void learn_key(o3sdk::app::Context& ctx, unsigned key) noexcept;
+  void learn_drop(o3sdk::app::Context& ctx) noexcept;  // cancels this screen's arm (nothing else's)
+  bool learn_on(const o3sdk::app::Context& ctx, unsigned key) const noexcept;  // armed here, on this page's key, and the kit still waiting
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   o3sdk::dsp::UnitId tract_ = o3sdk::dsp::kNoUnit;
@@ -63,6 +68,9 @@ class ParamsScreen final : public o3sdk::app::Screen {
   std::uint8_t focus_ = params::first_focus(0);  // the F key the encoder drives (always a live key)
   const char* note_ = nullptr;                   // a moment's line (a static string), until note_until_
   std::uint64_t note_until_ = 0;
+  bool learn_armed_ = false;  // this screen armed the kit's learn (main loop only); the kit says whether it still waits (a bound controller ends it)
+  std::uint8_t learn_page_ = 0;
+  std::uint8_t learn_key_ = 0;
 };
 
 }  // namespace o3_voc03er

@@ -209,6 +209,13 @@ PARAMS shows four pages of eight values on the F keys, with the voiceprint small
 UP and DOWN, to change page.
 The pads play PERFORM's layout here too.
 
+**Learn a controller.** Hold SHIFT and press a value's F key: the key lights, the line under the big name says LEARN and the value's name, MOVE A KNOB,
+and the next controller you move (CC 0 to 119, on DIN or USB) is bound to that value; the strip says LEARNED CC and its number. From then
+on the knob moves the value, and a knob does nothing until it has reached the value, so the value never jumps. The same SHIFT + F key again cancels (LEARN OFF), and
+so does leaving the page or the screen. While you hold SHIFT the F row reads LEARN on every value that can take a controller and "-" on VOICING, which is the
+app's own setting and cannot, and on MODE and QUALITY, which are not live gestures (MODE swaps the layout, QUALITY reallocates TALK's LPC order). A value takes one controller and a controller moves one value; learning a value again replaces its controller. The
+bindings are kept with the unit's settings, not with the project. Binding CC 1 takes the mod wheel away from the vibrato (a bound controller no longer reaches the app). This needs more testing on the unit with a real controller.
+
 ![PARAMS, page CARRIER: the synth's eight values](manual/img/params.png)
 
 *CARRIER: SHAPE (the wave), SPREAD (how many detuned copies stack), SUB, TILT (dark to bright), NOISE (for the consonants), ATTACK, RELEASE and LEVEL.*
@@ -574,7 +581,7 @@ at the end of the pattern that plays. While the chain plays it owns what plays: 
 ## 8. MIDI
 
 MIDI notes play the synth beside the pads and share its voices. They also feed TUNE when NOTES IN is on. Pitch bend moves the synth and the sounding slots; the
-mod wheel (CC 1) adds vibrato (to the synth). A controller can be learned onto any value, sixteen at most.
+mod wheel (CC 1) adds vibrato (to the synth). A controller can be learned onto a value of PARAMS, sixteen at most (section 4, PARAMS: SHIFT + the value's F key).
 
 Slices: notes from 36 up fire one slice each of the SPEAKS slot (36 is slice 1). Velocity 100 and above is full level; lower is softer.
 The slice plays to its end; letting go of the key does not stop it. Every other note plays the synth.
