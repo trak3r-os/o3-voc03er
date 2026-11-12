@@ -267,6 +267,40 @@ Contrast stays above 23 dB. The rms goes up 0.5-0.8 dB (the shelf and the leak a
 
 Cost [estimate, not a measurement]: the comb is about 12 cycles per low-rate frame x 16 = 200 cycles a block; the shelf about 6 cycles x 64 = 400; the leak's low-pass and sum about 8 cycles x 64 = 500; together about 1,100 cycles a block, under 1 % of the 138k read. Owed: by ear (all five constants are starting values: kTubeG, kMicShelfDb, kLeakDb, kLeakHz, the tube length), and the CPU and the level change on the unit; it needs more testing.
 
+## TALK's FORMANT, TF1
+
+FORMANT (parameter 40) was built for BANDS and ignored by TALK. TALK's lattice is a lossless tube, so the envelope moves by changing the tube.
+
+**Sign, proved.** The lattice `f -= k b[i-1]; b[i] = b[i-1] + k f` equals pipes of area A[m] = A[m-1] (1 + k[m]) / (1 - k[m]) (A[0] = 1; impedance 1/A; index 0 is the closed end, the highest index the open one where the carrier enters, the output at 0). The transfer function of that tube (each pipe half a low-rate sample long, multiplied on the left) against `lattice_env` has a spread of 0.000 dB over 20 Hz to 5 kHz with this sign and 28.8, 35.4 and 38.1 dB with the opposite one, at Quality 8, 16 and 24 (`talk_test.cpp`, "TF1 sign"). The map is its own inverse to 6e-8 on the vowel's coefficients.
+
+**Mapping.** s = 2^(st/12), st an integer in -12..+12 (rounded, NaN is 0). New section j reads the old area function at 0.5 + (j - 0.5) s, linear in area, the index clamped to [0, n]: past the open end the last area repeats, which is a k = 0 (transparent) extension, and every |k| comes out at or under kMaxK = 0.995 with the areas held in [1/65536, 65536]. +st pulls the function toward the closed end (shorter tube, formants up). -st spreads it, and the lattice runs n' = min(18, ceil(n / s)) sections so the whole function fits (the extra sections join with zero state and ramp in from k = 0 like any order change; Levinson stays at the Quality's order; at Quality 24 n is 18 already, so nothing can be added there). The rounding is half up, floor(st + 0.5), as BANDS has it from the Vocoder (2.5 is 3, -2.5 is -2). After the shift the gain's prediction error is recomputed from the new coefficients, so the loudness holds. FREEZE keeps the unshifted targets and re-shifts them, so FORMANT still moves a frozen vowel and 0 returns the frozen set bit for bit.
+
+**Measured** (a 110 Hz glottal source through a three-formant vowel, a flat carrier, peaks of the lattice envelope against the centre peaks times 2^(st/12); `talk_test.cpp`):
+
+| Quality (order) | Shift | F1 | F2 | F3 | Level |
+|---|---|---|---|---|---|
+| 16 (12) | +3 | -2 % | +4 % | +4 % | -0.9 dB |
+| 16 | +6 | -5 % | 0 % | +12 % | -1.3 dB |
+| 16 | +12 | -19 % | +6 % | lost | -1.9 dB |
+| 16 | -3 (15 sections) | +10 % | +15 % | +14 % | -0.3 dB |
+| 16 | -6 (17) | +13 % | +14 % | lost | -0.8 dB |
+| 16 | -12 (18) | +19 % | +25 % | lost | -0.5 dB |
+| 24 (18) | +3 | 0 % | +4 % | +1 % | -0.3 dB |
+| 24 | +6 | -2 % | 0 % | +3 % | -0.4 dB |
+| 24 | +12 | -12 % | +7 % | lost | -0.5 dB |
+| 24 | -3 | +6 % | +13 % | +19 % | +0.2 dB |
+| 24 | -6 | +6 % | +13 % | lost | +0.1 dB |
+| 24 | -12 | +4 % | +24 % | lost | +0.2 dB |
+| 8 (6) | +3, +6 | the order resolves one broad peak (1220 Hz at centre): +14 % and +3 % of the shifted target | | | 0.0, +0.1 dB |
+| 8 | -6, -12 (12 sections) | the broad peak falls, 18 % and 39 % above the target; at -3 it sits on the second formant, 31 % | | | -1.0, -1.9 dB |
+| 8 | +12 | no peak | | | +0.2 dB |
+
+Centre peaks: Quality 16 at 405, 1490 and 2540 Hz; Quality 24 at 460, 1505 and 2495 Hz. "Lost" means no peak near the target (the search finds a neighbour more than 25 % away). The down rows after the extension of the lattice, against the first version (which kept n sections and cut the mouth end): Quality 16 at -12 now finds F1 (+19 %, it was lost) and at -6 F2 improves (+14 %, was +18 %); F1 got a few points worse at -3 and -6 (+10 and +13 %, were +6 and +8 %) and the third formant at -6 is reported lost (it was a +29 % peak, not a tracked one either); Quality 8 down went from no usable peak to a falling one; Quality 24 cannot change (18 sections already). **Best within about +-6.** Up works at Quality 16 and 24 (F1 to F3 within 12 % to +6, +12 pulls F1 12 to 19 % low and loses F3). Down is weaker: F1 within 20 % at Quality 16 and 6 % at 24, F2 13 to 25 % high, F3 lags or goes. **Quality 8 is only useful going up.** The level stays within 2 dB (the test's bound is 1.5 dB up to 6 st, 2 dB beyond). Tests also cover |k| <= 0.995 on random, extreme, NaN and Inf sets, silence and impulses at +-12 for each order, block-size independence (a 1, 7, 13, 64 pattern against 64: difference at most 1e-5), the order change (a sweep through every FORMANT value: finite, no step larger than at centre, joining sections ramp from 0 and leave with the order), the gain after a FREEZE restore, the rounding, and the bit-exact bypass at 0 against digests of the previous `talk.cpp` (plain 4C98CE4A, FREEZE 05897D2D, Quality changes B7BE9C1F; obtained by building that file on its own).
+
+**Cost [est].** Two parts, neither averaged. (1) The shift runs once a hop, in `publish()` at the hop's last tick next to Levinson, so it lands on every second block (the hop's block) and the other block pays nothing: about 0.5k to 0.8k cycles up (n = 12 to 18 sections), 0.8k to 1.0k going down at Quality 16 (17 or 18 sections; about 0.3k more than the same shift without the longer tube). The reciprocals use a batch of four (one division and three multiplications per group): 2 x ceil(n' / 4) divisions, 6 at 12 sections and 10 at 17 or 18, against about 24 and 36 plain; about 40 cycles a section for the passes and the interpolation; no square roots, no per-section transcendental (the factor comes from a 25-entry table). (2) Going down the lattice itself has more sections, on every block: the lattice loop costs about 6 cycles a section per low-rate sample (the unit's own `macs_last_` accounting, 16 samples a block), so each added section is about 0.1k a block: +0.5k at Quality 16 at -6 (17 sections), +0.6k at -12 (18), +0.6k at Quality 8 at -12 (12); none at Quality 24 or going up. The worst case is Quality 16 at -12, about 0.6k on every block plus 1.0k on the hop's block. The per-sample lattice loop has no new branch (it runs `run_` sections, the same code as before). Owed: the CPU on the unit.
+
+**Owed by ear.** Whether the down shift sounds right (the top formant fades), and whether TALK's carrier, pre-emphasised, takes the shift as a smaller or larger singer. The areas are those of a filter, not of a mouth.
+
 ## Owed
 
 - Accepted by the maintainer, 2026-11-06: BANDS with 8 notes and 4 loops stays at 165.4k, 63.3 % mean and 65.5 % peak, over the 60 % budget, with no underrun and no shed. That row's limit was 66 % at its peak, and the maintainer raised it to 69 % the same day, leaving room for ROBOT. Multi-rate bands wait, and the third modulator section with them.

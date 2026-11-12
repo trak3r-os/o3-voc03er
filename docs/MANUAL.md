@@ -246,7 +246,10 @@ range has fewer bright harmonics to shape, so SPREAD, TILT and NOISE help the co
 
 **TALK.** The voice is described as a smooth curve of the mouth's resonances, and the synth is played through that curve. It sounds more
 like a voice and less like a filter bank, the nearest thing here to a talkbox. It likes steady, voiced sounds. QUALITY sets how fine the
-curve is. FREEZE holds a vowel while you play.
+curve is. FREEZE holds a vowel while you play. FORMANT (SHIFT + F5, or the strip on row C) moves the curve: up makes the voice smaller and
+brighter, down bigger and darker, from -12 to +12 semitones; 0 is TALK as it was. It works best within about 6 semitones either way. Going up follows well at QUALITY 16 and
+24 up to +6; at +12 the first formant falls short and the top one is gone. Going down is weaker: the first formant follows, the second sits a
+little high and the top one fades. QUALITY 8 is only useful going up; use QUALITY 16 or 24 to go down. FORMANT needs more testing by ear.
 
 ![PERFORM in TUNE: the pitch ladder](manual/img/perform-tune.png)
 

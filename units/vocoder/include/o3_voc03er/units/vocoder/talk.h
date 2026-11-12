@@ -30,6 +30,15 @@
 // quiet microphone and a hot line sound alike and a change of MODE keeps the level. level_ survives reset(), as in Bands::restart, and a
 // change of MODE hands it over (adopt_level): without that a hot input came in 20 dB too loud until the follower caught up.
 //
+// FORMANT (TF1): the lattice is a lossless tube, so the spectral envelope can be moved by changing the tube's length. Once a hop, after
+// Levinson, the reflection coefficients become areas (A[m] = A[m-1] (1 + k[m]) / (1 - k[m]), proved against the physical tube in
+// talk_test.cpp: index 0 is the closed end, the highest index the open one, where the carrier enters), the area function is resampled along
+// the tube by s = 2^(st/12) (A'[j] = A(0.5 + (j - 0.5) s), linear in area; past the open end it stays constant, which is a matched extension,
+// k = 0, transparent) and goes back to reflection coefficients. +st shortens the tube and raises every formant; -st lengthens it, and the
+// lattice then runs ceil(n / s) sections (at most kMaxStages) so the mouth end is not cut: Levinson stays at the Quality's order, the extra
+// sections join with zero state and ramp from k = 0 like any order change, and at Quality 24 (18 sections already) nothing can be added. At st = 0 nothing of this runs and the output is bit for bit what it was. The gain follows the
+// level the shifted filter would give, so the loudness holds. Two divisions per four sections, in publish().
+//
 // Numerics: r0 x 1.0001, Gaussian lag window (60 Hz at the low rate), |k| <= 0.995, silence gate on r0. FREEZE stops k from updating
 // (the gain still follows). Quality 8..24 is the parameter's range; the lattice order is (q x 3 + 2) / 4 (16 gives 12, 8 gives 6,
 // 24 gives 18). An order change is applied at the next publish; the lattice runs the larger of the old and new order until the ramp
@@ -103,6 +112,10 @@ class Talk {
   void reset() noexcept;                     // clears the state, keeps the settings (a mode switch into Talk)
   void set_order(std::uint32_t order) noexcept;  // Quality, clamped to 8..24; safe at any moment
   void set_freeze(bool on) noexcept { freeze_ = on; }
+  // FORMANT: st semitones, rounded half up (floor(st + 0.5), as BANDS does) and clamped to -12..+12; the tube is shortened by 2^(st/12) (see the header). 0 is the exact old path.
+  // Applied at the next publish, even with FREEZE on (the frozen coefficients are kept unshifted). Audio context only.
+  void set_formant(float st) noexcept;
+  float formant() const noexcept { return formant_st_; }
   // The AGC's level, handed over by a change of MODE (see Bands::agc_level).
   float agc_level() const noexcept { return level_; }
   void adopt_level(float level) noexcept;
@@ -118,9 +131,18 @@ class Talk {
   std::uint32_t order() const noexcept { return order_; }  // Quality
   bool freeze() const noexcept { return freeze_; }
   std::uint32_t lattice_order() const noexcept { return run_; }
+  std::uint32_t target_order() const noexcept { return tgt_order_; }  // the sections the targets (kt_) fill: the Quality's, or more for FORMANT < 0
+  float gain_target() const noexcept { return gain_t_; }  // the lattice gain the ramp is heading for (tests)
   float breath_open() const noexcept { return open_; }
   float duck_gain() const noexcept { return duck_; }  // the duck's gain at the last publish, 1 = not ducked (tests)
   float breath_level() const noexcept { return breath_; }  // the breath's gain now (tests; 0 for a gated, silent-ish modulator)
+
+  // The reflection <-> area map the FORMANT shift runs through (public for the tests). k[1..n], |k| < 1 (clamped to kMaxK, a NaN to kMaxK);
+  // area[0..n] with area[0] = 1, every area in [kAreaMin, kAreaMax]. area[m] = area[m-1] (1 + k[m]) / (1 - k[m]), k[m] = (a[m] - a[m-1]) / (a[m] + a[m-1]).
+  static constexpr float kAreaMin = 1.0f / 65536.0f;
+  static constexpr float kAreaMax = 65536.0f;
+  static void areas_from_reflection(const float* k, std::uint32_t n, float* area) noexcept;
+  static void reflection_from_areas(const float* area, std::uint32_t n, float* k) noexcept;
 
   // S4 and S5 switches (tests): the tube's feedback g, the proximity shelf's gain k (out += k LP200(out)) and the leakage's gain, each 0 = off
   // and bit-exact S3. Start at the constants in talk.cpp; the ring, the delay and the filter states are not touched. Audio context only.
@@ -131,6 +153,8 @@ class Talk {
   void slice(std::uint32_t units) noexcept;
   void publish() noexcept;
   void tick(float m, float c, float& y) noexcept;  // one low-rate sample: analysis share, ramp, lattice
+  // FORMANT: k[1..n] -> out[1..m], through the areas; returns m, the sections the shifted tube has (n, or ceil(n / s) up to kMaxStages for s < 1)
+  std::uint32_t shift_tube(const float* k, std::uint32_t n, float* out) const noexcept;
 
   // Single thread: everything runs in the audio context (events are applied in process() order).
   alignas(8) float ring_[kRing];
@@ -141,6 +165,9 @@ class Talk {
   alignas(8) float k_[kMaxStages + 2];   // current reflection coefficients, index 1..order
   alignas(8) float kt_[kMaxStages + 2];  // targets
   alignas(8) float dk_[kMaxStages + 2];
+  alignas(8) float kraw_[kMaxStages + 2];  // the last live targets before the FORMANT shift (FREEZE re-shifts them), single context
+  alignas(8) float tpos_f_[kMaxStages + 1];             // the shifted tube's section j reads the old area at index tpos_i_[j] + tpos_f_[j]
+  alignas(8) std::uint32_t tpos_i_[kMaxStages + 1];
   alignas(8) float b_[kMaxStages + 2];   // lattice backward states
   Halfband dec_mod_[2], dec_car_[2], interp_[2];  // stage 1 at fs -> fs/2, stage 2 fs/2 -> fs/4
 
@@ -154,6 +181,10 @@ class Talk {
   std::uint32_t tgt_order_ = 12;
   bool analysing_ = false;
   bool freeze_ = false;
+  bool warp_on_ = false;    // FORMANT is not at centre: the tables above are valid and publish() shifts the tube
+  bool shifted_ = false;    // kt_ holds a shifted set (so a return to centre has to put kraw_ back, FREEZE or not)
+  float formant_st_ = 0.0f;
+  float sinv_ = 1.0f;       // 2^(-st/12), the sections a lengthened tube needs per analysis section
   bool odd1_ = false, odd2_ = false;  // sample phases of the two halfband stages (the next input has an odd index), as Bands::fol_odd_
   std::uint32_t stage_ = 0;     // cursor: 0 window, 1 lags
   std::uint32_t cpos_ = 0;      // in units of four samples

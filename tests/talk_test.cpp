@@ -9,7 +9,9 @@
 #include <o3sdk/dsp/event.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -133,6 +135,7 @@ float peak(const std::vector<float>& v, std::size_t from = 0) {
 Talk* make_talk() {
   static Talk t;  // 14 KiB: not on the stack
   t.prepare(kFs);
+  t.set_formant(0.0f);  // prepare keeps the settings, and a test before this one may have left FORMANT on
   return &t;
 }
 
@@ -1524,4 +1527,665 @@ TEST_CASE("talk: S5, the proximity shelf lifts 110 Hz by about 2.5 dB and leaves
   CHECK(g110 > 2.0f);
   CHECK(g110 < 3.0f);
   CHECK(std::fabs(g4k) < 0.3f);
+}
+
+
+// ---- TF1: FORMANT in TALK ----
+
+namespace {
+
+const Formant kV3[] = {{500.0f, 80.0f, 6.0f}, {1500.0f, 110.0f, 12.0f}, {2500.0f, 150.0f, 14.0f}};
+
+// A vowel through Talk at Quality q with FORMANT st; returns the output and leaves the targets in t.
+std::vector<float> run_vowel(Talk& t, std::uint32_t q, float st, std::size_t blocks = 400) {
+  t.set_order(q);
+  t.set_formant(st);
+  FormantVowel v(110.0f, kV3, 3);
+  Saw saw(100.0f);
+  return run_talk(t, [&] { return 0.3f * v.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, blocks, [](std::size_t) {});
+}
+
+}  // namespace
+
+// The tube the lattice is, written as a chain of lossless pipes: areas a[0..p] (a[0] = 1, from the targets). Pipes 0..p-1 are finite, half a
+// low-rate sample long one way (th = w / 2), impedance 1 / a[m]; pipe p is the matched one the carrier enters. Pipe 0 ends closed and the
+// output is taken there. `sign` = +1 is the convention of the code (a[m] = a[m-1] (1 + k) / (1 - k)); -1 builds the reciprocal one.
+float tube_env(const float* k, std::uint32_t p, float hz, float sign) {
+  using C = std::complex<float>;
+  float a[Talk::kMaxStages + 1];
+  float kk[Talk::kMaxStages + 2];
+  for (std::uint32_t m = 1; m <= p; ++m) kk[m] = sign * k[m];
+  Talk::areas_from_reflection(kk, p, a);
+  const float w = kPi2 * hz / (kFs * 0.25f);
+  const float th = 0.5f * w;
+  const float cs = std::cos(th), sn = std::sin(th);
+  C m11(1.0f, 0.0f), m12(0.0f, 0.0f), m21(0.0f, 0.0f), m22(1.0f, 0.0f);  // the pipes' product, from the closed end outward (each new pipe on the left)
+  for (std::uint32_t m = 0; m < p; ++m) {
+    const float z = 1.0f / a[m];
+    const C t11(cs, 0.0f), t12(0.0f, z * sn), t21(0.0f, sn / z), t22(cs, 0.0f);
+    const C n11 = t11 * m11 + t12 * m21, n12 = t11 * m12 + t12 * m22, n21 = t21 * m11 + t22 * m21, n22 = t21 * m12 + t22 * m22;
+    m11 = n11;
+    m12 = n12;
+    m21 = n21;
+    m22 = n22;
+  }
+  const float zp = 1.0f / a[p];
+  return std::abs(C(2.0f, 0.0f) / (m11 + zp * m21));
+}
+
+// Max minus min of (tube response in dB - lattice envelope in dB) over 200..5000 Hz: 0 when the two are the same filter up to a gain.
+float tube_vs_lattice_spread(const Talk& t, std::uint32_t p, float sign) {
+  float k[Talk::kMaxStages + 2];
+  for (std::uint32_t m = 1; m <= p; ++m) k[m] = t.reflection_target(m);
+  float lo = 1.0e9f, hi = -1.0e9f;
+  for (float hz = 200.0f; hz <= 5000.0f; hz += 50.0f) {
+    const float d = 20.0f * std::log10(tube_env(k, p, hz, sign) / lattice_env(t, p, hz));
+    lo = std::min(lo, d);
+    hi = std::max(hi, d);
+  }
+  return hi - lo;
+}
+
+TEST_CASE("talk: TF1 sign, the lattice is the tube with a[m] = a[m-1] (1 + k) / (1 - k), and the opposite sign is another filter") {
+  for (std::uint32_t q : {8u, 16u, 24u}) {
+    const std::uint32_t p = Talk::stages_for(q);
+    Talk& t = *make_talk();
+    run_vowel(t, q, 0.0f, 200);
+    const float good = tube_vs_lattice_spread(t, p, 1.0f), bad = tube_vs_lattice_spread(t, p, -1.0f);
+    std::printf("TF1 sign q%u: spread %.3f dB with the code's sign, %.1f dB with the opposite\n", q, static_cast<double>(good),
+                static_cast<double>(bad));
+    CHECK(good < 0.5f);
+    CHECK(bad > 6.0f);
+  }
+}
+
+namespace {
+
+// Local maxima of the lattice's envelope between 150 Hz and 5 kHz, in 5 Hz steps, first one above 200 Hz first.
+std::vector<float> env_peaks(const Talk& t, std::uint32_t p) {
+  std::vector<float> out;
+  float prev = lattice_env(t, p, 145.0f), cur = lattice_env(t, p, 150.0f);
+  for (float hz = 150.0f; hz < 5000.0f; hz += 5.0f) {
+    const float nxt = lattice_env(t, p, hz + 5.0f);
+    if (cur > prev && cur >= nxt && hz > 200.0f) out.push_back(hz);
+    prev = cur;
+    cur = nxt;
+  }
+  return out;
+}
+
+float mean_square(const std::vector<float>& x, std::size_t from) {
+  float s = 0.0f;
+  for (std::size_t i = from; i < x.size(); ++i) s += x[i] * x[i];
+  return s / static_cast<float>(x.size() - from);
+}
+
+float nearest(const std::vector<float>& v, float target) {
+  float best = 0.0f, bd = 1.0e9f;
+  for (float x : v) {
+    if (std::fabs(x - target) < bd) {
+      bd = std::fabs(x - target);
+      best = x;
+    }
+  }
+  return best;
+}
+
+}  // namespace
+
+TEST_CASE("talk: TF1 the formants follow 2^(st/12) (peaks of the lattice envelope), the level holds, at Quality 8, 16 and 24") {
+  // Measured with the three-formant vowel above (500, 1500, 2500 Hz at f0 110 Hz): the envelope's peaks in the shifted run against the
+  // centre run's peaks times 2^(st/12). LPC at order 6 (Quality 8) resolves one broad peak only, so it is checked for direction.
+  // Tolerance (what is reached, with a little margin): up (+3, +6) F1..F3 within 15 %; down (-3, -6, -12) at Quality 16 F1 within 20 %,
+  // F2 within 26 % (the synthesis lattice is lengthened to ceil(n / s) sections, up to 18, so the mouth end is no longer cut off, but the
+  // top formant still lags: it is only required not to sit above the centre one); at Quality 24 (18 sections already, nothing to add) F1
+  // within 8 %, F2 within 26 %. Quality 8: direction only. The peaks are read over the sections the shifted targets fill (target_order()).
+  for (std::uint32_t q : {8u, 16u, 24u}) {
+    const std::uint32_t p = Talk::stages_for(q);
+    Talk& t0 = *make_talk();
+    const auto o0 = run_vowel(t0, q, 0.0f);
+    const std::vector<float> c0 = env_peaks(t0, p);
+    const float ms0 = mean_square(o0, 20000);
+    REQUIRE(c0.size() >= (q == 8u ? 1u : 3u));
+    for (int st : {-12, -6, -3, 3, 6, 12}) {
+      Talk& t = *make_talk();
+      const auto o = run_vowel(t, q, static_cast<float>(st));
+      REQUIRE(finite(o));
+      const std::vector<float> pks = env_peaks(t, t.target_order());
+      const float fac = std::pow(2.0f, static_cast<float>(st) / 12.0f);
+      const float lvl = 10.0f * std::log10(mean_square(o, 20000) / ms0);
+      float err[3] = {0.0f, 0.0f, 0.0f}, got[3] = {0.0f, 0.0f, 0.0f};
+      for (std::size_t i = 0; i < 3 && i < c0.size(); ++i) {
+        got[i] = nearest(pks, c0[i] * fac);
+        err[i] = got[i] / (c0[i] * fac) - 1.0f;
+      }
+      std::printf("TF1 q%2u st %+3d: F1 %4.0f (%+3.0f%%) F2 %4.0f (%+3.0f%%) F3 %4.0f (%+3.0f%%)  level %+.2f dB  (centre %.0f %.0f %.0f)\n", q, st,
+                  static_cast<double>(got[0]), static_cast<double>(100.0f * err[0]), static_cast<double>(got[1]), static_cast<double>(100.0f * err[1]),
+                  static_cast<double>(got[2]), static_cast<double>(100.0f * err[2]), static_cast<double>(lvl), static_cast<double>(c0[0]),
+                  static_cast<double>(c0.size() > 1 ? c0[1] : 0.0f), static_cast<double>(c0.size() > 2 ? c0[2] : 0.0f));
+      CHECK(std::fabs(lvl) <= (std::abs(st) <= 6 ? 1.5f : 2.0f));
+      if (q == 8u) {
+        if (st == 3 || st == 6) {
+          REQUIRE(!pks.empty());
+          CHECK(pks[0] > c0[0] * 1.15f);  // the one broad peak rises
+          CHECK(pks[0] < c0[0] * 1.6f);
+        } else if (st == -6 || st == -12) {
+          REQUIRE(!pks.empty());
+          CHECK(pks[0] < c0[0]);  // the one broad peak falls (it does not at -3, where it sits on the second formant)
+        }
+        continue;
+      }
+      if (st == 3 || st == 6) {
+        for (int i = 0; i < 3; ++i) CHECK(std::fabs(err[i]) <= 0.15f);
+      } else if (st < 0) {
+        CHECK(std::fabs(err[0]) <= (q == 24u ? 0.08f : 0.20f));
+        CHECK(std::fabs(err[1]) <= 0.26f);
+        if (st == -3) CHECK(std::fabs(err[2]) <= 0.20f);
+        else CHECK(got[2] <= c0[2] * 1.02f);
+      } else if (st == 12) {
+        CHECK(got[0] >= c0[0] * 1.4f);
+        CHECK(std::fabs(err[1]) <= 0.15f);
+      }
+    }
+  }
+}
+
+TEST_CASE("talk: TF1 the area map, a(m) = a(m-1) (1 + k) / (1 - k), is its own inverse and clamps whatever it is given") {
+  float a[Talk::kMaxStages + 1], k2[Talk::kMaxStages + 2];
+  {
+    const float k[Talk::kMaxStages + 2] = {0.0f, 0.5f, -0.5f};
+    Talk::areas_from_reflection(k, 2, a);
+    CHECK(a[0] == 1.0f);
+    CHECK(a[1] == doctest::Approx(3.0f).epsilon(1.0e-5));         // a positive k widens the tube toward the carrier's end
+    CHECK(a[2] == doctest::Approx(1.0f).epsilon(1.0e-5));         // and the next, -0.5, narrows it back by the same ratio
+  }
+  // random sets, |k| <= 0.25, and the real targets of the vowel at each order
+  std::uint32_t seed = 12345u;
+  const auto rnd = [&] {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return static_cast<float>(seed >> 8) / 8388608.0f - 1.0f;  // -1..1
+  };
+  for (int round = 0; round < 50; ++round) {
+    const std::uint32_t n = 1u + static_cast<std::uint32_t>(round) % Talk::kMaxStages;
+    float k[Talk::kMaxStages + 2] = {};
+    for (std::uint32_t m = 1; m <= n; ++m) k[m] = 0.25f * rnd();
+    Talk::areas_from_reflection(k, n, a);
+    Talk::reflection_from_areas(a, n, k2);
+    for (std::uint32_t m = 1; m <= n; ++m) CHECK(std::fabs(k2[m] - k[m]) <= 1.0e-5f);
+  }
+  float worst = 0.0f;
+  for (std::uint32_t q : {8u, 16u, 24u}) {
+    Talk& t = *make_talk();
+    run_vowel(t, q, 0.0f, 200);
+    const std::uint32_t p = Talk::stages_for(q);
+    float k[Talk::kMaxStages + 2] = {};
+    for (std::uint32_t m = 1; m <= p; ++m) k[m] = t.reflection_target(m);
+    Talk::areas_from_reflection(k, p, a);
+    Talk::reflection_from_areas(a, p, k2);
+    for (std::uint32_t m = 1; m <= p; ++m) worst = std::max(worst, std::fabs(k2[m] - k[m]));
+  }
+  MESSAGE("round trip on the vowel's targets: worst |dk| " << worst);
+  CHECK(worst <= 2.0e-4f);
+  // extremes: every set stays inside |k| <= kMaxK and every area inside its floor and ceiling; a NaN, an Inf and a wrong sign are inputs too
+  const float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
+  const float sets[][4] = {{0.995f, 0.995f, 0.995f, 0.995f}, {-0.995f, -0.995f, -0.995f, -0.995f}, {0.995f, -0.995f, 0.995f, -0.995f},
+                           {nan, 0.3f, nan, -0.3f},          {inf, -inf, 1.5f, -1.5f},              {1.0f, -1.0f, 0.0f, 0.9999999f}};
+  for (const auto& set : sets) {
+    float k[Talk::kMaxStages + 2] = {};
+    for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) k[m] = set[(m - 1u) % 4u];
+    Talk::areas_from_reflection(k, Talk::kMaxStages, a);
+    for (std::uint32_t m = 0; m <= Talk::kMaxStages; ++m) {
+      CHECK(a[m] >= Talk::kAreaMin);
+      CHECK(a[m] <= Talk::kAreaMax);
+    }
+    Talk::reflection_from_areas(a, Talk::kMaxStages, k2);
+    for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) CHECK(std::fabs(k2[m]) <= Talk::kMaxK);
+  }
+  const float bad[Talk::kMaxStages + 1] = {nan, 0.0f, -1.0f, inf, 1.0e30f, 1.0e-30f, 1.0f, nan, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f};
+  Talk::reflection_from_areas(bad, Talk::kMaxStages, k2);
+  for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) CHECK(std::fabs(k2[m]) <= Talk::kMaxK);
+}
+
+namespace {
+
+void check_targets_inside(const Talk& t, std::uint32_t p) {
+  for (std::uint32_t m = 1; m <= p; ++m) {
+    CHECK(std::isfinite(t.reflection_target(m)));
+    CHECK(std::fabs(t.reflection_target(m)) <= Talk::kMaxK);
+    CHECK(std::isfinite(t.reflection(m)));
+    CHECK(std::fabs(t.reflection(m)) <= Talk::kMaxK);
+  }
+}
+
+}  // namespace
+
+TEST_CASE("talk: TF1 |k| <= 0.995 and a finite output at +-12 st, at every order, on a vowel, a full-scale tone, impulses, noise and NaN") {
+  for (std::uint32_t q : {8u, 16u, 24u}) {
+    for (float st : {-12.0f, -5.0f, 5.0f, 12.0f}) {
+      const std::uint32_t p = Talk::stages_for(q);
+      {
+        Talk& t = *make_talk();
+        const auto o = run_vowel(t, q, st, 300);
+        CHECK(finite(o));
+        check_targets_inside(t, p);
+      }
+      {  // a pure tone at full scale: the near-singular case
+        Talk& t = *make_talk();
+        t.set_order(q);
+        t.set_formant(st);
+        float ph = 0.0f;
+        const auto o = run_talk(t, [&] { ph += 0.0309f; return std::sin(ph); }, [] { return 0.3f; }, 300, [](std::size_t) {});
+        CHECK(finite(o));
+        CHECK(peak(o) < 4.0f);
+        check_targets_inside(t, p);
+      }
+      {  // impulses, then noise, then a NaN and an Inf
+        Talk& t = *make_talk();
+        t.set_order(q);
+        t.set_formant(st);
+        Noise nz;
+        std::size_t n = 0;
+        const auto o = run_talk(t,
+                                [&] {
+                                  ++n;
+                                  if (n < 20000) return n % 700u == 0 ? 1.0f : 0.0f;
+                                  if (n < 40000) return nz.next();
+                                  if (n == 40001) return std::numeric_limits<float>::quiet_NaN();
+                                  if (n == 40002) return std::numeric_limits<float>::infinity();
+                                  return 0.0f;
+                                },
+                                [] { return 0.3f; }, 800, [](std::size_t) {});
+        CHECK(finite(o));
+        check_targets_inside(t, p);
+      }
+    }
+  }
+}
+
+TEST_CASE("talk: TF1 a silent modulator gives the same output at any FORMANT as at centre (the shift is skipped), and it stays finite") {
+  // Silence is not shifted: the hop's gate is closed, so the targets are the ones TALK already keeps for it. What the carrier does
+  // through them (the floor) is TALK's own, and FORMANT does not touch it.
+  for (float st : {-12.0f, 7.0f}) {
+    const auto run = [&](float f, bool vowel_first) {
+      Talk& t = *make_talk();
+      t.set_order(16);
+      t.set_formant(f);
+      FormantVowel v(110.0f, kV3, 3);
+      Saw saw(100.0f);
+      if (vowel_first) run_talk(t, [&] { return 0.3f * v.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, 200, [](std::size_t) {});
+      return run_talk(t, [] { return 0.0f; }, [&] { return 0.3f + 0.2f * saw.next(); }, 400, [](std::size_t) {});
+    };
+    const auto fresh0 = run(0.0f, false), fresh = run(st, false);
+    CHECK(finite(fresh));
+    CHECK(std::memcmp(fresh0.data(), fresh.data(), fresh.size() * sizeof(float)) == 0);
+    // after a vowel the tube is the shifted one and fades to the same floor as the centre run within the targets' ramp
+    const auto tail0 = run(0.0f, true), tail = run(st, true);
+    CHECK(finite(tail));
+    float worst = 0.0f;
+    for (std::size_t i = 300 * 64; i < tail.size(); ++i) worst = std::max(worst, std::fabs(tail[i] - tail0[i]));
+    MESSAGE("st " << st << ": silent tail, worst difference from centre " << worst);
+    CHECK(worst <= 1.0e-3f);
+  }
+}
+
+// The output of the Talk before TF1 (talk.cpp at commit b4801e3, no FORMANT code at all), pinned: the bypass test below compares the new code
+// with itself, these compare it with the old one. The three constants were obtained by building that talk.cpp and its header on their own
+// (a standalone harness: the old files first on the include path, the other unit sources from the tree, -O0 and -O2 gave the same digests),
+// running tf1_pre_digest on a Talk prepared at 44100 Hz, and printing the result. FORMANT at 0 must give them back bit for bit.
+// BEGIN pre-TF1 digest
+// An FNV-1a digest of the output bits of Talk on a fixed signal (a resonated impulse train with 1 % noise, a saw carrier), 800 blocks of 64, in
+// three runs: 0 plain at Quality 16, 1 FREEZE from block 300, 2 Quality 16 -> 8 at block 250 -> 24 at block 500. The caller prepares the Talk.
+std::uint32_t tf1_pre_digest(Talk& t, int mode) {
+  t.set_freeze(false);
+  t.set_order(16);
+  std::uint32_t h = 2166136261u, s = 1u;
+  float ph = 0.0f, y1 = 0.0f, y2 = 0.0f;
+  for (int b = 0; b < 800; ++b) {
+    if (mode == 1 && b == 300) t.set_freeze(true);
+    if (mode == 2 && b == 250) t.set_order(8);
+    if (mode == 2 && b == 500) t.set_order(24);
+    float m[64], c[64], o[64];
+    for (int i = 0; i < 64; ++i) {
+      s = s * 1664525u + 1013904223u;
+      const float n = static_cast<float>(static_cast<std::int32_t>(s)) / 2147483648.0f;
+      const float e = ((b * 64 + i) % 400 == 0) ? 1.0f : 0.0f;
+      const float y = e + 1.7f * y1 - 0.9f * y2 + 0.01f * n;
+      y2 = y1;
+      y1 = y;
+      m[i] = 0.05f * y;
+      ph += 0.0113f;
+      if (ph > 1.0f) ph -= 1.0f;
+      c[i] = 0.3f + 0.4f * (ph - 0.5f);
+    }
+    t.process(m, c, o, 64);
+    for (int i = 0; i < 64; ++i) {
+      std::uint32_t u;
+      std::memcpy(&u, &o[i], 4);
+      h = (h ^ u) * 16777619u;
+    }
+  }
+  return h;
+}
+// END pre-TF1 digest
+
+TEST_CASE("talk: TF1 FORMANT 0 gives the output of the Talk before TF1, bit for bit (digests of the old talk.cpp): plain, FREEZE, Quality changes") {
+  static Talk t;
+  const std::uint32_t want[3] = {0x4C98CE4Au, 0x05897D2Du, 0xB7BE9C1Fu};
+  for (int mode = 0; mode < 3; ++mode) {
+    t.prepare(kFs);
+    t.set_formant(0.0f);
+    INFO("mode " << mode);
+    CHECK(tf1_pre_digest(t, mode) == want[mode]);
+  }
+}
+
+TEST_CASE("talk: TF1 at centre the output is bit-exact with a Talk that was never given a FORMANT, also after a shifted stretch") {
+  const std::size_t blocks = 500;
+  std::vector<float> m(blocks * 64), c(blocks * 64);
+  {
+    FormantVowel v(110.0f, kV3, 3);
+    Saw saw(100.0f);
+    for (std::size_t i = 0; i < m.size(); ++i) {
+      m[i] = 0.3f * v.next();
+      c[i] = 0.3f + 0.2f * saw.next();
+    }
+  }
+  static Talk ref, a;
+  ref.prepare(kFs);
+  ref.set_order(16);
+  std::vector<float> oref(m.size()), oa(m.size());
+  for (std::size_t b = 0; b < blocks; ++b) ref.process(&m[b * 64], &c[b * 64], &oref[b * 64], 64);
+  a.prepare(kFs);
+  a.set_order(16);
+  a.set_formant(0.0f);
+  for (std::size_t b = 0; b < blocks; ++b) a.process(&m[b * 64], &c[b * 64], &oa[b * 64], 64);
+  CHECK(std::memcmp(oref.data(), oa.data(), oref.size() * sizeof(float)) == 0);
+  // FORMANT 0.4 rounds to 0, and NaN is centre
+  a.prepare(kFs);
+  a.set_order(16);
+  a.set_formant(0.4f);
+  CHECK(a.formant() == 0.0f);
+  a.set_formant(std::numeric_limits<float>::quiet_NaN());
+  CHECK(a.formant() == 0.0f);
+  a.set_formant(40.0f);
+  CHECK(a.formant() == 12.0f);
+  a.set_formant(-40.0f);
+  CHECK(a.formant() == -12.0f);
+  a.set_formant(-std::numeric_limits<float>::infinity());
+  CHECK(a.formant() == -12.0f);
+  a.set_formant(0.0f);
+  for (std::size_t b = 0; b < blocks; ++b) a.process(&m[b * 64], &c[b * 64], &oa[b * 64], 64);
+  CHECK(std::memcmp(oref.data(), oa.data(), oref.size() * sizeof(float)) == 0);
+  // a shifted stretch in the middle: the targets are the unshifted ones again at the next hop, and the output follows within a moment
+  a.prepare(kFs);
+  a.set_order(16);
+  std::size_t diff_blocks = 0;
+  for (std::size_t b = 0; b < blocks; ++b) {
+    if (b == 100) a.set_formant(6.0f);
+    if (b == 200) a.set_formant(0.0f);
+    a.process(&m[b * 64], &c[b * 64], &oa[b * 64], 64);
+    if (b == 150) {
+      bool differs = false;
+      for (std::uint32_t k = 1; k <= 12; ++k) differs = differs || a.reflection_target(k) != 0.0f;
+      CHECK(differs);
+    }
+    if (b >= 230 && std::memcmp(&oref[b * 64], &oa[b * 64], 64 * sizeof(float)) != 0) ++diff_blocks;
+  }
+  // the lattice's memory and the gain's glide are short: the last 100 blocks are the same bits or very close
+  float worst = 0.0f;
+  for (std::size_t i = 400 * 64; i < oa.size(); ++i) worst = std::max(worst, std::fabs(oa[i] - oref[i]));
+  MESSAGE("after a shifted stretch: " << diff_blocks << " blocks of 270 differ, worst difference in the last 100 blocks " << worst);
+  CHECK(worst <= 1.0e-3f * peak(oref));
+}
+
+TEST_CASE("talk: TF1 any frame count gives the same output as calls of 64 with FORMANT on") {
+  const std::size_t total = 64 * 85;
+  std::vector<float> m(total), c(total);
+  {
+    FormantVowel v(110.0f, kV3, 3);
+    Saw saw(100.0f);
+    for (std::size_t i = 0; i < total; ++i) {
+      m[i] = 0.3f * v.next();
+      c[i] = 0.3f + 0.2f * saw.next();
+    }
+  }
+  for (float st : {5.0f, -4.0f}) {
+    Talk& a = *make_talk();
+    a.set_order(16);
+    a.set_formant(st);
+    std::vector<float> ref(total), got(total);
+    for (std::size_t i = 0; i < total; i += 64) a.process(&m[i], &c[i], &ref[i], 64);
+    static Talk b;
+    b.prepare(kFs);
+    b.set_order(16);
+    b.set_formant(st);
+    const std::uint32_t pattern[] = {1, 7, 13, 64};
+    std::size_t pos = 0;
+    unsigned k = 0;
+    while (pos < total) {
+      const std::size_t n = std::min<std::size_t>(pattern[k++ % 4], total - pos);
+      b.process(&m[pos], &c[pos], &got[pos], static_cast<std::uint32_t>(n));
+      pos += n;
+    }
+    float worst = 0.0f;
+    for (std::size_t i = 0; i < total; ++i) worst = std::max(worst, std::fabs(ref[i] - got[i]));
+    MESSAGE("st " << st << ": worst difference " << worst << " on a peak of " << peak(ref));
+    CHECK(peak(ref) > 0.005f);
+    CHECK(worst <= 1.0e-5f);
+  }
+}
+
+TEST_CASE("talk: TF1 FREEZE keeps the unshifted targets and FORMANT moves the frozen tube; back at centre they are the frozen ones, bit for bit") {
+  Talk& t = *make_talk();
+  t.set_order(16);
+  FormantVowel va(110.0f, kV3, 3);
+  Saw saw(100.0f);
+  run_talk(t, [&] { return 0.3f * va.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, 300, [](std::size_t) {});
+  t.set_freeze(true);
+  run_talk(t, [&] { return 0.3f * va.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, 20, [](std::size_t) {});
+  const std::uint32_t p = Talk::stages_for(16);
+  float frozen[Talk::kMaxStages + 2] = {};
+  for (std::uint32_t m = 1; m <= p; ++m) frozen[m] = t.reflection_target(m);
+  const Formant other[] = {{300.0f, 60.0f, 6.0f}, {2300.0f, 120.0f, 12.0f}, {3000.0f, 150.0f, 8.0f}};
+  FormantVowel vb(150.0f, other, 3);
+  const auto still = [&](std::size_t blocks) {
+    run_talk(t, [&] { return 0.3f * vb.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, blocks, [](std::size_t) {});
+  };
+  still(60);
+  for (std::uint32_t m = 1; m <= p; ++m) CHECK(t.reflection_target(m) == frozen[m]);  // frozen, FORMANT at centre: nothing moves
+  t.set_formant(5.0f);
+  still(40);
+  float moved[Talk::kMaxStages + 2] = {};
+  bool differs = false;
+  for (std::uint32_t m = 1; m <= p; ++m) {
+    moved[m] = t.reflection_target(m);
+    differs = differs || moved[m] != frozen[m];
+    CHECK(std::fabs(moved[m]) <= Talk::kMaxK);
+  }
+  CHECK(differs);
+  still(60);  // frozen and shifted: the shifted set is the same hop after hop
+  for (std::uint32_t m = 1; m <= p; ++m) CHECK(t.reflection_target(m) == moved[m]);
+  t.set_formant(0.0f);
+  still(40);
+  for (std::uint32_t m = 1; m <= p; ++m) CHECK(t.reflection_target(m) == frozen[m]);
+  // a frozen set that is shifted and lengthened is not louder than the unshifted one by more than a couple of dB
+  t.set_formant(-7.0f);
+  const auto o = run_talk(t, [&] { return 0.3f * vb.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, 150, [](std::size_t) {});
+  CHECK(finite(o));
+  CHECK(peak(o, 100 * 64) < 1.0f);
+}
+
+TEST_CASE("talk: TF1 FREEZE, FORMANT back to 0 puts the gain on the restored filter in the same hop (not one hop late)") {
+  // Two Talks with the same history, both frozen on the same vowel; B never shifts, A is shifted by -5 and +7 (the gains differ, which is
+  // checked) and then taken back to 0. The hop after the restore, A's gain target is B's.
+  struct Rig {
+    Talk* t;
+    FormantVowel va{110.0f, kV3, 3};
+    Saw saw{100.0f};
+    void run(std::size_t blocks) {
+      t->set_order(16);
+      run_talk(*t, [&] { return 0.3f * va.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, blocks, [](std::size_t) {});
+    }
+  };
+  static Talk ta, tb;  // two of them (make_talk() hands out one), 14 KiB each: not on the stack
+  for (Talk* t : {&ta, &tb}) {
+    t->prepare(kFs);
+    t->set_freeze(false);
+    t->set_formant(0.0f);
+  }
+  Rig a{&ta}, b{&tb};
+  a.run(300);
+  b.run(300);
+  a.t->set_freeze(true);
+  b.t->set_freeze(true);
+  a.run(40);
+  b.run(40);
+  CHECK(a.t->gain_target() == b.t->gain_target());
+  for (float st : {-5.0f, 7.0f}) {
+    a.t->set_formant(st);
+    a.run(10);
+    b.run(10);
+    CHECK(std::fabs(a.t->gain_target() / b.t->gain_target() - 1.0f) > 0.02f);  // the shifted filter has its own gain
+    a.t->set_formant(0.0f);
+    a.run(2);  // one hop: the publish that restores
+    b.run(2);
+    CHECK(std::fabs(a.t->gain_target() / b.t->gain_target() - 1.0f) <= 1e-5f);
+    a.run(20);
+    b.run(20);
+  }
+}
+
+TEST_CASE("talk: TF1 a lengthened tube changes the lattice order cleanly: |k| < 1, finite, new sections ramp from 0 and leave with the order") {
+  // Q16 has 12 sections; FORMANT -12 wants 18 (ceil(12 / 0.5) = 24, capped), -6 wants 17, -3 wants 15, up and 0 want 12.
+  Talk& t = *make_talk();
+  t.set_freeze(false);  // make_talk() keeps the settings, and the FREEZE test before this one leaves it on
+  t.set_order(16);
+  t.set_formant(-12.0f);
+  FormantVowel v(110.0f, kV3, 3);
+  Saw saw(100.0f);
+  const auto drive = [&](std::size_t blocks, std::size_t every, const int* seq, std::size_t nseq, std::uint32_t* orders = nullptr) {
+    std::size_t i = 0;
+    return run_talk(t, [&] { return 0.3f * v.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, blocks, [&](std::size_t b) {
+      if (b % every == 0) t.set_formant(static_cast<float>(seq[i++ % nseq]));
+      if (orders) orders[b] = t.target_order();
+    });
+  };
+  t.set_formant(0.0f);
+  const auto centre = drive(400, 1000, std::array<int, 1>{0}.data(), 1);
+  CHECK(t.target_order() == 12u);
+  // the order the targets fill, per FORMANT value, after the settling hops
+  struct Want { int st; std::uint32_t n; };
+  for (Want w : {Want{-12, 18}, Want{-6, 17}, Want{-3, 15}, Want{-1, 13}, Want{0, 12}, Want{3, 12}, Want{12, 12}}) {
+    t.set_formant(static_cast<float>(w.st));
+    drive(40, 1000, std::array<int, 1>{w.st}.data(), 1);
+    INFO("st " << w.st);
+    CHECK(t.target_order() == w.n);
+    for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) {
+      CHECK(std::fabs(t.reflection_target(m)) <= Talk::kMaxK);
+      if (m > w.n) CHECK(t.reflection_target(m) == 0.0f);
+    }
+  }
+  // sweep through every value, a change every 3 blocks, many times: finite, bounded, and while a section joins its k is under its target
+  const int seq[] = {0, -12, -6, 0, -3, -12, 5, -9, 0, -1, -12, 12, -12, -7};
+  std::vector<std::uint32_t> orders(900);
+  const auto o = drive(900, 3, seq, sizeof(seq) / sizeof(seq[0]), orders.data());
+  CHECK(finite(o));
+  CHECK(peak(o, 64 * 40) < 2.0f * peak(centre, 64 * 40) + 0.2f);
+  float worst = 0.0f, worst_c = 0.0f;
+  for (std::size_t i = 64 * 40 + 1; i < o.size(); ++i) worst = std::max(worst, std::fabs(o[i] - o[i - 1]));
+  for (std::size_t i = 64 * 40 + 1; i < centre.size(); ++i) worst_c = std::max(worst_c, std::fabs(centre[i] - centre[i - 1]));
+  std::printf("TF1 order sweep: largest sample step %.4f against %.4f at centre\n", static_cast<double>(worst), static_cast<double>(worst_c));
+  CHECK(worst < 1.5f * worst_c);
+  for (std::uint32_t m = 1; m <= Talk::kMaxStages; ++m) CHECK(std::fabs(t.reflection(m)) <= Talk::kMaxK);
+  // after the sweep is left on 0 for a few hops, the lattice has shrunk to the Quality's order and the sections above it hold k = 0
+  drive(20, 1000, std::array<int, 1>{0}.data(), 1);
+  CHECK(t.lattice_order() == 12u);
+  for (std::uint32_t m = 13; m <= Talk::kMaxStages; ++m) CHECK(t.reflection(m) == 0.0f);
+  // a section that joins starts at k = 0, passes through values between 0 and its target on the way (a ramp, no step)
+  t.set_formant(-12.0f);
+  bool between = false;
+  float first[Talk::kMaxStages + 1] = {};
+  run_talk(t, [&] { return 0.3f * v.next(); }, [&] { return 0.3f + 0.2f * saw.next(); }, 6, [&](std::size_t b) {
+    for (std::uint32_t m = 13; m <= 18; ++m) {
+      const float k = std::fabs(t.reflection(m)), kt = std::fabs(t.reflection_target(m));
+      if (b == 0) first[m] = k;
+      if (k > 0.0f && kt > 1e-3f && k < 0.98f * kt) between = true;
+    }
+  });
+  for (std::uint32_t m = 13; m <= 18; ++m) CHECK(first[m] == 0.0f);
+  CHECK(between);
+}
+
+TEST_CASE("talk: TF1 FORMANT is rounded half up, as BANDS does (2.5 is 3, -2.5 is -2), a NaN is 0, and the range is -12..+12") {
+  Talk& t = *make_talk();
+  for (float in : {2.5f, 2.49f, -2.5f, -2.51f, 0.5f, -0.5f, -0.49f, 11.5f, 12.4f, -12.4f, 99.0f, -99.0f}) {
+    t.set_formant(in);
+    float want = std::floor(in + 0.5f);
+    want = want > 12.0f ? 12.0f : (want < -12.0f ? -12.0f : want);
+    INFO("in " << in);
+    CHECK(t.formant() == want);
+  }
+  t.set_formant(2.5f);
+  CHECK(t.formant() == 3.0f);
+  t.set_formant(-2.5f);
+  CHECK(t.formant() == -2.0f);
+  t.set_formant(std::numeric_limits<float>::quiet_NaN());
+  CHECK(t.formant() == 0.0f);
+  t.set_formant(std::numeric_limits<float>::infinity());
+  CHECK(t.formant() == 12.0f);
+  t.set_formant(-std::numeric_limits<float>::infinity());
+  CHECK(t.formant() == -12.0f);
+}
+
+TEST_CASE("vocoder: FORMANT (parameter 40) reaches TALK, and the other modes do not run it") {
+  static Vocoder vo;
+  vo.prepare(kFs);
+  CHECK(Vocoder::Formant == 40);
+  CHECK(vo.talk().formant() == 0.0f);
+  Voice v(110.0f);
+  v.set_vowel(kA, 2);
+  std::vector<float> out(300 * 64);
+  dsp::Transport tr;
+  for (std::size_t b = 0; b < 300; ++b) {
+    float m[64], r[64];
+    for (float& x : m) x = 0.3f * v.next();
+    dsp::Event ev[3];
+    std::uint32_t n = 0;
+    if (b == 0) {
+      ev[n++] = dsp::note_on(48, 100);
+      ev[n++] = dsp::param_change(Vocoder::Mode, 1.0f);
+      ev[n++] = dsp::param_change(Vocoder::Formant, 4.6f);
+    }
+    dsp::ProcessArgs a{};
+    a.events = ev;
+    a.event_count = n;
+    a.in_l = m;
+    a.in_r = m;
+    a.out_l = out.data() + b * 64;
+    a.out_r = r;
+    a.frames = 64;
+    a.transport = &tr;
+    vo.process(a);
+  }
+  CHECK(vo.talk().formant() == 5.0f);  // integer semitones, rounded
+  for (float in : {-2.5f, 2.5f}) {  // half up in both engines (BANDS takes floor(v + 0.5) from the Vocoder, TALK does the same inside)
+    float m[64] = {}, r[64], o[64];
+    dsp::Event ev[1] = {dsp::param_change(Vocoder::Formant, in)};
+    dsp::ProcessArgs a{};
+    a.events = ev;
+    a.event_count = 1;
+    a.in_l = m;
+    a.in_r = m;
+    a.out_l = o;
+    a.out_r = r;
+    a.frames = 64;
+    a.transport = &tr;
+    vo.process(a);
+    CHECK(vo.talk().formant() == std::floor(in + 0.5f));
+  }
+  CHECK(finite(out));
+  CHECK(peak(out, 100 * 64) > 0.005f);
+  CHECK(peak(out) < 1.0f);
 }

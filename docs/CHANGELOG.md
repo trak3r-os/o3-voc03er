@@ -4,6 +4,17 @@
 
 ### Added
 
+- **TF1: FORMANT works in TALK.** It was set and ignored there. Once per analysis hop the reflection coefficients become the areas of the
+  lossless tube the lattice is, the area function is stretched along the tube by 2^(st/12) (linear in area, a transparent extension past the
+  open end) and goes back to reflection coefficients, so the voice's formants move up or down by the same factor as in BANDS, and the gain
+  follows the shifted filter so the level holds within 2 dB. Going down, the lattice runs more sections (ceil(n / s), at most 18) so the
+  mouth end is not cut off. The shift is rounded half up like BANDS' (2.5 is 3, -2.5 is -2). At 0 nothing runs and the output is bit for bit as
+  before (pinned in the test against digests of the previous `talk.cpp`). It works best within about +-6: at QUALITY 16 and 24 up to +6 the
+  first two formants land within 5 % (the third within 12 %), +12 pulls the first formant 12 to 19 % low and loses the third; down is
+  weaker (the first formant within 20 % at QUALITY 16 and 6 % at 24, the second 13 to 25 % high, the top one fades), and QUALITY 8 (order 6)
+  is only useful going up (+3, +6). Cost [est]: 0.5k to 1.0k cycles on the hop's block (every second block, not averaged) plus up to 0.6k on
+  every block going down (the longer lattice); the CPU is owed on the unit. No new parameter (id 40). Needs more testing by ear; `tests/talk_test.cpp`,
+  `docs/ENGINE-REALISM.md`.
 - **SLICE CH: slices on their own MIDI channel.** A setting with the values SAME (the default, today's behaviour: notes from 36 on your
   channel fire slices), 1 to 16 and OFF. With a channel, the notes of that channel fire the slices of the SPEAKS slot (36 is slice 1) and
   never play the synth or write into PATTERN's NOTE lane, while the notes of your channel always play the synth; OFF never fires a slice.

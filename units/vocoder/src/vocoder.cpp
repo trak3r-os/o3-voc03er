@@ -315,6 +315,7 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
       break;
     case Formant:
       bands_.set_formant(std::floor(v + 0.5f));  // integer semitones
+      talk_.set_formant(v);                       // Talk rounds and clamps itself; 0 is the exact old path
       break;
     case Thru:
       bands_.set_thru(v);

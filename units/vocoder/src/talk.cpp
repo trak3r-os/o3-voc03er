@@ -68,6 +68,42 @@ constexpr float kOpenPeak = 1.0e-3f;    // the carrier's peak over a call above 
 constexpr float kOpenMs = 5.0f;
 
 inline float flush(float x) noexcept { return (x > kTiny || x < -kTiny) ? x : 0.0f; }
+// FORMANT. Reciprocals of d[0..n), n <= kMaxStages, every d in (0, 2^20): one division for each group of four (Montgomery's trick: the
+// prefix products give each element's share of the one inverse), so the hop pays a division every four sections, not every section. Four
+// factors in [0.005, 2^20] stay far from float's range.
+void recip_groups(const float* d, float* out, std::uint32_t n) noexcept {
+  for (std::uint32_t g = 0; g < n; g += 4u) {
+    const std::uint32_t cnt = n - g < 4u ? n - g : 4u;
+    float pre[4];
+    float run = 1.0f;
+    for (std::uint32_t i = 0; i < cnt; ++i) {
+      pre[i] = run;
+      run *= d[g + i];
+    }
+    float inv = 1.0f / run;
+    for (std::uint32_t i = cnt; i-- > 0u;) {
+      out[g + i] = inv * pre[i];
+      inv *= d[g + i];
+    }
+  }
+}
+
+// |k| < 1 for any input: a NaN becomes +kMaxK (the comparisons are written so that a NaN fails them).
+inline float clamp_k(float k) noexcept {
+  k = !(k <= Talk::kMaxK) ? Talk::kMaxK : k;
+  return !(k >= -Talk::kMaxK) ? -Talk::kMaxK : k;
+}
+
+inline float clamp_area(float a) noexcept {
+  a = !(a >= Talk::kAreaMin) ? Talk::kAreaMin : a;
+  return a > Talk::kAreaMax ? Talk::kAreaMax : a;
+}
+
+// 2^(st/12) for st = -12..12.
+constexpr float kFormantScale[25] = {0.5f,       0.529732f, 0.561231f, 0.594604f, 0.629961f, 0.667420f, 0.707107f, 0.749154f, 0.793701f,
+                                     0.840896f,  0.890899f, 0.943874f, 1.0f,      1.059463f, 1.122462f, 1.189207f, 1.259921f, 1.334840f,
+                                     1.414214f,  1.498307f, 1.587401f, 1.681793f, 1.781797f, 1.887749f, 2.0f};
+
 }  // namespace
 
 void CarDrive::prepare(float sample_rate) noexcept {
@@ -187,6 +223,7 @@ void Talk::reset() noexcept {
   for (std::uint32_t m = 0; m < kMaxStages + 2; ++m) {
     k_[m] = 0.0f;
     kt_[m] = 0.0f;
+    kraw_[m] = 0.0f;
     dk_[m] = 0.0f;
     b_[m] = 0.0f;
   }
@@ -198,6 +235,7 @@ void Talk::reset() noexcept {
   wpos_ = filled_ = hop_pos_ = end_ = 0;
   pa_ = run_ = tgt_order_ = stages_for(order_);
   analysing_ = false;
+  shifted_ = false;
   stage_ = cpos_ = lag_ = total_ = done_ = ramp_left_ = 0;
   for (auto& v : acc_) v = 0.0f;
   emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
@@ -289,6 +327,70 @@ void Talk::slice(std::uint32_t units) noexcept {
   }
 }
 
+void Talk::areas_from_reflection(const float* k, std::uint32_t n, float* area) noexcept {
+  n = n > kMaxStages ? kMaxStages : n;
+  float kc[kMaxStages] = {}, den[kMaxStages] = {}, inv[kMaxStages] = {};
+  for (std::uint32_t i = 0; i < n; ++i) {
+    kc[i] = clamp_k(k[i + 1u]);
+    den[i] = 1.0f - kc[i];
+  }
+  recip_groups(den, inv, n);
+  area[0] = 1.0f;
+  for (std::uint32_t i = 0; i < n; ++i) area[i + 1u] = clamp_area(area[i] * (1.0f + kc[i]) * inv[i]);
+}
+
+void Talk::reflection_from_areas(const float* area, std::uint32_t n, float* k) noexcept {
+  n = n > kMaxStages ? kMaxStages : n;
+  float a[kMaxStages + 1] = {}, sum[kMaxStages] = {}, inv[kMaxStages] = {};
+  for (std::uint32_t i = 0; i <= n; ++i) a[i] = clamp_area(area[i]);
+  for (std::uint32_t i = 0; i < n; ++i) sum[i] = a[i + 1u] + a[i];
+  recip_groups(sum, inv, n);
+  for (std::uint32_t i = 0; i < n; ++i) k[i + 1u] = clamp_k((a[i + 1u] - a[i]) * inv[i]);
+}
+
+void Talk::set_formant(float st) noexcept {
+  float c = st;
+  if (!(c >= -12.0f)) c = c < 0.0f ? -12.0f : 0.0f;  // -inf; a NaN is centre
+  c = c > 12.0f ? 12.0f : c;
+  const int n = static_cast<int>(std::floor(c + 0.5f));  // half up, the same rounding as BANDS (Vocoder: floor(v + 0.5))
+  formant_st_ = static_cast<float>(n);
+  warp_on_ = n != 0;
+  if (!warp_on_) return;
+  const float s = kFormantScale[n + 12];
+  sinv_ = 1.0f / s;
+  // The shifted tube's section j reads the old area function at 0.5 + (j - 0.5) s: the glottis end stays where it was, s > 1 pulls the
+  // function toward it (the mouth end is padded with the last area), s < 1 spreads it (the last sections fall off the end).
+  for (std::uint32_t j = 0; j <= kMaxStages; ++j) {
+    float pos = 0.5f + (static_cast<float>(j) - 0.5f) * s;
+    pos = pos > 0.0f ? pos : 0.0f;
+    const std::uint32_t i = static_cast<std::uint32_t>(pos);
+    tpos_i_[j] = i;
+    tpos_f_[j] = pos - static_cast<float>(i);
+  }
+}
+
+// k[1..n] -> out[1..n]: reflection to areas, the area function resampled along the tube, areas to reflection. Linear in area, so every
+// resampled area is a convex mix of positive ones: positive, and |k| < 1 on the way back (clamped to kMaxK). Needs set_formant(!= 0).
+std::uint32_t Talk::shift_tube(const float* k, std::uint32_t n, float* out) const noexcept {
+  if (n == 0u) return 0u;
+  // A lengthened tube (s < 1, so sinv_ > 1) gets the sections it needs to hold the whole function; a shortened one keeps n.
+  std::uint32_t m = n;
+  if (sinv_ > 1.0f) {
+    const float want = static_cast<float>(n) * sinv_;
+    m = static_cast<std::uint32_t>(want);
+    if (static_cast<float>(m) < want) ++m;
+    m = m > kMaxStages ? kMaxStages : m;
+  }
+  float area[kMaxStages + 1] = {}, na[kMaxStages + 1] = {};
+  areas_from_reflection(k, n, area);
+  for (std::uint32_t j = 0; j <= m; ++j) {
+    const std::uint32_t i = tpos_i_[j];
+    na[j] = i >= n ? area[n] : area[i] + tpos_f_[j] * (area[i + 1u] - area[i]);
+  }
+  reflection_from_areas(na, m, out);
+  return m;
+}
+
 // Levinson-Durbin on r_[0..pa_]; sets the targets and the gain target, and starts the ramp.
 void Talk::publish() noexcept {
   const std::uint32_t p = pa_;
@@ -329,6 +431,35 @@ void Talk::publish() noexcept {
     const std::uint32_t q = p < ord ? p : ord;
     for (std::uint32_t m = 1; m <= q; ++m) err *= 1.0f - kt_[m] * kt_[m];
   }
+  const std::uint32_t use = p < ord ? p : ord;
+  const std::uint32_t prev_run = run_;
+  std::uint32_t syn = use;  // the sections the lattice will run: the analysis order, or more for a lengthened tube
+  const bool live = !silent && !freeze_;
+  if (live) {
+    for (std::uint32_t m = 1; m <= kMaxStages; ++m) kt_[m] = m <= use ? kk[m] : 0.0f;
+    for (std::uint32_t m = 1; m <= kMaxStages; ++m) kraw_[m] = kt_[m];
+  } else {
+    for (std::uint32_t m = use + 1; m <= kMaxStages; ++m) kt_[m] = 0.0f;
+  }
+  // FORMANT: the live targets (or, frozen, the last live ones) go through the tube. At centre none of it runs, unless the shift has just been
+  // taken off a frozen set, which gets its unshifted targets back.
+  if (!silent && (warp_on_ || shifted_)) {
+    if (warp_on_) {
+      syn = shift_tube(kraw_, use, kt_);
+      for (std::uint32_t m = syn + 1u; m <= kMaxStages; ++m) kt_[m] = 0.0f;
+      shifted_ = true;
+      err = live ? r_[0] : r_[0] * kR0Boost;  // the gain follows the shifted filter's own error, so the loudness holds
+      for (std::uint32_t m = 1; m <= syn; ++m) err *= 1.0f - kt_[m] * kt_[m];
+    } else {
+      for (std::uint32_t m = 1; m <= use; ++m) kt_[m] = kraw_[m];
+      for (std::uint32_t m = use + 1u; m <= kMaxStages; ++m) kt_[m] = 0.0f;
+      shifted_ = false;
+      if (!live) {  // the shift is off a frozen set: its gain follows the restored filter from this hop, not the shifted one
+        err = r_[0] * kR0Boost;
+        for (std::uint32_t m = 1; m <= use; ++m) err *= 1.0f - kt_[m] * kt_[m];
+      }
+    }
+  }
   agc_ = agc_gain(level_);
   // S1: the carrier ducks when the modulator is breath-like (much high band against the window's power) and above the level gate.
   float gd = kDuckFloor;
@@ -346,15 +477,8 @@ void Talk::publish() noexcept {
   } else {
     gain_t_ = 0.0f;
   }
-  const std::uint32_t use = p < ord ? p : ord;
-  const std::uint32_t prev_run = run_;
-  if (!silent && !freeze_) {
-    for (std::uint32_t m = 1; m <= kMaxStages; ++m) kt_[m] = m <= use ? kk[m] : 0.0f;
-  } else {
-    for (std::uint32_t m = use + 1; m <= kMaxStages; ++m) kt_[m] = 0.0f;
-  }
-  tgt_order_ = use;
-  run_ = prev_run > use ? prev_run : use;
+  tgt_order_ = syn;
+  run_ = prev_run > syn ? prev_run : syn;
   if (gain_ == 0.0f) {  // from silence nothing sounds yet, so the filter lands at once: a phrase starts on its formants, with no glide from flat
     for (std::uint32_t m = 1; m <= kMaxStages; ++m) k_[m] = kt_[m];
   }
