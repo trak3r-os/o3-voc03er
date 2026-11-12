@@ -1017,7 +1017,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   h.fkey[4] = "TRIM END, F1 TRIMS";
   h.fkey[5] = "PEAK TO -1 DB, F1 CONFIRMS";
   h.fkey[7] = "ONE CUT OVER THE SLOT";
-  h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: PERFORM'S ROWS A AND B.";
+  h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: THE NOTES PALETTE, ROWS A AND B.";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "CURSOR, LIT F KEY, BRACKET";

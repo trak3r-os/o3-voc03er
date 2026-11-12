@@ -1,5 +1,5 @@
-# PERFORM in TRACT (V2, docs/TRACT-KNOBS-PLAN.md 4.2 and 4.3, docs/REVIEW-2026-11-11.md section 3, TP1): TRACT keeps its own layout, A VOWEL, B TONGUE, C TIP
-# (parameter strips, 12 pads over the range). Then B is set to a TRIAD and C to MOUTH: VOWEL on columns 0..8 (A to U, the nearest one lit, the five pure vowels
+# PERFORM in TRACT (V2, docs/TRACT-KNOBS-PLAN.md 4.2 and 4.3, docs/REVIEW-2026-11-11.md section 3, TP1): TRACT keeps its own layout, A NOTE, B TONGUE (a parameter
+# strip, 12 pads over the range), C MOUTH. Then B is set to a TRIAD: the MOUTH strip is VOWEL on columns 0..8 (A to U, the nearest one lit, the five pure vowels
 # dim-bright), LIPS, TIP and BACK closures on 9..11 (held, then back to OPEN), F8 is VOWEL, and the voiceprint draws the mouth's profile (SPEAKS dimmed: no
 # input, the mouth is played). A chord is held on row B so the WAV carries a tone through the tube. The simulator shows the screen and that the engine takes
 # the values; the strip by hand and the pop of a closure are for the unit.
@@ -10,30 +10,25 @@ record on
 tap f1
 turn 8
 wait 600
-snap 01_tract_default_strips
+snap 01_tract_default_rows
 paddown 16
 wait 400
-snap 02_a_vowel_strip_pad_4
+snap 02_a_note_held
 padup 16
+wait 300
 paddown 35
 wait 400
 snap 03_b_tongue_strip_pad_max
 padup 35
 paddown 42
 wait 400
-snap 04_c_tip_strip_pad_6
+snap 04_c_mouth_vowel_o
 padup 42
 tap f6
 tap f6
 tap f7
 turn -80
 turn 1
-wait 100
-tap f6
-tap f6
-tap f7
-turn -80
-turn 7
 wait 400
 snap 05_b_triad_c_mouth
 paddown 26

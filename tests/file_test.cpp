@@ -656,6 +656,74 @@ TEST_CASE("file: P3 NEW puts every field of STAT 1.1 and TRIG and CHOKE back to 
   CHECK(h->runtime().frame_failures() == 0u);
 }
 
+// SP1: the notes palette (SAMPLE's and PATTERN's pad rows A and B) is in no file; NEW and a LOAD put A NOTE, B TRIAD back, as the manual says.
+TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIAD") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-sp1");
+  REQUIRE(card_dir.ok());
+  const std::filesystem::path card_root(card_dir.path());
+  REQUIRE(put_project(card_root, "SRC", p3_project()));
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  // SAMPLE's lower two rows are the palette (pads 24..47); F1 LOW PADS is the lit key there and steps row A.
+  const auto row_b_lit = [&] {  // a pad of B (a triad) lights on column 0, a root, in the default key
+    unsigned n = 0;
+    for (unsigned c = 0; c < 12; ++c) {
+      n += h->leds().level(36 + c) != 0 ? 1u : 0u;
+    }
+    return n != 0u;
+  };
+  const auto open_sample = [&] {
+    tap(*h, app::Button::SamplePlay);
+    h->run_ms(400);
+  };
+  const auto row_a_dark = [&] {
+    for (unsigned c = 0; c < 12; ++c) {
+      if (h->leds().level(24 + c) != 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+  open_sample();
+  CHECK_FALSE(row_a_dark());
+  CHECK(row_b_lit());
+  h->turn(5);  // A: NOTE to OFF (dark)
+  h->run_ms(100);
+  CHECK(row_a_dark());
+  CHECK(row_b_lit());  // B is untouched
+  // NEW.
+  tap(*h, app::Button::File);
+  h->run_ms(60);
+  tap(*h, app::Button::F4);  // NEW asks
+  tap(*h, app::Button::F1);  // confirmed
+  h->run_ms(400);
+  open_sample();
+  CHECK_FALSE(row_a_dark());
+  CHECK(row_b_lit());
+  // The same after a LOAD.
+  h->turn(5);
+  h->run_ms(100);
+  CHECK(row_a_dark());
+  tap(*h, app::Button::File);
+  h->run_ms(60);
+  tap(*h, app::Button::F1);  // LOAD asks
+  tap(*h, app::Button::F1);  // confirmed: the picker lists the folders
+  h->run_ms(300);
+  tap(*h, app::Button::F1);  // OPEN the one folder
+  h->run_ms(900);
+  open_sample();
+  CHECK_FALSE(row_a_dark());
+  CHECK(row_b_lit());
+  tap(*h, app::Button::File);  // leave the app as a fresh one: the singleton keeps the loaded name
+  h->run_ms(60);
+  tap(*h, app::Button::F4);
+  tap(*h, app::Button::F1);
+  h->run_ms(400);
+  CHECK(h->runtime().frame_failures() == 0u);
+}
+
 // LE4: a project opened under a walking chain replaces the chain in place. The player used to keep its row (past the new chain's end: the chain then
 // ended at the lap's end, the lit row out of range, and the new chain never played); now it starts over at the new chain's first row.
 TEST_CASE("file: a LOAD under a walking chain starts the new chain at its first row") {

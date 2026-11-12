@@ -6,7 +6,6 @@
 #include "perform_logic.h"
 #include "sample_rec_logic.h"
 #include "sample_screen.h"
-#include "strip_logic.h"
 #include "song_screen.h"
 #include "skin/ornoir.h"
 
@@ -287,7 +286,7 @@ void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noe
 }
 
 // A palette pad writes into the cursor's step, and the cursor moves on. With step pads held (Q4) it writes every held step instead and the cursor stays.
-// On the NOTE lane the pad writes what PERFORM's row A or B plays there (a note, or a chord of PATTERN's voicing); a pad that plays nothing (OFF, a parameter strip,
+// On the NOTE lane the pad writes what the notes palette's row A or B plays there (a note, or a chord of PATTERN's voicing); a pad that plays nothing (OFF,
 // out of range) writes nothing and sounds nothing. The pad sounds while it is held (the audition, Q3); SHIFT + a pad sounds and writes nothing.
 void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) noexcept {
   PatternData& p = pattern_now();
@@ -380,7 +379,7 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
   ctx.redraw();
 }
 
-const pads::Layout& PatternScreen::layout_now() const noexcept { return perform_ != nullptr ? perform_->layout() : kDefaultLayout; }
+const pads::Layout& PatternScreen::layout_now() const noexcept { return perform_ != nullptr ? perform_->notes() : kDefaultLayout; }
 
 void PatternScreen::pad(app::Context& ctx, unsigned pad, bool shift) noexcept {
   if (pad < pt::kPalettePads) {
@@ -447,7 +446,7 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u);
       break;
     case kKeyRow:  // ROW: A or B, the row F7 sets (a tap flips, a detent stops at the ends)
-    case kKeyPlays: {  // PLAYS: the chosen row's value, written through PERFORM's layout
+    case kKeyPlays: {  // PLAYS: the chosen row's note kind, in the notes palette
       if (lane() != pt::Lane::Note || perform_ == nullptr) {
         return;
       }
@@ -459,18 +458,14 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
           flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
         }
       } else {
-        // The entry list is the mode's (notes, then its parameter strips, TP1); a strip row writes nothing here, so the palette goes dark on it.
-        const pads::Row r = static_cast<pads::Row>(row_);
-        const unsigned mode = perform_->layout_mode();
-        const pads::Layout& cur = perform_->layout();
-        const unsigned at = strip::entry_index(r, mode, cur.row[row_], cur.strip[row_]);
-        const unsigned to = tap ? strip::entry_tap(r, mode, at) : strip::entry_step(r, mode, at, delta);
-        if (to != at) {
-          pads::Layout l = cur;
-          strip::apply_entry(l, r, mode, to);
+        // The notes palette's own list (pads::kOrderAB, SP1): no strip is reachable here.
+        const pads::Row r = static_cast<pads::Row>(row_ & 1u);
+        const pads::Plays cur = perform_->notes().row[row_ & 1u];
+        const pads::Plays to = tap ? pads::plays_tap(r, cur) : pads::plays_step(r, cur, delta);
+        if (to != cur) {
           perform_->audition_release_all(ctx);  // a pad held under the old value ends with it
           aud_ = 0;
-          perform_->set_layout(l);
+          (void)perform_->notes_set(r, to);
         }
       }
       break;
@@ -814,7 +809,7 @@ void PatternScreen::update(app::Context& ctx) noexcept {
 }
 
 // Rows 0 and 1: the lane's palette (mid where it holds what the cursor's step stores); rows 2 and 3: the steps and the patterns. On the NOTE lane the
-// palette is PERFORM's rows A and B as they play now: the key's root low, the scale dim, the rest and the pads that play nothing dark; F6's row goes off for
+// palette is the notes palette's rows A and B (PERFORM::notes()): the key's root low, the scale dim, the rest and the pads that play nothing dark; F6's row goes off for
 // a moment when it changes.
 void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   const PatternData& p = pattern_now();
@@ -914,9 +909,9 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {"STEPS", "MOVES THE CURSOR; SHIFT: A REST IN THE LANE", Color::Play},
       {"PATTERNS", "A TO H: SHOW IT, PLAY IT NEXT", Color::Sel},
   };
-  // The NOTE lane's palette says what its pads write: PERFORM's rows A and B as the layout has them now.
+  // The NOTE lane's palette says what its pads write: the notes palette's rows A and B (PERFORM::notes(), the same in every mode).
   static constexpr app::HelpPadGroup kNoteGroups[] = {
-      {"NOTES", "WHAT PERFORM'S ROWS A AND B PLAY (F6, F7)", Color::Accent},
+      {"NOTES", "WHAT ROWS A AND B PLAY (F6, F7)", Color::Accent},
       kGroups[1],
       kGroups[2],
   };
@@ -1041,7 +1036,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     const bool note_lane = lane() == pt::Lane::Note;
     const unsigned row = row_ & 1u;
     cat(keys[kKeyRow].value, sizeof keys[kKeyRow].value, pads::kRowNames[row]);
-    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, strip::row_name(layout_now(), static_cast<pads::Row>(row)));
+    cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, pads::kPlaysNames[pads::idx(layout_now().row[row])]);
     keys[kKeyRow].dim = keys[kKeyPlays].dim = !note_lane;  // the NOTE lane's palette; dim elsewhere
     keys[kKeyRow].hot = keys[kKeyRow].hot && note_lane;
     keys[kKeyPlays].hot = keys[kKeyPlays].hot && note_lane;

@@ -156,7 +156,7 @@ again. Leaving the screen cancels an armed take and stops a running one at the b
 
 The overview waveform across the screen, tall, the cuts as marks numbered 1 to 24, the trim as two brackets, the cursor a bright line with its
 time under it. The encoder moves the cursor; LEFT / RIGHT jump cut to cut; INSERT makes a cut at the cursor, DELETE removes the one at it. A pad
-of the top rows auditions that slice through the vocoder, and a pad of the bottom rows plays PERFORM's rows A and B (the same split as SAMPLE).
+of the top rows auditions that slice through the vocoder, and a pad of the bottom rows plays the notes palette, A a note and B a triad (the same split as SAMPLE).
 
 - F1 CUT EVEN (OFF, 8, 16, 24 equal parts; turning re-cuts) · F2 CUT BEATS (OFF, 4, 8, 16 a bar, on the bars the take was recorded on; dimmed for
   a loaded WAV) · F3 CUT HITS (0 to 100: the sensitivity of the onset detector, 0 off; the cuts follow it as it turns; the first tap from 0 lands at 50, then by 10, and 100 wraps to 0) · F4 START and F5 END (the
@@ -181,9 +181,9 @@ tick, into a 1.41 MB int16 stage in the SDRAM; the 16-bit 44.1 kHz case skips th
 ### PATTERN
 
 Sixteen steps as cells with five lanes under each (NOTE, CARRIER, LEVEL, SLICE, MOUTH), the playhead in the voice ink, the cursor framed, the lane in
-force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever PERFORM's rows A and B play there (section 7). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
+force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever the notes palette's rows A and B play there (A NOTE and B TRIAD at start; the palette is PATTERN's own, not PERFORM's layout). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
 the playhead); columns 8 to 11 of those rows are patterns A to H (`kLedMid` the current, `kLedOn` the one playing); rows 0 and 1 are the lane's
-palette: NOTE PERFORM's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER eight pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4, LIVE; the cell reads FLW, SYN, NSE, S1 to S4, LIV), LEVEL 24 steps of
+palette: NOTE the notes palette's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER eight pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4, LIVE; the cell reads FLW, SYN, NSE, S1 to S4, LIV), LEVEL 24 steps of
 velocity, SLICE slices 1 to 24, MOUTH two pages (below). A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
 the cursor there (SHIFT + step pad: a rest in the lane).
 On LEVEL the palette pad also sounds the cursor step's note or chord at that level while held (a rest sounds nothing); on SLICE it fires the
@@ -454,12 +454,12 @@ Row 0 is the controls on every layout (below). Rows 1, 2 and 3 are A, B and C, e
 of the kind per pad: TRIAD, the triad the scale gives on that root, major, minor or diminished; 7TH, the seventh the scale gives; OPEN, root,
 fifth, ninth, the airy vocoder pad; POWER, root, fifth, octave); on C only, FORMANT (a strip of semitones, a tap sets the formant and holds nothing), BEND
 (the strip of section 7b) and MOUTH (TRACT's strip, below); on every row OFF (dark and silent) and the parameter strips (TP1, below). A root outside the scale still plays (its nearest diatonic quality) and is lit
-dimmer. The default is A NOTE, B TRIAD, C FORMANT, and A VOWEL, B TONGUE, C CL TIP in TRACT.
+dimmer. The defaults (one per mode, every row doing something at the mode's default values): BANDS A NOTE, B TRIAD, C FORMANT; TALK A NOTE, B 7TH, C FORMANT; TUNE A NOTE, B SCALE, C SPEED; ROBOT A NOTE, B SHAPE, C FORMANT; TRACT A NOTE, B TONGUE, C MOUTH. A saved project keeps its layouts until F4 NEW.
 **F6 ROW and F7 PLAYS**: F6 chooses A, B or C (a tap steps and wraps, the encoder stops at the ends) and the row's LEDs flash once
 (`kRowFlashMs`, 150 ms); F7 steps the chosen row through its order (A and B: NOTE, TRIAD, 7TH, OPEN, POWER, OFF, then the strips; C: NOTE,
 TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF, then the strips; a tap wraps, the encoder stops at the ends, SHIFT + encoder jumps by group). The
 retired PIANO values (NP1) load as the plain value of the same kind. **The shortcut**: while a pad of A, B or
-C is held, F7 changes that pad's row at once and F6's row moves to it. SHIFT + F7 is OCTAVE (AK1; the arrow keys step the focused F value on PERFORM, except F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET (`arrow_may_step`: a stray press there changes the voicing or loads a sound),
+C is held, F7 changes that pad's row at once and F6's ROW stays where it is. SHIFT + F7 is OCTAVE (AK1; the arrow keys step the focused F value on PERFORM, except F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET (`arrow_may_step`: a stray press there changes the voicing or loads a sound),
 and on PATTERN keep UP / DOWN as the octave and LEFT / RIGHT as the cursor). Each row that plays notes sits one octave above
 the playing rows under it (`row_octave`). The project keeps the layout of each mode (STAT 1.1 for BANDS, PADS 1.0 for all five); a 1.1 file loads
 through STAT alone, and saving also writes the 1.0 chord kind, pads mode and bend row derived from it (`legacy_fields`) for an older build.
@@ -595,7 +595,7 @@ plays looped and takes SPEAKS (the side that held LIVE), so you hear it through 
 visible, for a take of a chosen length into a chosen slot.)
 
 **To slices.** SAMPLE EDIT (1): the take across the screen. F2 CUT BEATS (2), turn to 16 (3): sixteen marks. SAMPLE PLAY (4): the top two rows
-light; a pad plays its slice through the note or chord held on the bottom rows (PERFORM's rows A and B); hold a slice and change the pad under it. F2 SIDE is already SPEAKS;
+light; a pad plays its slice through the note or chord held on the bottom rows (the notes palette, A and B); hold a slice and change the pad under it. F2 SIDE is already SPEAKS;
 on PERFORM F3 SOUNDS to NOISE makes the same slices whisper. Four presses; a WAV instead of a take is SAMPLE LOAD, UP / DOWN, F1 OPEN, three more.
 
 **To an external carrier.** On PERFORM, F3 SOUNDS: the picker lists SYNTH, NOISE, LIVE "MIC (SAME AS SPEAKS)", SLOT 1. With the microphone on

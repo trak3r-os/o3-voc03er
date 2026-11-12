@@ -6,6 +6,7 @@
 #include "../app/src/strip_logic.h"
 
 #include <cstring>
+#include <string>
 #include <set>
 
 using namespace o3_voc03er;
@@ -326,42 +327,99 @@ TEST_CASE("strip: a tap steps on and wraps, the encoder stops at the ends, SHIFT
   CHECK(i < tn);
 }
 
-TEST_CASE("strip: the default layout is A NOTE, B TRIAD, C FORMANT, and TRACT's is A VOWEL, B TONGUE, C TIP") {
+TEST_CASE("strip: the default layouts, one per mode, every row doing something with the mode's own defaults") {
   for (unsigned m = 0; m < kModeCount; ++m) {
     const pd::Layout l = st::default_layout(m);
     CHECK(st::layout_valid(l));
-    if (m == kModeTract) {
-      CHECK(l.row[0] == Plays::Strip);
-      CHECK(l.strip[0] == st::kIdVowel);
-      CHECK(l.row[1] == Plays::Strip);
-      CHECK(l.strip[1] == st::kIdTongue);
-      CHECK(l.row[2] == Plays::Strip);
-      CHECK(l.strip[2] == st::kIdTip);
-      CHECK(std::strcmp(st::row_name(l, Row::A), "VOWEL") == 0);
-      CHECK(std::strcmp(st::row_name(l, Row::B), "TONGUE") == 0);
-      CHECK(std::strcmp(st::row_name(l, Row::C), "CL TIP") == 0);
-    } else {
-      CHECK(l.row[0] == Plays::Note);
-      CHECK(l.row[1] == Plays::Triad);
-      CHECK(l.row[2] == Plays::Formant);
-      CHECK(l.strip[0] == pd::kNoStrip);
+    CHECK(l.row[0] == Plays::Note);  // every mode that sounds from notes has a note row (TUNE with NOTES IN on, TRACT with SOURCE PADS)
+    for (unsigned r = 0; r < pd::kRows; ++r) {
+      if (l.row[r] == Plays::Strip) {
+        const st::StripDef* d = st::find(l.strip[r]);
+        REQUIRE(d != nullptr);
+        CHECK(st::in_mode(*d, m));  // a strip the mode uses, never a dark one
+      }
     }
   }
+  // BANDS: melody, chords, formant.
+  pd::Layout l = st::default_layout(0);
+  CHECK(l.row[1] == Plays::Triad);
+  CHECK(l.row[2] == Plays::Formant);
+  CHECK(l.strip[0] == pd::kNoStrip);
+  // TALK: seventh chords.
+  l = st::default_layout(st::kModeTalk);
+  CHECK(l.row[1] == Plays::Seventh);
+  CHECK(l.row[2] == Plays::Formant);
+  // TUNE: the scale and the retune speed as strips (KEY is silent at the default CHROM scale).
+  l = st::default_layout(st::kModeTune);
+  CHECK(l.row[1] == Plays::Strip);
+  CHECK(l.strip[1] == st::kIdScale);
+  CHECK(l.row[2] == Plays::Strip);
+  CHECK(l.strip[2] == st::kIdSpeed);
+  CHECK(std::strcmp(st::row_name(l, Row::B), "SCALE") == 0);
+  CHECK(std::strcmp(st::row_name(l, Row::C), "SPEED") == 0);
+  // ROBOT: the carrier's shape between the notes and the formant.
+  l = st::default_layout(st::kModeRobot);
+  CHECK(l.row[1] == Plays::Strip);
+  CHECK(l.strip[1] == st::kIdShape);
+  CHECK(l.row[2] == Plays::Formant);
+  CHECK(std::strcmp(st::row_name(l, Row::B), "SHAPE") == 0);
+  // TRACT: the notes pitch the voice, then the tongue and the MOUTH strip.
+  l = st::default_layout(kModeTract);
+  CHECK(l.row[1] == Plays::Strip);
+  CHECK(l.strip[1] == st::kIdTongue);
+  CHECK(l.row[2] == Plays::Mouth);
+  CHECK(std::strcmp(st::row_name(l, Row::B), "TONGUE") == 0);
+  CHECK(std::strcmp(st::row_name(l, Row::C), "MOUTH") == 0);
+}
+
+TEST_CASE("strip: F7's label names the row and what it plays, and the flash gives the place in the list") {
+  char out[16] = {};
+  pd::Layout l = st::default_layout(kModeTract);
+  st::plays_label(l, Row::A, out);
+  CHECK(std::strcmp(out, "A NOTE") == 0);
+  st::plays_label(l, Row::B, out);
+  CHECK(std::strcmp(out, "B TONGUE") == 0);
+  st::plays_label(l, Row::C, out);
+  CHECK(std::strcmp(out, "C MOUTH") == 0);
+  l = st::default_layout(st::kModeTalk);
+  st::plays_label(l, Row::B, out);
+  CHECK(std::strcmp(out, "B 7TH") == 0);
+  // A strip row: its own name, however long (the buffer holds the longest: "C T GLIDE", "B ACCENT").
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    for (unsigned r = 0; r < pd::kRows; ++r) {
+      const unsigned n = st::entry_count(static_cast<Row>(r), m);
+      for (unsigned i = 0; i < n; ++i) {
+        pd::Layout t = st::default_layout(m);
+        st::apply_entry(t, static_cast<Row>(r), m, i);
+        st::plays_label(t, static_cast<Row>(r), out);
+        CHECK(out[0] == "ABC"[r]);
+        CHECK(out[1] == ' ');
+        CHECK(std::strlen(out) < sizeof out - 1u);
+        st::plays_position(t, static_cast<Row>(r), i, n, out);
+        const std::string want = std::string(st::row_name(t, static_cast<Row>(r))) + " " + std::to_string(i + 1u) + "/" + std::to_string(n);
+        CHECK(want == out);
+      }
+    }
+  }
+  // The first entry of row A is NOTE: "NOTE 1/n".
+  l = st::default_layout(0);
+  st::plays_position(l, Row::A, 0, st::entry_count(Row::A, 0), out);
+  CHECK(std::string(out).rfind("NOTE 1/", 0) == 0);
 }
 
 TEST_CASE("strip: a layout is valid when its rows are offered and its ids known, and sanitize drops an unknown id to the mode's default row") {
   pd::Layout l;
   CHECK(st::layout_valid(l));
-  l.row[0] = Plays::Strip;
-  l.strip[0] = 0x7F7F;
+  l.row[1] = Plays::Strip;
+  l.strip[1] = 0x7F7F;
   CHECK_FALSE(st::layout_valid(l));
   const pd::Layout s = st::sanitize(l, kModeTract);
-  CHECK(s.row[0] == Plays::Strip);
-  CHECK(s.strip[0] == st::kIdVowel);
+  CHECK(s.row[1] == Plays::Strip);
+  CHECK(s.strip[1] == st::kIdTongue);
   CHECK(st::layout_valid(s));
   const pd::Layout b = st::sanitize(l, 0);
-  CHECK(b.row[0] == Plays::Note);
-  CHECK(b.strip[0] == pd::kNoStrip);
+  CHECK(b.row[1] == Plays::Triad);
+  CHECK(b.strip[1] == pd::kNoStrip);
   // a good strip row stays
   pd::Layout g;
   CHECK(pd::set_strip(g, Row::B, st::id_of(by_name("DRY"))));

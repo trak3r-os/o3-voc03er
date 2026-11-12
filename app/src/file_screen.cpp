@@ -568,6 +568,7 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
   }
   apply_route(ctx);
   apply_slots(ctx);
+  perform_->notes_reset();  // the notes palette is in no file: a load and NEW both put A NOTE, B TRIAD back (SP1)
   if (g_proj.stat != 0u) {
     (void)ctx.engine().set_tempo(g_proj.tempo_mbpm);
     perform_->set_octave(g_proj.octave);

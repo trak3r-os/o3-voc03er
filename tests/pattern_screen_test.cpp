@@ -777,10 +777,33 @@ TEST_CASE("pattern: FX goes SLICE, MOUTH, SLICE; F2 taps through the five lanes"
   }
   CHECK(rig.count(0, 23, app::kLedOff) == 3u);
   tap(*rig.h, app::Button::F2);  // wraps to NOTE
-  CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // TRACT's own layout is parameter strips (A VOWEL, B TONGUE): they write no notes, so the palette is dark
-  set_mode(*rig.h, 0.0f);  // BANDS has its own layout (A NOTE, B TRIAD): the palette is lit
-  CHECK(rig.count(0, 23, app::kLedOff) < 24u);
+  const unsigned tract_dark = rig.count(0, 23, app::kLedOff);
+  CHECK(tract_dark < 24u);  // the notes palette is the same in TRACT: lit
+  set_mode(*rig.h, 0.0f);   // BANDS: the same palette
+  CHECK(rig.count(0, 23, app::kLedOff) == tract_dark);
   CHECK(rig.count(0, 23, app::kLedOff) != 3u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+// SP1: the palette is the notes palette, not PERFORM's layout. F7 offers note kinds only and changes nothing on PERFORM; a change of PERFORM's layout (a
+// mode with other rows) leaves the palette as it is.
+TEST_CASE("pattern: F7 offers note kinds only, and PERFORM's layout and the palette do not touch each other") {
+  Rig rig;
+  tap(*rig.h, app::Button::F7);  // focus PLAYS (row A)
+  rig.h->turn(30);               // the last entry the palette offers
+  rig.h->run_ms(60);
+  CHECK(rig.count(0, 11, app::kLedOff) == 12u);  // OFF: dark, not a strip
+  rig.h->turn(-30);
+  rig.h->run_ms(60);
+  CHECK(rig.count(0, 11, app::kLedOff) < 12u);  // NOTE again
+  const unsigned lit_a = rig.count(0, 11, app::kLedOff);
+  const unsigned lit_b = rig.count(12, 23, app::kLedOff);
+  set_mode(*rig.h, 4.0f);  // TRACT: PERFORM's rows are NOTE, TONGUE, MOUTH
+  CHECK(rig.count(0, 11, app::kLedOff) == lit_a);
+  CHECK(rig.count(12, 23, app::kLedOff) == lit_b);  // B is TRIAD here, not TONGUE
+  tap(*rig.h, app::Button::Performance);
+  rig.h->run_ms(300);
+  CHECK(rig.led(24 + 0) != app::kLedOff);  // TRACT's B on PERFORM: the TONGUE strip, lit
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 

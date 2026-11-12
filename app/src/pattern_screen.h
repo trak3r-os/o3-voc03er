@@ -5,16 +5,16 @@
 // (NOTE, CARRIER, LEVEL, SLICE, MOUTH: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
 //
 //   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
-//   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of PERFORM's two upper pad rows (A or B)
-//   F7 changes, F7 PLAYS is that row's value (NOTE, TRIAD, 7TH, OPEN, POWER, OFF, or one of the mode's parameter strips: pads::Layout, PERFORM holds it); both are dim off the
-//   NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
+//   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of the notes palette's two pad rows (A or B)
+//   F7 changes, F7 PLAYS is that row's note kind (NOTE, TRIAD, 7TH, OPEN, POWER, OFF: the palette PATTERN, SAMPLE and SAMPLE EDIT share, SP1; PERFORM's layout is
+//   a different thing and no strip is reachable here); both are dim off the NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
 //   The encoder starts on F5, the cursor step's value in the lane. SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected
 //   and writes the nearest of TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press
 //   cancels, leaving the screen cancels, and nothing is written before the analysis ends.
 //   UP / DOWN: the octave (PERFORM's and SAMPLE's, one press one step, the palette's notes move by 12). LEFT / RIGHT: the cursor (they repeat when
 //   held). NOTE, INSTR, VOL, FX and F2: the lane (app.cpp opens the screen on it; FX: SLICE, then MOUTH, then SLICE).
 //   Pads: rows 2 and 3, columns 0..7: steps 1..16 (a press moves the cursor; SHIFT + press writes a rest in the lane); columns 8..11: patterns A..H (the
-//   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: the pads of PERFORM's rows A and B, what
+//   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: the notes palette's rows A and B, what
 //   they play there, at PERFORM's octave, lit like PERFORM's; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS
 //   slot's cuts 1..24, lit up to its count; MOUTH: row 0 PERFORM's mouth strip, the nine vowels then LIPS, TIP, BACK, row 1 the vowels with GLD, the
 //   slide into them; the lane speaks in TRACT only, dim elsewhere, and a pad sounds the mouth live there). A palette pad writes into the cursor's step and moves the cursor on; a pad that plays nothing writes nothing.
@@ -106,7 +106,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   void capture_finish(o3sdk::app::Context& ctx) noexcept;
   bool capture_slot_same() const noexcept;
   pattern::MouthPage mouth_page() const noexcept { return static_cast<pattern::MouthPage>(page_); }
-  const pads::Layout& layout_now() const noexcept;  // PERFORM's (the default one when no PERFORM is wired)
+  const pads::Layout& layout_now() const noexcept;  // the notes palette (PERFORM::notes(); the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;

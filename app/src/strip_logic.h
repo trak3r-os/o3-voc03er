@@ -395,21 +395,86 @@ constexpr const char* row_name(const pd::Layout& l, pd::Row r) noexcept {
   return pd::kPlaysShort[pd::idx(p)];
 }
 
+namespace detail {
+// Appends `s` to `out` (capacity `cap`, always terminated) from `n` on; returns the new length.
+constexpr std::size_t cat(char* out, std::size_t cap, std::size_t n, const char* s) noexcept {
+  for (; *s != '\0' && n + 1 < cap; ++s) {
+    out[n++] = *s;
+  }
+  out[n] = '\0';
+  return n;
+}
+constexpr std::size_t cat_uint(char* out, std::size_t cap, std::size_t n, unsigned v) noexcept {
+  char d[12] = {};
+  std::size_t k = 0;
+  do {
+    d[k++] = static_cast<char>('0' + v % 10u);
+    v /= 10u;
+  } while (v != 0u && k < sizeof d - 1u);
+  while (k != 0u && n + 1 < cap) {
+    out[n++] = d[--k];
+  }
+  out[n] = '\0';
+  return n;
+}
+}  // namespace detail
+
+// F7's value on PERFORM (FX1): the row it acts on and what that row plays, "A VOWEL", "B 7TH", "C MOUTH".
+constexpr void plays_label(const pd::Layout& l, pd::Row r, char (&out)[16]) noexcept {
+  std::size_t n = detail::cat(out, sizeof out, 0, pd::kRowNames[pd::idx(r)]);
+  n = detail::cat(out, sizeof out, n, " ");
+  (void)detail::cat(out, sizeof out, n, row_name(l, r));
+}
+
+// The flash while the encoder or a tap moves F7: what the row plays now and its place in the list, "VOWEL 7/30" (entry `index` of `total`, one-based).
+constexpr void plays_position(const pd::Layout& l, pd::Row r, unsigned index, unsigned total, char (&out)[16]) noexcept {
+  std::size_t n = detail::cat(out, sizeof out, 0, row_name(l, r));
+  n = detail::cat(out, sizeof out, n, " ");
+  n = detail::cat_uint(out, sizeof out, n, index + 1u);
+  n = detail::cat(out, sizeof out, n, "/");
+  (void)detail::cat_uint(out, sizeof out, n, total);
+}
+
 // ---- layouts per mode ---------------------------------------------------------------------------------------------------------------------
 
-// The default of a mode: TRACT plays A VOWEL, B TONGUE, C TIP; every other mode A NOTE, B TRIAD, C FORMANT.
+// The default of a mode: every row does something audible or visible out of the box, with the mode's default values, and a mode that sounds from notes
+// has a note row (the maintainer's "whatever makes most sense", 2026-11-13):
+//   BANDS  A NOTE, B TRIAD, C FORMANT    melody, chords and the formant
+//   TALK   A NOTE, B 7TH,   C FORMANT    talkbox lines and seventh chords
+//   TUNE   A NOTE, B SCALE, C SPEED      NOTES IN defaults to ON, so the pads' notes are the targets; the scale and the retune speed are strips (KEY
+//                                        is silent at the default CHROM scale, SCALE is not)
+//   ROBOT  A NOTE, B SHAPE, C FORMANT    ROBOT is BANDS with a leveller, so the carrier's SHAPE and the formant both act
+//   TRACT  A NOTE, B TONGUE, C MOUTH     SOURCE defaults to PADS (it picks where the tube's shape comes from, pads or the live voice, not the
+//                                        pitch): the notes pitch the voice, the tongue and the MOUTH strip (the vowels and the three closures) shape the tube
+// A saved project keeps its own layouts; F4 NEW puts these back.
+inline constexpr unsigned kModeTalk = 1;
+inline constexpr unsigned kModeTune = 2;
+inline constexpr unsigned kModeRobot = 3;
 inline constexpr std::uint16_t kIdVowel = pd::strip_id(kTagTract, TractUnit::Vowel);
 inline constexpr std::uint16_t kIdTongue = pd::strip_id(kTagTract, TractUnit::Tongue);
 inline constexpr std::uint16_t kIdTip = pd::strip_id(kTagHold, 2);
+inline constexpr std::uint16_t kIdScale = pd::strip_id(kTagVoice, Vocoder::Scale);
+inline constexpr std::uint16_t kIdSpeed = pd::strip_id(kTagVoice, Vocoder::Speed);
+inline constexpr std::uint16_t kIdShape = pd::strip_id(kTagVoice, Vocoder::Wave);
 constexpr pd::Layout default_layout(unsigned mode) noexcept {
-  pd::Layout l;
-  if (mode == kModeTract) {
-    l.row[0] = pd::Plays::Strip;
-    l.strip[0] = kIdVowel;
-    l.row[1] = pd::Plays::Strip;
-    l.strip[1] = kIdTongue;
-    l.row[2] = pd::Plays::Strip;
-    l.strip[2] = kIdTip;
+  pd::Layout l;  // A NOTE, B TRIAD, C FORMANT
+  switch (mode) {
+    case kModeTalk:
+      l.row[1] = pd::Plays::Seventh;
+      break;
+    case kModeTune:
+      (void)pd::set_strip(l, pd::Row::B, kIdScale);
+      (void)pd::set_strip(l, pd::Row::C, kIdSpeed);
+      break;
+    case kModeRobot:
+      (void)pd::set_strip(l, pd::Row::B, kIdShape);
+      break;
+    case kModeTract:
+      (void)pd::set_strip(l, pd::Row::B, kIdTongue);
+      l.row[2] = pd::Plays::Mouth;
+      break;
+    default:
+      break;
   }
   return l;
 }

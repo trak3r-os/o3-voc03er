@@ -16,7 +16,7 @@
 //                 layout per mode (BANDS, TALK, TUNE, ROBOT, TRACT), kept when the mode changes and saved in the project. F6 ROW picks
 //                 A, B or C (a tap steps and wraps, the encoder stops at the ends; the row's LEDs flash once); F7 PLAYS sets that row (SHIFT + the encoder jumps
 //                 by group). Holding a pad of a
-//                 row and tapping F7 (or turning) changes THAT row at once, and F6 follows it. A row above plays one octave higher per playing row below it
+//                 row and tapping F7 (or turning) changes THAT row at once, and F6 stays where it is. A row above plays one octave higher per playing row below it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
 //                 about 120 ms after the last one. A tap on an F key takes the encoder back. MIDI pitch bend adds to it (set_wheel)
 //   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, OCTAVE, PRESET); SHIFT + F key focuses
@@ -138,14 +138,18 @@ class PerformScreen final : public o3sdk::app::Screen {
   unsigned slots_waiting() const noexcept { return slots_waiting_; }
   unsigned focus() const noexcept { return focus_; }
   // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play, the current mode's of the five (`layouts()`). PERFORM's own pads
-  // (rows 1, 2 and 3), PATTERN's palette (rows A and B) and SAMPLE's follow it. Main loop only. Saved in the project (PADS); init() sets the defaults
-  // (strip::default_layout: TRACT A VOWEL, B TONGUE, C TIP; the others A NOTE, B TRIAD, C FORMANT). The mode is read in service() (every main-loop pass),
-  // in enter() and on a pad press, so another screen's layout() is the mode of the last pass.
-  // set_plays is for the screens that are not PERFORM (PATTERN's F7): false, changing nothing, for a value the row does not offer. PERFORM's own F7 lets
-  // the held pads go first (step_plays).
+  // (rows 1, 2 and 3) follow it and nothing else does (strips live on PERFORM only). Main loop only. Saved in the project (PADS); init() sets the defaults
+  // (strip::default_layout: one per mode, see strip_logic.h). The mode is read in service() (every main-loop pass),
+  // in enter() and on a pad press. PERFORM's own F7 lets the held pads go first (step_plays).
   const pads::Layout& layout() const noexcept { return layouts_[mode_]; }
-  bool set_plays(pads::Row row, pads::Plays value) noexcept { return pads::set_plays(layouts_[mode_], row, value); }
   unsigned layout_mode() const noexcept { return mode_; }
+  // The notes palette (SP1): what the pad rows A and B play on PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD, the same in every mode. Notes only
+  // (pads::kOrderAB), default A NOTE, B TRIAD. It lives here only because this is the screen the others already reach; PERFORM never reads or writes it,
+  // and a PERFORM layout change does not touch it. RAM, no chunk (docs/CHANGELOG.md, SP1): init(), a project load and F4 NEW put the defaults back (notes_reset). Main loop only.
+  // notes_set is false, changing nothing, for a row or value the palette does not offer (row C, a strip).
+  const pads::Layout& notes() const noexcept { return notes_; }
+  void notes_reset() noexcept { notes_ = {}; }  // A NOTE, B TRIAD
+  bool notes_set(pads::Row row, pads::Plays value) noexcept { return row != pads::Row::C && pads::set_plays(notes_, row, value); }
   // SAMPLE's pads of a parameter strip (rows A and B there): the same press and release as PERFORM's pad of that row and column. False when the row
   // does not hold a strip (nothing done).
   // `why`, when given, receives the text of a dark strip's refusal ("... IN <MODE>", valid until the next refusal) for the caller to show with its own say();
@@ -156,8 +160,6 @@ class PerformScreen final : public o3sdk::app::Screen {
   void release_closures(o3sdk::app::Context& ctx) noexcept;
   // The LED level of that pad (the value's pad on, the others dim, those past the choices dark; a held closure's pad on); dark for a row without a strip.
   std::uint8_t strip_led(const o3sdk::dsp::Engine& e, pads::Row row, unsigned col, unsigned pad_id) const noexcept;
-  // SAMPLE's F1 sets the current mode's layout whole (after PERFORM's own checks in strip_logic.h); the held notes and strips are the caller's to let go.
-  void set_layout(const pads::Layout& l) noexcept { layouts_[mode_] = l; }
   // The row F6 points at (A, B or C) and the one whose LEDs flash.
   pads::Row row() const noexcept { return row_; }
   int latched() const noexcept { return latched_; }
@@ -244,6 +246,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   int octave_ = 0;
   unsigned voicing_ = 3;     // Voicing of the chords (Smooth)
   pads::Layout layouts_[kModeCount] = {};  // see layout(); init() fills the defaults
+  pads::Layout notes_ = {};  // see notes(): rows A and B, notes only
   unsigned mode_ = 0;        // the mode whose layout is in force (sync_mode)
   pads::Row row_ = pads::Row::A;  // F6: the row F7 and the encoder set (main loop only)
   std::uint64_t row_flash_until_ = 0;  // the chosen row's LEDs are dark until then, a short off-on when F6 changes the row (leds() checks it)
@@ -279,6 +282,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   std::uint64_t cap_t0_ = 0;
   int latched_ = -1;         // the latched pad, or -1
   std::uint64_t held_ = 0;   // the pads this screen holds notes for (bit pad)
+  std::uint64_t down_ = 0;   // FX1: the pads physically down on this screen (bit pad: set by a press, cleared by its release, by leave() and init(); a latched pad and an OFF pad
+                             // count while the finger is on them, nothing else does). F7 follows a pad of A, B or C only through this mask. Main loop only.
   std::uint32_t label_sig_ = 0xFFFFFFFFu;  // what the labels were built for
   std::uint32_t frame_ = 0;
   mutable o3sdk::app::HelpPadGroup help_groups_[5] = {};

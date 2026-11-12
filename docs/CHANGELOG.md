@@ -4,6 +4,16 @@
 
 ### Added
 
+- **SP1: strips on PERFORM only, one notes palette for the rest.** TP1 had put the parameter strips into the per-mode layout that PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD also read,
+  so in TRACT the SAMPLE pads played no notes and F1 PLAYS showed strip values. Now PATTERN's NOTE lane, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD share one pair of note rows of their own, A NOTE and B TRIAD at start
+  (NOTE, TRIAD, 7TH, OPEN, POWER, OFF), the same in every mode; PERFORM's per-mode layouts never change it and it never changes them (setting a row on PERFORM no longer changes PATTERN's palette). No strip
+  code is reachable from those screens. PATTERN's F7 and SAMPLE's F1 step the pair; SAMPLE's F1 is now LOW PADS (value "A NOTE") and the screen says "UPPER PADS: SLICES. LOWER PADS: A NOTE  B TRIAD". The pair is
+  RAM only (A NOTE, B TRIAD again after a restart, a project load or F4 NEW); the project's PADS chunk is unchanged. Holding a slice and a note pad still sings the note.
+  **FX1:** on PERFORM F7 follows a pad only while it is physically held (a latched pad or a stale held bit does not count); with no pad down it steps the row F6 shows, and F6's row never moves by itself.
+  F7's value now names the row and what it plays ("A VOWEL"), and "NAME n/N" (the entry's number of its list) while the encoder moves it. **Defaults:** BANDS A NOTE, B TRIAD, C FORMANT; TALK A NOTE, B 7TH, C FORMANT; TUNE A NOTE, B SCALE, C SPEED
+  (NOTES IN is on by default; KEY would be silent at the default CHROM scale); ROBOT A NOTE, B SHAPE, C FORMANT; TRACT A NOTE, B TONGUE, C MOUTH (every row does something out of the box, and a mode that sounds from notes has a note row). A saved PADS chunk keeps
+  its layouts: an existing project keeps its old layout until F4 NEW. Scenarios `sample_layout.txt` and the PERFORM ones, tests in `sample_test`, `perform_screen_test`, `pattern_screen_test`, `strip_logic_test`.
+  Needs more testing on the unit.
 - **LC1: LIVE in PATTERN's CARRIER lane.** A step can sound through the live audio input, as PERFORM's SOUNDS LIVE does (the pattern's carrier ids are the engine's: 7 is LIVE, appended, the saved ids 0 to 6 never move;
   `kCarrierMax` 6 to 7, the three-bit carrier field already held it). INSTR gets a LIVE pad (pad 7, cell "LIV") and playback switches the carrier to LIVE on that step and to the next step's carrier after it, a Stop
   restoring the user's pick. It works with SPEAKS on a slot or on the input. Of the PATTERN lanes only SLICE needs a slot (it says SPEAKS HAS NO SLICES); MOUTH capture reads a recorded slot by design. No format

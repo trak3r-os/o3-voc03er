@@ -128,7 +128,7 @@ now.
 | F4 KEY | The root of the key. Chords and pitch correction share it |
 | F5 SCALE | The scale: the chords and TUNE stay in it |
 | F6 ROW | Which pad row F7 sets: A, B or C. A tap steps and wraps; the encoder stops at the ends. The row's pads flash once |
-| F7 PLAYS | What the chosen row plays: notes, chords or a parameter strip (below). Hold a pad of A, B or C and F7 changes that pad's row at once |
+| F7 PLAYS | What the chosen row plays: notes, chords or a parameter strip (below). Hold a pad of A, B or C and F7 changes that pad's row at once. Its value names the row and what it plays (for example A VOWEL) |
 | F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL |
 | SHIFT + F1 | FREEZE the vowel |
 | SHIFT + F2 | GATE: chops the sound in time (OFF, 1/4, 1/8, 1/16, 1/32) |
@@ -143,8 +143,8 @@ now.
 
 *PERFORM in TALK: the voiceprint is now a smooth curve, the shape of the mouth.*
 
-**The pads layout.** This is the one place that explains the pads; PATTERN, SAMPLE, SAMPLE REC, SAMPLE EDIT and PARAMS play the same layout and
-point here. The top pad row is always the controls: OCT- and OCT+, VOL- and VOL+, ROOT- and ROOT+, MOD (adds a little vibrato while held) and
+**The pads layout.** This is the one place that explains the pads; PATTERN, SAMPLE REC and PARAMS play the same layout and
+point here (SAMPLE, SAMPLE EDIT, FILE, SAMPLE LOAD and PATTERN's NOTE lane have two note rows of their own, below and section 6). On PARAMS and SAMPLE REC the pads are PERFORM's. The top pad row is always the controls: OCT- and OCT+, VOL- and VOL+, ROOT- and ROOT+, MOD (adds a little vibrato while held) and
 BND- and BND+ (bend while held). Below it are three rows, A, B and C from the top, and the twelve columns are the twelve roots, C at the left, in
 the key and scale of F4 and F5. Each row has a PLAYS value. F6 ROW chooses the row (the row's pads flash once) and F7 PLAYS chooses what it
 plays, in this order:
@@ -176,8 +176,7 @@ kind, a strip shows the parameter's name.
 - MOUTH (row C only): the mouth strip of TRACT (section 5b). In the other modes the row is dark and the screen says MOUTH SPEAKS IN TRACT.
 - OFF: the row is dark and silent.
 
-**Each mode keeps its own three rows.** Switching mode with F1 shows that mode's layout and keeps the edits of every other. The default is A NOTE,
-B TRIAD and C FORMANT in BANDS, TALK, TUNE and ROBOT, and A VOWEL, B TONGUE and C CL TIP in TRACT. A strip of a parameter another mode uses is
+**Each mode keeps its own three rows.** Switching mode with F1 shows that mode's layout and keeps the edits of every other. The defaults are below. A strip of a parameter another mode uses is
 dark and the screen says where it lives (for example "... IN TRACT").
 
 **Each row that plays notes sits one octave above the playing rows under it**, so a note on row B is one octave over the same pad on row C. The
@@ -189,9 +188,21 @@ UP raise, LEFT and DOWN lower). On PATTERN the arrows keep their own jobs (LEFT 
 RIGHT step the F value and UP and DOWN pick the slot. The arrows leave three values to a tap of their key or the encoder, since a stray press there
 changes the sound's character: F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET.
 
-**The shortcut:** while you hold a pad of A, B or C, F7 changes that pad's row at once, and F6 follows it. SHIFT tapped while a pad is held
-latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it. **The five layouts are saved with the
-project** (section 9) and F4 NEW puts them back to the default. Recording a strip into a PATTERN lane is not built: a strip sets the value live.
+**The shortcut:** while you hold a pad of A, B or C, F7 changes that pad's row at once. Only a pad that is physically down counts: a latched pad,
+or one you let go of, does not, and with no pad down F7 changes the row F6 shows. F6's row never moves by itself. SHIFT tapped while a pad is held
+latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it, and F7's own value says which row it acts
+on and what that row plays (A VOWEL, B 7TH, C MOUTH). **The five layouts are saved with the project** (section 9) and F4 NEW puts them back to the
+default. A project you saved earlier keeps its own layouts until you press NEW.
+
+**The defaults.** Every row does something out of the box: BANDS is A NOTE, B TRIAD, C FORMANT (melody, chords, formant); TALK is A NOTE, B 7TH,
+C FORMANT; TUNE is A NOTE, B SCALE, C SPEED (NOTES IN is on, so the pads' notes are the targets; the scale, then the retune speed; KEY would be silent at the default CHROM scale); ROBOT is A NOTE,
+B SHAPE, C FORMANT; TRACT is A NOTE, B TONGUE, C MOUTH (the pads' notes are the voice's pitch, the tongue and the MOUTH strip are the mouth).
+
+**Strips live on PERFORM only.** A strip is a PERFORM thing: PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD never show one. They share
+one pair of note rows of their own, A and B, with NOTE, TRIAD, 7TH, OPEN, POWER or OFF (A NOTE and B TRIAD at first), the same in every mode.
+Setting a row on PERFORM does not change that pair, and changing the pair (F7 on PATTERN, F1 LOW PADS on SAMPLE) does not touch PERFORM's
+layouts. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load (needs more testing). Recording a
+strip into a PATTERN lane is not built: a strip sets the value live, on PERFORM.
 
 **Pitch bend.** The encoder bends the synth once it is free: press PERFORMANCE while on PERFORM to free it, and tap any F key to take it
 back. It springs back to the middle about a tenth of a second after you stop turning. SHIFT makes the steps larger. Set row C to BEND
@@ -326,9 +337,9 @@ into a pattern; it does not give you a voice you can talk through.
 
 **Playing it by hand.** There are three ways, and they all move the same mouth.
 
-- **The strips.** In TRACT row A starts as a VOWEL strip, B as TONGUE and C as the TIP closure (section 4, PERFORM: every parameter of the mode is
-  a strip, and the layout is kept for TRACT apart from the other modes); change a row with F6 and F7. The MOUTH value below is the old way to
-  put everything on one row. Set row C to MOUTH (F6 until it says C, then F7 until it says MOUTH). Columns 1 to 9 of the row are the vowels A, A-E, E, E-I, I,
+- **The strips.** In TRACT row A starts as NOTE (the voice's pitch), B as a TONGUE strip and C as the MOUTH strip (section 4, PERFORM: every
+  parameter of the mode is a strip, and the layout is kept for TRACT apart from the other modes); change a row with F6 and F7. Row C starts as MOUTH, which puts the vowels and the closures
+  on one row (to bring it back: F6 until it says C, then F7 until it says MOUTH). Columns 1 to 9 of the row are the vowels A, A-E, E, E-I, I,
   I-O, O, O-U and U: a press sets the vowel and it stays when you let go. Columns 10, 11 and 12 are the closures LIPS, TIP and BACK: the mouth
   shuts while the pad is held and opens when you let go, and if two are held the last pressed wins. The row plays no notes, so the rows above it
   keep the octave to themselves. Outside TRACT the row is dark and the screen says MOUTH SPEAKS IN TRACT.
@@ -457,10 +468,12 @@ bar and throws it away. DELETE with no take running empties the slot.
 
 ![SAMPLE: four slots on the left, the selected slot's waveform and cuts, the slices on the pads](manual/img/sample.png)
 
-*SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom two rows play PERFORM's rows A and B. One slice is sounding.*
+*SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom two rows play notes, and the screen says which (LOW PADS). One slice is sounding.*
 
-The top two pad rows are the slices of the selected slot. The bottom two rows play PERFORM's layout (section 4, PERFORM), row A on the upper one and row B
-on the lower one, at PERFORM's octave (SHIFT + F3 moves it). A pad sounds while it is held, and
+The top two pad rows are the slices of the selected slot. The bottom two rows always play notes, in a pair of rows of their own (the shared notes palette of section 4): row A on the
+upper one (NOTE at first) and row B on the lower one (TRIAD), at PERFORM's octave (SHIFT + F3 moves it). Whatever mode PERFORM is in, and whatever its pads
+play there (the strips included), these two rows do not change. The right column (LOW PADS) and the line under the slots (for example "LOW
+PADS: A NOTE  B TRIAD") say what each row plays. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load. A pad sounds while it is held, and
 leaving the screen lets everything go. **Hold a slice and a layout pad together, and the slice sings that note or chord.** There is no latch on
 this screen: the hand holds the pad. Four slices can sound at once.
 
@@ -470,7 +483,7 @@ the same.
 
 | Key | What it does |
 |---|---|
-| F1 PLAYS | What the row plays, as on PERFORM's F7. It sets the row that SHIFT + F1 chose (A at first), or, while you hold a pad of the bottom rows, that pad's row |
+| F1 LOW PADS | What the lower pad rows play: NOTE, TRIAD, 7TH, OPEN, POWER or OFF (no strips). The value reads the row and its kind, for example A NOTE. It sets the row that SHIFT + F1 chose (A at first), or, while you hold a pad of the bottom rows, that pad's row |
 | SHIFT + F1 ROW | The other row, A or B: its pads go dark for a moment |
 | SHIFT + F2 SLICE CH | The MIDI channel that fires slices: SAME, 1 to 16 or OFF (section 8). Hold SHIFT and turn the encoder; its value shows in the SHIFT row, and the screen's right column reads SLICE CH |
 | F2 SIDE | Which side the slot is on: SPEAKS, SOUNDS or NONE |
@@ -481,7 +494,7 @@ the same.
 | F7 CHOKE | ON (the default): a hit fades out the slot's sounding slice and starts the new one. OFF: up to four slices overlap |
 | F8 LEVEL | -24 to +12 dB |
 
-UP and DOWN pick the slot. The layout is PERFORM's: F1 PLAYS and SHIFT + F1 ROW change the same values F7 and F6 do there.
+UP and DOWN pick the slot. F1 LOW PADS and SHIFT + F1 ROW change the shared pair of note rows (PATTERN's NOTE lane uses it too); PERFORM's F6 and F7 are separate. SAMPLE EDIT, FILE and SAMPLE LOAD play the same two rows.
 
 ### SAMPLE EDIT
 
@@ -491,7 +504,7 @@ UP and DOWN pick the slot. The layout is PERFORM's: F1 PLAYS and SHIFT + F1 ROW 
 
 SAMPLE EDIT shows the take across the whole screen. Cuts are marks numbered 1 to 24. The encoder moves the cursor; LEFT and RIGHT jump
 from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice; the bottom rows play
-PERFORM's rows A and B.
+SAMPLE's two note rows (A NOTE, B TRIAD at first; F1 LOW PADS on SAMPLE changes them).
 
 | Key | What it does |
 |---|---|
@@ -548,8 +561,8 @@ pad writes into the step under the cursor and moves the cursor on; with one or m
 On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
 fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
 
-On the NOTE lane the palette is PERFORM's rows A and B as they play (the pads layout, section 4, PERFORM; F6 chooses A or B here, F7 what it plays).
-A pad writes what PERFORM would play there: a note, a chord of the row's kind, or nothing when the row is OFF. **For a bass line of
+On the NOTE lane the palette is the shared pair of note rows, A and B (the notes palette of section 4, the same one SAMPLE plays; PERFORM's layout does not change it; F6 chooses A or B here, F7 what it plays: a note kind or OFF, never a strip).
+A pad writes what that row plays: a note, a chord of the row's kind, or nothing when the row is OFF. **For a bass line of
 single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held, and keeps sounding when the pattern plays the same note
 (its gate off, a repeat or Stop does not cut it; needs more testing); SHIFT + a palette pad sounds
 and writes nothing.
@@ -561,8 +574,8 @@ and writes nothing.
 | F3 LENGTH | 1 to 16 steps |
 | F4 TEMPO | The tempo |
 | F5 VALUE | The cursor step's value in the lane; the encoder edits it |
-| F6 ROW | NOTE lane: which of PERFORM's rows the palette shows, A or B. The row flashes. MOUTH lane: SET, the palette VOWELS or WORDS. Dim on the other lanes |
-| F7 PLAYS | NOTE lane: what that row plays (PERFORM's values for rows A and B). MOUTH lane: FILL. Dim on the other lanes |
+| F6 ROW | NOTE lane: which of the two note rows the palette shows, A or B. The row flashes. MOUTH lane: SET, the palette VOWELS or WORDS. Dim on the other lanes |
+| F7 PLAYS | NOTE lane: what that row plays (NOTE, TRIAD, 7TH, OPEN, POWER or OFF). MOUTH lane: FILL. Dim on the other lanes |
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | SHIFT + F8 CAPTURE | MOUTH lane only: reads the slot SAMPLE shows into the lane. Pressed again while it reads, it cancels |
@@ -624,8 +637,8 @@ trim, speed, direction, level, TRIG, CHOKE and the name of the WAV it came from.
 writes the sounds into the project folder. ACCENT and SOURCE set from a strip are not saved with the project. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
 becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and CHOKE ON. The preset is kept by name: a
 name this build does not know opens as no preset. A project saved before the layouts were per mode opens with its one layout on BANDS, TALK, TUNE
-and ROBOT and the TRACT default (A VOWEL, B TONGUE, C TIP); a saved piano value opens as the plain note, chord or OFF of the same kind. An older
-image that opens a new project reads the BANDS layout and ignores the rest (needs more testing). F4 NEW puts all of these back to their defaults.
+and ROBOT and the TRACT default (A NOTE, B TONGUE, C MOUTH); a saved piano value opens as the plain note, chord or OFF of the same kind. An older
+image that opens a new project reads the BANDS layout and ignores the rest (needs more testing). F4 NEW puts all of these back to their defaults (a project you saved earlier keeps its own pads layouts until NEW; the defaults are the ones in section 4).
 
 ![FILE: the list of projects](manual/img/file.png)
 

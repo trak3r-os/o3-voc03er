@@ -4,10 +4,12 @@
 // SAMPLE (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"), in the OR NOIR skin: the four slots as a column (the selected one framed: name,
 // length, speed, direction, its side in that side's ink), the slot's slices and play line in the middle, SOUNDS and the pad row on the right.
 //
-//   F1 PLAYS  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL        SHIFT + F1: ROW (A or B)
+//   F1 LOW PADS  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL        SHIFT + F1: ROW (A or B)
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on (DIR and LOOP flip at once). UP / DOWN: the slot.
-//   LEFT / RIGHT: the octave. The bottom two pad rows play PERFORM's layout rows A and B (Q7: the layout is PERFORM's, F1 PLAYS sets the row SHIFT + F1
-//   chose, or the row of a pad that is held), sounded through PERFORM's audition entry like PATTERN's palette; the top two rows are the slot's slices 1..24 (even cuts,
+//   The bottom two pad rows (here, on SAMPLE EDIT, FILE and SAMPLE LOAD) play notes from the notes palette PATTERN shares (SP1: PerformScreen::notes(), not PERFORM's layout, which is per mode
+//   and may hold parameter strips): A NOTE and B TRIAD at start, F1 LOW PADS sets the row SHIFT + F1 chose (or the row of a pad that is held) to NOTE, TRIAD, 7TH,
+//   OPEN, POWER or OFF. They sound through PERFORM's audition entry like PATTERN's palette, at PERFORM's octave; the palette lives in RAM (a restart, a
+//   project load or F4 NEW puts the defaults back). The top two rows are the slot's slices 1..24 (even cuts,
 //   8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), it plays its cut once and stops at the end cut (TRIG ONE SHOT, the default; GATE also stops it at the release).
 //   A slice turns the slot's whole loop off (LOOP reads OFF) until F5 starts it again; a new hit restarts the slice from its start cut.
 //   TRIG and CHOKE are per slot; CHOKE ON (default) gives a slot one voice (a hit fades the sounding slice out and starts the new one), OFF lets its slices overlap on the free readers (or steal the oldest).
@@ -112,9 +114,10 @@ class SampleScreen final : public o3sdk::app::Screen {
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void stop_loop(o3sdk::app::Context& ctx, unsigned slot) noexcept;  // Play 0 on the slot's loop when it plays or waits (a slice owns the slot)
   void release_all(o3sdk::app::Context& ctx) noexcept;
-  void play_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;     // pad 24..47: what PERFORM's row A (24..35) or B (36..47) plays there, held until the release
+  const pads::Layout& lay() const noexcept;  // the notes palette (PERFORM::notes(): rows A and B, note kinds only), the defaults when no PERFORM is wired
+  void play_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;     // pad 24..47: what this screen's row A (24..35) or B (36..47) plays there, held until the release
   void release_play(o3sdk::app::Context& ctx, unsigned pad) noexcept;  // its release (a pad that is not held does nothing)
-  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap, bool jump = false) noexcept;  // F1: PLAYS of the row of the lowest held layout pad, else of the chosen row
+  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;  // F1: the note kind of the row of the lowest held layout pad, else of the chosen row
   void flip_row(o3sdk::app::Context& ctx) noexcept;                    // SHIFT + F1: the other row; its pads go dark for a moment
   void draw_line(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept;
   Vocoder::LoopStatus view(unsigned loop) const noexcept;

@@ -1,6 +1,7 @@
-# SAMPLE's lower pad rows play PERFORM's layout rows A and B (Q7, docs/REVIEW-2026-11-11.md finding 15), the upper two rows stay the slot's slices. F1 PLAYS sets
-# the row that SHIFT + F1 ROW chose (A to start); a pad of a row held while F1 turns changes that row. The default is A NOTE, B TRIAD: A goes to 7TH, then B
-# to OPEN; B to OFF, then B to the SHAPE strip (TP1: a strip row sets the parameter from its twelve pads and plays no note). The WAV carries the notes; the unit's feel and the keys' LEDs by hand are for the unit.
+# SAMPLE's lower pad rows play this screen's own two rows A and B (SP1; Q7 first made them PERFORM's rows), the upper two rows stay the slot's slices. F1 LOW PADS
+# sets the row that SHIFT + F1 ROW chose (A to start); a pad of a row held while F1 turns changes that row. The default is A NOTE, B TRIAD: A goes to 7TH, then B
+# to OPEN; B to OFF, and F1 stops there (no strips). Then PERFORM goes to TRACT (A NOTE, B TONGUE, C MOUTH) and SAMPLE still plays its own notes palette (13, 14).
+# The WAV carries the notes; the unit's feel and the keys' LEDs by hand are for the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_layout.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -56,9 +57,20 @@ snap 11_b_off
 wait 300
 turn 1
 wait 200
-snap 12_b_shape_strip
-paddown 41
+snap 12_b_stops_at_off
+turn -30
+wait 100
+# SP1: TRACT on PERFORM (its rows are strips there) changes nothing here: the lower pads still play notes and say so
+tap performance
+wait 100
+tap f1
+turn 8
+wait 400
+tap sampleplay
 wait 300
-snap 13_b_shape_pad_held
-padup 41
+snap 13_tract_lower_pads_notes
+paddown 29
+wait 300
+snap 14_tract_a_note_held
+padup 29
 wait 300

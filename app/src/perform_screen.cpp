@@ -160,6 +160,7 @@ void PerformScreen::init(dsp::UnitId voice, dsp::UnitId tract, const InputMeter*
   for (unsigned m = 0; m < kModeCount; ++m) {
     layouts_[m] = strip::default_layout(m);
   }
+  notes_reset();  // the notes palette is RAM-only: A NOTE, B TRIAD at every start, load and NEW
   mode_ = 0;
   row_ = pads::Row::A;
   row_flash_until_ = 0;
@@ -181,6 +182,7 @@ void PerformScreen::init(dsp::UnitId voice, dsp::UnitId tract, const InputMeter*
   flash_until_ = 0;
   latched_ = -1;
   held_ = 0;
+  down_ = 0;
   label_sig_ = 0xFFFFFFFFu;
   frame_ = 0;
   pick_ = 0;
@@ -198,6 +200,7 @@ void PerformScreen::init(dsp::UnitId voice, dsp::UnitId tract, const InputMeter*
 const ui::Theme* PerformScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
 
 void PerformScreen::enter(app::Context& ctx) noexcept {
+  down_ = 0;
   sync_mode(ctx);
   ctx.redraw();
 }
@@ -220,6 +223,7 @@ void PerformScreen::sync_mode(app::Context& ctx) noexcept {
 
 void PerformScreen::leave(app::Context& ctx) noexcept {
   pick_ = 0;  // a picker does not outlive the screen; a capture does (update() resumes it)
+  down_ = 0;  // a pad let go on another screen is never seen here
   release_all(ctx);
 }
 
@@ -254,6 +258,7 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   if (pad >= app::kPadCount) {
     return;
   }
+  down_ |= std::uint64_t{1} << pad;
   sync_mode(ctx);
   dsp::Engine& e = ctx.engine();
   const pl::PadSpec sp = pl::pad_spec(lay(), app::pad_row(pad), app::pad_col(pad), octave_);
@@ -557,6 +562,9 @@ void PerformScreen::audition_release_all(app::Context& ctx) noexcept {
 }
 
 void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
+  if (pad < app::kPadCount) {
+    down_ &= ~(std::uint64_t{1} << pad);
+  }
   if (pad < app::kPadCount && ((mouth_pads_ >> pad) & 1u) != 0u) {
     mouth_release(ctx, pad);
     return;
@@ -662,10 +670,11 @@ void PerformScreen::choose_row(app::Context& ctx, pads::Row r) noexcept {
   ctx.redraw();
 }
 
-// The row of the lowest pad held in A, B or C, or the chosen row when none is: F7 changes the row whose pad is under the finger.
+// The row of the lowest pad physically down in A, B or C (down_, FX1), or the chosen row when none is: F7 changes the row whose pad is under the finger and
+// otherwise the row F6 shows. A latched pad, a pad whose notes still sound and a bit another screen left in held_ do not count.
 pads::Row PerformScreen::pressed_row() const noexcept {
   for (unsigned r = 1; r <= pads::kRows; ++r) {
-    if (((held_ >> (r * app::kPadCols)) & 0xFFFu) != 0u) {
+    if (((down_ >> (r * app::kPadCols)) & 0xFFFu) != 0u) {
       return pl::layout_row(r);
     }
   }
@@ -681,7 +690,7 @@ void PerformScreen::step_plays(app::Context& ctx, int delta, bool tap, bool jump
   const pads::Layout& cur_l = lay();
   const unsigned cur = strip::entry_index(r, mode_, cur_l.row[pads::idx(r)], cur_l.strip[pads::idx(r)]);
   const unsigned next = tap ? strip::entry_tap(r, mode_, cur) : (jump ? strip::entry_jump(r, mode_, cur, delta) : strip::entry_step(r, mode_, cur, delta));
-  row_ = r;
+  // F6's row stays as it is (FX1): the row F7 changed is the pad's while one is down, and ROW does not follow it.
   if (next == cur) {
     ctx.redraw();
     return;
@@ -691,8 +700,11 @@ void PerformScreen::step_plays(app::Context& ctx, int delta, bool tap, bool jump
   release_all(ctx);
   lay() = l;
   const strip::Entry e = strip::entry_at(r, mode_, next);
-  show_flash(ctx, pads::kRowNames[pads::idx(r)], strip::row_name(l, r));
-  if (jump && e.group != strip::kGroupNotes) {  // the group the jump landed in, so a long list is readable
+  // "A VOWEL 7/30": the row, what it plays now and its place in the list; a jump into a strip group names the group instead, so a long list is readable.
+  char pos[16] = {};
+  strip::plays_position(l, r, next, strip::entry_count(r, mode_), pos);
+  show_flash(ctx, pads::kRowNames[pads::idx(r)], pos);
+  if (jump && e.group != strip::kGroupNotes) {
     show_flash(ctx, strip::kGroupNames[e.group], strip::row_name(l, r));
   }
 }
@@ -1380,7 +1392,7 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
     } else if (pick_ == 0u && sfocus_ == pl::kNoShiftFocus && (k == 1u || k == 2u)) {  // F2 SPEAKS, F3 SOUNDS: a list, not a step
       open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
-    } else if (k == 6u && pick_ == 0u && (held_ >> app::kPadCols) != 0u) {  // F7 with a pad of A, B or C held: that row's PLAYS steps at once
+    } else if (k == 6u && pick_ == 0u && (down_ >> app::kPadCols) != 0u) {  // F7 with a pad of A, B or C down: that row's PLAYS steps at once
       sfocus_ = pl::kNoShiftFocus;
       focus_ = k;
       turn(ctx, 1, false, true);
@@ -1600,7 +1612,11 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   set(3, pl::kKeyNames[key % 12u]);
   set(4, pl::kScaleNames[scale < kScaleTableCount ? scale : 0u]);
   set(5, pads::kRowNames[pads::idx(row_)]);
-  set(6, strip::row_name(layout(), row_));
+  {  // F7 names the row it acts on and what that row plays: "A VOWEL" (the row of a pad that is down, else F6's)
+    char lbl[16] = {};
+    strip::plays_label(layout(), pressed_row(), lbl);
+    set(6, lbl);
+  }
   {
     char num[12] = {};
     if (mode == kModeTract) {  // VOWEL: a pure column's name (A, AE, E ...) or the percentage

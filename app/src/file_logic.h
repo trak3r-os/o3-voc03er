@@ -109,7 +109,7 @@ inline void project_layouts(const Project& p, pads::Layout (&out)[kModeCount]) n
 }
 
 // The STAT fields of a project that was just made: the first boot's tempo, pattern A, octave 0, the first chord kind, pads; voicing SMOOTH, bend row off,
-// range 2, FOLLOW off, no preset, the default layouts (A NOTE, B TRIAD, C FORMANT; TRACT A VOWEL, B TONGUE, C TIP).
+// range 2, FOLLOW off, no preset, the default layouts (strip::default_layout, one per mode).
 inline void default_stat(Project& p) noexcept {
   p.stat = 1;
   p.tempo_mbpm = 120000u;

@@ -20,7 +20,7 @@
 //   PADS 1.0  (TP1, after STAT; written with STAT) u8 count (5 = modes.h kModeCount: BANDS, TALK, TUNE, ROBOT, TRACT), then per mode its layout: 3 x u8 row
 //             (pads::Plays: 0..5, 11..14) and 3 x u16 strip id (pads::strip_id: tag << 8 | parameter; 0 for a row that is not a STRIP, a STRIP row has one). An id
 //             this build does not know is not an error: the screen drops that row to the mode's default. Absent: the STAT layout serves BANDS, TALK, TUNE and ROBOT and
-//             TRACT gets its default (A VOWEL, B TONGUE, C TIP). An older image skips the chunk and reads the BANDS layout from STAT. A count other than 5 refuses the file
+//             TRACT gets its default (A NOTE, B TONGUE, C MOUTH). An older image skips the chunk and reads the BANDS layout from STAT. A count other than 5 refuses the file
 //   SLOT 1.1  u8 count (4), then per slot u16 record length and u32 length (samples), u8 cuts, cuts x (u32 start, u32 len), u32 trim start, u32 trim end,
 //             i8 speed (-1 0.5X, 0 1X, +1 2X), u8 reverse, i8 level (half-dB), u8 name length, the WAV's file name (no NUL),
 //             then u8 values (appended: 1 = the trim, speed, reverse and level above were captured live and are restored; 0 or absent = a file from before, they are left alone),
