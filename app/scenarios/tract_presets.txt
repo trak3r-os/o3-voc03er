@@ -1,0 +1,65 @@
+# SHIFT + F8 PRESET of PERFORM in TRACT (PR1): the mode is TRACT, a held chord (pad 26) goes through TRACT's eight mouths, one second each (AH, OO, EE, WOW, BREATH,
+# TIN MAN, TINY, BIG). The first SHIFT + F8 focuses PRESET and the first turn picks AH; each later SHIFT + F8 tap steps to the next. The window shows the name, the
+# voiceprint draws the mouth the preset wrote. The WAV is the chord through every mouth. Then F1 back to BANDS: SHIFT + F8 offers the vocoder's own table again.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/tract_presets.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+tap f1
+turn 8
+wait 600
+paddown 26
+wait 500
+snap 00_tract_none
+press shift
+tap f8
+release shift
+turn 1
+wait 1000
+snap 01_AH
+press shift
+tap f8
+release shift
+wait 1000
+snap 02_OO
+press shift
+tap f8
+release shift
+wait 1000
+snap 03_EE
+press shift
+tap f8
+release shift
+wait 1000
+snap 04_WOW
+press shift
+tap f8
+release shift
+wait 1000
+snap 05_BREATH
+press shift
+tap f8
+release shift
+wait 1000
+snap 06_TIN_MAN
+press shift
+tap f8
+release shift
+wait 1000
+snap 07_TINY
+press shift
+tap f8
+release shift
+wait 1000
+snap 08_BIG
+tap f1
+turn -8
+wait 600
+press shift
+tap f8
+release shift
+wait 600
+snap 09_bands_shift_f8
+padup 26
+wait 400
+wav tract_presets

@@ -962,6 +962,44 @@ TEST_CASE("perform: F8 is VOWEL in TRACT, 1 percent a detent, and the strip foll
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
+TEST_CASE("perform: SHIFT + F8 in TRACT picks one of TRACT's eight sounds, writes all twelve tract values and leaves the vocoder's alone") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F1);
+  h.turn(8);  // clamps at TRACT
+  h.run_ms(300);
+  const float vocoder_glide = unit_param(h, kGlide);
+  shift_tap(h, app::Button::F8);
+  h.turn(1);  // from none the first turn picks AH
+  h.run_ms(40);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.0f));
+  CHECK(tract_param(h, TractUnit::Jaw) == doctest::Approx(0.3f));
+  CHECK(tract_param(h, TractUnit::Glide) == doctest::Approx(30.0f));
+  h.turn(3);  // OO, EE, then WOW: vowel O, a slow glide, a large tube, a jaw that accents
+  h.run_ms(40);
+  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(0.75f));
+  CHECK(tract_param(h, TractUnit::Glide) == doctest::Approx(200.0f));
+  CHECK(tract_param(h, TractUnit::Size) == doctest::Approx(1.0f));
+  CHECK(tract_param(h, TractUnit::Accent) == doctest::Approx(0.3f));
+  h.turn(1);  // BREATH: nothing of WOW stays
+  h.run_ms(40);
+  CHECK(tract_param(h, TractUnit::Accent) == doctest::Approx(0.0f));
+  CHECK(tract_param(h, TractUnit::Size) == doctest::Approx(2.0f));
+  CHECK(tract_param(h, TractUnit::Hiss) == doctest::Approx(0.9f));
+  CHECK(tract_param(h, TractUnit::Mix) == doctest::Approx(0.7f));
+  CHECK(unit_param(h, kGlide) == doctest::Approx(vocoder_glide));  // the vocoder's GLIDE is not TRACT's
+  CHECK(unit_param(h, kFormant) == doctest::Approx(0.0f));
+  h.turn(-1);  // back one: WOW
+  h.run_ms(40);
+  CHECK(tract_param(h, TractUnit::Glide) == doctest::Approx(200.0f));
+  h.turn(-3);
+  h.turn(-1);  // AH, then the table wraps to the last: BIG
+  h.run_ms(40);
+  CHECK(tract_param(h, TractUnit::Size) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
 TEST_CASE("perform: the display list of PERFORM in TRACT (the mouth's profile, a held closure) fits next to the busiest mode") {
   std::size_t busiest = 0;
   for (int turn : {0, 1, 2, 3}) {  // BANDS, TALK, ROBOT, SING

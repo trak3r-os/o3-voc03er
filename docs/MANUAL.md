@@ -137,7 +137,7 @@ now.
 | SHIFT + F5 | FORMANT: moves the voice's colour up or down, as if the singer were smaller or bigger |
 | SHIFT + F6 | THRU: lets some of the voice's top through |
 | SHIFT + F7 | OCTAVE: the octave of the pads, -3 to +2 (the same value the OCT- and OCT+ pads step) |
-| SHIFT + F8 | PRESET: eight factory sounds |
+| SHIFT + F8 | PRESET: eight factory sounds (in TRACT, TRACT's own eight) |
 
 ![PERFORM in TALK mode with a chord held](manual/img/perform-talk.png)
 
@@ -311,7 +311,14 @@ section, 5b.
 F3 SOUNDS has it) goes through a model of a mouth, a tube from the throat to the lips, and you shape the tube with your hands: a vowel, a jaw,
 the lips, a closure. The live voice, if DRY lets it through, goes through the tube too. The voiceprint draws the tube as a profile of the mouth,
 and SPEAKS is dimmed: it says NO INPUT: THE MOUTH IS PLAYED. GATE, ARP, GLIDE, BEND, VIB, SUB, TILT, NOISE and the carrier lane work as in the
-other modes. No preset picks TRACT: you press F1 until it says TRACT.
+other modes. The vocoder's eight presets never pick TRACT: you press F1 until it says TRACT. Once there, SHIFT + F8 offers TRACT's own eight (below).
+
+**TRACT presets.** In TRACT, SHIFT + F8 PRESET steps through eight mouths instead of the vocoder's eight: AH, OO, EE (the vowel singers), WOW (a slow glide, a
+large tube and an accent that opens the jaw: a talking bass), BREATH (a whisper: the vowel I with the jaw down and the lips rounded so the tube is narrow, HISS 0.9, MIX 0.7; the hiss only sounds while the tube is narrow somewhere), TIN MAN (a small, ringing robot mouth), TINY (a small
+throat) and BIG (a large one). Each writes all twelve of TRACT's values (VOWEL, TONGUE, JAW, LIPS, CLOSE, GLIDE, SIZE, RES, HISS, MIX, SLIDE, ACCENT), so nothing
+stays from the one before. The source (PADS or LIVE), KEY, SCALE, the loops and the transport are left as they are. CLOSE, MIX, SLIDE and ACCENT are in no project file: opening a project or pressing NEW puts them back to their defaults (MIX 1 in TRACT, 0 elsewhere), so a value a preset set never stays behind. The window shows the name, or --- before the
+first. The project keeps the name of the last preset chosen, and a name this build does not know opens as no preset. These are starting points for your ear, chosen without
+listening on the unit (AH and BIG the least sure): they need more testing.
 
 **When to pick it.** Pick BANDS or TALK when the sound should follow a voice. Pick TRACT when there is no voice to follow, or when you want to
 play the words yourself: a synth line that sings vowels, a bass that goes WOW, a pad that opens from U to A. It gives you a mouth you can write

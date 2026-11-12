@@ -4,6 +4,8 @@
 
 #include "../app/src/file_logic.h"
 
+#include <o3_voc03er/modes.h>
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <o3sdk/app/app.h>
@@ -393,6 +395,17 @@ float voc_param(sim::Harness& h, std::uint16_t id) {
     }
   }
   return -1.0f;
+}
+
+// The tract unit's own parameter and unit id (the unit named TRACT).
+dsp::UnitId tract_unit(sim::Harness& h) {
+  for (unsigned u = 0; u < 8; ++u) {
+    const dsp::UnitInfo* info = h.engine().unit_info(static_cast<dsp::UnitId>(u));
+    if (info != nullptr && std::strcmp(info->name, "TRACT") == 0) {
+      return static_cast<dsp::UnitId>(u);
+    }
+  }
+  return dsp::kNoUnit;
 }
 
 }  // namespace
@@ -810,4 +823,77 @@ TEST_CASE("file: LE6 HELP names F8 as CANCEL while a save or an open runs, and s
   std::string busy = help_text(&ok);
   CHECK_MESSAGE(busy.find("CANCELS THE JOB|") == 0u, busy);
   h->run_ms(600);
+}
+
+// PR1 review: CLOSE, MIX, SLIDE and ACCENT are in no file (TRCT holds eight values), and a TRACT preset writes all of them (BREATH leaves MIX at 0.7). A
+// load or a NEW puts them back to the unit's defaults (MIX as the mode asks: 1 in TRACT, 0 elsewhere) so no value hides behind "---".
+namespace {
+void dirty_tract(sim::Harness& h) {
+  const dsp::UnitId t = tract_unit(h);
+  REQUIRE(t != dsp::kNoUnit);
+  (void)h.engine().set_param(t, o3_voc03er::TractUnit::Close, 2.0f);
+  (void)h.engine().set_param(t, o3_voc03er::TractUnit::Mix, 0.4f);
+  (void)h.engine().set_param(t, o3_voc03er::TractUnit::Slide, 500.0f);
+  (void)h.engine().set_param(t, o3_voc03er::TractUnit::Accent, 0.8f);
+  h.run_ms(20);
+  REQUIRE(h.engine().param(t, o3_voc03er::TractUnit::Accent) == doctest::Approx(0.8f));  // the test starts from a dirty tube
+  REQUIRE(h.engine().param(t, o3_voc03er::TractUnit::Mix) == doctest::Approx(0.4f));
+}
+void check_tract_unsaved(sim::Harness& h, float mix) {
+  const dsp::UnitId t = tract_unit(h);
+  CHECK(h.engine().param(t, o3_voc03er::TractUnit::Close) == doctest::Approx(0.0f));
+  CHECK(h.engine().param(t, o3_voc03er::TractUnit::Slide) == doctest::Approx(0.0f));
+  CHECK(h.engine().param(t, o3_voc03er::TractUnit::Accent) == doctest::Approx(0.0f));
+  CHECK(h.engine().param(t, o3_voc03er::TractUnit::Mix) == doctest::Approx(mix));
+}
+void load_folder(sim::Harness& h) {
+  tap(h, app::Button::File);
+  h.run_ms(60);
+  tap(h, app::Button::F1);  // LOAD asks
+  tap(h, app::Button::F1);  // confirmed: the picker lists the folders
+  h.run_ms(300);
+  tap(h, app::Button::F1);  // OPEN the one folder
+  h.run_ms(900);
+}
+}  // namespace
+
+TEST_CASE("file: PR1 a LOAD puts the tract's CLOSE, SLIDE, ACCENT and MIX back to their defaults, MIX 0 outside TRACT and 1 in a TRACT project") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-pr1-load");
+  REQUIRE(card_dir.ok());
+  const std::filesystem::path card_root(card_dir.path());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  Project bands = p3_project();  // no engine value: the mode stays as it is (BANDS at start)
+  REQUIRE(put_project(card_root, "SRC", bands));
+  REQUIRE(h->start());
+  h->run_ms(300);
+  dirty_tract(*h);
+  load_folder(*h);
+  check_tract_unsaved(*h, 0.0f);
+  CHECK(h->runtime().frame_failures() == 0u);
+  // A project in TRACT: the file's Mode is TRACT, so MIX is 1 as apply_mode() writes it.
+  Project tract = p3_project();
+  REQUIRE(o3_voc03er::project_set_engine(tract, o3_voc03er::Vocoder::Mode, static_cast<float>(o3_voc03er::kModeTract)));
+  REQUIRE(put_project(card_root, "SRC", tract));
+  dirty_tract(*h);
+  load_folder(*h);
+  check_tract_unsaved(*h, 1.0f);
+  CHECK(h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("file: PR1 NEW puts the tract's CLOSE, SLIDE, ACCENT and MIX back to their defaults") {
+  platform::host::ScratchDir card_dir("o3_voc03er-file-pr1-new");
+  REQUIRE(card_dir.ok());
+  platform::host::DirCard card(card_dir.path());
+  auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
+  REQUIRE(h->start());
+  h->run_ms(300);
+  dirty_tract(*h);
+  tap(*h, app::Button::File);
+  h->run_ms(60);
+  tap(*h, app::Button::F4);  // NEW asks
+  tap(*h, app::Button::F1);  // confirmed
+  h->run_ms(400);
+  check_tract_unsaved(*h, 0.0f);  // NEW's mode is the default one (BANDS): the tube is off
+  CHECK(h->runtime().frame_failures() == 0u);
 }

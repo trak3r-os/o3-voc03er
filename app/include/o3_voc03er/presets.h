@@ -8,6 +8,7 @@
 // These are STARTING POINTS for the maintainer's ear, set by reasoning and by the host renders, not by listening on the unit: change a value
 // here and nothing else has to move.
 
+#include <o3_voc03er/units/tract/tract.h>
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include <cstddef>
@@ -40,7 +41,7 @@ constexpr Preset make(const char* name, float mode, float carsrc, float wave, fl
 }
 }  // namespace preset_detail
 
-// Mode 0 BANDS, 3 ROBOT (4 TRACT is not a preset: the tube is played, not preset). CarSrc 1 SYNTH, 2 NOISE. Gate 3 is 1/16; Arp 1 is UP.
+// Mode 0 BANDS, 3 ROBOT (these eight never select TRACT: in TRACT SHIFT + F8 picks from kTractPresets below). CarSrc 1 SYNTH, 2 NOISE. Gate 3 is 1/16; Arp 1 is UP.
 //                                                      mode car wave noise  atk  rel  det  q   fmt  thru glide gate arp vib frz
 inline constexpr Preset kPresets[kPresetCount] = {
     preset_detail::make("ROBOT",   3, 1, 0, 0.0f,   5.0f,   80.0f,  0.0f, 16, 0,  0.0f,   0.0f, 0, 0, 0.0f, 0),
@@ -51,6 +52,45 @@ inline constexpr Preset kPresets[kPresetCount] = {
     preset_detail::make("PULSE",   0, 1, 0, 0.0f,   5.0f,   60.0f,  6.0f, 16, 0,  0.0f,   0.0f, 3, 0, 0.0f, 0),
     preset_detail::make("ARP",     0, 1, 0, 0.0f,   5.0f,   30.0f,  4.0f, 16, 0,  0.0f,   0.0f, 0, 1, 0.0f, 0),
     preset_detail::make("FROZEN",  0, 1, 0, 0.0f, 300.0f,  600.0f, 10.0f, 16, 0,  0.0f,   0.0f, 0, 0, 0.0f, 1),
+};
+
+// ---- TRACT's eight (SHIFT + F8 while the mode is TRACT) ----------------------------------------------------------------------------------
+// They write the tract unit (TractUnit, not the Vocoder): every one lists all twelve of its mouth and tube values, in the unit's own order, so choosing
+// one leaves nothing behind from the one before. Source (PADS or LIVE) is not in it, nor are KEY, SCALE, the loops, the transport or any vocoder value.
+// The names differ from the vocoder table's (a project saves one name: project_preset_index and project_tract_preset_index tell the tables apart by
+// it). Mix is 1 (the tube alone, as apply_mode() leaves it in TRACT) except where a preset says otherwise. Vowel runs A 0, E .25, I .5, O .75, U 1.
+// STARTING POINTS for the maintainer's ear, set by reasoning and never heard on the unit. Signs, read from the kit: Tongue + is front, Jaw + is more
+// open (- narrows the tube), Lips + is spread and - is rounded. BREATH sits on I with the jaw down and the lips rounded: HISS only sounds while the narrowest section
+// is under 0.3 wide (presets_test measures it). AH and BIG are the least sure of the eight.
+inline constexpr std::size_t kTractPresetParams = 12;
+inline constexpr std::size_t kTractPresetCount = 8;
+
+struct TractPreset {
+  const char* name;  // at most 8 characters
+  PresetValue v[kTractPresetParams];
+};
+
+namespace preset_detail {
+using T = TractUnit;
+constexpr TractPreset tmake(const char* name, float vowel, float tongue, float jaw, float lips, float close, float glide_ms, float size, float res,
+                            float hiss, float mix, float slide_ms, float accent) {
+  return {name,
+          {{T::Vowel, vowel}, {T::Tongue, tongue}, {T::Jaw, jaw},     {T::Lips, lips},   {T::Close, close},   {T::Glide, glide_ms},
+           {T::Size, size},   {T::Res, res},       {T::Hiss, hiss},   {T::Mix, mix},     {T::Slide, slide_ms}, {T::Accent, accent}}};
+}
+}  // namespace preset_detail
+
+// Close 0 OPEN. Size 0 BIG, 1 LARGE, 2 NORMAL, 3 SMALL, 4 TINY.
+//                                                           vowel tongue jaw  lips close glide size res  hiss mix slide acc
+inline constexpr TractPreset kTractPresets[kTractPresetCount] = {
+    preset_detail::tmake("AH",      0.00f,  0.0f,  0.3f,  0.0f, 0,  30.0f, 2, 0.5f, 0.10f, 1.0f, 0.0f, 0.0f),
+    preset_detail::tmake("OO",      1.00f,  0.0f, -0.2f, -0.1f, 0,  40.0f, 2, 0.5f, 0.10f, 1.0f, 0.0f, 0.0f),
+    preset_detail::tmake("EE",      0.50f,  0.0f, -0.1f,  0.3f, 0,  30.0f, 2, 0.5f, 0.10f, 1.0f, 0.0f, 0.0f),
+    preset_detail::tmake("WOW",     0.75f,  0.0f,  0.1f,  0.0f, 0, 200.0f, 1, 0.6f, 0.05f, 1.0f, 0.0f, 0.3f),
+    preset_detail::tmake("BREATH",  0.50f,  0.0f, -0.3f, -0.3f, 0,  60.0f, 2, 0.3f, 0.90f, 0.7f, 0.0f, 0.0f),
+    preset_detail::tmake("TIN MAN", 0.25f,  0.0f,  0.0f,  0.0f, 0,   5.0f, 4, 0.9f, 0.10f, 1.0f, 0.0f, 0.0f),
+    preset_detail::tmake("TINY",    0.50f,  0.0f,  0.0f,  0.0f, 0,  25.0f, 4, 0.5f, 0.15f, 1.0f, 0.0f, 0.0f),
+    preset_detail::tmake("BIG",     0.00f, -0.2f,  0.2f,  0.0f, 0,  80.0f, 0, 0.5f, 0.15f, 1.0f, 0.0f, 0.0f),
 };
 
 }  // namespace o3_voc03er

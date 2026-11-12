@@ -762,6 +762,30 @@ TEST_CASE("project: P3 the 1.1 STAT and SLOT fields round-trip one by one") {
   CHECK(project_preset_index(g) == -1);
 }
 
+TEST_CASE("project: a TRACT preset's name reloads as that TRACT preset and as no vocoder preset, and the other way round") {
+  Project p = stat_base();
+  for (unsigned i = 0; i < kTractPresetCount; ++i) {
+    Project r = p;
+    set_project_tract_preset(r, i);
+    Project g = {};
+    REQUIRE(read(write(r), g));
+    CHECK(project_tract_preset_index(g) == static_cast<int>(i));
+    CHECK(project_preset_index(g) == -1);
+  }
+  Project v = p;
+  set_project_preset(v, 2);
+  CHECK(project_tract_preset_index(v) == -1);
+  Project none = p;
+  set_project_tract_preset(none, kTractPresetCount);
+  CHECK(none.preset_len == 0);
+  CHECK(project_tract_preset_index(none) == -1);
+  Project odd = p;
+  odd.preset_len = 4;
+  std::memcpy(odd.preset, "NOPE", 4);
+  CHECK(project_tract_preset_index(odd) == -1);
+  CHECK(project_preset_index(odd) == -1);
+}
+
 TEST_CASE("project: P3 a preset is matched by name, an unknown name is none") {
   Project p = stat_base();
   p.preset_len = 5;

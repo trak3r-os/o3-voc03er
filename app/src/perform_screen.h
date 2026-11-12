@@ -127,6 +127,12 @@ class PerformScreen final : public o3sdk::app::Screen {
   const pads::Layout (&layouts() const noexcept)[kModeCount] { return layouts_; }
   unsigned preset() const noexcept { return preset_; }
   void set_preset(unsigned index) noexcept { preset_ = index < kPresetCount ? index : perform::kNoPreset; }
+  // TRACT's own table (kTractPresets): SHIFT + F8 in TRACT picks from it and keeps its index apart from the vocoder's. `preset_is_tract()` says which of
+  // the two the project's one saved name belongs to (the last SHIFT + F8 choice); FILE's load sets both, at most one of them is not none.
+  unsigned tract_preset() const noexcept { return tract_preset_; }
+  void set_tract_preset(unsigned index) noexcept { tract_preset_ = index < kTractPresetCount ? index : perform::kNoPreset; }
+  bool preset_is_tract() const noexcept { return preset_is_tract_; }
+  void set_preset_is_tract(bool t) noexcept { preset_is_tract_ = t; }
   // FILE's load marks the slots whose WAV is still on its way (bit n: slot n): PERFORM and FILE draw them grey (ornoir::kSlotWaiting). Main loop only.
   void set_slots_waiting(unsigned mask) noexcept { slots_waiting_ = static_cast<std::uint8_t>(mask & 0xFu); }
   unsigned slots_waiting() const noexcept { return slots_waiting_; }
@@ -230,6 +236,8 @@ class PerformScreen final : public o3sdk::app::Screen {
   const Vocoder* voc_ = nullptr;
   SourceStep step_source_ = nullptr;
   void* source_user_ = nullptr;
+  unsigned tract_preset_ = perform::kNoPreset;  // the last TRACT sound chosen (SHIFT + F8 in TRACT), or kNoPreset
+  bool preset_is_tract_ = false;                // the last choice came from kTractPresets: it is the name a project saves
   unsigned preset_ = perform::kNoPreset;  // the last factory sound chosen (SHIFT + F8), or kNoPreset: the window shows ---
   unsigned sfocus_ = perform::kNoShiftFocus;  // the SHIFT-row value the encoder drives (1 GATE, 2 ARP, 3 GLIDE, 4 FORMANT, 5 THRU, 6 OCTAVE, 7 PRESET), or kNoShiftFocus; the row stays shown while set
   unsigned focus_ = 5;       // the F key the encoder drives (default F6, ROW); perform::kBendFocus (8): none, the encoder bends

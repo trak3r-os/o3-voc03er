@@ -193,28 +193,52 @@ inline void set_project_pads(Project& p, const pads::Layout (&l)[kModeCount]) no
   set_project_layout(p, l[0]);
 }
 
-// The preset a project names: its index in presets.h, or -1 for none (no name, or a name this build does not know).
+// The saved preset name is one string for two tables: the vocoder's (presets.h kPresets) and TRACT's (kTractPresets). The names of the two never meet
+// (tests/presets_test.cpp), so a name belongs to at most one table; the other table's lookup answers none.
+namespace project_detail {
+inline bool name_is(const Project& p, const char* n) noexcept {
+  return std::strlen(n) == p.preset_len && std::memcmp(n, p.preset, p.preset_len) == 0;
+}
+inline void set_name(Project& p, const char* name) noexcept {
+  p.preset_len = 0;
+  std::memset(p.preset, 0, sizeof p.preset);
+  if (name != nullptr) {
+    const std::size_t n = std::strlen(name);
+    p.preset_len = static_cast<std::uint8_t>(n > kPresetNameMax ? kPresetNameMax : n);
+    std::memcpy(p.preset, name, p.preset_len);
+  }
+}
+}  // namespace project_detail
+
+// The preset a project names in the vocoder's table: its index in presets.h kPresets, or -1 for none (no name, or a name that is not in it).
 inline int project_preset_index(const Project& p) noexcept {
   if (p.preset_len == 0u || p.preset_len > kPresetNameMax) {
     return -1;
   }
   for (std::size_t i = 0; i < kPresetCount; ++i) {
-    const char* n = kPresets[i].name;
-    if (std::strlen(n) == p.preset_len && std::memcmp(n, p.preset, p.preset_len) == 0) {
+    if (project_detail::name_is(p, kPresets[i].name)) {
       return static_cast<int>(i);
     }
   }
   return -1;
 }
-// Names the preset `index` of presets.h (an index past the table: none).
-inline void set_project_preset(Project& p, unsigned index) noexcept {
-  p.preset_len = 0;
-  std::memset(p.preset, 0, sizeof p.preset);
-  if (index < kPresetCount) {
-    const std::size_t n = std::strlen(kPresets[index].name);
-    p.preset_len = static_cast<std::uint8_t>(n > kPresetNameMax ? kPresetNameMax : n);
-    std::memcpy(p.preset, kPresets[index].name, p.preset_len);
+// The same in TRACT's table (kTractPresets): its index, or -1.
+inline int project_tract_preset_index(const Project& p) noexcept {
+  if (p.preset_len == 0u || p.preset_len > kPresetNameMax) {
+    return -1;
   }
+  for (std::size_t i = 0; i < kTractPresetCount; ++i) {
+    if (project_detail::name_is(p, kTractPresets[i].name)) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+// Names the preset `index` of the vocoder's table (an index past the table: none).
+inline void set_project_preset(Project& p, unsigned index) noexcept { project_detail::set_name(p, index < kPresetCount ? kPresets[index].name : nullptr); }
+// Names the preset `index` of TRACT's table (an index past the table: none).
+inline void set_project_tract_preset(Project& p, unsigned index) noexcept {
+  project_detail::set_name(p, index < kTractPresetCount ? kTractPresets[index].name : nullptr);
 }
 
 // The route a project holds (the default route when none is stored).

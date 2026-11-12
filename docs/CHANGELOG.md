@@ -4,6 +4,10 @@
 
 ### Added
 
+- **PR1: TRACT presets on PERFORM SHIFT + F8.** In TRACT the PRESET value offers eight mouths of its own (AH, OO, EE, WOW, BREATH, TIN MAN, TINY, BIG), each writing all twelve
+  tract values (Vowel to Accent, never SOURCE), so none leaves anything behind; the vocoder's eight are unchanged and the vocoder is untouched in TRACT. The project's one saved
+  preset name resolves against the table of the last choice (`project_tract_preset_index`), an unknown name opens as none. Scenario `tract_presets.txt`, tests in
+  `presets_test`, `project_test`, `perform_screen_test`. Review fold: BREATH now narrows the tube (I, jaw -0.3, lips -0.3) so HISS sounds (`presets_test` measures 0.0072 rms of hiss against none before); EE spreads its lips (+0.3), OO rounds them (-0.1), TINY loses its clamped tongue bend; a project load and NEW put the tract's CLOSE, SLIDE, ACCENT and MIX back to their defaults (MIX 1 in TRACT, 0 elsewhere; the file format is unchanged; two tests in `file_test`); with no tract unit SHIFT + F8 changes nothing and shows ---. The sounds are starting points for the ear, chosen without listening: needs more testing on the unit.
 - **ML1: MIDI learn on PARAMS.** SHIFT + an F key arms the kit's learn for that value, on all four pages (the TRACT page learns the tract unit's own values); the same
   keys again cancel, and so does leaving the page or the screen. The armed key lights and the screen says LEARN and the value's name, MOVE A KNOB; the strip says
   LEARNED CC n. A value that is not a live-safe unit parameter (VOICING, MODE, QUALITY) shows "-" on the held-SHIFT row and cannot be armed. `App::midi_learned_moved` redraws. MANUAL no

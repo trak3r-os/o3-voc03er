@@ -304,7 +304,11 @@ void FileScreen::capture(app::Context& ctx) noexcept {
   p.bend_row = lf.bend_row;
   p.bend_range = static_cast<std::uint8_t>(perform_->bend_range());
   p.follow = pattern_->follow() ? 1u : 0u;
-  set_project_preset(p, perform_->preset());
+  if (perform_->preset_is_tract()) {  // one saved name: the table the last SHIFT + F8 choice came from
+    set_project_tract_preset(p, perform_->tract_preset());
+  } else {
+    set_project_preset(p, perform_->preset());
+  }
   set_project_pads(p, perform_->layouts());
   for (unsigned s = 0; s < route::kSlots; ++s) {
     const sample::SliceTable& t2 = sample_->table(s);
@@ -478,18 +482,34 @@ void FileScreen::service(app::Context& ctx) noexcept {
     return;
   }
   // The tract's values (TRCT, V3): the file's, or the unit's defaults when the file has none (NEW, or a file from before). Through the same ring, a few a
-  // frame, and not cancellable like the rest of the restore (LE6).
-  while (tract_ != dsp::kNoUnit && g_fd.tnext < kTractSaved && sent < fl::kValuesPerFrame) {
-    const std::uint16_t id = kTractSavedId[g_fd.tnext];
-    const core::ParamDesc* d = ctx.engine().param_desc(tract_, id);
-    const float v = g_proj.trct != 0u ? g_proj.tract[g_fd.tnext] : (d != nullptr ? d->def : 0.0f);
+  // frame, and not cancellable like the rest of the restore (LE6). After them the four values no file holds (CLOSE, SLIDE, ACCENT: the unit's defaults, and
+  // MIX as apply_mode() writes it for the loaded mode: 1 in TRACT, 0 elsewhere), so a load or NEW never leaves a TRACT preset's value behind.
+  constexpr unsigned kUnsaved = 4;
+  constexpr std::uint16_t kUnsavedId[kUnsaved] = {TractUnit::Close, TractUnit::Slide, TractUnit::Accent, TractUnit::Mix};
+  while (tract_ != dsp::kNoUnit && g_fd.tnext < kTractSaved + kUnsaved && sent < fl::kValuesPerFrame) {
+    float v = 0.0f;
+    std::uint16_t id = 0;
+    if (g_fd.tnext < kTractSaved) {
+      id = kTractSavedId[g_fd.tnext];
+      const core::ParamDesc* d = ctx.engine().param_desc(tract_, id);
+      v = g_proj.trct != 0u ? g_proj.tract[g_fd.tnext] : (d != nullptr ? d->def : 0.0f);
+    } else {
+      id = kUnsavedId[g_fd.tnext - kTractSaved];
+      if (id == TractUnit::Mix) {
+        const float m = project_has_engine(g_proj, Vocoder::Mode) ? g_proj.engine[Vocoder::Mode] : ctx.engine().param(voice_, Vocoder::Mode);
+        v = mode_index(m) == kModeTract ? 1.0f : 0.0f;
+      } else {
+        const core::ParamDesc* d = ctx.engine().param_desc(tract_, id);
+        v = d != nullptr ? d->def : 0.0f;
+      }
+    }
     if (!ctx.engine().set_param(tract_, id, v)) {
       return;
     }
     ++g_fd.tnext;
     ++sent;
   }
-  if (tract_ == dsp::kNoUnit || g_fd.tnext >= kTractSaved) {
+  if (tract_ == dsp::kNoUnit || g_fd.tnext >= kTractSaved + kUnsaved) {
     apply(ctx, true);
   }
 }
@@ -557,6 +577,9 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
     pattern_->set_follow(g_proj.follow != 0u);
     const int preset = project_preset_index(g_proj);
     perform_->set_preset(preset < 0 ? perform::kNoPreset : static_cast<unsigned>(preset));
+    const int tpreset = project_tract_preset_index(g_proj);  // the name is in at most one table (presets_test)
+    perform_->set_tract_preset(tpreset < 0 ? perform::kNoPreset : static_cast<unsigned>(tpreset));
+    perform_->set_preset_is_tract(tpreset >= 0);
     pads::Layout lay[kModeCount];
     fl::project_layouts(g_proj, lay);  // an older file's one layout serves every mode but TRACT
     perform_->set_layouts(lay);

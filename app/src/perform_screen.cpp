@@ -1216,8 +1216,20 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) no
     step_octave(ctx, delta);
     return;
   }
+  if (sfocus_ == 7u && mode == kModeTract) {  // SHIFT + F8 PRESET in TRACT: one of kTractPresets, written to the tract unit (not the vocoder)
+    if (tract_ != dsp::kNoUnit) {  // no tract unit (a build without it): nothing to write, so the index and the saved name stay as they were
+      tract_preset_ = pl::preset_step(tract_preset_, delta, kTractPresetCount);
+      preset_is_tract_ = true;
+      for (const PresetValue& pv : kTractPresets[tract_preset_].v) {
+        (void)e.set_param(tract_, pv.id, pv.value);
+      }
+    }
+    ctx.redraw();
+    return;
+  }
   if (sfocus_ == 7u) {  // SHIFT + F8 PRESET: the sound changes at once, as the encoder turns
     preset_ = pl::preset_step(preset_, delta, kPresetCount);
+    preset_is_tract_ = false;
     for (const PresetValue& pv : kPresets[preset_].v) {
       (void)e.set_param(voice_, pv.id, pv.value);
     }
@@ -1659,7 +1671,11 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
             append(keys[i].value, num);
             keys[i].pct = pl::bar_percent(static_cast<float>(octave_), static_cast<float>(kMinOctave), static_cast<float>(kMaxOctave));
           } else if (i == 7u) {
-            append(keys[i].value, preset_ < kPresetCount ? kPresets[preset_].name : "---");
+            if (mode == kModeTract) {
+              append(keys[i].value, tract_ != dsp::kNoUnit && tract_preset_ < kTractPresetCount ? kTractPresets[tract_preset_].name : "---");
+            } else {
+              append(keys[i].value, preset_ < kPresetCount ? kPresets[preset_].name : "---");
+            }
           } else if (i == 4u) {
             const int f = static_cast<int>(std::floor(e.param(voice_, Vocoder::Formant) + 0.5f));
             char lbl[pl::kLabelChars + 1] = {};
