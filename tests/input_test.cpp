@@ -281,7 +281,7 @@ TEST_CASE("parse_pat refuses what is out of range, unknown or incomplete and lea
   CHECK(bad({"A", "1", "jump", "3"}));
 }
 
-TEST_CASE("parse_tract names every tract parameter, ACCENT last, and reads a number or a choice") {
+TEST_CASE("parse_tract names every tract parameter, SOURCE last, and reads a number or a choice") {
   using o3_voc03er::parse_tract;
   using o3_voc03er::TractCommand;
   TractCommand c;
@@ -300,8 +300,15 @@ TEST_CASE("parse_tract names every tract parameter, ACCENT last, and reads a num
   REQUIRE(parse_tract("accent", "0.25", c));  // id 11, the MOUTH line's (V3b); the app checks the unit's 0..1 range
   CHECK(c.id == 11u);
   CHECK(c.value == doctest::Approx(0.25f));
+  REQUIRE(parse_tract("source", "live", c));  // id 12, the live voice (LT1); the app checks the unit's 0..1 range
+  CHECK(c.id == 12u);
+  CHECK(c.value == doctest::Approx(1.0f));
+  REQUIRE(parse_tract("source", "pads", c));
+  CHECK(c.value == doctest::Approx(0.0f));
+  REQUIRE(parse_tract("source", "1", c));
+  CHECK(c.value == doctest::Approx(1.0f));
   const TractCommand before = c;
-  CHECK_FALSE(parse_tract("mouth", "1", c));
+  CHECK_FALSE(parse_tract("mouth", "1", c));  // the MOUTH line is the lane, not a parameter
   CHECK_FALSE(parse_tract("accent", "x", c));
   CHECK_FALSE(parse_tract("accent", "1e3", c));
   CHECK_FALSE(parse_tract("close", "nose", c));

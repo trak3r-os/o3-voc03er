@@ -93,7 +93,7 @@ void mcap_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
     {"voc", "voc <mode> [n]|formant|thru|glide|gate|arp|speaks|sounds <v>|bendrange", &voc_command},
-    {"tract", "tract <param> <v>: a wrong call lists the 12 params and their ranges", &tract_command},
+    {"tract", "tract <param> <v>: a wrong call lists the 13 params and their ranges", &tract_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
     {"slicech", "slicech [same|1..16|off]: the MIDI channel that fires slices", &slicech_command},
@@ -136,6 +136,8 @@ class MyApp final : public app::App {
     ctx_ = &ctx;  // the console's handlers have no Context argument; they run in the main loop
     dsp::Engine& e = ctx.engine();
     voc_.bind_loops(g_loop_mem, o3_voc03er::Loop::kMaxSamples);  // before attach: the unit takes its memory from the app
+    voc_.bind_mouth(&mouth_);   // the live voice's tube shape: the vocoder writes it, the tract unit (SOURCE LIVE) reads it; one struct, one render context
+    tract_.bind_mouth(&mouth_);
     const dsp::UnitId voice = e.attach(voc_);  // an Instrument: the engine hands it the codec input as in_l / in_r (the modulator)
     // Slot 0 plays the vocoder; the mixer's level, pan and sends are the slot's. A refused call is counted (Engine::setup_errors) and the
     // simulator and app_test fail on it, so the result need not be checked here.
@@ -615,7 +617,7 @@ class MyApp final : public app::App {
     o3_voc03er::TractCommand c;
     if (ctx_ == nullptr || args.argc != 3u || !o3_voc03er::parse_tract(args.arg(1), args.arg(2), c) ||
         !o3sdk::core::param_in_range(tract_.info().params[c.id], c.value)) {
-      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 0..2000|accent 0..1> <value>").nl();
+      out.text("usage: tract <vowel 0..1|tongue|jaw|lips -1..1|close open..back|glide 5..500|size big..tiny|res|hiss|mix 0..1|slide 0..2000|accent 0..1|source pads..live> <value>").nl();
       return;
     }
     (void)ctx_->engine().set_param(tract_id_, static_cast<std::uint16_t>(c.id), c.value);
@@ -828,6 +830,7 @@ class MyApp final : public app::App {
   }
 
   o3_voc03er::Vocoder voc_;
+  o3_voc03er::MouthLink mouth_;  // between voc_ and tract_ (units/mouth/include/o3_voc03er/units/mouth/link.h)
   o3_voc03er::TractUnit tract_;  // an Effect: slot 0, insert 0 (setup())
   o3_voc03er::PerformScreen perform_;
   o3_voc03er::SampleRecScreen sample_rec_;

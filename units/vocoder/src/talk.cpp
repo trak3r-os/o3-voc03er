@@ -128,25 +128,8 @@ void CarDrive::process(float* x, std::uint32_t n) noexcept {
 }
 
 void Talk::prepare(float sample_rate) noexcept {
-  const std::uint32_t rise = static_cast<std::uint32_t>(static_cast<float>(kWin) * kWinRise);
-  const std::uint32_t fall = kWin - rise;
-  float s2 = 0.0f;
-  for (std::uint32_t i = 0; i < kWin; ++i) {
-    float h;
-    if (i < rise) {
-      h = std::sin(0.25f * kPi2 * (static_cast<float>(i) + 0.5f) / static_cast<float>(rise));
-    } else {
-      h = std::cos(0.25f * kPi2 * (static_cast<float>(i - rise) + 0.5f) / static_cast<float>(fall));
-    }
-    wtab_[i] = h * h;
-    s2 += wtab_[i] * wtab_[i];
-  }
-  sumw2_ = s2;
+  lpc_.prepare(sample_rate);
   const float fl = sample_rate * 0.25f;
-  for (std::uint32_t l = 0; l <= kMaxStages; ++l) {
-    const float x = kPi2 * kLagHz * static_cast<float>(l) / fl;
-    lagw_[l] = std::exp(-0.5f * x * x);
-  }
   // 2nd-order Butterworth high-pass (RBJ, Q = 1/sqrt 2), full rate.
   const float w0 = kPi2 * kBreathHz / sample_rate;
   const float cw = std::cos(w0);
@@ -215,11 +198,8 @@ void Talk::set_realism(float tube_g, float shelf_k, float leak) noexcept {
 }
 
 void Talk::reset() noexcept {
-  for (auto& v : ring_) v = 0.0f;
-  for (auto& v : win_) v = 0.0f;
   tube_.reset();
   shelf_y_ = leak_y_ = 0.0f;
-  for (auto& v : r_) v = 0.0f;
   for (std::uint32_t m = 0; m < kMaxStages + 2; ++m) {
     k_[m] = 0.0f;
     kt_[m] = 0.0f;
@@ -232,13 +212,11 @@ void Talk::reset() noexcept {
   for (auto& h : interp_) h = Halfband{};
   drive_.reset();
   odd1_ = odd2_ = false;
-  wpos_ = filled_ = hop_pos_ = end_ = 0;
-  pa_ = run_ = tgt_order_ = stages_for(order_);
-  analysing_ = false;
+  run_ = tgt_order_ = stages_for(order_);
+  lpc_.reset(run_);
   shifted_ = false;
-  stage_ = cpos_ = lag_ = total_ = done_ = ramp_left_ = 0;
-  for (auto& v : acc_) v = 0.0f;
-  emph_prev_ = car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
+  ramp_left_ = 0;
+  car_prev_ = gain_ = gain_t_ = dgain_ = 0.0f;
   hp_s1_ = hp_s2_ = br_lp_y_ = br_lp2_y_ = 0.0f;
   hf_acc_ = hf_done_ = ms_acc_ = ms_done_ = unv_ = car_lp_y_ = 0.0f;
   duck_ = 1.0f;
@@ -255,76 +233,6 @@ void Talk::adopt_level(float level) noexcept {
 
 void Talk::set_order(std::uint32_t order) noexcept {
   order_ = order < kMinOrder ? kMinOrder : (order > kMaxOrder ? kMaxOrder : order);
-}
-
-// Runs `units` of the sliced work, a unit being four samples: first the window and r0, then the lags, four in one pass. Every sample loaded serves
-// four lags and the four sums do not wait on each other; one lag at a time cost two loads a multiply-add and stalled on its own sum. The
-// window's zeros past kWin let every lag run the same length, and the lags past pa_ of the last pass are never read.
-void Talk::slice(std::uint32_t units) noexcept {
-  macs_last_ += units * 16u;
-  while (units != 0u && stage_ < 2u) {
-    std::uint32_t c = kQuads - cpos_;
-    c = c < units ? c : units;
-    units -= c;
-    if (stage_ == 0u) {
-      float r0 = acc_[0];
-      const std::uint32_t last = (cpos_ + c) * 4u;
-      for (std::uint32_t i = cpos_ * 4u; i < last; ++i) {
-        const float x = ring_[(end_ - kWin + i) & (kRing - 1u)] * wtab_[i];
-        win_[i] = x;
-        r0 += mulb(x, x);
-      }
-      acc_[0] = r0;
-    } else {
-      const float* a = win_ + cpos_ * 4u;
-      const float* b = a + lag_;
-      float s0 = acc_[0], s1 = acc_[1], s2 = acc_[2], s3 = acc_[3];
-      float b0 = b[0], b1 = b[1], b2 = b[2];
-      for (std::uint32_t q = 0; q < c; ++q) {
-        const float a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3];
-        const float b3 = b[3], b4 = b[4], b5 = b[5], b6 = b[6];
-        s0 += mulb(a0, b0);
-        s1 += mulb(a0, b1);
-        s2 += mulb(a0, b2);
-        s3 += mulb(a0, b3);
-        s0 += mulb(a1, b1);
-        s1 += mulb(a1, b2);
-        s2 += mulb(a1, b3);
-        s3 += mulb(a1, b4);
-        s0 += mulb(a2, b2);
-        s1 += mulb(a2, b3);
-        s2 += mulb(a2, b4);
-        s3 += mulb(a2, b5);
-        s0 += mulb(a3, b3);
-        s1 += mulb(a3, b4);
-        s2 += mulb(a3, b5);
-        s3 += mulb(a3, b6);
-        b0 = b4;
-        b1 = b5;
-        b2 = b6;
-        a += 4;
-        b += 4;
-      }
-      acc_[0] = s0;
-      acc_[1] = s1;
-      acc_[2] = s2;
-      acc_[3] = s3;
-    }
-    cpos_ += c;
-    if (cpos_ == kQuads) {
-      cpos_ = 0;
-      if (stage_ == 0u) {
-        r_[0] = acc_[0];
-        stage_ = 1;
-        lag_ = 1;
-      } else {
-        for (std::uint32_t i = 0; i < 4u; ++i) r_[lag_ + i] = acc_[i];
-        lag_ += 4u;
-        if (lag_ > pa_) stage_ = 2;
-      }
-      for (auto& v : acc_) v = 0.0f;
-    }
-  }
 }
 
 void Talk::areas_from_reflection(const float* k, std::uint32_t n, float* area) noexcept {
@@ -391,43 +299,18 @@ std::uint32_t Talk::shift_tube(const float* k, std::uint32_t n, float* out) cons
   return m;
 }
 
-// Levinson-Durbin on r_[0..pa_]; sets the targets and the gain target, and starts the ramp.
+// Levinson-Durbin (Lpc::levinson) on the finished analysis; sets the targets and the gain target, and starts the ramp.
 void Talk::publish() noexcept {
-  const std::uint32_t p = pa_;
+  const std::uint32_t p = lpc_.order();
   const std::uint32_t ord = stages_for(order_);
-  const float power = r_[0] / sumw2_;
+  const float power = lpc_.power();
   const bool silent = !(power > kGate);
   float err = 0.0f;
   float kk[kMaxStages + 2] = {};
   if (!silent && !freeze_) {
-    r_[0] *= kR0Boost;
-    for (std::uint32_t l = 1; l <= p; ++l) r_[l] *= lagw_[l];
-    float a[kMaxStages + 2];
-    float t[kMaxStages + 2];
-    for (auto& v : a) v = 0.0f;
-    err = r_[0];
-    std::uint32_t macs = 0;
-    const float err_floor = r_[0] * kErrFloor;
-    for (std::uint32_t m = 1; m <= p; ++m) {
-      if (!(err > err_floor)) {
-        // A safety net, reached by no signal tried: the boost on r0 and the lag window keep err far above it. If err ever got to 0,
-        // -s/err would be a NaN no clamp catches and the lattice would stay poisoned. The stages left stay at 0.
-        break;
-      }
-      float s = r_[m];
-      for (std::uint32_t j = 1; j < m; ++j) s += a[j] * r_[m - j];
-      float k = -s / err;
-      k = k > kMaxK ? kMaxK : (k < -kMaxK ? -kMaxK : k);
-      for (std::uint32_t j = 1; j < m; ++j) t[j] = a[j] + k * a[m - j];
-      for (std::uint32_t j = 1; j < m; ++j) a[j] = t[j];
-      a[m] = k;
-      kk[m] = k;
-      err *= 1.0f - k * k;
-      macs += 2u * m;
-    }
-    macs_last_ += macs;
+    err = lpc_.levinson(kk);  // r0 is boosted from here on
   } else if (!silent) {
-    err = r_[0] * kR0Boost;  // frozen: k holds, the gain follows the level through the frozen filter's own error
+    err = lpc_.r0() * kR0Boost;  // frozen: k holds, the gain follows the level through the frozen filter's own error
     const std::uint32_t q = p < ord ? p : ord;
     for (std::uint32_t m = 1; m <= q; ++m) err *= 1.0f - kt_[m] * kt_[m];
   }
@@ -448,14 +331,14 @@ void Talk::publish() noexcept {
       syn = shift_tube(kraw_, use, kt_);
       for (std::uint32_t m = syn + 1u; m <= kMaxStages; ++m) kt_[m] = 0.0f;
       shifted_ = true;
-      err = live ? r_[0] : r_[0] * kR0Boost;  // the gain follows the shifted filter's own error, so the loudness holds
+      err = live ? lpc_.r0() : lpc_.r0() * kR0Boost;  // the gain follows the shifted filter's own error, so the loudness holds
       for (std::uint32_t m = 1; m <= syn; ++m) err *= 1.0f - kt_[m] * kt_[m];
     } else {
       for (std::uint32_t m = 1; m <= use; ++m) kt_[m] = kraw_[m];
       for (std::uint32_t m = use + 1u; m <= kMaxStages; ++m) kt_[m] = 0.0f;
       shifted_ = false;
       if (!live) {  // the shift is off a frozen set: its gain follows the restored filter from this hop, not the shifted one
-        err = r_[0] * kR0Boost;
+        err = lpc_.r0() * kR0Boost;
         for (std::uint32_t m = 1; m <= use; ++m) err *= 1.0f - kt_[m] * kt_[m];
       }
     }
@@ -473,7 +356,7 @@ void Talk::publish() noexcept {
   }
   duck_ = gd;
   if (!silent) {
-    gain_t_ = gd * kGainK * agc_ * std::sqrt((err > 0.0f ? err : 0.0f) / sumw2_);
+    gain_t_ = gd * kGainK * agc_ * std::sqrt((err > 0.0f ? err : 0.0f) / lpc_.sumw2());
   } else {
     gain_t_ = 0.0f;
   }
@@ -490,32 +373,10 @@ void Talk::publish() noexcept {
 
 // One low-rate sample: the modulator into the ring, this sample's share of the analysis, the ramp one step, the carrier through the lattice.
 void Talk::tick(float m, float c, float& y) noexcept {
-  if (hop_pos_ == 0u) {
-    // the window is the kWin samples before this one; a ring of 512 keeps it stable through the hop
-    analysing_ = filled_ >= kWin;
-    if (analysing_) {
-      end_ = wpos_ & (kRing - 1u);
-      pa_ = stages_for(order_);
-      stage_ = cpos_ = lag_ = 0;
-      for (auto& v : acc_) v = 0.0f;
-      total_ = kQuads * (1u + (pa_ + 3u) / 4u);  // the window, and a pass for every four lags
-      done_ = 0;
-    }
-  }
-  ring_[wpos_ & (kRing - 1u)] = m - kPreEmph * emph_prev_;
-  emph_prev_ = m;
-  ++wpos_;
+  const bool hop_end = lpc_.push(m, stages_for(order_));
   const float am = m < 0.0f ? -m : m;
   level_ += (am - level_) * (am > level_ ? lvl_att_ : lvl_rel_);
-  if (filled_ < kRing) ++filled_;
-  if (analysing_ && (hop_pos_ & 3u) == 3u) {
-    // an even share of the work every four samples: the cumulative target is total x (pos + 1) / kHop
-    const std::uint32_t upto = total_ * (hop_pos_ + 1u) / kHop;
-    slice(upto - done_);
-    done_ = upto;
-    if (hop_pos_ == kHop - 1u) publish();
-  }
-  hop_pos_ = hop_pos_ == kHop - 1u ? 0u : hop_pos_ + 1u;
+  if (hop_end) publish();
 
   const std::uint32_t run = run_;
   const bool ramping = ramp_left_ != 0u;
@@ -558,6 +419,7 @@ void Talk::tick(float m, float c, float& y) noexcept {
 
 void Talk::process(const float* mod, const float* car, float* out, std::uint32_t n) noexcept {
   macs_last_ = 0;
+  lpc_.clear_macs();
   if (n > kMaxFrames) n = kMaxFrames;
   float m0[kMaxFrames], c0[kMaxFrames];
   float m1[kMaxFrames / 2], c1[kMaxFrames / 2], m2[kMaxFrames / 4], c2[kMaxFrames / 4];
@@ -684,7 +546,7 @@ void Talk::process(const float* mod, const float* car, float* out, std::uint32_t
   for (auto& h : dec_mod_) settle(h);
   for (auto& h : dec_car_) settle(h);
   for (auto& h : interp_) settle(h);
-  emph_prev_ = flush(emph_prev_);
+  lpc_.flush_state();
   car_prev_ = flush(car_prev_);
   car_lp_y_ = flush(car_lp_y_);
   gain_ = flush(gain_);

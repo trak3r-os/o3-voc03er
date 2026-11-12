@@ -198,6 +198,8 @@ VOICING: how a chord's notes are laid out.*
 VOICING has four settings. CLOSE stacks the notes as written. OPEN lifts the third an octave. WIDE spreads the chord over two octaves.
 SMOOTH, the default, picks the arrangement nearest the chord before, within the pad's octave, so a progression moves without jumps.
 
+The SHAPE page's sixth key is MOUTH (F6): PADS, the default, or LIVE. It only matters in TRACT, where it says what moves the mouth (section 5b, "Your voice as the mouth"); outside TRACT the key is dim and a tap does nothing. It is not kept with the project and starts as PADS each time.
+
 ![PARAMS, page TUNE](manual/img/params-tune.png)
 
 *TUNE: KEY, SCALE, SPEED (how fast a note is pulled), AMOUNT, and NOTES IN (follow the notes you play).*
@@ -307,6 +309,16 @@ into a pattern; it does not give you a voice you can talk through.
 
 The values are live in every mode, so you can set the mouth before you press F1. In the other modes the page says TRACT MODE ONLY and keeps them.
 A strip pad that is held wins over the pattern's mouth line while it is held.
+
+**Your voice as the mouth.** TRACT can also take its mouth from the voice at the input. On PARAMS, SHAPE page, press F6 (MOUTH) and step it to
+LIVE: the program reads the voice into the shape of a tube a few milliseconds at a time (from a window of about 23 ms), and the carrier speaks
+through it. Say an "ah" and then an "ee" and the synth does the same. PADS, the default, puts the mouth back in your hands. In LIVE the strip, the lane and
+VOWEL, TONGUE, JAW and LIPS do not move the mouth (SIZE, RES and HISS still work, and a closure still mutes), and when the voice goes quiet the mouth
+stays where it was. It reads the input the other modes read, set by MASTER's SOURCE and GAIN. It costs more processor than PADS: an estimate of about
+12,000 cycles a block, about 5 % of the processor, to be measured on the unit. Honest limits: the reading assumes the usual voice, whose spectrum falls
+toward the high end. A flat or very bright source, or a noisy room, reads the mouth wrong, the first formant most of all (a perfectly flat source reads F1 up to
+104 % too high and F2 and F3 up to 57 % and 34 % off); a close microphone in a quiet room reads best, and low vowels (U) have the biggest error. A synthetic voice reads within about
+13 % on the first formant and 4 % on the second and third. SOURCE LIVE needs more testing with a real voice and room on the unit.
 
 **Writing it: the MOUTH lane.** In PATTERN, F2 (or FX, a second press after SLICE) picks the fifth lane, MOUTH. Each step holds one mouth:
 FOLLOW (empty: the step leaves the mouth as it is), one of the nine vowels, a closure, a word, or a wobble. The palette is the top two rows of

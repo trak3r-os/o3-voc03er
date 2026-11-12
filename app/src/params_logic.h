@@ -39,6 +39,7 @@ enum class Fmt : std::uint8_t {
   Scale,    // 0..kScaleTableCount - 1, round
   OnOff,    // 0 / 1
   Voicing,  // 0..3 (CLOSE, OPEN, WIDE, SMOOTH: the chords' Voicing), clamped
+  Source,   // TRACT's SOURCE, 0 / 1 (PADS, LIVE): what drives the tube's shape, round
 };
 
 struct KeyDef {
@@ -56,6 +57,7 @@ inline constexpr KeyDef later(const char* name) noexcept { return KeyDef{name, K
 
 inline constexpr const char* kPageNames[kPages] = {"CARRIER", "SHAPE", "TUNE", "TRACT"};
 inline constexpr const char* kSizeNames[5] = {"BIG", "LARGE", "NORMAL", "SMALL", "TINY"};
+inline constexpr const char* kMouthSourceNames[2] = {"PADS", "LIVE"};
 // The page tabs under the voiceprint: four at 181 wide on a 189 step from x = 26, the last ends at x = 774 (the voiceprint's right edge).
 inline constexpr int kTabX0 = 26;
 inline constexpr int kTabW = 181;
@@ -76,7 +78,9 @@ inline constexpr KeyDef kTable[kPages][kKeys] = {
      {"QUALITY", Kind::Value, Vocoder::Quality, Fmt::Int, 8, 24, 1, 4},
      {"FREEZE", Kind::Value, Vocoder::Freeze, Fmt::OnOff, 0, 1, 1, 1},
      {"DRY", Kind::Value, Vocoder::Dry, Fmt::Pct, 0, 100, 2, 10},
-     app_key("VOICING", Fmt::Voicing, 0, 3), kBlank, kBlank, kBlank},
+     app_key("VOICING", Fmt::Voicing, 0, 3),
+     // LT1: what drives TRACT's tube, the pads and the lane or the live voice at the input. Not saved (the project keeps TRACT's first eight values).
+     {"MOUTH", Kind::Tract, TractUnit::Source, Fmt::Source, 0, 1, 1, 1}, kBlank, kBlank},
     {{"KEY", Kind::Value, Vocoder::Key, Fmt::Key, 0, 11, 1, 1},
      {"SCALE", Kind::Value, Vocoder::Scale, Fmt::Scale, 0, static_cast<int>(kScaleTableCount) - 1, 1, 1},
      {"SPEED", Kind::Value, Vocoder::Speed, Fmt::MsLin, 0, 500, 5, 25},
@@ -99,8 +103,10 @@ inline constexpr const KeyDef& key_def(unsigned page, unsigned key) noexcept { r
 inline constexpr unsigned next_page(unsigned page, int delta = 1) noexcept { return perform::step_wrapped(page % kPages, delta, kPages); }
 
 // Whether a key acts in mode `mode` (mode_index): QUALITY is TALK's LPC order and does nothing in the other modes, so PARAMS draws it dim
-// there (it stays focusable: the value is TALK's when the mode comes back). Every other key acts in every mode.
-inline constexpr bool key_live(const KeyDef& k, unsigned mode) noexcept { return !(k.kind == Kind::Value && k.param == Vocoder::Quality && mode != 1u); }
+// there (it stays focusable: the value is TALK's when the mode comes back); MOUTH (LT1) is TRACT's live voice and acts in TRACT only. Every other key acts in every mode.
+inline constexpr bool key_live(const KeyDef& k, unsigned mode) noexcept {
+  return !(k.kind == Kind::Value && k.param == Vocoder::Quality && mode != 1u) && !(k.fmt == Fmt::Source && mode != kModeTract);  // MOUTH: the tube listens in TRACT only
+}
 
 inline constexpr bool live_kind(Kind k) noexcept { return k == Kind::Value || k == Kind::App || k == Kind::Tract; }
 
@@ -157,7 +163,7 @@ inline int step_display(const KeyDef& k, int cur, int delta, bool coarse, bool w
   }
   wrap = wrap && !tap_holds(k);
   const int n = k.hi - k.lo + 1;
-  if (k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff) {
+  if (k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff || k.fmt == Fmt::Source) {
     int v = (cur - k.lo + delta) % n;
     return k.lo + (v < 0 ? v + n : v);
   }
@@ -248,6 +254,9 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
       break;
     case Fmt::Voicing:
       put(perform::kVoicingNames[u < 4u ? u : 3u]);
+      break;
+    case Fmt::Source:
+      put(kMouthSourceNames[u < 2u ? u : 1u]);
       break;
   }
 }

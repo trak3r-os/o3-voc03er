@@ -23,6 +23,13 @@
 //             time is the time constant), so a move that must arrive within T ms is written as T / 3 (95 %)
 //  11 Accent  0..1 (default 0): the jaw opens by this much more, the bend takes JAW + ACCENT clamped to -1..+1 (the MOUTH line writes it on an accented
 //             step; JAW keeps the knob's value and the hook never writes it). 0 is bit-exact with a build without it
+//  12 Source  0 PADS, 1 LIVE (default PADS): where the tube's shape comes from. PADS is the vowel, tongue, jaw and lips above (the pads, the lane, the
+//             MOUTH line) and is bit-exact with a build without this parameter. LIVE drives the tube from the voice at the input: the Vocoder
+//             analyses the modulator (mouth_live.h) and hands the areas over a MouthLink (bind_mouth); VOWEL, TONGUE, JAW, LIPS and ACCENT keep
+//             moving underneath but do not shape the tube while the areas rule (the way back to PADS lands where they are); CLOSE still silences
+//             (a stop), and SIZE, RES, HISS, GLIDE and MIX act as always. It needs a bound link, MIX above 0 and
+//             a voice above the analysis' gate: until the first shape the pads' vowel sounds, and in silence the last shape holds. Not saved: the
+//             project and the config store TRCT's first eight values, so the app starts on PADS (docs/MANUAL.md)
 //
 // Two things the wrapper adds to the Processor:
 //  * MIX rises only after a hold of kEnterHoldMs (12 ms, a little more than the vocoder's 10 ms mode crossfade): the app writes MIX 1 together with
@@ -37,6 +44,7 @@
 // block of 64, about 6.3 % of the CPU; the wrapper adds about 8 cycles a frame (mean and two peaks). Asleep or at MIX 0 it is about 3 cycles a
 // frame. A unit measurement is owed.
 
+#include <o3_voc03er/units/mouth/link.h>
 #include <o3sdk/dsp/unit.h>
 #include <o3sdk/extras/tract/processor.h>
 
@@ -46,7 +54,7 @@ namespace o3_voc03er {
 
 class TractUnit final : public o3sdk::dsp::Unit {
  public:
-  enum Param : std::uint16_t { Vowel, Tongue, Jaw, Lips, Close, Glide, Size, Res, Hiss, Mix, Slide, Accent, kParamCount };
+  enum Param : std::uint16_t { Vowel, Tongue, Jaw, Lips, Close, Glide, Size, Res, Hiss, Mix, Slide, Accent, Source, kParamCount };
 
   static constexpr float kEnterHoldMs = 12.0f;        // MIX 0 -> above 0 waits this long (the vocoder's crossfade is 10 ms)
   static constexpr float kSilent = 1.0e-4f;           // -80 dB: under it the input, and the tube's output, count as silent
@@ -59,6 +67,11 @@ class TractUnit final : public o3sdk::dsp::Unit {
   void prepare(float sample_rate) noexcept override;
   void process(const o3sdk::dsp::ProcessArgs& args) noexcept override;
 
+  // The live voice's shape (SOURCE LIVE), main loop before the engine starts; the link outlives the unit, and the Vocoder is bound to the same one.
+  // Null (the default): SOURCE LIVE does nothing and the pads' vowel rules.
+  void bind_mouth(MouthLink* link) noexcept { link_ = link; }
+  bool mouth_live() const noexcept { return live_; }   // SOURCE LIVE, a link and MIX above 0: the tube is (or is about to be) driven by the voice
+
   // For a test or a screen (the render context's state, read after a block).
   bool asleep() const noexcept { return asleep_; }
   bool holding() const noexcept { return hold_left_ != 0u; }
@@ -70,6 +83,8 @@ class TractUnit final : public o3sdk::dsp::Unit {
   void set(std::uint16_t id, float v) noexcept;
   void run(const o3sdk::dsp::ProcessArgs& args, std::uint32_t from, std::uint32_t to) noexcept;
   void pass(const o3sdk::dsp::ProcessArgs& args, std::uint32_t from, std::uint32_t to) noexcept;
+  void drive_mouth() noexcept;
+  void update_live() noexcept;
 
   o3sdk::extras::tract::Processor proc_;
   alignas(8) float mono_[kMaxFrames] = {};
@@ -81,6 +96,8 @@ class TractUnit final : public o3sdk::dsp::Unit {
   std::uint32_t hold_left_ = 0;      // frames of the hold still to run; the Processor's MIX is 0 until it ends
   std::uint32_t quiet_ = 0;          // frames in a row with a silent input and a silent output
   std::uint32_t processed_ = 0;
+  MouthLink* link_ = nullptr;        // the Vocoder's shape, render context only (link.h)
+  bool live_ = false;                // SOURCE LIVE with a link and MIX above 0
   bool asleep_ = false;
   bool engaged_ = false;             // the Processor's MIX has been raised (and not dropped to 0 since)
 };

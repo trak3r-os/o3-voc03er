@@ -13,6 +13,7 @@ using o3sdk::core::ParamUnit;
 
 constexpr const char* kCloseNames[] = {"OPEN", "LIPS", "TIP", "BACK"};
 constexpr const char* kSizeNames[] = {"BIG", "LARGE", "NORMAL", "SMALL", "TINY"};
+constexpr const char* kSourceNames[] = {"PADS", "LIVE"};
 
 // name, unit text, names, knots, min, max, default, detents, coarse, list count, display, curve, flags, page
 constexpr o3sdk::core::ParamDesc kParams[TractUnit::kParamCount] = {
@@ -28,6 +29,7 @@ constexpr o3sdk::core::ParamDesc kParams[TractUnit::kParamCount] = {
     {"MIX", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
     {"SLIDE", "ms", nullptr, nullptr, 0.0f, 2000.0f, 0.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
     {"ACCENT", "%", nullptr, nullptr, 0.0f, 1.0f, 0.0f, 100, 10, 0, ParamUnit::NormPct, ParamCurve::Linear, 0, 0},
+    {"SOURCE", "", kSourceNames, nullptr, 0.0f, 1.0f, 0.0f, 1, 1, 2, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
 };
 
 constexpr o3sdk::dsp::UnitInfo kInfo{"TRACT", o3sdk::dsp::UnitKind::Effect, kParams, TractUnit::kParamCount, nullptr, 0};
@@ -68,6 +70,7 @@ void TractUnit::prepare(float sample_rate) noexcept {
   asleep_ = false;
   engaged_ = false;
   mix_ = 0.0f;
+  live_ = false;
   proc_.prepare(sample_rate);
   proc_.set_mix(0.0f);
   for (unsigned p = 0; p < kParamCount; ++p) {
@@ -131,10 +134,36 @@ void TractUnit::set(std::uint16_t id, float v) noexcept {
       } else if (hold_left_ == 0) {
         hold_left_ = hold_frames_ != 0u ? hold_frames_ : 1u;  // the Processor stays at MIX 0 until the hold ends
       }
+      update_live();
       break;
     }
+    case Source:
+      update_live();
+      break;
     default:
       break;
+  }
+}
+
+// SOURCE LIVE, a link and a MIX above 0: the Vocoder is asked for the voice's shape. Anything else is the pads' vowel, through the kit's way back
+// (the diameters glide from the areas to the vowel's shape).
+void TractUnit::update_live() noexcept {
+  live_ = link_ != nullptr && round_index(values_[Source], 1) == 1 && mix_ > 0.0f;
+  if (!live_) {
+    proc_.use_shape();   // a no-op unless the areas rule
+    if (link_ != nullptr) link_->valid = false;   // the shape of a voice that is gone must not come back when LIVE is entered again (same render context as the Vocoder)
+  }
+}
+
+// Once a block, before the tube runs: ask for the voice, and hand over its shape if there is one (the call is cheap, about 200 cycles: the
+// Processor glides to the areas by itself). Without a shape yet (nothing heard) the pads' vowel sounds; once there is one it holds in silence.
+void TractUnit::drive_mouth() noexcept {
+  if (!live_) return;
+  link_->want = true;
+  if (link_->valid) {
+    proc_.set_areas(link_->area, link_->n);
+  } else {
+    proc_.use_shape();
   }
 }
 
@@ -189,6 +218,7 @@ void TractUnit::run(const o3sdk::dsp::ProcessArgs& a, std::uint32_t from, std::u
     for (std::uint32_t i = 0; i < n; ++i) {
       mono_[i] = 0.5f * (a.in_l[from + i] + a.in_r[from + i]);
     }
+    drive_mouth();
     proc_.process(mono_, mono_, n);
     processed_ += n;
     std::memcpy(a.out_l + from, mono_, n * sizeof(float));
@@ -206,8 +236,10 @@ void TractUnit::run(const o3sdk::dsp::ProcessArgs& a, std::uint32_t from, std::u
 }
 
 void TractUnit::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
+  if (live_) link_->want = true;   // the Vocoder analyses the voice in the block after one that asked, so the shape is there when the tube wakes
   o3sdk::dsp::for_each_run(
       args, [&](std::uint32_t from, std::uint32_t to) { run(args, from, to); }, [&](const o3sdk::dsp::Event& e) { apply(e); });
+  if (!live_ && link_ != nullptr) link_->valid = false;   // an analysis that was in flight when LIVE was left lands one block late: dropped here, so no old shape survives
 }
 
 }  // namespace o3_voc03er

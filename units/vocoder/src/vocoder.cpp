@@ -163,6 +163,8 @@ void Vocoder::prepare(float sample_rate) noexcept {
   carrier_.prepare(sample_rate);
   bands_.prepare(sample_rate);
   talk_.prepare(sample_rate);
+  mouth_live_ = MouthLive{};  // the live voice's analysis starts afresh at the next ask (the link is the app's, not touched here)
+  mouth_on_ = false;
   const auto fade = static_cast<std::uint32_t>(kModeFadeMs * 0.001f * sample_rate);
   bands_mix_.set_length(fade);
   talk_mix_.set_length(fade);
@@ -1329,6 +1331,15 @@ void Vocoder::process(const o3sdk::dsp::ProcessArgs& args) noexcept {
     if (sel_ == kCarVoice) {
       tune_.detect(mod, n);  // VOICE outside TUNE: the detector alone
     }
+  }
+  if (mouth_ != nullptr) {  // TRACT's live voice: the TractUnit asks (want, once a block) and TALK is not running, so its analysis is free to borrow
+    const bool live = mouth_->want && runs(carrier_mix_) && !runs(talk_mix_);
+    mouth_->want = false;
+    if (live) {
+      if (!mouth_on_) mouth_live_.start(talk_.analysis());
+      mouth_live_.process(talk_.analysis(), mod, n, *mouth_);
+    }
+    mouth_on_ = live;
   }
   publish_view();  // the BANDS followers for the PERFORM screen, once a block
   float rw[Bands::kMaxFrames];  // ROBOT: the wet sum after the compressor (a copy: the BANDS term reads the wet sum itself while they crossfade)

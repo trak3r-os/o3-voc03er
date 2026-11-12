@@ -185,7 +185,8 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
                   : "FOUR PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE, TRACT. PARAMS OR UP\n"
                     "AND DOWN TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. PADS PLAY CHORDS.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
-    h.fkey[i] = pr::focusable(page_, i) ? "TAP: FOCUS, THEN STEP" : nullptr;  // a blank key has no row
+    // a blank key has no row; MOUTH (LT1) says what it does: the pads and the lane, or the voice at the input, shape the tube
+    h.fkey[i] = !pr::focusable(page_, i) ? nullptr : (pr::key_def(page_, i).fmt == pr::Fmt::Source ? "MOUTH: PADS OR LIVE VOICE" : "TAP: FOCUS, THEN STEP");
   }
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];

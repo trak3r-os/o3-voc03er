@@ -241,7 +241,9 @@ TEST_CASE("tract mode: the tables agree: five modes, TRACT is the fifth, the tub
   CHECK(vo.info().params[Vocoder::Mode].max == 4.0f);
   CHECK(Vocoder::kParamCount == 64);  // the kit's limit: the tube's knobs are the new unit's
   CHECK(tu.info().param_count == TractUnit::kParamCount);
-  CHECK(TractUnit::kParamCount == 12);
+  CHECK(TractUnit::kParamCount == 13);
+  CHECK(TractUnit::Source == 12);  // appended: ids are indices (LT1)
+  CHECK(tu.info().params[TractUnit::Source].def == 0.0f);  // PADS: the app starts on the lane, SOURCE is not saved
   CHECK(tu.info().kind == dsp::UnitKind::Effect);
   CHECK(tu.info().params[TractUnit::Mix].def == 0.0f);
   CHECK(tu.info().params[TractUnit::Glide].def == 30.0f);
@@ -712,38 +714,38 @@ TEST_CASE("tract mode: the console's tract command sets the ids, by name, and re
   REQUIRE(id.tube != dsp::kNoUnit);
   const auto get = [&](TractUnit::Param p) { return h->engine().param(id.tube, p); };
   (void)console("tract", "vowel", "0.5");
-  CHECK(get(TractUnit::Vowel) == doctest::Approx(0.5f));
+  CHECK(double(get(TractUnit::Vowel)) == doctest::Approx(0.5));
   (void)console("tract", "tongue", "-0.25");
-  CHECK(get(TractUnit::Tongue) == doctest::Approx(-0.25f));
+  CHECK(double(get(TractUnit::Tongue)) == doctest::Approx(-0.25));
   (void)console("tract", "jaw", "1");
-  CHECK(get(TractUnit::Jaw) == doctest::Approx(1.0f));
+  CHECK(double(get(TractUnit::Jaw)) == doctest::Approx(1.0));
   (void)console("tract", "lips", "-1");
-  CHECK(get(TractUnit::Lips) == doctest::Approx(-1.0f));
+  CHECK(double(get(TractUnit::Lips)) == doctest::Approx(-1.0));
   (void)console("tract", "close", "tip");
-  CHECK(get(TractUnit::Close) == 2.0f);
+  CHECK(double(get(TractUnit::Close)) == 2.0);
   (void)console("tract", "close", "open");
-  CHECK(get(TractUnit::Close) == 0.0f);
+  CHECK(double(get(TractUnit::Close)) == 0.0);
   (void)console("tract", "size", "tiny");
-  CHECK(get(TractUnit::Size) == 4.0f);
+  CHECK(double(get(TractUnit::Size)) == 4.0);
   (void)console("tract", "size", "2");
-  CHECK(get(TractUnit::Size) == 2.0f);
+  CHECK(double(get(TractUnit::Size)) == 2.0);
   (void)console("tract", "glide", "120");
-  CHECK(get(TractUnit::Glide) == 120.0f);
+  CHECK(double(get(TractUnit::Glide)) == 120.0);
   (void)console("tract", "res", "0.8");
-  CHECK(get(TractUnit::Res) == doctest::Approx(0.8f));
+  CHECK(double(get(TractUnit::Res)) == doctest::Approx(0.8));
   (void)console("tract", "hiss", "0");
-  CHECK(get(TractUnit::Hiss) == 0.0f);
+  CHECK(double(get(TractUnit::Hiss)) == 0.0);
   (void)console("tract", "slide", "200");
-  CHECK(get(TractUnit::Slide) == 200.0f);
+  CHECK(double(get(TractUnit::Slide)) == 200.0);
   (void)console("tract", "mix", "1");
-  CHECK(get(TractUnit::Mix) == 1.0f);
+  CHECK(double(get(TractUnit::Mix)) == 1.0);
   // Out of range, an unknown name, a word that is no number: usage, nothing written.
   const std::string bad = console("tract", "vowel", "2");
   CHECK(bad.find("usage") != std::string::npos);
-  CHECK(get(TractUnit::Vowel) == doctest::Approx(0.5f));
+  CHECK(double(get(TractUnit::Vowel)) == doctest::Approx(0.5));
   CHECK(console("tract", "bogus", "1").find("usage") != std::string::npos);
   CHECK(console("tract", "glide", "abc").find("usage") != std::string::npos);
   CHECK(console("tract", "glide", "4").find("usage") != std::string::npos);
-  CHECK(get(TractUnit::Glide) == 120.0f);
+  CHECK(double(get(TractUnit::Glide)) == 120.0);
   CHECK(console("tract").find("usage") != std::string::npos);
 }

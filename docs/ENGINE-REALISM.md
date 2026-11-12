@@ -334,3 +334,13 @@ Tests: the digest of `talk_test` (BANDS output) was renewed, and the gate edge d
 Cost [estimate, not a measurement]: one multiply-add and one subtract per sample on top of the sum that was already there, about 3 cycles a sample, 200 cycles (about 1 microsecond) a block, under 0.1 % of the render budget; THRU live adds a 3-sample delay copy. BANDS stays to be read on the unit against its 69 % limit (65.5 % peak before this change).
 
 Owed: the sound by ear on the unit, `kTiltA` and `kUvNoiseGain` against a real microphone, and the CPU on the unit.
+
+## TRACT LIVE, LT1
+
+The live voice drives TRACT's tube: TALK's LPC (order 11 at fs/4, pre-emphasis 0.9, window 256 decimated samples, hop 32) becomes 22 tube areas
+(`mouth_live.cpp`), not a reflection filter. Measured on a synthetic voice (a 120 Hz impulse train, tilted by a one-pole low-pass, through the kit's own tube at each vowel, 1 s, 44.1 kHz in, the analysis at fs/4;
+the formants are the spectral peaks of the impulse response of the tube set to the live areas against the vowel's own, so the error is the analysis's and the tube's, not a measurement of a microphone): with a tilted source (0.96) the worst error over the five vowels is
+F1 12.6 % (U, 298 Hz), F2 3.6 %, F3 1.8 %; A, E, O are within 3 % on F1 (the tilt-0.96 table in `tests/mouth_test.cpp`). With a flat source (tilt 0) the same chain reads
+F1 high by 18 % (A), 36 % (E), 78 % (I), 19 % (O), 101 % (U), worst over the five vowels F1 +104 %, F2 -57 %, F3 -34 % (F2 and F3 merge on some vowels; the test only bounds them loosely, F1 under 160 %, F2 90 %, F3 55 %): the pre-emphasis assumes a falling spectrum, which a real
+voice has and a flat pulse train does not. That limit is printed by the test, not tuned away. A noisy room reads as an open tube. Silence: after the window
+drains the gate holds the last shape (output level 0.61 of the speaking level at 0.49 s of silence, 0.2 to 5 allowed). Owed: a real voice and room on the unit.

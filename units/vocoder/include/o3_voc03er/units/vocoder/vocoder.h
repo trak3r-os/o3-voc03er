@@ -101,7 +101,9 @@
 #include <o3_voc03er/units/vocoder/autotune.h>
 #include <o3_voc03er/units/vocoder/bands.h>
 #include <o3_voc03er/units/vocoder/carrier.h>
+#include <o3_voc03er/units/mouth/link.h>
 #include <o3_voc03er/units/vocoder/loop.h>
+#include <o3_voc03er/units/vocoder/mouth_live.h>
 #include <o3_voc03er/units/vocoder/robot.h>
 #include <o3_voc03er/units/vocoder/talk.h>
 
@@ -277,6 +279,11 @@ class Vocoder final : public o3sdk::dsp::Unit {
   View view() const noexcept;
 
   static constexpr unsigned kCarVoice = 8;  // CarSrc VOICE
+  // The live voice's tube shape for the TRACT unit (mouth_live.h, o3_voc03er/units/mouth/link.h): main loop, before the engine starts; the link
+  // outlives the unit. While the link's `want` is set (the TractUnit sets it each block in which SOURCE is LIVE), the TRACT mode analyses the
+  // modulator with TALK's analysis and writes the shape into it; any other mode, or no `want`, costs one flag read. Null: never.
+  void bind_mouth(MouthLink* link) noexcept { mouth_ = link; }
+  const MouthLive& mouth() const noexcept { return mouth_live_; }
   const Carrier& carrier() const noexcept { return carrier_; }
   const Bands& bands() const noexcept { return bands_; }
   const Talk& talk() const noexcept { return talk_; }
@@ -335,6 +342,9 @@ class Vocoder final : public o3sdk::dsp::Unit {
   Carrier carrier_;
   Bands bands_;
   Talk talk_;
+  MouthLive mouth_live_;       // TRACT's live voice; borrows talk_'s analysis while TALK is not running
+  MouthLink* mouth_ = nullptr;  // bound by the app; read and written in the render context only
+  bool mouth_on_ = false;       // the live voice was analysed in the last block
   Autotune tune_;
   NoiseSource noise_;
   o3sdk::dsp::Ramp level_;

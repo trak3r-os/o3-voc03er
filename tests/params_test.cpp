@@ -226,7 +226,7 @@ TEST_CASE("params: stepping clamps the linear keys and wraps the round ones") {
   CHECK(v == 500);
 }
 
-TEST_CASE("params: QUALITY is live only in TALK, every other key in every mode") {
+TEST_CASE("params: QUALITY is live only in TALK, MOUTH in TRACT, every other key in every mode") {
   REQUIRE(std::string(o3_voc03er::kModeNames[1]) == "TALK");
   const pm::KeyDef& quality = pm::key_def(1, 1);
   CHECK(pm::key_live(quality, 1u));
@@ -235,12 +235,37 @@ TEST_CASE("params: QUALITY is live only in TALK, every other key in every mode")
     for (unsigned page = 0; page < pm::kPages; ++page) {
       for (unsigned k = 0; k < pm::kKeys; ++k) {
         const pm::KeyDef& d = pm::key_def(page, k);
-        if (&d != &quality) {
+        if (d.fmt == pm::Fmt::Source) {
+          CHECK(pm::key_live(d, m) == (m == o3_voc03er::kModeTract));
+        } else if (&d != &quality) {
           CHECK(pm::key_live(d, m));
         }
       }
     }
   }
+}
+
+TEST_CASE("params: MOUTH (LT1) is TRACT's SOURCE on the second page: PADS or LIVE by name, a round key") {
+  using o3_voc03er::TractUnit;
+  const pm::KeyDef& k = pm::key_def(1, 5);
+  CHECK(std::string(k.name) == "MOUTH");
+  CHECK(k.kind == pm::Kind::Tract);
+  CHECK(k.param == TractUnit::Source);
+  CHECK(k.param < TractUnit::kParamCount);
+  CHECK(k.fmt == pm::Fmt::Source);
+  CHECK(pm::focusable(1, 5));
+  char t[12];
+  pm::format_value(k, 0, t);
+  CHECK(std::string(t) == "PADS");
+  pm::format_value(k, 1, t);
+  CHECK(std::string(t) == "LIVE");
+  CHECK(pm::to_display(k.fmt, 1.0f) == 1);
+  CHECK(pm::to_param(k.fmt, 1) == 1.0f);
+  CHECK(pm::step_display(k, 0, 1, false) == 1);
+  CHECK(pm::step_display(k, 1, 1, false) == 0);   // round: a detent past LIVE is PADS
+  CHECK(pm::step_display(k, 0, -1, true) == 1);
+  CHECK(pm::bar_of(k, 1) == -1);                  // a word: no bar
+  CHECK(pm::key_def(1, 6).kind == pm::Kind::None);
 }
 
 TEST_CASE("params: values read as short text") {

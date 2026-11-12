@@ -4,6 +4,18 @@
 
 ### Added
 
+- **LT1: the live voice drives TRACT's tube.** TRACT's SOURCE (PADS by default, or LIVE; PARAMS, SHAPE page, F6 MOUTH; console `tract source live|pads`)
+  makes the mouth follow the voice at the input. The vocoder reads the input with TALK's own analysis (the LPC code moved to `lpc.cpp`, shared and unchanged:
+  TALK is bit for bit as before), orders 11 to 22 tube areas (each section twice, floor 0.05, smoothing 0.5, silence holds the last shape) and hands them,
+  through a one-struct link between the two units (same render context, no atomics, one block of latency), to the tract kit's new `Processor::set_areas`
+  (extras/tract in o3-sdk; the vowel path is bit for bit the same, pinned by digest). No new vocoder parameter (64 of 64): SOURCE is TRACT's thirteenth,
+  appended; it is not saved with the project (`TRCT` keeps eight values) and boots as PADS; `config.o3a` and the pattern format are untouched. Default
+  behaviour is bit for bit as before (the chain digest 0x3546222B, unbound and bound). Measured on a synthetic voice (tilted source, five vowels A, E, I, O, U):
+  worst formant error F1 12.6 % (U), F2 3.6 %, F3 1.8 %; a flat source reads F1 up to 104 % high, F2 57 % and F3 34 % off (the analysis assumes a falling spectrum; bounded loosely in the test). Silence
+  holds a shape of sane level, DC, clipping and 1e-20 noise stay finite, no click when switching mid-note (`tests/mouth_test.cpp`). Cost [estimate]: about
+  12,000 cycles a block, 15,000 on a hop block, in LIVE only; memory about 100 B, 110 B link and 216 B more in the tube. `app/scenarios/tract_live.txt` shows
+  the key and that the chord holds, not the mouth following (the voiceprint still draws the pads' parameters). Needs more testing with a real voice and room
+  on the unit: the sound, the CPU, a click on entering LIVE, a low F1.
 - **MC1: capture the mouth.** PATTERN, MOUTH lane, SHIFT + F8 CAPTURE reads the slot SAMPLE shows and writes the lane: per step the nearest of
   TRACT's nine vowels (MOUTH 1 to 9) by the distance between mean-removed log-areas, or a closure (LIPS) where the step's level is 30 dB under
   the take's loudest step. The analysis is TALK's at QUALITY 16 (fs/4, order 12, pre-emphasis 0.9, the same window and lag window, the TF1

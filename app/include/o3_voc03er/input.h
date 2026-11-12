@@ -200,13 +200,15 @@ inline bool parse_voc(const char* mode, const char* count, VocCommand& out) noex
   out = v;
   return true;
 }
-// `tract <param> <value>`: a parameter of the tract unit (units/tract) by its word (the unit's table order is the id: vowel 0 .. accent 11) and a
-// value, a decimal number ("0.5", "-1", "30") or, for CLOSE and SIZE, the name of the choice (open lips tip back; big large normal small tiny).
+// `tract <param> <value>`: a parameter of the tract unit (units/tract) by its word (the unit's table order is the id: vowel 0 .. source 12) and a
+// value, a decimal number ("0.5", "-1", "30") or, for CLOSE, SIZE and SOURCE, the name of the choice (open lips tip back; big large normal small tiny;
+// pads live).
 // The range is the unit's own: the app checks it against the table (param_in_range) and refuses what is outside.
-inline constexpr unsigned kTractParamCount = 12;
-inline constexpr const char* kTractWords[kTractParamCount] = {"vowel", "tongue", "jaw", "lips", "close", "glide", "size", "res", "hiss", "mix", "slide", "accent"};
+inline constexpr unsigned kTractParamCount = 13;
+inline constexpr const char* kTractWords[kTractParamCount] = {"vowel", "tongue", "jaw", "lips", "close", "glide", "size", "res", "hiss", "mix", "slide", "accent", "source"};
 inline constexpr const char* kTractCloseWords[4] = {"open", "lips", "tip", "back"};
 inline constexpr const char* kTractSizeWords[5] = {"big", "large", "normal", "small", "tiny"};
+inline constexpr const char* kTractSourceWords[2] = {"pads", "live"};
 struct TractCommand {
   unsigned id = 0;
   float value = 0.0f;
@@ -256,10 +258,11 @@ inline bool parse_tract(const char* name, const char* value, TractCommand& out) 
   c.id = id;
   const bool is_close = id == 4u;
   const bool is_size = id == 6u;
-  if (is_close || is_size) {
-    const unsigned n = is_close ? 4u : 5u;
+  const bool is_source = id == 12u;
+  if (is_close || is_size || is_source) {
+    const unsigned n = is_close ? 4u : (is_size ? 5u : 2u);
     for (unsigned i = 0; i < n; ++i) {
-      if (std::strcmp(value, is_close ? kTractCloseWords[i] : kTractSizeWords[i]) == 0) {
+      if (std::strcmp(value, is_close ? kTractCloseWords[i] : (is_size ? kTractSizeWords[i] : kTractSourceWords[i])) == 0) {
         c.value = static_cast<float>(i);
         out = c;
         return true;

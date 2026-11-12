@@ -51,6 +51,7 @@
 // Memory: ring 2 KiB + window 1 KiB and 80 B of zeros + window table 1 KiB, in the object (SRAM).
 
 #include <o3_voc03er/units/vocoder/halfband.h>
+#include <o3_voc03er/units/vocoder/lpc.h>
 
 #include <cstdint>
 
@@ -95,15 +96,13 @@ static_assert(alignof(TubeComb) >= 8u, "the ring is alignas(8)");
 class Talk {
  public:
   static constexpr std::uint32_t kMaxFrames = 64;
-  static constexpr std::uint32_t kWin = 256;   // low-rate samples
-  static constexpr std::uint32_t kHop = 32;    // low-rate samples
-  static constexpr std::uint32_t kRing = 512;
+  static constexpr std::uint32_t kWin = Lpc::kWin;   // low-rate samples (the analysis is lpc.h's)
+  static constexpr std::uint32_t kHop = Lpc::kHop;   // low-rate samples
+  static constexpr std::uint32_t kRing = Lpc::kRing;
   static constexpr std::uint32_t kMinOrder = 8;   // Quality's limits
   static constexpr std::uint32_t kMaxOrder = 24;
   static constexpr std::uint32_t kMaxStages = 18;  // the lattice's order at Quality 24
-  static constexpr std::uint32_t kQuads = kWin / 4u;  // the analysis' unit, four samples
-  static constexpr std::uint32_t kLagTop = (kMaxStages + 3u) / 4u * 4u;  // the last lag a pass of four reaches
-  static constexpr float kMaxK = 0.995f;
+  static constexpr float kMaxK = Lpc::kMaxK;
 
   // The lattice order Quality q runs.
   static constexpr std::uint32_t stages_for(std::uint32_t q) noexcept { return (q * 3u + 2u) / 4u; }
@@ -125,9 +124,12 @@ class Talk {
   void process(const float* mod, const float* car, float* out, std::uint32_t n) noexcept;
 
   // Test seam: multiply-adds of the last process() call (one addition a slice, not one a MAC), and the lattice's state.
-  std::uint32_t macs_last_block() const noexcept { return macs_last_; }
+  std::uint32_t macs_last_block() const noexcept { return macs_last_ + lpc_.macs(); }
   float reflection_target(std::uint32_t m) const noexcept { return kt_[m]; }  // m 1..kMaxStages
   float reflection(std::uint32_t m) const noexcept { return k_[m]; }
+  // The analysis, for MouthLive (TRACT's live voice), which borrows it while Talk is not running (no mode crossfade to TALK under way): it saves a
+  // second 4 KiB analysis. Whoever borrows it restarts it (Lpc::reset); Talk::reset() does the same when TALK is entered again.
+  Lpc& analysis() noexcept { return lpc_; }
   std::uint32_t order() const noexcept { return order_; }  // Quality
   bool freeze() const noexcept { return freeze_; }
   std::uint32_t lattice_order() const noexcept { return run_; }
@@ -150,18 +152,13 @@ class Talk {
   std::uint32_t tube_delay() const noexcept { return tube_.delay(); }  // the comb's delay in low-rate samples (tests)
 
  private:
-  void slice(std::uint32_t units) noexcept;
   void publish() noexcept;
   void tick(float m, float c, float& y) noexcept;  // one low-rate sample: analysis share, ramp, lattice
   // FORMANT: k[1..n] -> out[1..m], through the areas; returns m, the sections the shifted tube has (n, or ceil(n / s) up to kMaxStages for s < 1)
   std::uint32_t shift_tube(const float* k, std::uint32_t n, float* out) const noexcept;
 
   // Single thread: everything runs in the audio context (events are applied in process() order).
-  alignas(8) float ring_[kRing];
-  alignas(8) float win_[kWin + kLagTop];  // the window, then zeros that are never written: a pass reads up to kLagTop past it
-  alignas(8) float wtab_[kWin];
-  alignas(8) float r_[kLagTop + 1];
-  alignas(8) float lagw_[kMaxStages + 1];
+  Lpc lpc_;  // the analysis: ring, window, autocorrelation and Levinson (lpc.h)
   alignas(8) float k_[kMaxStages + 2];   // current reflection coefficients, index 1..order
   alignas(8) float kt_[kMaxStages + 2];  // targets
   alignas(8) float dk_[kMaxStages + 2];
@@ -171,31 +168,17 @@ class Talk {
   alignas(8) float b_[kMaxStages + 2];   // lattice backward states
   Halfband dec_mod_[2], dec_car_[2], interp_[2];  // stage 1 at fs -> fs/2, stage 2 fs/2 -> fs/4
 
-  std::uint32_t wpos_ = 0;      // low-rate samples written (wraps with the ring mask)
-  std::uint32_t filled_ = 0;
-  std::uint32_t hop_pos_ = 0;   // 0..kHop-1
-  std::uint32_t end_ = 0;       // ring index just past the analysis window
   std::uint32_t order_ = 16;    // requested (Quality)
-  std::uint32_t pa_ = 12;       // order of the analysis in progress
   std::uint32_t run_ = 12;      // lattice order running
   std::uint32_t tgt_order_ = 12;
-  bool analysing_ = false;
   bool freeze_ = false;
   bool warp_on_ = false;    // FORMANT is not at centre: the tables above are valid and publish() shifts the tube
   bool shifted_ = false;    // kt_ holds a shifted set (so a return to centre has to put kraw_ back, FREEZE or not)
   float formant_st_ = 0.0f;
   float sinv_ = 1.0f;       // 2^(-st/12), the sections a lengthened tube needs per analysis section
   bool odd1_ = false, odd2_ = false;  // sample phases of the two halfband stages (the next input has an odd index), as Bands::fol_odd_
-  std::uint32_t stage_ = 0;     // cursor: 0 window, 1 lags
-  std::uint32_t cpos_ = 0;      // in units of four samples
-  std::uint32_t lag_ = 0;       // the first of the four lags of this pass
-  float acc_[4] = {};
-  std::uint32_t total_ = 0;
-  std::uint32_t done_ = 0;
   std::uint32_t ramp_left_ = 0;
   std::uint32_t macs_last_ = 0;
-  float sumw2_ = 1.0f;
-  float emph_prev_ = 0.0f;
   float car_prev_ = 0.0f;
   CarDrive drive_;       // the carrier's high-pass and clip, at the full rate
   float gain_ = 0.0f, gain_t_ = 0.0f, dgain_ = 0.0f;
