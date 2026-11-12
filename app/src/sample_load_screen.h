@@ -5,12 +5,14 @@
 //
 //   The slot is named at the top: UP / DOWN change it (the one SAMPLE and SAMPLE EDIT show). The kit's file picker lists the WAVs with their sizes (encoder,
 //   LEFT / RIGHT a page, a pad a row). F1 OPEN loads the file under the cursor into the slot, F8 BACK returns to the screen this one was opened from.
-//   16-bit PCM at 44.1 kHz, mono or stereo (the mean of the two) only: anything else is refused on the strip, as is a damaged file. A file over 16 s gives its
-//   first 16 s and the strip says so. A slot that is recording or sounds is refused (STOP THE SLOT FIRST); a slot that holds a sample asks first (REPLACES SLOT n,
-//   a second F1 confirms, any other key cancels).
+//   PCM of 8, 16, 24 or 32 bits or 32-bit float, at 22.05 to 96 kHz, mono or stereo (the mean of the two): converted on the way in to the slot's mono 16-bit 44.1 kHz
+//   (sample_load_logic.h, wav_convert.h); anything else, or a damaged file, is refused on the strip with its reason. A file over 16 s (after the conversion) gives its
+//   first 16 s and the strip says so, and what was converted ("48K 24B TO 44.1K 16B"). A slot that is recording or sounds is refused (STOP THE SLOT FIRST); a slot that
+//   holds a sample asks first (REPLACES SLOT n, a second F1 confirms, any other key cancels).
 //
-// The read is one of the kit's card jobs (Files::load into a sink), a slice of the main loop a pass; the file is staged in the SDRAM (16 s of stereo and its
-// header), checked, and written into the slot memory in bounded slices (sample_load_logic.h), a 64-sample fade at both ends. A slot that held a sample is
+// The read is one of the kit's card jobs (Files::load into a sink), a slice of the main loop a pass; the sink walks the file's chunks and converts the data as it comes
+// into a stage in the SDRAM (one loop of mono 16-bit), with a bounded amount of converter work a pass (the sink answers WouldBlock past it). The stage is checked, and written
+// into the slot memory in bounded slices, a 64-sample fade at both ends. A slot that held a sample is
 // cleared first (the unit's own Rec CLEAR, as SAMPLE EDIT's empty does), so a replacement of the same length is a new length to every screen too. Then Load
 // goes to the unit and the screen waits for the slot to show the length. SAMPLE's service() then cuts the slot evenly (F2 dim: not whole bars, unless it is).
 // Main loop only; the state is in the SDRAM (g_sl in the .cpp), so this object is the picker, the sink and a few pointers.
@@ -81,7 +83,6 @@ class SampleLoadScreen final : public o3sdk::app::Screen {
   std::int16_t* mem_ = nullptr;
   o3sdk::app::Screen* back_ = nullptr;
   o3sdk::app::FilePicker picker_;
-  sample_load::StageSink sink_;
 };
 
 }  // namespace o3_voc03er

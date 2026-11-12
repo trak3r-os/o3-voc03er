@@ -140,7 +140,7 @@ TEST_CASE("app: a pattern and an octave saved on the card come back after a rest
 }
 
 namespace {
-// The WAVs sample_load.txt loads (app/scenarios/sample_load_wavs.py writes the same six for a run by hand): the scenario test's card starts empty.
+// The WAVs sample_load.txt loads (app/scenarios/sample_load_wavs.py writes the same seven for a run by hand): the scenario test's card starts empty.
 void put_wav(const std::filesystem::path& file, std::uint32_t frames, unsigned ch, std::uint32_t rate, unsigned bits, std::size_t cut = 0) {
   std::vector<std::uint8_t> v;
   const auto le = [&v](std::uint32_t x, unsigned bytes) {
@@ -168,6 +168,8 @@ void put_wav(const std::filesystem::path& file, std::uint32_t frames, unsigned c
       const float x = 0.5f * std::sin(6.2831853f * (220.0f + 110.0f * static_cast<float>(c)) * static_cast<float>(i) / static_cast<float>(rate));
       if (bits == 16u) {
         le(static_cast<std::uint32_t>(static_cast<std::uint16_t>(static_cast<std::int16_t>(x * 32767.0f))), 2);
+      } else if (bits == 24u) {
+        le(static_cast<std::uint32_t>(static_cast<std::int32_t>(x * 8388607.0f)) & 0xFFFFFFu, 3);
       } else {
         v.push_back(static_cast<std::uint8_t>(static_cast<int>(x * 127.0f) + 128));
       }
@@ -183,10 +185,11 @@ void put_load_wavs(const std::filesystem::path& root) {
   std::filesystem::create_directories(d);
   put_wav(d / "a_mono.wav", 66150, 1, 44100, 16);
   put_wav(d / "b_stereo.wav", 66150, 2, 44100, 16);
-  put_wav(d / "c_48k.wav", 48000, 1, 48000, 16);
+  put_wav(d / "c_48k24.wav", 72000, 2, 48000, 24);
   put_wav(d / "d_8bit.wav", 44100, 1, 44100, 8);
-  put_wav(d / "e_long20.wav", 20u * 44100u, 2, 44100, 16);
+  put_wav(d / "e_long20.wav", 20u * 48000u, 2, 48000, 24);
   put_wav(d / "f_broken.wav", 44100, 1, 44100, 16, 30000);
+  put_wav(d / "g_192k.wav", 19200, 1, 192000, 16);
 }
 }  // namespace
 

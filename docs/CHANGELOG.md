@@ -4,6 +4,26 @@
 
 ### Added
 
+- **WI1: WAV import converts on load.** SAMPLE LOAD accepts 8, 16, 24 and 32-bit PCM and 32-bit float WAVs (plain or WAVE_FORMAT_EXTENSIBLE headers, unknown
+  chunks skipped, odd chunks padded), mono or stereo, from 22.05 to 96 kHz, and converts them to the slot format (mono int16 at 44.1 kHz) while loading; the
+  16 s limit applies to the converted length. 16-bit 44.1 kHz files take the old integer path and load sample for sample as before. Refused with a clear strip
+  text: other codings (ADPCM, MP3), more than 2 channels, rates outside 22.05 to 96 kHz, bad block align, a damaged or empty file. The strip says what was done
+  ("48K 24B TO 44.1K 16B", "FIRST 16.000 S LOADED, FILE HAS 20.000 S, ...") or why it refused. Rounding to nearest, no dither (rounding noise about -98 dBFS);
+  a stereo mix of 16-bit files truncates as before. Resampler (`app/src/wav_convert.h`): Kaiser (beta 7) windowed sinc, 16 zero crossings a side, 64 phases,
+  cut at 0.86 of the lower Nyquist, Q15 table, float ring, float only, no `double`, no heap, output length exactly ceil(n x 44100 / rate), the kernel is
+  renormalised so the ends do not droop. Measured on the host: pass-band ripple within 0.002 dB to 15.4 kHz, residual -82 to -90 dB, -14.6 dB at 20 kHz, -67 dB at
+  22 kHz, aliases from above Nyquist -77 to -92 dB. Work is bounded per pass (the budget of 80,000 taps, about 5 ms [estimate], is checked before every input frame and the sink returns a short
+  count, or WouldBlock at the top of a call, so a pass overshoots by one frame's work, under 140 taps, whatever the size of the chunk the kit offers) and the progress
+  display is kept. The sinc table (1,026 entries, 2 KB) is built once, on the first converted load after boot, inside the main loop: about 0.9 M cycles, 5 ms [estimate]. Memory: the
+  converter (header parser, table, ring, 2.8 KB) is in the SDRAM, built on first use in zeroed `O3SDK_BIG` storage, and not in the SRAM singleton: SRAM_U free under the
+  stack is 39,256 B after (0x2002a000 - __bss_end 0x200206a8, 6,488 B above the linker's 32 KiB floor) against 36,456 B with the converter in the SRAM; the SDRAM stage
+  shrinks from 2.8 MB to 1.41 MB (int16 frames). Cost [estimate]: about 36 taps an output at 48 kHz, 12 to 15 cycles a tap, so a 16 s stereo 24-bit 48 kHz file is about 4 s
+  of CPU and a 5 to 6 s load; to be measured on the unit. Behaviour changes against the old loader: a file whose block align disagrees with its format is now refused
+  ("BROKEN WAV FILE"); the refusal texts for the formats are "NEEDS PCM OR FLOAT", "NEEDS 8 TO 32 BIT" and "NEEDS 22 TO 96 KHZ" (were "NEEDS PCM, NOT FLOAT",
+  "NEEDS 16 BIT", "NEEDS 44.1 KHZ"), in the same order (coding, bits, rate, channels, then the block align); float, 8, 24 and 32-bit and other rates, which were refused, load. The 16-bit 44.1 kHz
+  result is pinned in the test by digests of what the loader of f8dd91a made of the same mono and stereo files. SAVE WAV
+  still writes 16-bit mono at 44.1 kHz. No parameter, `config.o3a` or pattern/project format change. Tests: `tests/sample_load_test.cpp` (rewritten),
+  `tests/wav_convert_test.cpp`, scenario `app/scenarios/sample_load.txt` with 24-bit 48 kHz, 20 s and 192 kHz files.
 - **SB1: bend a slot.** The Bend value (MIDI wheel, encoder, strip, BND pads) now also bends every sounding slot, loop or region, main and slice channel,
   by the same semitones (rate = speed x 2^(bend/12), up to 12 st either way; a slot used to play at 0.5x, 1x or 2x only). The synth's vibrato does not move
   slots. The reader keeps a fixed-point phase (Q33 samples in a `uint64`, a Q24 ratio, no float to 64-bit integer conversion, no `double`) and reads with linear

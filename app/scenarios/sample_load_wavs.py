@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # The WAVs sample_load.txt loads (SAMPLE LOAD, U8a), written into the folder given as the one argument (the card's Apps/o3_voc03er/):
-#   a_mono 1.5 s mono, b_stereo 1.5 s stereo (the same length), c_48k at 48 kHz, d_8bit at 8 bit, e_long20 20 s of stereo, f_broken with its data cut short.
+#   a_mono 1.5 s mono, b_stereo 1.5 s stereo (the same length), c_48k24 1.5 s of stereo at 48 kHz and 24 bit (converted on load: the same length at 44.1 kHz), d_8bit at 8 bit,
+#   e_long20 20 s of stereo at 48 kHz and 24 bit (converted, then cut to 16 s), f_broken with its data cut short, g_192k at 192 kHz (refused).
 # Run with `python3 -I`. Nothing is written to the repository: the card is a scratch directory.
 import math
 import os
@@ -15,6 +16,8 @@ def wav(path, frames, ch, rate, bits, gen, cut=0):
             v = gen(i, c)
             if bits == 16:
                 b += struct.pack('<h', max(-32768, min(32767, int(v * 32767))))
+            elif bits == 24:
+                b += struct.pack('<i', max(-8388608, min(8388607, int(v * 8388607))))[:3]
             else:
                 b += struct.pack('B', max(0, min(255, int(v * 127) + 128)))
     fmt = struct.pack('<HHIIHH', 1, ch, rate, rate * ch * bits // 8, ch * bits // 8, bits)
@@ -26,8 +29,8 @@ def wav(path, frames, ch, rate, bits, gen, cut=0):
         f.write(out)
 
 
-def sine(freq, amp):
-    return lambda i, c: amp * math.sin(2 * math.pi * freq * i / 44100)
+def sine(freq, amp, rate=44100):
+    return lambda i, c: amp * math.sin(2 * math.pi * freq * i / rate)
 
 
 def main():
@@ -38,11 +41,13 @@ def main():
     wav(os.path.join(d, 'a_mono.wav'), 66150, 1, 44100, 16, sine(440, 0.8))
     wav(os.path.join(d, 'b_stereo.wav'), 66150, 2, 44100, 16,
         lambda i, c: (0.8 * math.sin(2 * math.pi * 220 * i / 44100) if c == 0 else 0.4 * math.sin(2 * math.pi * 330 * i / 44100)) * (1 - i / 66150))
-    wav(os.path.join(d, 'c_48k.wav'), 48000, 1, 48000, 16, sine(440, 0.5))
+    wav(os.path.join(d, 'c_48k24.wav'), 72000, 2, 48000, 24,
+        lambda i, c: (0.6 * math.sin(2 * math.pi * 220 * i / 48000) if c == 0 else 0.3 * math.sin(2 * math.pi * 1100 * i / 48000)))
     wav(os.path.join(d, 'd_8bit.wav'), 44100, 1, 44100, 8, sine(440, 0.5))
-    wav(os.path.join(d, 'e_long20.wav'), 20 * 44100, 2, 44100, 16,
-        lambda i, c: 0.7 * math.sin(2 * math.pi * (110 + c * 55) * i / 44100) * (0.5 + 0.5 * math.sin(2 * math.pi * i / 44100)))
+    wav(os.path.join(d, 'e_long20.wav'), 20 * 48000, 2, 48000, 24,
+        lambda i, c: 0.7 * math.sin(2 * math.pi * (110 + c * 55) * i / 48000) * (0.5 + 0.5 * math.sin(2 * math.pi * i / 48000)))
     wav(os.path.join(d, 'f_broken.wav'), 44100, 1, 44100, 16, sine(440, 0.5), cut=30000)
+    wav(os.path.join(d, 'g_192k.wav'), 19200, 1, 192000, 16, sine(440, 0.5, 192000))
 
 
 main()

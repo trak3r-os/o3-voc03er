@@ -479,9 +479,19 @@ so it does not click. COPY copies the slot, cuts and all, to the next empty slot
 *SAMPLE LOAD with an empty card: it says so. Put WAV files in the app's folder and they are listed here.*
 
 SAMPLE LOAD lists the WAV files in `Apps/o3_voc03er/` on the card. To put files there, use Config's CARD AS DISK to see the card from a
-computer, or put the card in a computer. UP and DOWN pick a file, F1 loads it into the selected slot, F8 goes back. Files must be 16-bit,
-44.1 kHz, mono or stereo (stereo is mixed to mono). A longer file gives its first 16 seconds, and the strip says so. A slot that already
+computer, or put the card in a computer. UP and DOWN pick a file, F1 loads it into the selected slot, F8 goes back. A slot that already
 holds a sample asks first: F1 confirms, any other key cancels.
+
+What loads: PCM WAV files of 8, 16, 24 or 32 bits, and 32-bit float files, mono or stereo (stereo is mixed to mono), at any rate from 22.05 to 96 kHz
+(so 48 kHz, 24-bit files from a computer load as they are). A slot is always mono, 16-bit, 44.1 kHz, so a file that is not that is converted while
+it loads: the rate with a windowed-sinc resampler (a flat pass band to about 15 kHz, content above 44.1 kHz's half rate is filtered out before it can
+fold back as noise), the bit depth by rounding to the nearest 16-bit value (no dither: the rounding noise is about 98 dB below full scale). A file that
+is already 16-bit 44.1 kHz is copied unchanged. The 16-second limit counts the converted sound, so a 20 second file gives its first 16 seconds. The strip
+says what happened: "LOADED 1.500 S, 48K 24B TO 44.1K 16B", "FIRST 16.000 S LOADED, FILE HAS 20.000 S, ..." for a cut file, or why the file was refused:
+"NEEDS PCM OR FLOAT" (ADPCM, MP3 or another coding), "NEEDS 8 TO 32 BIT", "NEEDS 22 TO 96 KHZ", "NEEDS MONO OR STEREO", "BROKEN WAV FILE", "NOT A WAV FILE",
+"EMPTY WAV FILE". A refused file leaves the slot as it was. A converted file takes longer to load, since every sample is resampled by the processor
+(a 16 second stereo 24-bit 48 kHz file is estimated at 5 to 6 seconds; this needs measuring on the unit); the strip shows the progress and F8 cancels.
+SAVE WAV in SAMPLE EDIT still writes 16-bit mono at 44.1 kHz, the rate of the slot. The conversion needs more testing on the unit.
 
 ## 7. Patterns and songs
 
@@ -624,7 +634,9 @@ been read there, but several things need more testing, most of all by ear. In pa
   on the unit.
 - **Heavy use.** With every mode, a long chain and a full set of slots on screen at once, the processor load has not been measured in all
   its combinations.
-- **A WAV that is not 16-bit 44.1 kHz** is refused. A file longer than 16 seconds is cut to its first 16.
+- **WAV loading** converts 8, 16, 24 and 32-bit PCM and 32-bit float files of 22.05 to 96 kHz (mono or stereo) to the slot's 16-bit 44.1 kHz mono; other
+  codings, more than two channels and other rates are refused (SAMPLE LOAD). A file longer than 16 seconds (after conversion) is cut to its first 16. The
+  conversion needs more testing on the unit, in particular its load time and how it sounds on bright material.
 - **Bending a slot** changes its speed, so its pitch and its length move together: there is no pitch shift that keeps the length. The sound of a bent
   slot (the interpolation is linear, so a bright recording can sound duller or carry some aliasing, most on a bend up), the return to the bar after a bend,
   and the load of several bent slots at once need more testing on a unit.

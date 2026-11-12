@@ -168,11 +168,14 @@ of the top rows auditions that slice through the vocoder, and a pad of the botto
 
 The kit's `FilePicker` (`app/file_picker.h`) over the app's folder, `.wav` only, with the file's size in the value column (the picker has no seconds
 column, so the seconds of a file go on the strip when it is loaded and the slot's on the line at the right); F1 OPEN loads it into the selected slot (named
-at the top, UP / DOWN change it), F8 BACK. 16-bit PCM at 44.1 kHz, mono or stereo (mixed to mono), at most 16 s (a longer file gives its first 16 s and the
-strip says "FIRST 16.000 S LOADED, FILE HAS 20.000 S"). The listing is `Apps/o3_voc03er/`, because the kit loads from the app's folder only (section 9);
+at the top, UP / DOWN change it), F8 BACK. PCM of 8 to 32 bits or 32-bit float, 22.05 to 96 kHz, mono or stereo (mixed to mono), converted on load to the slot's 16-bit 44.1 kHz mono, at most 16 s of
+the converted sound (a longer file gives its first 16 s and the strip says "FIRST 16.000 S LOADED, FILE HAS 20.000 S, 48K 24B TO 44.1K 16B"; a converted
+file ends its note with what was done). The listing is `Apps/o3_voc03er/`, because the kit loads from the app's folder only (section 9);
 the card as a USB disk (Config, CARD AS DISK) is how files get there from a computer. A slot that records or sounds refuses ("STOP THE SLOT FIRST"); a slot
-that holds a sample asks "REPLACES SLOT n: F1 CONFIRMS" and any other key cancels ("NOT REPLACED"). Another rate, another bit depth, a float file or a broken
-one is refused on the strip, with the slot as it was.
+that holds a sample asks "REPLACES SLOT n: F1 CONFIRMS" and any other key cancels ("NOT REPLACED"). Another coding, more than two channels, a rate outside 22.05 to 96 kHz or a broken
+one is refused on the strip with its reason ("NEEDS 22 TO 96 KHZ", ...), with the slot as it was. The conversion (`wav_convert.h`: a Kaiser-windowed sinc, 16 zero crossings
+a side, 64 phases, cut at 0.86 of the lower Nyquist; `sample_load_logic.h`: the header parser and the sink) is streamed with a budget of 80,000 taps per screen
+tick, into a 1.41 MB int16 stage in the SDRAM; the 16-bit 44.1 kHz case skips the resampler.
 
 ### PATTERN
 
@@ -246,9 +249,10 @@ length changes (a take starts it, length 0 clears the picture at once), one slot
 again 3 times, then dropped until the next length change. Nothing runs in the render. RAM cost: about 7 KB of SDRAM, a few bytes of SRAM_U. A sprite costs 7 display-list words. No new unit parameter.
 
 Built in U8a (`sample_load_screen.{h,cpp}`, pure logic in `sample_load_logic.h`, `tests/sample_load_test.cpp`, `app/scenarios/sample_load.txt` with `sample_load_wavs.py`): the load, no SAVE WAV (U8b).
-The card job (`Files::load`, in the kit's slices, so no frame waits) reads the file into a stage of 1,411,264 bytes in the SDRAM (the header and 16 s of stereo; a longer file fills it and the screen cancels
-the read, the data it holds is the first 16 s). The header is parsed from the stage (`sample_load::parse`: RIFF chunks walked to `fmt ` and `data`, bounded at 64 chunks, WAVE_FORMAT_EXTENSIBLE read as its
-sub-format), then the app writes the slot's memory 8,192 frames a pass from the main loop (a stereo pair is its mean), bakes the 64-sample fades at both ends with the last pass, sends Load and a 0, and waits
+The card job (`Files::load`, in the kit's slices, so no frame waits) pushes the file into a `ByteSink` (`sample_load::LoadSink`, `g_sink` in the SDRAM), which parses the header as the bytes arrive
+(RIFF chunks walked to `fmt ` and `data`, bounded at 64 chunks, WAVE_FORMAT_EXTENSIBLE read as its sub-format, a block align that disagrees with the format refused) and converts as it goes (a stereo pair is
+its mean, 8 to 32-bit and float to int16, 22.05 to 96 kHz resampled to 44.1 kHz) into a 16 s stage of 1,411,264 bytes in the SDRAM (`g_stage`); a longer file fills it, the sink ends the load there and the data
+held is the first 16 s. Then the app writes the slot's memory 8,192 frames a pass from the main loop, bakes the 64-sample fades at both ends with the last pass, sends Load and a 0, and waits
 for `loop_status(slot).length` (1 s, resent every 100 ms, then "LOAD FAILED"). The strip counts READING and WRITING in percent; F8 reads CANCEL while the card is read. Every refusal is decided before the slot is
 touched. A slot that holds a sample is cleared first (Play 0, Rec 2, Rec 0) and the screen waits for length 0, so SAMPLE's `service()` sees 0 and then the new length and re-cuts it evenly: `edited` is
 cleared and F2 is dim for a length that is not whole bars, as for any take. SAMPLE EDIT's tables and the overview follow because the clear goes through length 0; a replacement of the same length takes the same
@@ -407,7 +411,7 @@ frame at 15 Hz (every other frame skipped by the app's own counter; `redraw()` s
 SRAM_U has about 0.7 KiB above its floor, so no screen keeps more than its cursor there: every table (the slice tables, 4 x 24 x 8 B; the eight
 patterns with their chords, 8 x 16 x 6 B; the chain; the picker's 24 entries, 1.2 KB; the hop energies of the onset detector, 4 x 2,756 x 2 B =
 22 KB; the overview staging) lives in one namespace-scope `O3SDK_BIG` struct in the SDRAM (about 36 KB) that the screens hold a pointer to; a
-main-loop read there is 29 cycles. SAMPLE LOAD's stage (1,411,264 bytes, `g_stage`), its 64 picker entries and its state are in the SDRAM as well (U8a). The screens themselves are 20 to 60 bytes each, under 400 bytes in all; `docs/PLAN.md` 4e still stands: the
+main-loop read there is 29 cycles. SAMPLE LOAD's stage (1,411,264 bytes, `g_stage`), its 64 picker entries, its state and its converter (`g_sink`: header parser, 2 KB sinc table, input ring; WI1) are in the SDRAM as well (U8a). The screens themselves are 20 to 60 bytes each, under 400 bytes in all; `docs/PLAN.md` 4e still stands: the
 first slice moves cold unit state out before any of this is linked.
 
 ## 6. The carrier synth
@@ -550,7 +554,7 @@ case near 55 %. A fifth reader is not planned; SPREAD's third oscillator was rea
 **The app:** the two pickers and the capture gesture (the routing as pure state, host-tested: every pair and what the screen says of it); the chord
 engine (root, kind, scale quality, voicing, SMOOTH's nearest inversion: pure, host-tested); the slice tables and their edits; the onset detector
 (one main-loop scan of the slot in 4,096-sample slices computing a 256-sample hop energy, then peaks above the running mean by the sensitivity, 50
-ms apart at least: pure, host-tested on a drum WAV and a sung phrase); the WAV reader (RIFF, 16-bit PCM, mono or stereo to mono, through
+ms apart at least: pure, host-tested on a drum WAV and a sung phrase); the WAV reader (RIFF and EXTENSIBLE headers, 8 to 32-bit PCM and float, 22.05 to 96 kHz, mono or stereo to mono, resampled to 44.1 kHz, through
 `Files::load` into an SDRAM staging region and then into the stopped slot, with the 64-sample seam fades `Loop` expects); the overview renderer;
 the patterns A to H with chords, and the chain; `project.o3a` (the chunk container, as `pattern.h`); the LPC envelope and the voiceprint drawing;
 the skin's theme and its contrast test; every screen's `help()` checked with `help_check`.

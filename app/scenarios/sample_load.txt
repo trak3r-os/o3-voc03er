@@ -1,10 +1,10 @@
 # SAMPLE LOAD (U8a): SAMPLE LOAD opens the kit's file picker on Apps/o3_voc03er/ (.wav only); UP and DOWN name the slot; F1 loads the file under the cursor into it;
 # F8 returns to the screen it came from. A mono file, a stereo file over the same slot (REPLACES SLOT 1, F1 confirms: same length, so the slot is cleared first), a 48 kHz
-# and an 8-bit file refused, any other key cancelling the ask, a damaged file refused, a 20 s stereo file clipped to 16 s (the read stops when the stage is full), a slot
-# that records refused. The simulator shows the screen and the unit's length; it cannot say how it sounds. The card needs the WAVs of sample_load_wavs.py:
+# 24-bit stereo file converted on load to the slot's 44.1 kHz 16-bit (the strip says so), any other key cancelling the ask, a damaged file and a 192 kHz file refused, a 20 s
+# 48 kHz 24-bit file converted and clipped to 16 s (the read stops when the stage is full), a slot that records refused. The simulator shows the screen and the unit's length; it cannot say how it sounds. The card needs the WAVs of sample_load_wavs.py:
 #   mkdir -p <card> <dir> && python3 -I app/scenarios/sample_load_wavs.py <card>/Apps/o3_voc03er
 #   build-host/app/o3_voc03er_sim --scenario app/scenarios/sample_load.txt --card <card> --out <dir>
-# Files sorted: a_mono, b_stereo (same length as a_mono), c_48k, d_8bit, e_long20, f_broken.
+# Files sorted: a_mono, b_stereo (same length as a_mono), c_48k24 (the same length once converted), d_8bit, e_long20, f_broken, g_192k.
 wait 300
 expect state card=ready
 tap sampleload
@@ -30,16 +30,19 @@ wait 1200
 snap 04_replaced
 expect state screen=SAMPLE_LOAD
 
-# c_48k.wav: asks, F1 confirms, then the file is refused and the slot is untouched (the list starts at its top after every job)
+# c_48k24.wav (1.5 s, 48 kHz, 24-bit stereo): asks, F1 confirms, then the file is converted to 44.1 kHz 16-bit mono, 66150 frames, and the strip says what was done (the list
+# starts at its top after every job)
 turn 2
 tap f1
 wait 100
 tap f1
-wait 800
-snap 05_refused_rate
+snap 05a_converting
+wait 2500
+snap 05_converted
 expect state screen=SAMPLE_LOAD
+expect state loop1=66150
 
-# d_8bit.wav: asks; any other key cancels (F3 here)
+# d_8bit.wav: asks; any other key cancels (F3 here); an 8-bit file loads, but not this time
 turn 3
 tap f1
 wait 100
@@ -56,6 +59,16 @@ tap f1
 wait 800
 snap 07_refused_broken
 expect state screen=SAMPLE_LOAD
+
+# g_192k.wav: refused at its header, the slot untouched
+turn 6
+tap f1
+wait 100
+tap f1
+wait 800
+snap 07b_refused_rate
+expect state screen=SAMPLE_LOAD
+expect state loop1=66150
 
 # e_long20.wav (20 s of stereo) into the empty slot 2: the first 16 s; the strip says so
 tap down

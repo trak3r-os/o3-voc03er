@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <new>
 
 namespace o3_voc03er {
 
@@ -55,13 +56,26 @@ struct LoadData {
   std::uint64_t deadline, resend;
   const char* note;             // a moment's line (a static string or note_buf), until note_until
   std::uint64_t note_until;
-  char note_buf[64];
+  char note_buf[112];
 };
 O3SDK_BIG LoadData g_sl = {};
 O3SDK_BIG app::Files::Entry g_entries[kEntries] = {};
-// The file as the card job delivers it: the header, then 16 s of stereo at most (a longer file is cut at the end of the stage).
-alignas(4) O3SDK_BIG std::uint8_t g_stage[sl::kStageBytes];
-static_assert(sizeof g_stage == sl::kStageBytes, "the stage is the logic's size");
+// The converter: the header parser, the sinc table (2 KB) and the input ring. Main loop only (Files::load pumps it from there), so it lives in the SDRAM and not in the SRAM
+// singleton, where it would take about 3 KB of the 32 KiB floor the linker script keeps under the stack. An O3SDK_BIG object cannot carry a vtable pointer or member
+// initialisers (the section is zero), so the storage is zero bytes and the sink is constructed in it on first use, once (the sinc table it builds lazily stays for the session).
+alignas(sl::LoadSink) O3SDK_BIG unsigned char g_sink_mem[sizeof(sl::LoadSink)];
+O3SDK_BIG bool g_sink_made;
+static_assert(alignof(sl::LoadSink) <= 8, "O3SDK_BIG aligns to 8");
+sl::LoadSink& sink() noexcept {
+  if (!g_sink_made) {
+    ::new (static_cast<void*>(g_sink_mem)) sl::LoadSink;
+    g_sink_made = true;
+  }
+  return *std::launder(reinterpret_cast<sl::LoadSink*>(g_sink_mem));
+}
+// The file as the sink converts it: mono, 16-bit, 44.1 kHz, one loop at most (a longer file is cut at the end of the stage).
+alignas(4) O3SDK_BIG std::int16_t g_stage[sl::kMaxFrames];
+static_assert(sizeof g_stage == sl::kMaxFrames * sizeof(std::int16_t), "the stage is one loop");
 
 constexpr int kX = 26;
 constexpr int kW = 748;
@@ -256,9 +270,9 @@ void SampleLoadScreen::chosen(app::Context& ctx) noexcept {
 void SampleLoadScreen::begin(app::Context& ctx) noexcept {
   app::Files& files = ctx.files();
   files.set_quiet(true);  // the screen has its own strip
-  sink_.bind(g_stage, sl::kStageBytes);
+  sink().bind(g_stage, g_sl.entry.size);  // the size is 0 for FILE's external loads: a data chunk cut short is then found by the end of the stream
   g_sl.note = nullptr;
-  if (!files.load(g_sl.folder, g_sl.entry.name, sink_)) {
+  if (!files.load(g_sl.folder, g_sl.entry.name, sink())) {
     const char* why = files.status().text;
     end_job(ctx);
     say(ctx, why != nullptr && why[0] != '\0' ? why : "CARD BUSY");
@@ -369,11 +383,11 @@ void SampleLoadScreen::tick_read(app::Context& ctx) noexcept {
   app::Files& files = ctx.files();
   const app::Files::Status st = files.status();
   bool done = st.phase == app::Files::Status::Done;
-  if (sink_.overflowed() && st.phase == app::Files::Status::Running) {
-    files.cancel();  // 16 s of stereo are staged: the rest of a longer file is not needed
+  if (sink().settled() && st.phase == app::Files::Status::Running) {
+    files.cancel();  // refused, the data complete or one loop converted: the rest of the file is not needed
     done = true;
   } else if (st.phase == app::Files::Status::Failed) {
-    if (sink_.overflowed()) {
+    if (sink().settled()) {
       done = true;  // the cancel above came back as a Failed "CANCELLED"
     } else {
       const char* why = st.text;
@@ -383,9 +397,11 @@ void SampleLoadScreen::tick_read(app::Context& ctx) noexcept {
     }
   }
   if (!done) {
+    sink().begin_pass();  // the converter's work for the next pass of the card job
     return;
   }
-  const sl::Info info = sl::parse(sink_.data(), sink_.held(), sink_.overflowed() ? g_sl.entry.size : sink_.seen());
+  sink().finish();
+  const sl::Info info = sink().info();
   if (info.verdict != sl::Verdict::Ok) {
     end_job(ctx);
     say(ctx, sl::refusal_text(info.verdict));
@@ -406,7 +422,7 @@ void SampleLoadScreen::tick_read(app::Context& ctx) noexcept {
     g_sl.deadline = ctx.uptime_ms() + kClearMs;
     g_sl.stage = kClearing;
   } else {
-    sl::write_begin(g_sl.w, info.frames, info.channels);
+    sl::write_begin(g_sl.w, info.frames);
     g_sl.stage = kCopying;
   }
 }
@@ -415,7 +431,7 @@ void SampleLoadScreen::tick_read(app::Context& ctx) noexcept {
 void SampleLoadScreen::tick_clear(app::Context& ctx) noexcept {
   const unsigned slot = g_sl.slot & 3u;
   if (sample_->status(slot).length == 0u && sample_->table(slot).length == 0u) {
-    sl::write_begin(g_sl.w, g_sl.info.frames, g_sl.info.channels);
+    sl::write_begin(g_sl.w, g_sl.info.frames);
     g_sl.stage = kCopying;
   } else if (ctx.uptime_ms() >= g_sl.deadline) {
     end_job(ctx);
@@ -431,7 +447,7 @@ void SampleLoadScreen::tick_copy(app::Context& ctx) noexcept {
     return;
   }
   std::int16_t* to = mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples;
-  if (sl::write_step(g_sl.w, g_stage + g_sl.info.data_offset, to)) {
+  if (sl::write_step(g_sl.w, g_stage, to)) {
     send_load(ctx);
   }
 }
@@ -454,7 +470,7 @@ void SampleLoadScreen::finish_copy(app::Context& ctx) noexcept {
   const unsigned slot = g_sl.slot & 3u;
   std::int16_t* to = mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples;
   for (unsigned guard = 0; guard < 4u + sl::kMaxFrames / sl::kSlice; ++guard) {  // bounded: a slice a turn
-    if (sl::write_step(g_sl.w, g_stage + g_sl.info.data_offset, to)) {
+    if (sl::write_step(g_sl.w, g_stage, to)) {
       break;
     }
   }
@@ -467,14 +483,24 @@ void SampleLoadScreen::tick_wait(app::Context& ctx) noexcept {
   const std::uint64_t now = ctx.uptime_ms();
   if (st.rec == Vocoder::LoopStatus::Rec::Idle && st.length == g_sl.info.frames) {
     g_sl.note_buf[0] = '\0';
-    if (g_sl.info.clipped) {
+    const std::uint32_t total = g_sl.info.total_frames();
+    if (g_sl.info.clipped && total != 0u) {
       cat(g_sl.note_buf, sizeof g_sl.note_buf, "FIRST ");
       cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
       cat(g_sl.note_buf, sizeof g_sl.note_buf, " LOADED, FILE HAS ");
-      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.file_frames);
+      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, total);
+    } else if (g_sl.info.clipped) {  // the size was not known: only that it went on
+      cat(g_sl.note_buf, sizeof g_sl.note_buf, "FIRST ");
+      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
+      cat(g_sl.note_buf, sizeof g_sl.note_buf, " LOADED");
     } else {
       cat(g_sl.note_buf, sizeof g_sl.note_buf, "LOADED ");
       cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
+    }
+    char conv[40];
+    if (sl::conversion_text(g_sl.info, conv, sizeof conv) != 0u) {
+      cat(g_sl.note_buf, sizeof g_sl.note_buf, ", ");
+      cat(g_sl.note_buf, sizeof g_sl.note_buf, conv);
     }
     g_sl.ext_ok = true;
     end_job(ctx);
@@ -521,7 +547,7 @@ void SampleLoadScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   if (sample_ != nullptr) {
     sample_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
   }
-  h.summary = "A 16-BIT 44.1 KHZ WAV, MONO OR STEREO, FROM APPS/O3_VOC03ER ON THE CARD, INTO THE SLOT AT THE TOP. OVER 16 S GIVES THE FIRST 16 S.";
+  h.summary = "A WAV OF 8 TO 32 BIT OR FLOAT, 22 TO 96 KHZ, FROM APPS/O3_VOC03ER ON THE CARD, INTO THE SLOT AT THE TOP. CONVERTED TO 16 BIT 44.1 KHZ MONO. THE FIRST 16 S.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -557,7 +583,7 @@ void SampleLoadScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   if (g_sl.stage == kReading) {
     verb = "READING ";
     pct = ctx.files().status().permille / 10u;
-    if (sink_.overflowed()) {
+    if (sink().settled()) {
       pct = 100;
     }
   } else if (g_sl.stage == kClearing) {
