@@ -536,10 +536,12 @@ SAVE WAV in SAMPLE EDIT still writes 16-bit mono at 44.1 kHz, the rate of the sl
 *PATTERN playing with FOLLOW on: the bright frame is the playhead.*
 
 Eight patterns, A to H, of up to sixteen steps each. Each step has five lanes: **NOTE** (a chord or a note), **CARRIER** (what sounds on that
-step: FOLLOW, SYNTH, NOISE or a slot), **LEVEL**, **SLICE** (which slice of the speaking slot fires) and **MOUTH** (TRACT mode's mouth). NOTE, INSTR (carrier), VOL (level)
+step: FOLLOW, SYNTH, NOISE, a slot or LIVE), **LEVEL**, **SLICE** (which slice of the speaking slot fires) and **MOUTH** (TRACT mode's mouth). NOTE, INSTR (carrier), VOL (level)
 and FX (slice, then MOUTH on a second press, then slice again) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
 
-The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). A palette
+The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). The CARRIER palette has eight pads: FOLLOW, SYNTH, NOISE, SLOT 1 to 4 and LIVE.
+LIVE sounds that step through the audio input, as SOUNDS LIVE does on PERFORM (in TRACT the input goes through the tube); it works whether SPEAKS is a slot or the input (with no input ever chosen on F2 SPEAKS it plays whatever the input gives at power-up, likely silence or noise), and the next step with a carrier
+switches away from it (FOLLOW leaves the carrier as it is). A pattern file with a LIVE step does not load on an older image. Switching to LIVE mid-pattern needs more testing on the unit (a click at the switch is possible). A palette
 pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays (on every lane, not only NOTE). The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
 (a step pad past LENGTH does nothing). The lower right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
 

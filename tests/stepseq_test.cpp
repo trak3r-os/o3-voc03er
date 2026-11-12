@@ -219,7 +219,8 @@ TEST_CASE("step: every field round trips through the word, and the zero word is 
   CHECK_FALSE(step_valid(Step{128, 0, 0, 0, 0, 0}));
   CHECK_FALSE(step_valid(Step{1, 5, 0, 0, 0, 0}));
   CHECK_FALSE(step_valid(Step{1, 0, 4, 0, 0, 0}));
-  CHECK_FALSE(step_valid(Step{1, 0, 0, 7, 0, 0}));  // LIVE (7) is never a lane value
+  CHECK(step_valid(Step{1, 0, 0, 7, 0, 0}));        // LIVE (7, LC1) is the last carrier
+  CHECK_FALSE(step_valid(Step{1, 0, 0, 8, 0, 0}));  // 8 does not exist
   CHECK_FALSE(step_valid(Step{1, 0, 0, 0, 128, 0}));
   CHECK_FALSE(step_valid(Step{1, 0, 0, 0, 0, 25}));  // SLICE is 0..24
   CHECK(step_valid(Step{1, 0, 0, 0, 0, 24}));
@@ -250,7 +251,7 @@ TEST_CASE("editing: the lanes change one field each, a bad value or step changes
   CHECK_FALSE(set_note(p, 3, 128));
   CHECK_FALSE(set_note(p, 16, 40));
   CHECK_FALSE(set_chord(p, 3, 0, ChordKind::Triad, Voicing::Close));  // a chord needs a root
-  CHECK_FALSE(set_carrier(p, 3, 7));
+  CHECK_FALSE(set_carrier(p, 3, kCarrierMax + 1u));
   CHECK_FALSE(set_level(p, 3, 128));
   CHECK_FALSE(set_length(p, 0));
   CHECK_FALSE(set_length(p, 17));
@@ -258,7 +259,7 @@ TEST_CASE("editing: the lanes change one field each, a bad value or step changes
   CHECK(length_of(p) == 16);
   REQUIRE(set_length(p, 5));
   CHECK(length_of(p) == 5);
-  for (unsigned i = 0; i < kCarrierMax + 1u; ++i) {  // FOLLOW, SYNTH, NOISE, SLOT 1..4, FOLLOW
+  for (unsigned i = 0; i < kCarrierMax + 1u; ++i) {  // FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE, FOLLOW
     CHECK(get_step(p, 7).carrier == i % (kCarrierMax + 1u));
     REQUIRE(cycle_carrier(p, 7));
   }
@@ -395,7 +396,7 @@ TEST_CASE("bank file: a file that fails a check loads nothing") {
   CHECK(refused(with_bank(7, 16, 0u)));            // a wrong pattern count
   CHECK(refused(with_bank(8, 0, 0u)));             // LENGTH 0
   CHECK(refused(with_bank(8, 17, 0u)));            // LENGTH 17
-  CHECK(refused(with_bank(8, 16, pack_step(Step{1, 0, 0, 0, 0, 0}) | (7u << 13))));  // carrier 7 (LIVE)
+  // the carrier field is three bits and 7 (LIVE, LC1) is valid: no pattern file can hold a bad carrier
   CHECK(refused(with_bank(8, 16, 0x00000080u)));                                     // note 128
   CHECK(refused(with_bank(8, 16, 5u << 8)));                                         // kind 5
   CHECK(refused(with_bank(8, 16, 25u << 24)));                                       // slice 25

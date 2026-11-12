@@ -43,8 +43,8 @@
 //            (a Param event, so it lands on the event's frame). FOLLOW changes nothing: the synth with the NOISE knob as set, and the loops
 //            whose role is CAR. SYNTH and NOISE play the synth with noise 0 or 1 and mute the CAR loops; LOOPn mutes the synth and every
 //            other CAR loop, and loop n is the carrier even if its role is MOD (its modulator part then stops at the block, not on the
-//            frame: set it to CAR first for a clean change). Nothing here touches the live input: it cannot be a carrier (its source
-//            switch settles for 200 ms). No click: the synth's gain, the noise amount and each loop's carrier gain move in a 5 ms ramp
+//            frame: set it to CAR first for a clean change). Nothing here touches the ADC: the app's AudioIn::select owns the source, the gain
+//            and the 200 ms settle, and 7 LIVE only routes the input (per step too, PATTERN's CARRIER lane since LC1). No click: the synth's gain, the noise amount and each loop's carrier gain move in a 5 ms ramp
 //            from the event's frame (the noise amount in slices of 16 samples, since the Carrier takes it once a run).
 //            7 LIVE: the live input (in_l, or in_r with LiveCh) is the carrier: the synth and the CAR loops are muted, the same 5 ms ramp
 //            (from the start of the block the event lands in). GATE cuts it like any carrier, ARP does not act on it. The ADC source itself is the app's.

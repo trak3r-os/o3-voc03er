@@ -10,8 +10,8 @@
 //                    the way make_chord counts: MIDI = 48 + 12 * octave + pitch class)
 //   byte 1  bits 0..2 kind     0 a single note, 1..4 a chord of ChordKind (Triad, Seventh, Open, Power) + 1
 //           bits 3..4 voicing  Voicing (chords only)
-//           bits 5..7 carrier  CARRIER lane: 0 FOLLOW (the step changes nothing: what SOUNDS says stays), 1 SYNTH, 2 NOISE, 3..6 SLOT 1..4.
-//                              LIVE is never a lane value (it is the user's pick and the lane cannot reach it, V5c)
+//           bits 5..7 carrier  CARRIER lane: 0 FOLLOW (the step changes nothing: what SOUNDS says stays), 1 SYNTH, 2 NOISE, 3..6 SLOT 1..4, 7 LIVE
+//                              (LC1: the audio input as the carrier, as SOUNDS LIVE; the ids are Vocoder::CarSrc's and the saved ones never change)
 //   byte 2  level    LEVEL lane = the note's velocity, 0 means the default (kLevelDefault), else 1..127
 //   byte 3  slice    SLICE lane (U6c): 0 none, 1..24 fires that slice of the SPEAKS slot at the step's frame (kSliceMax); a value above the
 //                    slot's slice count is stored and stays silent
@@ -276,7 +276,7 @@ inline bool set_mouth(PatternData& p, unsigned i, unsigned m) noexcept {
   __atomic_store_n(&p.mouth[i], static_cast<std::uint8_t>(m), __ATOMIC_RELAXED);
   return true;
 }
-// The next carrier of step `i` (FOLLOW, SYNTH, NOISE, SLOT 1..4, FOLLOW ...).
+// The next carrier of step `i` (FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE, FOLLOW ...).
 inline bool cycle_carrier(PatternData& p, unsigned i) noexcept {
   if (i >= kPatternSteps) {
     return false;

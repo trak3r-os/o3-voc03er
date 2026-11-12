@@ -31,6 +31,7 @@ Pattern sample() {
   p.carrier[1] = 3;
   p.carrier[5] = 2;
   p.carrier[15] = 6;
+  p.carrier[9] = 7;  // LIVE (LC1)
   return p;
 }
 
@@ -95,6 +96,7 @@ TEST_CASE("carrier file: the carriers round trip, and a pattern without them wri
   CHECK(back == p);
   CHECK(back.carrier[1] == 3);
   CHECK(back.carrier[15] == 6);
+  CHECK(back.carrier[9] == 7);  // LIVE is saved as CarSrc 7
 
   Pattern plain = p;
   for (std::uint8_t& c : plain.carrier) {
@@ -114,19 +116,19 @@ TEST_CASE("carrier file: a bad CARR refuses the whole file and leaves the patter
   Pattern keep = p;
   keep.carrier[2] = 1;
   const Pattern before = keep;
-  const std::vector<std::uint8_t> value = file_with_carr(p, kPatternSteps, 7, true);
+  const std::vector<std::uint8_t> value = file_with_carr(p, kPatternSteps, 8, true);
   CHECK_FALSE(read_pattern(value.data(), value.size(), keep));
   const std::vector<std::uint8_t> count = file_with_carr(p, 15, 0, false);
   CHECK_FALSE(read_pattern(count.data(), count.size(), keep));
   CHECK(keep == before);
-  const std::vector<std::uint8_t> fine = file_with_carr(p, kPatternSteps, 6, true);
+  const std::vector<std::uint8_t> fine = file_with_carr(p, kPatternSteps, 7, true);  // 7 is LIVE: the last value the file takes
   CHECK(read_pattern(fine.data(), fine.size(), keep));
-  CHECK(keep.carrier[3] == 6);
+  CHECK(keep.carrier[3] == 7);
 }
 
-TEST_CASE("carrier pattern: cycling steps through none, synth, noise, loop 1..4 and back") {
+TEST_CASE("carrier pattern: cycling steps through none, synth, noise, loop 1..4, live and back") {
   Pattern p;
-  for (unsigned expect : {1u, 2u, 3u, 4u, 5u, 6u, 0u, 1u}) {
+  for (unsigned expect : {1u, 2u, 3u, 4u, 5u, 6u, 7u, 0u, 1u}) {
     CHECK(p.cycle_carrier(4));
     CHECK(p.carrier[4] == expect);
   }
@@ -142,7 +144,7 @@ namespace {
 constexpr std::array<o3sdk::core::ParamDesc, Vocoder::kParamCount> make_rows() {
   std::array<o3sdk::core::ParamDesc, Vocoder::kParamCount> rows{};
   for (auto& r : rows) {
-    r = {"P", "", nullptr, nullptr, 0.0f, 6.0f, 0.0f, 7, 1, 0, o3sdk::core::ParamUnit::Int, o3sdk::core::ParamCurve::Linear, 0, 0};
+    r = {"P", "", nullptr, nullptr, 0.0f, 8.0f, 0.0f, 7, 1, 0, o3sdk::core::ParamUnit::Int, o3sdk::core::ParamCurve::Linear, 0, 0};
   }
   return rows;
 }
@@ -263,6 +265,39 @@ TEST_CASE("carrier hook: a stop restores what the user picked, once, and only if
   REQUIRE(rig.spy.hits.size() == 2);
   CHECK(rig.spy.hits[1].value == 1.0f);
   CHECK(rig.spy.hits[1].tick == 2u * 240u);  // the run restarts at position 0
+}
+
+// LC1: LIVE is a lane value (CarSrc 7, as SOUNDS LIVE). A LIVE step switches the carrier on its own frame, the next step with a carrier switches it away
+// (SYNTH here), a step with none (FOLLOW) leaves whichever is on, and a Stop gives back what the user picked.
+TEST_CASE("carrier hook: a LIVE step sounds the audio input, the next carrier step takes it away, a stop restores the pick") {
+  HookRig rig;
+  REQUIRE(rig.ok);
+  rig.seq.set_picked(3);  // SOUNDS = SLOT 1
+  std::uint8_t car[kPatternSteps] = {};
+  car[2] = 7;  // LIVE
+  car[6] = 1;  // SYNTH: the step after the LIVE ones that follows it
+  car[10] = 7;
+  REQUIRE(set_carrier(rig.bank.pattern[0], 2, 7));
+  rig.set_all(car);
+  CHECK(get_step(rig.bank.pattern[0], 2).carrier == 7u);
+  rig.e.start();
+  rig.spy.hits.clear();
+  REQUIRE(rig.e.play());
+  rig.run(1400);  // one bar
+  REQUIRE(rig.spy.hits.size() == 3);
+  const std::uint64_t at[3] = {2, 6, 10};
+  const float want[3] = {7.0f, 1.0f, 7.0f};
+  for (unsigned i = 0; i < 3; ++i) {
+    INFO("hit " << i);
+    CHECK(rig.spy.hits[i].exact);
+    CHECK(rig.spy.hits[i].tick == at[i] * 240u);
+    CHECK(rig.spy.hits[i].value == want[i]);
+  }
+  rig.spy.hits.clear();
+  REQUIRE(rig.e.stop());
+  rig.run(1);
+  REQUIRE(rig.spy.hits.size() == 1);  // the LIVE step was the last to change it: the pick comes back
+  CHECK(rig.spy.hits[0].value == 3.0f);
 }
 
 TEST_CASE("carrier hook: PLAY then STOP with no carrier step leaves SOUNDS alone (LIVE, a slot)") {

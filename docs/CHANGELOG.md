@@ -4,6 +4,11 @@
 
 ### Added
 
+- **LC1: LIVE in PATTERN's CARRIER lane.** A step can sound through the live audio input, as PERFORM's SOUNDS LIVE does (the pattern's carrier ids are the engine's: 7 is LIVE, appended, the saved ids 0 to 6 never move;
+  `kCarrierMax` 6 to 7, the three-bit carrier field already held it). INSTR gets a LIVE pad (pad 7, cell "LIV") and playback switches the carrier to LIVE on that step and to the next step's carrier after it, a Stop
+  restoring the user's pick. It works with SPEAKS on a slot or on the input. Of the PATTERN lanes only SLICE needs a slot (it says SPEAKS HAS NO SLICES); MOUTH capture reads a recorded slot by design. No format
+  change: an older image refuses a pattern file that holds a LIVE step, an older file loads here. Scenario `pattern_live_carrier.txt`, tests in `carrier_step_test`, `pattern_screen_test`, `stepseq_test`. Needs more testing on the unit
+  (a click at the switch).
 - **PR1: TRACT presets on PERFORM SHIFT + F8.** In TRACT the PRESET value offers eight mouths of its own (AH, OO, EE, WOW, BREATH, TIN MAN, TINY, BIG), each writing all twelve
   tract values (Vowel to Accent, never SOURCE), so none leaves anything behind; the vocoder's eight are unchanged and the vocoder is untouched in TRACT. The project's one saved
   preset name resolves against the table of the last choice (`project_tract_preset_index`), an unknown name opens as none. Scenario `tract_presets.txt`, tests in

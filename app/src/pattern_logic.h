@@ -24,7 +24,7 @@ inline constexpr const char* kClearPrompt[kLanes] = {"CLEAR NOTE LANE: F1 CONFIR
 
 inline constexpr unsigned kPalettePads = 24;  // pads 0..23: rows 0 and 1 (row 0 is the top)
 inline constexpr unsigned kFirstStepPad = 24;  // rows 2 and 3
-inline constexpr unsigned kCarrierPads = kCarrierMax + 1u;  // FOLLOW, SYNTH, NOISE, SLOT 1..4
+inline constexpr unsigned kCarrierPads = kCarrierMax + 1u;  // FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE
 
 // A pad of rows 2 and 3: columns 0..7 are steps 1..16 (row 2 the first eight), columns 8..11 are patterns A..H (row 2 A..D). -1: not that kind.
 constexpr int step_of_pad(unsigned pad) noexcept {
@@ -121,8 +121,8 @@ inline bool mouth_write(PatternData& p, unsigned i, unsigned pad, MouthPage page
 // The next step of the cursor after a palette write: one on, wrapping at LENGTH.
 constexpr unsigned next_cursor(unsigned cursor, unsigned length) noexcept { return length == 0u ? 0u : (cursor + 1u) % length; }
 
-inline constexpr const char* kCellCarrier[kCarrierPads] = {"FLW", "SYN", "NSE", "S1", "S2", "S3", "S4"};
-inline constexpr const char* kPadCarrier[kCarrierPads] = {"FOLLW", "SYNTH", "NOISE", "SLOT1", "SLOT2", "SLOT3", "SLOT4"};
+inline constexpr const char* kCellCarrier[kCarrierPads] = {"FLW", "SYN", "NSE", "S1", "S2", "S3", "S4", "LIV"};
+inline constexpr const char* kPadCarrier[kCarrierPads] = {"FOLLW", "SYNTH", "NOISE", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "LIVE"};
 // The MOUTH lane's cell: the vowel's letters (PERFORM's labels), "LIP", "TIP", "BCK" for the closures, a ">" before a vowel that slides in (GLD), the word's
 // three letters ("WOW" "YEA" "YOI" "WAH" "OW" "BA" "DA" "GA") or the WOB's rate ("~4" "~8" "~16" "~32" "~8T" "~16T"); empty for FOLLOW. Up to 4 characters
 // and the terminator.
@@ -167,7 +167,7 @@ inline void note_name(char (&out)[6], unsigned note) noexcept {
 // The MOUTH lane's VALUE walk: FOLLOW, A..U, LIP TIP BCK, 8 words, 6 WOBs (27 values, the last is 26).
 inline constexpr int kMouthWalkMax = static_cast<int>(kMouthWord + kMouthWords + kMouthWobRates) - 1;
 
-// The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind), CARRIER 0..6, LEVEL 1..127. A step with
+// The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind), CARRIER 0..7 (7 is LIVE), LEVEL 1..127. A step with
 // no change (the end of a range, the SLICE lane with no slices) returns false; SLICE steps 0..`slice_count` (0 is none).
 inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigned slice_count = 0) noexcept {
   const Step s = get_step(p, i);

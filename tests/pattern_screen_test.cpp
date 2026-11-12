@@ -155,6 +155,11 @@ TEST_CASE("pattern: value steps and rests by lane") {
   CHECK(pt::step_value(p, 0, pt::Lane::Carrier, 3));
   CHECK(o3_voc03er::get_step(p, 0).carrier == 3u);
   CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Carrier, 9));
+  CHECK(pt::step_value(p, 0, pt::Lane::Carrier, 4));  // LC1: 3 + 4 is LIVE (7), the last value; one more is refused
+  CHECK(o3_voc03er::get_step(p, 0).carrier == 7u);
+  CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Carrier, 1));
+  CHECK(pt::step_value(p, 0, pt::Lane::Carrier, -4));
+  CHECK(o3_voc03er::get_step(p, 0).carrier == 3u);
   CHECK_FALSE(pt::step_value(p, 0, pt::Lane::Slice, 1));  // SPEAKS has no slices
   CHECK(pt::rest_lane(p, 0, pt::Lane::Note));
   CHECK(o3_voc03er::get_step(p, 0).note == 0u);
@@ -411,8 +416,8 @@ TEST_CASE("pattern: SHIFT + F6 asks to clear the lane and F1 confirms; SHIFT + F
 
 TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and the LEDs show") {
   Rig rig;
-  tap(*rig.h, app::Button::Instr);  // CARRIER: seven values
-  CHECK(rig.count(0, 23, app::kLedOff) == 17u);
+  tap(*rig.h, app::Button::Instr);  // CARRIER: eight values
+  CHECK(rig.count(0, 23, app::kLedOff) == 16u);
   CHECK(rig.led(0) == app::kLedMid);  // FOLLOW is what an empty step stores
   pad(*rig.h, 2);                     // NOISE into step 1
   pad(*rig.h, 24);
@@ -430,10 +435,39 @@ TEST_CASE("pattern: LANE (the buttons and F2) picks what the palette writes and 
   CHECK(rig.count(0, 23, app::kLedOff) < 24u);
   tap(*rig.h, app::Button::F2);  // focus LANE
   tap(*rig.h, app::Button::F2);  // a tap steps it: CARRIER
-  CHECK(rig.count(0, 23, app::kLedOff) == 17u);
+  CHECK(rig.count(0, 23, app::kLedOff) == 16u);
   tap(*rig.h, app::Button::Down);
   tap(*rig.h, app::Button::Up);
-  CHECK(rig.count(0, 23, app::kLedOff) == 17u);  // UP and DOWN are the octave now: the lane stays CARRIER
+  CHECK(rig.count(0, 23, app::kLedOff) == 16u);  // UP and DOWN are the octave now: the lane stays CARRIER
+}
+
+// LC1: the CARRIER palette is FOLLOW, SYNTH, NOISE, SLOT 1..4 and LIVE on pads 0..7; the other 16 are dark.
+TEST_CASE("pattern: the CARRIER palette ends with LIVE, its cell and pad name, and the step's match (the logic)") {
+  static_assert(pt::kCarrierPads == 8u, "FOLLOW, SYNTH, NOISE, four slots and LIVE");
+  CHECK(std::strcmp(pt::kPadCarrier[7], "LIVE") == 0);
+  CHECK(std::strcmp(pt::kCellCarrier[7], "LIV") == 0);
+  CHECK(std::strcmp(pt::kPadCarrier[6], "SLOT4") == 0);  // the ids before it did not move
+  o3_voc03er::PatternData p{};
+  REQUIRE(o3_voc03er::set_carrier(p, 0, 7));
+  const o3_voc03er::Step s = o3_voc03er::get_step(p, 0);
+  const pd::Layout layout{};
+  for (unsigned pad = 0; pad < pt::kPalettePads; ++pad) {
+    CHECK(pt::palette_matches(pt::Lane::Carrier, pad, s, 0, layout) == (pad == 7u));
+  }
+}
+
+TEST_CASE("pattern: a LIVE pad writes the step and lights; the pads after it are dark") {
+  Rig rig;
+  tap(*rig.h, app::Button::Instr);  // CARRIER
+  CHECK(rig.led(7) != app::kLedOff);  // the LIVE pad is lit, and
+  CHECK(rig.led(8) == app::kLedOff);  // the next is dark
+  pad(*rig.h, 7);                     // LIVE into step 1; the cursor moves on
+  pad(*rig.h, 8);                     // a dark pad writes nothing
+  pad(*rig.h, 24);                    // back on step 1
+  CHECK(rig.led(7) == app::kLedMid);  // the palette shows what the step holds
+  CHECK(rig.led(0) == app::kLedDim);
+  CHECK(rig.count(0, 23, app::kLedOff) == 16u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
 TEST_CASE("pattern: with SPEAKS on LIVE the SLICE lane is dark and writes nothing") {

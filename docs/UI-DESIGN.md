@@ -42,8 +42,9 @@ live source on the other side is listed dimmed with the words CAPTURE FIRST. The
   MIC > SLOT 2"). Picking a dimmed live source on the other side pre-arms the same thing: after the capture the picker switches the ADC to the
   new source and gives it to that side. Two presses from "mic speaks through the synth" to "the captured voice speaks through the radio".
 
-The same rule explains why a live carrier cannot change per step (the ADC settles 200 ms): the PATTERN's CARRIER lane offers SYNTH, NOISE and
-the slots, and LIVE only as the value the pattern leaves alone (FOLLOW).
+LC1 changed one consequence of that rule: the PATTERN's CARRIER lane also offers LIVE (the audio input as the carrier, what PERFORM's SOUNDS LIVE does; in
+TRACT the input goes through the tube). The first brief held that a live carrier cannot change per step because the ADC settles 200 ms; the unit reads the raw ADC for a live carrier
+whatever the modulator source, so the switch is a gain change on a running input, but a click at the switch is not ruled out: needs more testing on the unit.
 
 ## 3. Every physical button
 
@@ -71,7 +72,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | SAMPLE REC | Opens SAMPLE REC: record the live source into the selected slot at the bar | everywhere |
 | SONG | Opens SONG: the chain of patterns A to H | everywhere |
 | NOTE | The pattern's NOTE lane: opens PATTERN with that lane selected (the pads write notes or chords into the step) | everywhere |
-| INSTR | The pattern's CARRIER lane (what sounds on that step: FOLLOW, SYNTH, NOISE, SLOT 1 to 4) | everywhere |
+| INSTR | The pattern's CARRIER lane (what sounds on that step: FOLLOW, SYNTH, NOISE, SLOT 1 to 4, LIVE) | everywhere |
 | VOL | The pattern's LEVEL lane (the step's velocity) | everywhere |
 | FX | The pattern's SLICE lane (the slice of the SPEAKS slot that fires on that step); pressed again on that lane, the MOUTH lane (TRACT's mouth), and again, back to SLICE. The weakest of the caps: HELP says "SLICE LANE, THEN MOUTH LANE" | everywhere |
 | PATTERN | Opens PATTERN, the 16-step sequencer (note or chord, carrier, level, slice per step) | everywhere |
@@ -182,7 +183,7 @@ tick, into a 1.41 MB int16 stage in the SDRAM; the 16-bit 44.1 kHz case skips th
 Sixteen steps as cells with five lanes under each (NOTE, CARRIER, LEVEL, SLICE, MOUTH), the playhead in the voice ink, the cursor framed, the lane in
 force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever PERFORM's rows A and B play there (section 7). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
 the playhead); columns 8 to 11 of those rows are patterns A to H (`kLedMid` the current, `kLedOn` the one playing); rows 0 and 1 are the lane's
-palette: NOTE PERFORM's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER six pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4), LEVEL 24 steps of
+palette: NOTE PERFORM's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER eight pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4, LIVE; the cell reads FLW, SYN, NSE, S1 to S4, LIV), LEVEL 24 steps of
 velocity, SLICE slices 1 to 24, MOUTH two pages (below). A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
 the cursor there (SHIFT + step pad: a rest in the lane).
 On LEVEL the palette pad also sounds the cursor step's note or chord at that level while held (a rest sounds nothing); on SLICE it fires the
@@ -212,7 +213,7 @@ Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cp
 slice), the bank of eight patterns is `O3SDK_BIG`, and the hook reads one word per step with a relaxed atomic, so an edit is heard whole at the
 step's next visit. A chord step stores its root as the note, so a pattern of single notes stays valid. Settled where the spec was open:
 the gate is 75 % of a sixteenth, notes also end at Stop; carrier 0 (FOLLOW) emits nothing, and a Stop restores the carrier the user picked only
-if a step changed it (LIVE is never a lane value); LEVEL 0 means 100 and is sent as the NoteOn velocity: the last note sets the synth's level, 100 and up being full, so a level above 100 sounds as 100 and the
+if a step changed it (LC1: LIVE, carrier 7, is the last lane value, appended so the saved ids never moved); LEVEL 0 means 100 and is sent as the NoteOn velocity: the last note sets the synth's level, 100 and up being full, so a level above 100 sounds as 100 and the
 lane only turns a step down; a soft note also lowers what is still held, because it is one gain and not one a voice. It acts on the SYNTH and NOISE carriers, not on a slot or LIVE; a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the
 previous step's notes; `pattern.o3a` v2 adds a BANK chunk after the v1 chunks (an older reader gets pattern A), a v1 file loads into A only,
 and a file that fails any check loads nothing. The console has `pat` (print, `len`, `note`, `chord`, `car`, `lvl`, `slc`): a step's slice (0 none, 1 to 24) fires that slice of the SPEAKS slot (U6c).

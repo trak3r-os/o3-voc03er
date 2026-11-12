@@ -1,0 +1,36 @@
+# LIVE in PATTERN's CARRIER lane (LC1): four notes, then the CARRIER lane with the LIVE pad (pad 7, after SLOT 1..4): LIVE on step 1, SYNTH on step 3, LIVE on
+# step 4 (the cells read LIV, SYN, LIV), and the bar run. SPEAKS stays on the audio input, the step's carrier is the input too, as PERFORM's SOUNDS LIVE.
+# The simulator's input is synthetic: this shows the screen and that the switch path runs; how LIVE sounds as a carrier on a real source is the unit's to say.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern_live_carrier.txt --out <dir>   (the dir must exist)
+record on
+wait 200
+tap pattern
+wait 100
+pad 0
+pad 3
+pad 7
+pad 3
+tap left
+tap left
+tap left
+tap left
+tap instr  # CARRIER: the palette is FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE on pads 0..7, the rest dark
+snap 01_carrier_palette
+pad 7
+tap right
+pad 1
+pad 7
+snap 02_live_set
+expect state carriers=3
+press shift
+tap play
+release shift
+wait 1200
+snap 03_running
+expect state playing=1
+wav pattern_live_carrier
+press shift
+tap play
+release shift
+wait 200
+expect state playing=0

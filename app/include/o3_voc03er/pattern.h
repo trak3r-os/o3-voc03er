@@ -12,8 +12,9 @@
 //
 //   pattern.o3a   type "PATN", one chunk STEP: u16 version (0x0100), u8 step count (16), 16 notes (0: a rest, else 1..127)
 //                 plus, since V5c, an optional chunk CARR: u16 version (0x0100), u8 step count (16), 16 carriers (0: none, follow what is set;
-//                 1 synth, 2 noise, 3..6 loop 1..4: the Vocoder's CARRIER values minus 0 FOLLOW). An absent CARR (every older file) is no carrier
-//                 on any step; a CARR with a wrong count or a value above 6 refuses the whole file. An older reader skips the chunk.
+//                 1 synth, 2 noise, 3..6 loop 1..4, 7 live (LC1): the Vocoder's CARRIER values minus 0 FOLLOW). An absent CARR (every older file) is
+//                 no carrier on any step; a CARR with a wrong count or a value above 7 refuses the whole file (so an image before LC1 refuses a file
+//                 with a LIVE step). An older reader skips the chunk.
 //   config.o3a    type "CONF", one chunk OCTV: u16 version (0x0100), u8 octave + 3 (so 0..5 for the octaves -3..+2)
 //                 plus VOIC (u16 version, u8 voicing 0..3) and, since MS1, SLCH: u16 version (0x0100), u8 the MIDI slice channel (0 SAME, 1..16 a
 //                 channel, 17 OFF; midi_slice_logic.h). An absent SLCH (every older file) is SAME, today's behaviour; a value above 17 refuses the file.
@@ -29,7 +30,7 @@
 namespace o3_voc03er {
 
 inline constexpr unsigned kPatternSteps = 16;
-inline constexpr std::uint8_t kCarrierMax = 6;  // a step's carrier: 0 none, 1 synth, 2 noise, 3..6 loop 1..4
+inline constexpr std::uint8_t kCarrierMax = 7;  // a step's carrier: 0 none, 1 synth, 2 noise, 3..6 loop 1..4, 7 live (LC1; the ids are Vocoder::CarSrc's, the saved ones never change)
 inline constexpr const char* kPatternFile = "pattern.o3a";  // in the app's folder on the card, Apps/<id>/ (the CMake id)
 inline constexpr const char* kConfigFile = "config.o3a";
 // The largest file each makes (about 80 and 50 bytes) with room to spare; the buffers that hold them are word aligned (Files::save reads them).
