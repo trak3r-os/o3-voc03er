@@ -190,6 +190,8 @@ void Vocoder::prepare(float sample_rate) noexcept {
   vib_was_ = false;
   bend_.jump(0.0f);
   carrier_.set_bend_ratio(1.0f);
+  slot_bend_st_ = 0.0f;
+  loops_.set_bend(1.0f);
   bands_mix_.jump(1.0f);
   talk_mix_.jump(0.0f);
   tune_mix_.jump(0.0f);
@@ -998,7 +1000,7 @@ void Vocoder::publish_loops() noexcept {
     } else if (s.rec == Slot::Rec::Recording) {
       rec = s.want_rec ? 2u : 3u;
     }
-    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.bars(i) != 0u ? 64u : 0u) | (loops_.length(i) << 8);
+    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.on_bar(i) ? 64u : 0u) | (loops_.length(i) << 8);
     pos_[i].store(loops_.bank_position(i), std::memory_order_relaxed);
     status_[i].store(w, std::memory_order_relaxed);
     const std::uint32_t half_db = static_cast<std::uint32_t>(static_cast<int>(std::floor(s.level_db * 2.0f + 0.5f)) + 64);
@@ -1042,6 +1044,14 @@ void Vocoder::run_loops(const o3sdk::dsp::Transport& t, std::uint32_t n, float* 
     return;
   }
   tempo_mbpm_ = t.tempo_mbpm;
+  // The slots follow Bend (not the vibrato): once a block, one exp2 only when it moved. A wheel a hair off its centre (|Bend| below 0.02 st,
+  // a few steps of its 14 bits) is no bend for them: a bent loop ignores the bar lines, so the slots take exactly 1.0 there. The synth's own bend is not touched.
+  const float bend_st = bend_.value();
+  if (bend_st != slot_bend_st_) {
+    slot_bend_st_ = bend_st;
+    const float mag = bend_st < 0.0f ? -bend_st : bend_st;
+    loops_.set_bend(mag < 0.02f ? 1.0f : std::exp2(bend_st * (1.0f / 12.0f)));
+  }
   float tmp[Bands::kMaxFrames];
   std::uint32_t play_from[Loop::kCount] = {};
   // The block's bar line (frame and bar index), found once and only when something asks: -1 none. A block holds at most one.

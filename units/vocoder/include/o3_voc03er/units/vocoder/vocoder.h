@@ -74,8 +74,9 @@
 //                     (the modulator above 5 kHz, only while the carrier sounds): 0.5x at 0, 1x at 100 % (Talk::set_thru).
 //  42        CARRIER:
 //            42 Bend    st, -12..+12 (default 0): the SYNTH carrier's pitch, every oscillator's increment times 2^(Bend / 12), once a block through
-//                     a 20 ms dsp::Ramp (a stepped input glides). Only SYNTH moves: a live source has no pitch and a slot reads at fixed speeds.
-//                     0 is the exact unbent path.
+//                     a 20 ms dsp::Ramp (a stepped input glides). The SYNTH carrier and every sounding slot (a loop, a
+//                     slice, a sample: their speed times 2^(Bend / 12), Loop::set_bend; not the vibrato) bend; a live source has no pitch.
+//                     0 is the exact unbent path, for the synth and the slots alike; the slots also read |Bend| < 0.02 st as exactly 0 (a dead zone).
 //            43 Vib     0..1 (default 0): vibrato on the SYNTH carrier, a ~5.5 Hz sine LFO stepped once a block (one sin a block while on),
 //                     peak +-0.5 st at 1, added to Bend before the increments. 0 is the exact path of Bend alone and resets the phase.
 //  44..46    RHYTHM (the carrier's time and pitch; all three at 0 are bit for bit the sound without them):
@@ -370,6 +371,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   o3sdk::dsp::Ramp synth_gain_{1.0f};
   o3sdk::dsp::Ramp noise_amt_;
   o3sdk::dsp::Ramp bend_;  // semitones; the carrier's ratio follows it (step_bend)
+  float slot_bend_st_ = 0.0f;  // the Bend the slots (Loop::set_bend) were last given, render context only (run_loops)
   o3sdk::dsp::Ramp vib_;   // vibrato depth 0..1 (20 ms glide); an LFO of kVibHz, peak +-0.5 st at 1, added to the bend (step_bend)
   float vib_phase_ = 0.0f;  // cycles, 0..1; reset while the depth is 0
   float vib_inc_ = 0.0f;    // cycles a sample

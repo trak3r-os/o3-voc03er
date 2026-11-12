@@ -1,0 +1,33 @@
+# Bend moves a playing slot (SB1): a 1 bar take of a tone on the line is made in SAMPLE REC (AFTER SOUNDS, so it is the carrier and plays at once, looped),
+# then the MIDI wheel is pushed up, let go, pushed down, let go. The slot's speed follows Bend continuously (it used to play at 0.5x, 1x or 2x only).
+# The simulator's input is synthetic: this shows that the bent slot sounds and the screen stays sane; the WAV carries the shift (the four wavs read 220, 246, 196 and 220 Hz at the end of each hold). The sound on real
+# material, the click when the bend returns, and the CPU are for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/bend_slot.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+wait 100
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+snap 01_slot_playing
+wav bend_slot_flat
+midi usb e0 00 7f
+wait 800
+snap 02_wheel_up
+wav bend_slot_up
+midi usb e0 00 00
+wait 800
+snap 03_wheel_down
+wav bend_slot_down
+midi usb e0 00 40
+wait 800
+snap 04_wheel_centred
+wav bend_slot_back
+record off

@@ -20,6 +20,20 @@
 // slope changes, and going to 1x forward drops an odd half sample). A level change ramps linearly over the next chunk. start() begins at
 // the first sample (the last one in reverse) at the loop's own speed.
 //
+// Bend. set_bend(ratio) multiplies the speed of every sounding reader, loop or region, by a ratio in 0.5 .. 2 (one octave down to one up): the
+// Vocoder passes 2^(Bend/12), so a recorded voice or sample bends like the synth. Exactly 1 (bend 0) leaves everything above untouched,
+// bit for bit: the integer paths are taken by a test once a block. Away from 1 a reader plays from a fixed-point phase (Q33: whole samples
+// in the high bits, 2^-33 of a sample below; one uint64, no float to integer conversion, no double): the speed (0.5x, 1x or 2x times the
+// ratio) is added to it a sample, the output is the linear interpolation between the two neighbouring samples (the second wraps at a loop's
+// seam, and stops at a region's end), and the ratio glides linearly from the one the last chunk ended at to the target over the next chunk
+// (the Vocoder already glides the semitones over 20 ms, so no step is heard). The fades live in the stored samples, so a loop's seam is as quiet
+// bent as at 1x; a region keeps its fade in and its release as counts, and its natural end fades by position (the last 64 samples' worth of
+// distance at its nominal speed), since how many samples are left now depends on the ratio. Back at exactly 1 the reader leaves the fraction
+// in one chunk of 32 samples or more that lands on a whole sample (a whole half sample at 0.5x and in reverse), by a speed within 2 % of the
+// nominal one, and the integer paths go on from there. While a loop is bent, bar lines are ignored (it drifts from the bars by design); the first one after the bend is
+// back at 0 puts it right with the usual crossfade. A jump or stop tail running (ghost) plays at the nominal speed. Cost of a bent chunk of 64:
+// a span copy plus about 20 cycles a sample (interpolate, add the phase), a few hundred cycles of set-up; an unbent reader pays three compares.
+//
 // Bars. A loop knows how many whole bars it is (set_bars, 0 = free: a take that is not a count of bar lines, or a WAV that is not whole bars).
 // Only the owner knows that (Vocoder counts the bar lines a take spans, and judges a loaded WAV against the transport's tempo). For a loop of N
 // bars the owner calls bar_line(i, frame, k) at every bar line of the transport (k the bar index, `frame` in the next mix() block): the loop
@@ -65,6 +79,7 @@ class Loop {
   static constexpr std::uint32_t kMaxSamples = 16u * 44100u;  // one loop: 16 s at 44.1 kHz
   static constexpr std::uint32_t kBankSamples = kCount * kMaxSamples;
   static constexpr std::uint32_t kFadeSamples = 64;
+  static constexpr std::uint32_t kRatioOne = 1u << 24;  // the bend ratio 1.0 in Q24
   static constexpr std::uint64_t kSnap = 8;  // half samples: the slip a seam line puts right with a snap instead of a crossfade (bar_line)
 
   // `mem` holds kCount loops of `per_loop` samples (clamped to kMaxSamples), 2-byte aligned. nullptr or 0: unbound (every call is a no-op).
@@ -102,6 +117,9 @@ class Loop {
   // Bars (render context, see above). set_bars: 0 = free, else the loop is that many whole bars (reset by every take, clear, forget and adopt).
   void set_bars(unsigned i, std::uint32_t bars) noexcept;
   std::uint32_t bars(unsigned i) const noexcept { return i < kCount ? bars_[i] : 0u; }
+  // True while the loop holds the bars' cycle: it has bars and no bend has moved it off since the last bar line (the first line after the bend
+  // is back at 0 puts it right, and sets this again).
+  bool on_bar(unsigned i) const noexcept { return i < kCount && bars_[i] != 0u && !drift_[i]; }
   void bar_line(unsigned i, std::uint32_t frame, std::uint32_t bar) noexcept;
   // The transport's bar-0 line passed (it started again): the cycle is anchored at bar 0 again, for a loop under a region or one that is free too.
   void reanchor(unsigned i) noexcept;
@@ -110,6 +128,8 @@ class Loop {
   void set_speed(unsigned i, unsigned speed) noexcept;
   void set_reverse(unsigned i, bool reverse) noexcept;
   void set_gain(unsigned i, float gain) noexcept;
+  // The bend, for every reader (render context, any time; once a block is the intended rate): the speed factor, clamped to 0.5 .. 2 (NaN is 1).
+  void set_bend(float ratio) noexcept;
 
   // Regions (render context). trig_region: start (or retrigger) at `frame` of the next play() block; false when ignored (unbound, recording,
   // nothing to play). release_region: fade out from `frame`; nothing when no region sounds.
@@ -137,6 +157,16 @@ class Loop {
   void mix_region(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
   void region_off(unsigned i) noexcept;
   void mix_plain(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  std::uint32_t mix_bent(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  std::uint32_t region_chunk_bent(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
+  // The bent path is in charge of a loop / a region: a ratio other than 1 now or asked for, or a phase off the grid the integer paths play on
+  // (a fraction of a half sample, or an odd half sample at 1x and 2x, where they never leave the whole ones).
+  bool loop_bent(unsigned i) const noexcept {
+    return bq_ != kRatioOne || rq_[i] != kRatioOne || hf_[i] != 0u || (speed_[i] != 0u && (h_[i] & 1u) != 0u);
+  }
+  bool region_bent(unsigned i) const noexcept {
+    return bq_ != kRatioOne || rrq_[i] != kRatioOne || rhf_[i] != 0u || (speed_[i] != 0u && (rh_[i] & 1u) != 0u);
+  }
   void mix_slow(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
   void ghost_off(unsigned i) noexcept {
     gn_[i] = 0;
@@ -146,6 +176,14 @@ class Loop {
   std::uint32_t cap_ = 0;
   std::uint32_t len_[kCount] = {};
   std::uint32_t h_[kCount] = {};  // the play position in half samples
+  // The bend (render context only). bq_: the target ratio, Q24, 0.5 .. 2 (set_bend); rq_: the ratio each reader's last chunk ended at; hf_ /
+  // rhf_: the fraction of a half sample the loop's / region's position is past h_ / rh_, Q32 (0 whenever the integer paths are in charge);
+  // rrq_: rq_ of the region.
+  std::uint32_t bq_ = kRatioOne;
+  std::uint32_t rq_[kCount] = {kRatioOne, kRatioOne, kRatioOne, kRatioOne};
+  std::uint32_t rrq_[kCount] = {kRatioOne, kRatioOne, kRatioOne, kRatioOne};
+  std::uint32_t hf_[kCount] = {};
+  std::uint32_t rhf_[kCount] = {};
   std::uint8_t speed_[kCount] = {1, 1, 1, 1};
   bool rev_[kCount] = {};
   float gain_[kCount] = {1.0f, 1.0f, 1.0f, 1.0f};   // target
@@ -158,7 +196,9 @@ class Loop {
   // of the next mix() to half position sj_ (a plain snap, no ghost, when sn_).
   std::uint16_t bars_[kCount] = {};
   std::uint32_t k0_[kCount] = {};
+  bool drift_[kCount] = {};  // a bend moved the loop off its bar cycle (render context; the bar line clears it)
   std::uint32_t gh_[kCount] = {};
+  float gc_[kCount] = {};  // a stop tail's start offset (raw sample units): where a bent loop really was minus the whole half sample the ghost reads
   std::uint8_t gn_[kCount] = {};
   std::uint8_t gs_[kCount] = {};
   bool gv_[kCount] = {};

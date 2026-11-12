@@ -4,6 +4,28 @@
 
 ### Added
 
+- **SB1: bend a slot.** The Bend value (MIDI wheel, encoder, strip, BND pads) now also bends every sounding slot, loop or region, main and slice channel,
+  by the same semitones (rate = speed x 2^(bend/12), up to 12 st either way; a slot used to play at 0.5x, 1x or 2x only). The synth's vibrato does not move
+  slots. The reader keeps a fixed-point phase (Q33 samples in a `uint64`, a Q24 ratio, no float to 64-bit integer conversion, no `double`) and reads with linear
+  interpolation (cheap, and clean enough for the use: 68 dB SNR on a 441 Hz sine at +2 st, 43 dB on 2 kHz at +1 st, more aliasing on a bend up
+  of a bright source); the 64-sample seam and end fades still apply in both directions, and the interpolator reads only valid samples at the loop seam and at
+  a slice's end. The ratio glides with Bend's own 20 ms ramp and is stepped per 64-sample chunk in integers, so there is no zipper. Bend exactly 0 runs
+  HEAD's integer path unchanged (a branch a block), pinned by a digest of the playback over loops, regions, three speeds and both directions
+  (0x5451E258, equal to HEAD's). A bent whole-bar loop drifts by design; when the bend is back at 0 the loop lands on a whole-sample grid (a half-sample one only at 0.5x
+  forward, where HEAD's phase alternates) in a short settle chunk, so reverse, 2x and 0.5x return to HEAD's exact output and no two-sample average is
+  left behind (the test requires integer parity and an unbent output for every speed and direction), then the first bar line re-syncs it with the existing
+  snap or crossfade (worst step 0.018 in the test, under the crossfade's 0.039; no runaway). The loop's `on_bar` status bit goes false while the bend has
+  it off the bar and true again at that re-sync. A Bend below 0.02 st either way is read as exactly 0 by the slots (a dead zone: the wheel's rest position
+  and the strip's centre keep HEAD's bit-exact path; the synth still takes the true value). A region whose bent end lands on a zero length ends
+  instead of wrapping, and `stop()` while bent starts the tail on the sample the bent read would have played next (no sample-sized step). No new parameter (64 of 64), `config.o3a` and the pattern format are untouched. Measured on the host: the frequency of a bent sine is exact
+  to better than 1e-7 relative (+12, -12, +2, -5, +7 st), the reader against a double-precision oracle differs by at most 4.5e-8, no read outside a slot
+  (sentinel tests over odd lengths, an exact-size bank, the last slot, every speed and direction), a region's end fades. Cost [estimate]: an unbent
+  slot pays about 3 compares a block more; a bent one about 20 cycles a sample plus a few hundred cycles set-up per 64-sample chunk (about 1,500 to 2,000
+  cycles a chunk of 64 samples, under 1 % of the time it plays a slot at 180 MHz), memory 520 B of bent-read span in the bent call and 88 B of state; stack measured with `-fstack-usage` on the cross build:
+  `mix_bent` 904 B on top of `mix_plain` 600 B and `mix` 24 B, so the deepest loop path is 1,528 B against 896 B at HEAD (`mix_slow`), and `region_chunk_bent`
+  912 B under `mix_region` 56 B and `region_chunk` 24 B (992 B, HEAD 648 B): about 630 B more at the worst point of a 24 KiB stack; the real cost is for the unit
+  to read. `tests/bend_slot_test.cpp`, `app/scenarios/bend_slot.txt` (the WAVs read 220, 246, 196 and 220 Hz with the wheel up, down and centred).
+  Needs more testing on the unit: the sound by ear, the return to the bar, several bent slots at once and the CPU.
 - **LT1: the live voice drives TRACT's tube.** TRACT's SOURCE (PADS by default, or LIVE; PARAMS, SHAPE page, F6 MOUTH; console `tract source live|pads`)
   makes the mouth follow the voice at the input. The vocoder reads the input with TALK's own analysis (the LPC code moved to `lpc.cpp`, shared and unchanged:
   TALK is bit for bit as before), orders 11 to 22 tube areas (each section twice, floor 0.05, smoothing 0.5, silence holds the last shape) and hands them,

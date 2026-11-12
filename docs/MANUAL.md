@@ -177,8 +177,13 @@ project** (section 9) and F4 NEW puts it back to the default.
 
 **Pitch bend.** The encoder bends the synth once it is free: press PERFORMANCE while on PERFORM to free it, and tap any F key to take it
 back. It springs back to the middle about a tenth of a second after you stop turning. SHIFT makes the steps larger. Set row C to BEND
-(F6, then F7) for a strip of pads: the middle pair is zero, each pad outwards is a semitone. A bend moves the synth only: a live
-source and a slot have no pitch of their own to move.
+(F6, then F7) for a strip of pads: the middle pair is zero, each pad outwards is a semitone. A bend moves the synth and every sounding slot (a
+loop, a slice, a region): a slot plays faster or slower by the same number of semitones, up to an octave either way, so its pitch and its length
+change together, as with a tape, and the glide of the bend is smooth. The live input has no pitch of its own to move, and the vibrato moves the synth
+only. A loop that is on the bar drifts off it while it is bent; when the bend is back in the middle the loop is put back on the bar at the next bar line
+(with the same short crossfade as any re-sync). A bend of zero plays a slot exactly as before, and a bend smaller than a fiftieth of a semitone counts as
+zero for the slots. A bent slot is noisier in the highs: the read is a straight line between samples, which is cheap but lets some aliasing through (about
+43 dB below the signal on a 2 kHz tone and 68 dB on a 441 Hz tone, measured on the host), so a bright loop bent up sounds rougher than a dull one.
 
 ### PARAMS
 
@@ -538,8 +543,8 @@ starts from the cursor's row. The chain plays on when you leave SONG, so you can
 at the end of the pattern that plays. While the chain plays it owns what plays: a pattern you pick in PATTERN only changes what that screen shows and edits. Opening a project while it plays starts the new project's chain at its first row after the lap in progress. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
 ## 8. MIDI
 
-MIDI notes play the synth beside the pads and share its voices. They also feed TUNE when NOTES IN is on. Pitch bend moves the synth; the
-mod wheel (CC 1) adds vibrato. A controller can be learned onto any value, sixteen at most.
+MIDI notes play the synth beside the pads and share its voices. They also feed TUNE when NOTES IN is on. Pitch bend moves the synth and the sounding slots; the
+mod wheel (CC 1) adds vibrato (to the synth). A controller can be learned onto any value, sixteen at most.
 
 Slices: notes from 36 up fire one slice each of the SPEAKS slot (36 is slice 1). Velocity 100 and above is full level; lower is softer.
 The slice plays to its end; letting go of the key does not stop it. Every other note plays the synth.
@@ -620,7 +625,9 @@ been read there, but several things need more testing, most of all by ear. In pa
 - **Heavy use.** With every mode, a long chain and a full set of slots on screen at once, the processor load has not been measured in all
   its combinations.
 - **A WAV that is not 16-bit 44.1 kHz** is refused. A file longer than 16 seconds is cut to its first 16.
-- **Bending a slot** is not possible: a recording plays at three fixed speeds.
+- **Bending a slot** changes its speed, so its pitch and its length move together: there is no pitch shift that keeps the length. The sound of a bent
+  slot (the interpolation is linear, so a bright recording can sound duller or carry some aliasing, most on a bend up), the return to the bar after a bend,
+  and the load of several bent slots at once need more testing on a unit.
 - **Loops on the bar.** The re-sync at each bar line (the crossfade and the snap by ear, the load on the bar-line blocks, a tempo change during a take, the
   edge of 8 bars at 120 BPM, a slow or fast tempo against a loop, FOLLOW jitter around the edge, which two slots of one length count as a copy) needs more testing on a unit. A REC press a little after a bar line
   waits for the next line; there is no early-press tolerance.
