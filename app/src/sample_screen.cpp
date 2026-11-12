@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sample_screen.h"
 
+#include "midi_slice_logic.h"
 #include "overview.h"
 #include "pads_logic.h"
 #include "pattern_logic.h"
@@ -36,9 +37,10 @@ constexpr int kLevelTap = 6;  // a second tap on F8 moves the level this many ha
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr const char* kKeyNames[ornoir::kFKeys] = {"PLAYS", "SIDE", "SPEED", "DIR", "LOOP", "TRIG", "CHOKE", "LEVEL"};
-// The SHIFT row: F1 only (the others are blank and dim), labelled the way PATTERN's and PERFORM's are.
-constexpr const char* kShiftNames[ornoir::kFKeys] = {"ROW", "", "", "", "", "", "", ""};
+// The SHIFT row: F1 and F2 only (the others are blank and dim), labelled the way PATTERN's and PERFORM's are.
+constexpr const char* kShiftNames[ornoir::kFKeys] = {"ROW", "SLICE CH", "", "", "", "", "", ""};
 constexpr unsigned kKeyPlays = 0;  // F1
+constexpr unsigned kKeySliceCh = 1;  // F2, with SHIFT
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
   std::size_t n = std::strlen(dst);
@@ -134,12 +136,16 @@ void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* pe
   slot_ = 0;
   focus_ = 0;
   row_ = 0;
+  slice_ch_ = 0;
+  shift_slice_ = false;
   flash_until_ = 0;
   aud_ = 0;
   g_sd = SampleData{};  // a restarted app starts from the defaults
 }
 
 SliceMap* SampleScreen::slice_map() noexcept { return &g_sd.map; }
+
+void SampleScreen::set_slice_ch(unsigned v) noexcept { slice_ch_ = midislice::clamp(v); }
 
 void SampleScreen::set_slot(unsigned slot) noexcept { slot_ = static_cast<std::uint8_t>(slot < sm::kReaders ? slot : sm::kReaders - 1u); }
 sm::SliceTable& SampleScreen::table(unsigned slot) noexcept { return g_sd.table[slot & 3u]; }
@@ -154,6 +160,7 @@ const ui::Theme* SampleScreen::theme(const app::Context&) const noexcept { retur
 
 void SampleScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
+  shift_slice_ = false;  // SHIFT may have been let go on another screen, where update() did not see it
   ctx.redraw();
 }
 
@@ -472,11 +479,16 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
     if (in.shift) {
+      shift_slice_ = k == kKeySliceCh;
       if (k == kKeyPlays) {  // SHIFT + F1: ROW
         flip_row(ctx);
+      } else if (k == kKeySliceCh) {  // SHIFT + F2: SLICE CH, a tap steps on and wraps (SAME, 1 .. 16, OFF), the encoder steps without wrapping
+        slice_ch_ = slice_ch_ >= midislice::kOff ? midislice::kSame : static_cast<std::uint8_t>(slice_ch_ + 1u);
+        ctx.redraw();
       }
       return;
     }
+    shift_slice_ = false;
     if (k == focus_ || (k >= 3u && k <= 6u)) {  // a second tap steps the value on (DIR, LOOP, TRIG and CHOKE have nothing else to do)
       key_tap_ = true;
       turn(ctx, k, 1);
@@ -488,6 +500,11 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   if (in.turn()) {
     key_tap_ = false;
+    if (in.shift && shift_slice_) {
+      slice_ch_ = midislice::step(slice_ch_, static_cast<int>(in.delta()));
+      ctx.redraw();
+      return;
+    }
     turn(ctx, focus_, in.delta());
     return;
   }
@@ -586,6 +603,9 @@ void SampleScreen::pad_update(app::Context& ctx) noexcept {
 }
 
 void SampleScreen::update(app::Context& ctx) noexcept {
+  if (!ctx.panel().shift()) {
+    shift_slice_ = false;
+  }
   pad_update(ctx);
   if (note_ != nullptr && ctx.uptime_ms() >= note_until_) {
     note_ = nullptr;
@@ -651,7 +671,7 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "OCTAVE DOWN, HOLD REPEATS", nullptr},
       {Button::Right, "OCTAVE UP, HOLD REPEATS", nullptr},
-      {Button::Shift, "WITH F1: ROW A OR B", nullptr},
+      {Button::Shift, "F1: ROW A OR B; F2: SLICE CH", nullptr},
       {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
@@ -673,7 +693,7 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
     h.fkey_shift[i] = nullptr;
   }
   h.summary = "THE FOUR SLOTS: UP AND DOWN PICK ONE; ITS SIDE, SPEED, DIRECTION AND LEVEL ARE THE F KEYS.\n"
-              "UPPER PADS: SLICES; LOWER: PERFORM'S ROWS A AND B. MIDI NOTES FROM 36: THE SPEAKS SLICES.";
+              "UPPER PADS: SLICES; LOWER: PERFORM'S ROWS A, B. MIDI FROM 36: SLICES (CHANNEL: SHIFT + F2).";
   // The legend: the slices, then the layout's rows A and B as they play now (a pad's group is its row + 1: the slices 1, A 2, B 3).
   const pads::Layout layout = perform_ != nullptr ? perform_->layout() : pads::Layout{};
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
@@ -703,6 +723,7 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.pads = "UPPER ROWS: THE SLOT'S SLICES. LOWER ROWS: PERFORM'S ROWS A AND B; F1 SETS WHAT A ROW PLAYS.";
   h.fkey[0] = "WHAT THE ROW PLAYS";
   h.fkey_shift[0] = kShiftNames[0];
+  h.fkey_shift[1] = kShiftNames[1];
   h.fkey[1] = "SPEAKS, SOUNDS, NONE";
   h.fkey[2] = "0.5X, 1X, 2X";
   h.fkey[3] = "FORWARD, REVERSE";
@@ -836,9 +857,11 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
       keys[i] = ornoir::FKey{};
       keys[i].name = kShiftNames[i];
-      keys[i].dim = i != kKeyPlays;
+      keys[i].dim = i != kKeyPlays && i != kKeySliceCh;
     }
     cat(keys[kKeyPlays].value, sizeof keys[kKeyPlays].value, pads::kRowNames[row]);
+    midislice::format(slice_ch_, keys[kKeySliceCh].value);
+    keys[kKeySliceCh].hot = shift_slice_;
   }
 
   ui::plot::Canvas c(r);
@@ -914,6 +937,17 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   cat(buf, sizeof buf, pads::kRowNames[row]);
   r.text(kRightX + 12, kRowY + 100, buf, Color::TextDim, Face::Micro);
   r.text(kRightX + 12, kRowY + 122, pads::kPlaysNames[pads::idx(layout.row[row])], Color::Text, Face::Label);
+  {  // MS1: the channel MIDI fires slices on; "SET MIDI CH" when it cannot work (the user's channel is omni: the route takes every channel)
+    char val[12];
+    midislice::format(slice_ch_, val);
+    buf[0] = '\0';
+    cat(buf, sizeof buf, "SLICE CH ");
+    cat(buf, sizeof buf, val);
+    r.text(kRightX + 12, kRowY + 168, buf, Color::TextDim, Face::Micro);
+    if (midislice::needs_hint(slice_ch_, ctx.midi().config().channel)) {
+      r.text(kRightX + 12, kRowY + 190, "SET MIDI CH", Color::Accent, Face::Label);
+    }
+  }
 
   if (note_ != nullptr) {
     r.text(kColX, kRowY + 4 * kRowH + 2, note_, Color::Accent, Face::Label);

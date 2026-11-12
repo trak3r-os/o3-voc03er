@@ -28,6 +28,13 @@ dsp::Event midi_on(unsigned note, unsigned vel, std::uint16_t frame = 0) {
   return dsp::note_on(static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(vel), 0, frame);
 }
 dsp::Event midi_off(unsigned note, std::uint16_t frame = 0) { return dsp::note_off(static_cast<std::uint8_t>(note), frame); }
+// A note of the slice channel as the app sends it (MS1).
+dsp::Event slice_on(unsigned note, unsigned vel = 100, std::uint16_t frame = 0) {
+  return dsp::note_on(static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(vel), Vocoder::kNoteSlice, frame);
+}
+dsp::Event slice_off(unsigned note) {
+  return dsp::Event{0, dsp::EventKind::NoteOff, static_cast<std::uint8_t>(note), 0u, Vocoder::kNoteSlice, 0u, 0.0f};
+}
 dsp::Event pad_on(unsigned note, unsigned vel = 100) {
   return dsp::note_on(static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(vel), Vocoder::kNoteLocal, 0);
 }
@@ -313,4 +320,114 @@ TEST_CASE("midi slices: the step sequencer's notes carry the mark and its SLICE 
   CHECK(seq.slice_reader() == 2u);
   (void)seq.slices_open();
   CHECK(m.source == 0u);
+}
+
+// ---- MS1: slices on their own channel --------------------------------------------------------------------------------------------------
+
+TEST_CASE("slice channel: SAME (the default) fires slices from the unmarked notes from 36") {
+  Rig r(4);
+  CHECK(r.v.midi_slices());
+  REQUIRE(r.e.inject(r.id, midi_on(kLow, 100)));
+  (void)r.rms(2);
+  CHECK(r.v.loop_status(kReader).region);
+  CHECK_FALSE(r.v.carrier().holds(kLow));
+}
+
+TEST_CASE("slice channel: with the route's slices off (OFF, or a slice channel) unmarked 36 and up play the carrier") {
+  Rig r(4);
+  r.v.set_midi_slices(false);
+  CHECK_FALSE(r.v.midi_slices());
+  REQUIRE(r.e.inject(r.id, midi_on(kLow, 100)));
+  REQUIRE(r.e.inject(r.id, midi_on(kLow + 3, 100)));
+  (void)r.rms(3);
+  CHECK_FALSE(r.v.loop_status(kReader).region);
+  CHECK(r.v.carrier().holds(kLow));
+  CHECK(r.v.carrier().holds(kLow + 3));
+  // and the key's release is the carrier's, not a fired slice's
+  REQUIRE(r.e.inject(r.id, midi_off(kLow)));
+  (void)r.rms(1);
+  CHECK_FALSE(r.v.carrier().holds(kLow));
+  // they record into PATTERN's notes-in ring like any carrier note
+  Vocoder::NoteIn n;
+  unsigned taken = 0;
+  while (r.v.take_note_in(n)) {
+    ++taken;
+  }
+  CHECK(taken == 2u);
+}
+
+TEST_CASE("slice channel: a flagged note fires the slice in every mode and is never the carrier's") {
+  for (const bool route : {true, false}) {
+    INFO("route fires slices: " << route);
+    Rig r(4);
+    r.v.set_midi_slices(route);
+    REQUIRE(r.e.inject(r.id, slice_on(kLow + 1, 100, 40)));
+    std::vector<float> l;
+    (void)r.block(l);
+    CHECK(r.v.loop_status(kReader).region);
+    CHECK(r.rms(4) > 1.0e-3f);
+    CHECK_FALSE(r.v.carrier().holds(kLow + 1));
+    Vocoder::NoteIn n;
+    CHECK_FALSE(r.v.take_note_in(n));  // the notes-in ring is for the carrier's notes: the NOTE lane never records a slice note
+  }
+}
+
+TEST_CASE("slice channel: a flagged note out of the range or with no source does nothing, and is not the carrier's") {
+  Rig r(4);
+  r.v.set_midi_slices(false);
+  REQUIRE(r.e.inject(r.id, slice_on(kLow + 4)));  // past the count
+  REQUIRE(r.e.inject(r.id, slice_on(kLow - 1)));  // below the range
+  (void)r.rms(3);
+  CHECK_FALSE(r.v.loop_status(kReader).region);
+  CHECK_FALSE(r.v.carrier().holds(kLow + 4));
+  CHECK_FALSE(r.v.carrier().holds(kLow - 1));
+  Rig n(0);
+  REQUIRE(n.e.inject(n.id, slice_on(kLow)));
+  (void)n.rms(3);
+  CHECK_FALSE(n.v.loop_status(kReader).region);
+  CHECK_FALSE(n.v.carrier().holds(kLow));
+  Rig u(4, false);  // no map bound at all
+  REQUIRE(u.e.inject(u.id, slice_on(kLow)));
+  (void)u.rms(3);
+  CHECK_FALSE(u.v.carrier().holds(kLow));
+}
+
+TEST_CASE("slice channel: a flagged NoteOff does nothing: a carrier note of the same number stays and the slice is one shot") {
+  Rig r(4);
+  r.v.set_midi_slices(false);
+  REQUIRE(r.e.inject(r.id, midi_on(kLow, 100)));  // the user's channel plays the carrier note 36
+  (void)r.rms(2);
+  REQUIRE(r.v.carrier().holds(kLow));
+  REQUIRE(r.e.inject(r.id, slice_on(kLow)));      // the slice channel's note 36 fires slice 1
+  (void)r.rms(1);
+  REQUIRE(r.v.loop_status(kReader).region);
+  REQUIRE(r.e.inject(r.id, slice_off(kLow)));
+  (void)r.rms(1);
+  CHECK(r.v.loop_status(kReader).region);  // one shot
+  CHECK(r.v.carrier().holds(kLow));        // the carrier note is still on
+  // and the route's own NoteOff releases it
+  REQUIRE(r.e.inject(r.id, midi_off(kLow)));
+  (void)r.rms(1);
+  CHECK_FALSE(r.v.carrier().holds(kLow));
+}
+
+TEST_CASE("slice channel: switching the route's slices off under a fired key leaves no stuck carrier note") {
+  Rig r(4);
+  REQUIRE(r.e.inject(r.id, midi_on(kLow, 100)));  // fires (SAME)
+  (void)r.rms(1);
+  r.v.set_midi_slices(false);
+  REQUIRE(r.e.inject(r.id, midi_off(kLow)));      // its release is still the slice's
+  (void)r.rms(1);
+  CHECK_FALSE(r.v.carrier().holds(kLow));
+}
+
+TEST_CASE("slice channel: a reader that is recording refuses a flagged note too") {
+  Rig r(4);
+  REQUIRE(r.e.set_param(r.id, Vocoder::loop_param(kReader, Vocoder::LoopField::Rec), 1.0f));
+  (void)r.rms(2);
+  REQUIRE(r.v.loop_status(kReader).rec != Vocoder::LoopStatus::Rec::Idle);
+  REQUIRE(r.e.inject(r.id, slice_on(kLow)));
+  (void)r.rms(2);
+  CHECK_FALSE(r.v.loop_status(kReader).region);
+  CHECK_FALSE(r.v.carrier().holds(kLow));
 }

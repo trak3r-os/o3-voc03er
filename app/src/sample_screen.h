@@ -54,6 +54,9 @@ class SampleScreen final : public o3sdk::app::Screen {
   void update(o3sdk::app::Context& ctx) noexcept override;
 
   unsigned slot() const noexcept { return slot_; }
+  // MS1: the MIDI slice channel (midi_slice_logic.h: 0 SAME, 1..16, 17 OFF), set here by SHIFT + F2 and kept in config.o3a by the app. Main loop.
+  unsigned slice_ch() const noexcept { return slice_ch_; }
+  void set_slice_ch(unsigned v) noexcept;
   o3sdk::dsp::UnitId voice() const noexcept { return voice_; }  // the loop unit: SAMPLE EDIT's SHIFT + DELETE writes its Rec CLEAR
 
   // What SAMPLE EDIT (sample_edit_screen.h) shares with this screen: the selected slot, the cut tables (g_sd), the pads and the header.
@@ -122,6 +125,8 @@ class SampleScreen final : public o3sdk::app::Screen {
   std::uint8_t slot_ = 0;       // 0..3
   std::uint8_t focus_ = 0;      // the F key the encoder drives (F1, PLAYS)
   std::uint8_t row_ = 0;        // the layout row F1 sets: 0 A, 1 B (pads 24..35, 36..47)
+  std::uint8_t slice_ch_ = 0;   // the MIDI slice channel (SLICE CH): 0 SAME, 1..16, 17 OFF
+  bool shift_slice_ = false;    // SHIFT + F2 was the last SHIFT key: the encoder steps SLICE CH while SHIFT is held
   std::uint64_t flash_until_ = 0;  // ROW changed: its pads are dark until then
   std::uint32_t aud_ = 0;       // the layout pads sounding (bit pad - 24): the audition entry's pad ids; main loop only
   bool key_tap_ = false;        // turn() came from a second tap on an F key, not from the encoder

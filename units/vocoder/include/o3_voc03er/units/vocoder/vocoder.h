@@ -150,7 +150,12 @@ class Vocoder final : public o3sdk::dsp::Unit {
   // that source's reader at the note's frame, one shot (the NoteOff does not end it), its velocity the slice's level (100 and up full,
   // below v * 0.01). Any other note, marked or not, is the carrier's. A fired note never touches held notes, the carrier or the velocity
   // gain. A reader that is armed or recording refuses the note (it does nothing).
+  // Slices on their own channel (MS1): the app sends the notes of the slice channel (they reach App::midi(), not the route) as a NoteOn with
+  // kNoteSlice. That note fires slice (note - kSliceNoteLow + 1) in every mode, one shot, never the carrier, never the notes-in ring; a note
+  // out of the range or a slot with no source does nothing; its NoteOff is ignored. Whether the *unmarked* notes of the route may fire slices
+  // too is set_midi_slices (default true: the user's channel is the slice channel too, today's behaviour; false: they all play the carrier).
   static constexpr std::uint8_t kNoteLocal = 1u << 7;  // the kit uses bits 0 and 1 of flags
+  static constexpr std::uint8_t kNoteSlice = 1u << 6;
   static constexpr unsigned kSliceNoteLow = 36;
   static constexpr o3sdk::dsp::Event note_off_local(std::uint8_t note, std::uint16_t frame = 0) noexcept {
     return o3sdk::dsp::Event{frame, o3sdk::dsp::EventKind::NoteOff, note, 0u, kNoteLocal, 0u, 0.0f};
@@ -198,6 +203,10 @@ class Vocoder final : public o3sdk::dsp::Unit {
   }
   // Main loop, before the engine starts: the map the unit reads `source` of (its address never moves); null: no MIDI slices.
   void bind_slices(const SliceMap* map) noexcept { slices_ = map; }
+  // Main loop, any time: whether an unmarked NoteOn of the slice range fires a slice (true, the default) or plays the carrier (false). Plain
+  // atomic, single writer (the main loop), read by the render context with relaxed loads: one flag, nothing else depends on it.
+  void set_midi_slices(bool on) noexcept { midi_slices_.store(on, std::memory_order_relaxed); }
+  bool midi_slices() const noexcept { return midi_slices_.load(std::memory_order_relaxed); }
 
   // What a loop is doing, for the screen and the console: written by the render context once a block, read by the main loop (one atomic
   // word per loop, so a read is never torn).
@@ -358,6 +367,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
   unsigned npend_ = 0;
   Slot slot_[Loop::kCount];
   const SliceMap* slices_ = nullptr;  // bound once; `source` is read with acquire (see SliceMap)
+  std::atomic<bool> midi_slices_ = true;  // set_midi_slices: the main loop writes, the render context reads (relaxed)
   std::atomic<std::uint32_t> notein_[kNoteInDepth] = {};  // the notes-in ring (see NoteIn): single writer (the render context)
   std::atomic<std::uint32_t> notein_w_ = 0;               // entries written, wrapping: release by the writer, acquire by the reader
   std::uint32_t notein_r_ = 0;                            // entries taken: main loop only

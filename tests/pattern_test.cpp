@@ -145,7 +145,7 @@ TEST_CASE("config: the octave round trips for every octave, and a bad file is re
     std::uint8_t buf[kConfigFileMax] = {};
     const std::size_t n = write_config(octave, buf, sizeof buf);
     REQUIRE(n != 0u);
-    CHECK(n == 50u);
+    CHECK(n == 62u);  // CONF + OCTV + VOIC + SLCH
     int back = 99;
     REQUIRE(read_config(buf, n, back));
     CHECK(back == octave);
@@ -221,4 +221,67 @@ TEST_CASE("config: the voicing round trips, a file from before it reads as SMOOT
   const std::size_t n = write_config(0, buf, sizeof buf, 9);
   REQUIRE(read_config(buf, n, octave, voicing));
   CHECK(voicing == 3u);
+}
+
+TEST_CASE("config: the MIDI slice channel round trips, a file from before it reads as SAME, a bad one is refused") {
+  for (unsigned ch : {0u, 1u, 9u, 16u, 17u}) {
+    std::uint8_t buf[kConfigFileMax] = {};
+    const std::size_t n = write_config(-1, buf, sizeof buf, 2, ch);
+    REQUIRE(n != 0u);
+    int octave = 99;
+    unsigned voicing = 99;
+    unsigned back = 99;
+    REQUIRE(read_config(buf, n, octave, voicing, back));
+    CHECK(octave == -1);
+    CHECK(voicing == 2u);
+    CHECK(back == ch);
+  }
+  namespace chunk = o3sdk::formats::chunk;
+  std::uint8_t buf[kConfigFileMax] = {};
+  int octave = 99;
+  unsigned voicing = 99;
+  unsigned slice = 5;
+  // The file the voicing's version wrote (OCTV and VOIC): it loads, and the slice channel is SAME.
+  {
+    chunk::Writer w(buf, sizeof buf, "CONF");
+    REQUIRE(w.begin("OCTV"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(static_cast<std::uint8_t>(1 - kMinOctave)));
+    REQUIRE(w.end());
+    REQUIRE(w.begin("VOIC"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(1));
+    REQUIRE(w.end());
+    const std::size_t n = w.finish();
+    REQUIRE(read_config(buf, n, octave, voicing, slice));
+    CHECK(octave == 1);
+    CHECK(voicing == 1u);
+    CHECK(slice == 0u);
+  }
+  // A slice channel past OFF refuses the file whole, and all three stay as they were.
+  {
+    chunk::Writer w(buf, sizeof buf, "CONF");
+    REQUIRE(w.begin("OCTV"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(static_cast<std::uint8_t>(0 - kMinOctave)));
+    REQUIRE(w.end());
+    REQUIRE(w.begin("SLCH"));
+    REQUIRE(w.u16(0x0100));
+    REQUIRE(w.u8(18));
+    REQUIRE(w.end());
+    const std::size_t n = w.finish();
+    octave = 99;
+    voicing = 1;
+    slice = 5;
+    CHECK_FALSE(read_config(buf, n, octave, voicing, slice));
+    CHECK(octave == 99);
+    CHECK(voicing == 1u);
+    CHECK(slice == 5u);
+  }
+  // Asked past the range, it is written as SAME; the three-argument reader still reads a file that has the chunk.
+  const std::size_t n = write_config(0, buf, sizeof buf, 3, 40);
+  REQUIRE(n != 0u);
+  REQUIRE(read_config(buf, n, octave, voicing, slice));
+  CHECK(slice == 0u);
+  CHECK(read_config(buf, n, octave));
 }

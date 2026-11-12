@@ -37,6 +37,7 @@
 #include "file_screen.h"
 #include "sample_load_screen.h"
 #include "midi_pattern_logic.h"
+#include "midi_slice_logic.h"
 #include "sample_screen.h"
 #include "song_screen.h"
 #include <cmath>
@@ -86,6 +87,7 @@ void voc_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void tract_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
+void slicech_command(const app::DiagArgs& args, app::DiagOut& out) noexcept;
 
 constexpr app::DiagCommand kCommands[] = {
     {"ain", "ain <source> [gain 0..100]: select the audio input, show its level", &ain_command},
@@ -93,6 +95,7 @@ constexpr app::DiagCommand kCommands[] = {
     {"tract", "tract <param> <v>: a wrong call lists the 12 params and their ranges", &tract_command},
     {"loop", "loop <n> rec|stop|play|halt|clear|mod|car|half|x1|x2|fwd|rev|lvl <dB>", &loop_command},
     {"pat", "pat [A-H [len n|<step> note n|chord r k v|car c|lvl v|slc n]]", &pat_command},
+    {"slicech", "slicech [same|1..16|off]: the MIDI channel that fires slices", &slicech_command},
 };
 
 constexpr std::size_t text_length(const char* s) noexcept {
@@ -176,6 +179,7 @@ class MyApp final : public app::App {
     boot_ = Boot::Pattern;
     saved_octave_ = perform_.octave();
     saved_voicing_ = perform_.voicing();
+    saved_slice_ = sample_.slice_ch();
     ctx.show(perform_);
   }
 
@@ -188,6 +192,8 @@ class MyApp final : public app::App {
   // The file jobs end and start here, once per pass of the main loop (a Screen has an update() too, for what only it needs).
   void update(app::Context& ctx) noexcept override {
     poll_peaks(ctx);
+    // MS1: whether the user's channel may fire slices from note 36, told to the unit every pass (the setting and the live channel both change by hand).
+    voc_.set_midi_slices(o3_voc03er::midislice::route_fires_slices(sample_.slice_ch(), ctx.midi().config().channel));
     apply_mode(ctx.engine());  // every writer of Mode (PERFORM F1, PARAMS, a preset, the console, a project load) goes through the engine's parameter: this is the one reader
     sample_.service(ctx);  // slice voices end and tables follow lengths whichever screen is up
     // The screens' work that must not stop when one leaves (a screen button can leave at any moment; the kit gives App::input the key first). FILE's goes before
@@ -237,10 +243,11 @@ class MyApp final : public app::App {
       return;
     }
     // The setting saves itself when it changes (and the card is there): the file's bytes are made now and stay in g_cfg_buf until the job ends.
-    if (perform_.octave() != saved_octave_ || perform_.voicing() != saved_voicing_) {
+    if (perform_.octave() != saved_octave_ || perform_.voicing() != saved_voicing_ || sample_.slice_ch() != saved_slice_) {
       saved_octave_ = perform_.octave();
       saved_voicing_ = perform_.voicing();  // (even when refused: it is tried again at the next change, not every pass)
-      const std::size_t n = o3_voc03er::write_config(saved_octave_, g_cfg_buf, sizeof g_cfg_buf, saved_voicing_);
+      saved_slice_ = sample_.slice_ch();
+      const std::size_t n = o3_voc03er::write_config(saved_octave_, g_cfg_buf, sizeof g_cfg_buf, saved_voicing_, saved_slice_);
       files.set_quiet(true);
       op_ = n != 0u && files.save("", o3_voc03er::kConfigFile, g_cfg_buf, n) ? Op::SaveConfig : Op::None;
     }
@@ -404,6 +411,18 @@ class MyApp final : public app::App {
   // from the MOD pad (the larger wins). A controller the user bound by MIDI learn never reaches here (midi_learned_moved takes it). Main loop.
   bool midi(app::Context& ctx, const core::MidiMessage& m) noexcept override {
     const unsigned kind = core::midi_kind(m.status);
+    if (kind == 0x90u || kind == 0x80u) {  // MS1: the notes of the slice channel (SAMPLE SHIFT + F2) fire the SPEAKS slot's slices, from note 36
+      const unsigned user = ctx.midi().config().channel;
+      const unsigned ch = core::midi_channel(m.status);
+      if (!o3_voc03er::midislice::fires(sample_.slice_ch(), user, ch)) {
+        return false;
+      }
+      if (kind == 0x90u && m.data2 > 0u) {  // a key release does nothing: a slice is one shot
+        const std::uint8_t vel = m.data2;
+        (void)ctx.engine().note_on(voc_id_, m.data1, vel, o3_voc03er::Vocoder::kNoteSlice);
+      }
+      return true;
+    }
     if (kind != 0xC0u && kind != 0xE0u && !(kind == 0xB0u && m.data1 == 1u)) {
       return false;
     }
@@ -602,6 +621,26 @@ class MyApp final : public app::App {
     ctx_->redraw();
   }
 
+  // `slicech [same|1..16|off]` (main loop): sets and shows SLICE CH (SAMPLE SHIFT + F2), the MIDI channel whose notes fire slices (midi_slice_logic.h).
+  void slicech(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+    std::uint8_t v = 0;
+    if (ctx_ == nullptr || args.argc > 2u || (args.argc == 2u && !o3_voc03er::midislice::parse(args.arg(1), v))) {
+      out.text("usage: slicech [same|1..16|off]").nl();
+      return;
+    }
+    if (args.argc == 2u) {
+      sample_.set_slice_ch(v);
+      ctx_->redraw();
+    }
+    char text[12];
+    o3_voc03er::midislice::format(sample_.slice_ch(), text);
+    out.text("slicech: ").text(text);
+    if (o3_voc03er::midislice::needs_hint(sample_.slice_ch(), ctx_->midi().config().channel)) {
+      out.text(" (set the MIDI channel: omni takes every channel)");
+    }
+    out.nl();
+  }
+
   // `voc <bands|talk|tune|robot|tract> [notes 0..8]` (main loop): the mode, and N notes held from the console (the previous ones are released first).
   void voc(const app::DiagArgs& args, app::DiagOut& out) noexcept {
     o3_voc03er::VocShape shape;
@@ -673,6 +712,7 @@ class MyApp final : public app::App {
     w.num("in_peak_r", permille(meter_.right()));
     w.str("voc_mode", o3_voc03er::kModeWords[o3_voc03er::mode_index(ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode))]);
     w.num("voc_notes", console_notes_);
+    w.num("slice_ch", sample_.slice_ch());  // MS1: 0 SAME, 1..16, 17 OFF
     for (unsigned i = 0; i < o3_voc03er::Loop::kCount; ++i) {
       const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(i);
       char key[8] = {'l', 'o', 'o', 'p', static_cast<char>('1' + i), '\0'};
@@ -746,9 +786,12 @@ class MyApp final : public app::App {
     } else if (done && op_ == Op::LoadConfig) {
       int octave = 0;
       unsigned voicing = o3_voc03er::kDefaultVoicing;
-      if (o3_voc03er::read_config(g_load_buf, got, octave, voicing)) {
+      unsigned slice = 0;
+      if (o3_voc03er::read_config(g_load_buf, got, octave, voicing, slice)) {
         perform_.set_octave(octave);
         perform_.set_voicing(voicing);
+        sample_.set_slice_ch(slice);
+        saved_slice_ = sample_.slice_ch();
         saved_octave_ = perform_.octave();  // what the card holds: nothing to save
         saved_voicing_ = perform_.voicing();
       }
@@ -775,6 +818,7 @@ class MyApp final : public app::App {
   Boot boot_ = Boot::Pattern;
   int saved_octave_ = 0;  // the octave the card holds (or was last asked to)
   unsigned saved_voicing_ = o3_voc03er::kDefaultVoicing;  // the same for the voicing
+  unsigned saved_slice_ = 0;  // and for SLICE CH (MS1)
 };
 
 MyApp& instance() noexcept {
@@ -800,6 +844,10 @@ void loop_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
 
 void pat_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
   instance().pat(args, out);
+}
+
+void slicech_command(const app::DiagArgs& args, app::DiagOut& out) noexcept {
+  instance().slicech(args, out);
 }
 
 }  // namespace

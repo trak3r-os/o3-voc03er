@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **SLICE CH: slices on their own MIDI channel.** A setting with the values SAME (the default, today's behaviour: notes from 36 on your
+  channel fire slices), 1 to 16 and OFF. With a channel, the notes of that channel fire the slices of the SPEAKS slot (36 is slice 1) and
+  never play the synth or write into PATTERN's NOTE lane, while the notes of your channel always play the synth; OFF never fires a slice.
+  Set it on SAMPLE with SHIFT + F2 or in the USB console with `slicech [same|1..16|off]`; saved in `config.o3a` (an older file loads as
+  SAME). With IN CHANNEL on OMNI it cannot work, and SAMPLE shows SET MIDI CH. Needs more testing with a real controller, USB and DIN;
+  run in the simulator only (`app/scenarios/midi_slice_channel.txt`, `tests/midi_slices_test.cpp`, `tests/midi_slice_logic_test.cpp`).
+
 ## v0.4.0 (pre-release)
 
 A mode release: TRACT, a fifth mode that plays a mouth after the carrier, with a MOUTH lane in the pattern; PERFORM plays a layout of

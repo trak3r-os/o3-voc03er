@@ -384,6 +384,7 @@ the same.
 |---|---|
 | F1 PLAYS | What the row plays, as on PERFORM's F7. It sets the row that SHIFT + F1 chose (A at first), or, while you hold a pad of the bottom rows, that pad's row |
 | SHIFT + F1 ROW | The other row, A or B: its pads go dark for a moment |
+| SHIFT + F2 SLICE CH | The MIDI channel that fires slices: SAME, 1 to 16 or OFF (section 8). Hold SHIFT and turn the encoder; its value shows in the SHIFT row, and the screen's right column reads SLICE CH |
 | F2 SIDE | Which side the slot is on: SPEAKS, SOUNDS or NONE |
 | F3 SPEED | 0.5X, 1X or 2X |
 | F4 DIR | FWD or REV |
@@ -491,6 +492,19 @@ mod wheel (CC 1) adds vibrato. A controller can be learned onto any value, sixte
 Slices: notes from 36 up fire one slice each of the SPEAKS slot (36 is slice 1). Velocity 100 and above is full level; lower is softer.
 The slice plays to its end; letting go of the key does not stop it. Every other note plays the synth.
 
+SLICE CH (SAMPLE, SHIFT + F2, or `slicech` in the USB console) chooses where those slice notes come from:
+
+- **SAME** (the default): as above, on the channel you set for MIDI in Config.
+- **1 to 16**: the notes of your channel always play the synth. The notes of the slice channel fire slices (note 36 is slice 1, same
+  velocity rule, one shot), never play the synth and are never written into PATTERN's NOTE lane. A slice channel equal to your channel
+  works as SAME.
+- **OFF**: MIDI never fires a slice, and every note on your channel plays the synth.
+
+SLICE CH needs your own channel set to 1 to 16 (IN CHANNEL in Config, MIDI): with the channel on OMNI the notes of the slice channel
+play the synth as every other note does, and SAMPLE shows SET MIDI CH next to the setting. The setting is saved with the project's
+configuration (`config.o3a`); a file from an earlier version loads as SAME. `slicech` alone prints it; `slicech same`, `slicech 10`
+and `slicech off` set it. Slices on their own channel need more testing with a real controller, USB and DIN.
+
 Patterns: a program change from 0 to 7 picks pattern A to H, at the end of the pattern that plays. A higher number is ignored. While
 a SONG chain plays, it owns the pattern, so a program change then does nothing. Notes you play are written into PATTERN's lanes the way
 the pads write them.
@@ -542,6 +556,8 @@ been read there, but several things need more testing, most of all by ear. In pa
 - **TRACT.** The words, the closures, WOB, the accent and the strip by hand need more testing by ear; the pop of a closure too. Entering TRACT may
   let the raw carrier through for a few milliseconds before the mouth fades in. On a unit, TRACT with the mouth at rest takes about a fifth of the
   processor; the load while the mouth moves, with many notes and loops, needs more testing.
+- **SLICE CH.** Slices on their own MIDI channel have been run in the simulator only. With IN CHANNEL on OMNI the setting cannot work (the
+  screen says so). It needs more testing with a real controller, on USB and on the DIN port.
 - **The microphone and the radio.** Switching between them has been seen; how they sound needs a person.
 - **Clicks** at the switch when a take is captured from a live source need more testing.
 - **Glide, gate, arp, vibrato and the bend** need more testing by hand and ear, and so do the formant steps and the VOL, ROOT and BND

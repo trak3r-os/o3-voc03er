@@ -15,6 +15,8 @@
 //                 1 synth, 2 noise, 3..6 loop 1..4: the Vocoder's CARRIER values minus 0 FOLLOW). An absent CARR (every older file) is no carrier
 //                 on any step; a CARR with a wrong count or a value above 6 refuses the whole file. An older reader skips the chunk.
 //   config.o3a    type "CONF", one chunk OCTV: u16 version (0x0100), u8 octave + 3 (so 0..5 for the octaves -3..+2)
+//                 plus VOIC (u16 version, u8 voicing 0..3) and, since MS1, SLCH: u16 version (0x0100), u8 the MIDI slice channel (0 SAME, 1..16 a
+//                 channel, 17 OFF; midi_slice_logic.h). An absent SLCH (every older file) is SAME, today's behaviour; a value above 17 refuses the file.
 // A newer minor version (the low byte) is read as far as this one knows it; a newer major, a wrong count or a value out of range is refused.
 
 #include <o3_voc03er/pad_map.h>
@@ -156,8 +158,10 @@ inline bool read_pattern(const std::uint8_t* data, std::size_t n, Pattern& p) no
 // The settings as a file: the octave (OCTV) and the chords' voicing (VOIC, 0..3, the Voicing enum). A file from before VOIC existed has no such chunk
 // and reads as SMOOTH, the default.
 inline constexpr unsigned kDefaultVoicing = 3;
+// The MIDI slice channel (MS1, SLCH): 0 SAME (the default), 1..16, 17 OFF. The meaning is midi_slice_logic.h's; here it is a byte in range.
+inline constexpr unsigned kSliceChMax = 17;
 
-inline std::size_t write_config(int octave, std::uint8_t* out, std::size_t cap, unsigned voicing = kDefaultVoicing) noexcept {
+inline std::size_t write_config(int octave, std::uint8_t* out, std::size_t cap, unsigned voicing = kDefaultVoicing, unsigned slice_ch = 0) noexcept {
   namespace chunk = o3sdk::formats::chunk;
   chunk::Writer w(out, cap, "CONF");
   if (!w.begin("OCTV") || !w.u16(0x0100) || !w.u8(static_cast<std::uint8_t>(clamp_octave(octave) - kMinOctave)) || !w.end()) {
@@ -166,11 +170,15 @@ inline std::size_t write_config(int octave, std::uint8_t* out, std::size_t cap, 
   if (!w.begin("VOIC") || !w.u16(0x0100) || !w.u8(static_cast<std::uint8_t>(voicing > 3u ? 3u : voicing)) || !w.end()) {
     return 0;
   }
+  if (!w.begin("SLCH") || !w.u16(0x0100) || !w.u8(static_cast<std::uint8_t>(slice_ch > kSliceChMax ? 0u : slice_ch)) || !w.end()) {
+    return 0;
+  }
   return w.finish();
 }
 
-// The octave and the voicing from a file's bytes: false, both untouched, when it is damaged or either is out of range. No VOIC chunk: SMOOTH.
-inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, unsigned& voicing) noexcept {
+// The octave, the voicing and the slice channel from a file's bytes: false, all untouched, when it is damaged or any is out of range. No VOIC chunk:
+// SMOOTH; no SLCH chunk: SAME.
+inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, unsigned& voicing, unsigned& slice_ch) noexcept {
   namespace chunk = o3sdk::formats::chunk;
   chunk::Reader r;
   chunk::Chunk c{};
@@ -180,9 +188,11 @@ inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, un
   bool have_octave = false;
   int got_octave = 0;
   unsigned got_voicing = kDefaultVoicing;
+  unsigned got_slice = 0;
   while (r.next(c)) {
     const bool is_octave = chunk::id_is(c, "OCTV");
-    if (!is_octave && !chunk::id_is(c, "VOIC")) {
+    const bool is_slice = chunk::id_is(c, "SLCH");
+    if (!is_octave && !is_slice && !chunk::id_is(c, "VOIC")) {
       continue;
     }
     chunk::Fields f(c);
@@ -197,6 +207,11 @@ inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, un
       }
       got_octave = static_cast<int>(v) + kMinOctave;
       have_octave = true;
+    } else if (is_slice) {
+      if (v > kSliceChMax) {
+        return false;
+      }
+      got_slice = v;
     } else {
       if (v > 3u) {
         return false;
@@ -209,7 +224,13 @@ inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, un
   }
   octave = got_octave;
   voicing = got_voicing;
+  slice_ch = got_slice;
   return true;
+}
+
+inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave, unsigned& voicing) noexcept {
+  unsigned slice_ch = 0;
+  return read_config(data, n, octave, voicing, slice_ch);
 }
 
 inline bool read_config(const std::uint8_t* data, std::size_t n, int& octave) noexcept {

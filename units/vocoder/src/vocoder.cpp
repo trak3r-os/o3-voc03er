@@ -362,20 +362,30 @@ void Vocoder::set(std::uint16_t id, float v) noexcept {
   }
 }
 
-// An unmarked NoteOn in the slice range fires a slice of the published source at e.frame (see kNoteLocal). Returns true when the note was
-// taken, fired or refused, so it never reaches the carrier; false when it is the carrier's.
+// An unmarked NoteOn in the slice range fires a slice of the published source at e.frame (see kNoteLocal), when set_midi_slices allows it; a
+// kNoteSlice NoteOn does in every mode and is never the carrier's. Returns true when the note was taken, fired or refused, so it never reaches
+// the carrier; false when it is the carrier's.
 bool Vocoder::midi_slice_on(const o3sdk::dsp::Event& e) noexcept {
-  if (slices_ == nullptr || (e.flags & kNoteLocal) != 0u || e.note < kSliceNoteLow) {
+  const bool marked = (e.flags & kNoteSlice) != 0u;
+  if ((e.flags & kNoteLocal) != 0u) {
     return false;
+  }
+  if (!marked && !midi_slices_.load(std::memory_order_relaxed)) {
+    return false;
+  }
+  if (slices_ == nullptr || e.note < kSliceNoteLow) {
+    return marked;
   }
   const std::uint32_t src = __atomic_load_n(&slices_->source, __ATOMIC_ACQUIRE);
   const unsigned idx = e.note - kSliceNoteLow;
   const unsigned count = (src >> 8) & 0xFFu;
   const unsigned rd = src & 0xFFu;
   if (idx >= count || idx >= kSliceMax || rd >= Loop::kCount || !loops_.bound()) {
-    return false;
+    return marked;  // a marked note is never the carrier's
   }
-  midi_fired_ |= 1u << idx;  // its NoteOff is the slice's, even when the slot refuses (a stuck carrier note cannot follow)
+  if (!marked) {
+    midi_fired_ |= 1u << idx;  // its NoteOff is the slice's, even when the slot refuses (a stuck carrier note cannot follow)
+  }
   if (slot_[rd].rec != Slot::Rec::Idle) {
     return true;
   }
@@ -419,6 +429,9 @@ void Vocoder::apply(const o3sdk::dsp::Event& e) noexcept {
       break;
     }
     case EventKind::NoteOff:
+      if ((e.flags & kNoteSlice) != 0u) {
+        break;  // the slice channel's release: a slice is one shot
+      }
       if ((e.flags & kNoteLocal) == 0u && e.note >= kSliceNoteLow && e.note - kSliceNoteLow < 32u && (midi_fired_ & (1u << (e.note - kSliceNoteLow))) != 0u) {
         midi_fired_ &= ~(1u << (e.note - kSliceNoteLow));  // a fired slice is one shot: its key's release is not the carrier's
         break;

@@ -1,0 +1,116 @@
+# MIDI SLICES ON THEIR OWN CHANNEL (MS1): SAMPLE SHIFT + F2 is SLICE CH (SAME, 1..16, OFF). The user's channel is 1 (the Config's IN CHANNEL) and the slice
+# channel 10: a bass note at 36 on channel 1 plays the SYNTH (PATTERN records it as a step) while the same note on channel 10 fires slice 1 of the SPEAKS
+# slot and records nothing. OFF: MIDI fires no slice and note 36 is the synth's again. The WAV carries them; it is not the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/midi_slice_channel.txt --card <fresh dir> --out <dir>   (the dirs must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleplay
+wait 200
+tap f2
+tap f2
+wait 100
+tap f2
+wait 100
+paddown 26
+wait 100
+tap shift
+padup 26
+wait 600
+snap 01_cuts
+tap performance
+wait 100
+# SOUNDS back to SYNTH (the take is on SOUNDS), then SPEAKS takes SLOT 1 (the list's eighth row)
+tap f3
+turn -9
+tap f3
+wait 100
+tap f2
+wait 100
+turn 7
+wait 100
+snap 01a_speaks_list
+tap f2
+wait 200
+snap 01b_speaks_slot
+tap play
+wait 100
+# the SYNTH chord latched on the pads (a pad held, SHIFT: LATCH) keeps the carrier open, so that the slices are heard
+paddown 26
+wait 100
+tap shift
+padup 26
+wait 300
+# the user's channel 1: the kit's Config, IN CHANNEL (the first row of its MIDI section, RIGHT from AUDIO)
+tap config
+wait 100
+tap right
+wait 100
+turn 1
+snap 01_in_channel_1
+tap config
+wait 100
+# SAMPLE: SHIFT + F2 steps SLICE CH (SAME to 1), the encoder with SHIFT held on to 10
+tap sampleplay
+wait 100
+snap 02_same
+press shift
+tap f2
+wait 100
+snap 03_shift_row
+turn 9
+wait 100
+snap 04_slice_ch_10
+release shift
+wait 100
+expect state slice_ch=10
+# PATTERN stopped: a note of the user's channel is step entry (steps 1), the same note on channel 10 fires slice 1 and enters nothing
+tap pattern
+wait 100
+record on
+midi usb 90 24 7f
+wait 300
+midi usb 80 24 00
+wait 200
+expect state steps=1
+snap 05_user_note_recorded
+midi usb 99 24 7f
+wait 400
+midi usb 89 24 00
+wait 200
+midi usb 99 2c 7f
+wait 300
+midi usb 89 2c 00
+wait 200
+expect state steps=1
+snap 06_slice_channel_not_recorded
+# OFF (SHIFT + F2, the encoder to the end): MIDI fires no slice, and note 37 on channel 1 is the synth's (a second step)
+tap sampleplay
+wait 100
+press shift
+tap f2
+turn 20
+wait 100
+snap 07_off
+release shift
+wait 100
+expect state slice_ch=17
+tap pattern
+wait 100
+midi usb 90 25 7f
+wait 300
+midi usb 80 25 00
+wait 200
+expect state steps=2
+snap 08_off_is_the_synth
+wav midi_slice_channel
