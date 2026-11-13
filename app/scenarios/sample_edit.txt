@@ -8,9 +8,7 @@ wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
-tap f4
+tap f4              # AUTOPLAY OFF: the take waits in the slot (the pads own it)
 tap play
 wait 500
 record on
@@ -162,10 +160,7 @@ snap 25_cleared
 # U7d: F3 CUT HITS. A fresh take of bursts (a tone at -12 dBFS for 250 ms, -60 for the next 250), then F3: SCANNING, the cuts at the onsets, a lower sensitivity.
 tap samplerec
 wait 100
-tap f3
-tap f4
-tap f4
-tap f4
+# (LENGTH 1 BAR and AUTOPLAY OFF stay as the first take left them)
 input tone 220 -60
 tap rec
 input tone 220 -12

@@ -7,15 +7,13 @@ wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
-tap f4
+tap f4              # AUTOPLAY OFF: the take waits in the slot (the pads own it)
 tap play
 wait 500
 record on
 tap rec
 wait 9000
-snap 01_rec_after_take
+snap 01_rec_take
 tap sampleedit
 wait 4000
 snap 02_edit_picture

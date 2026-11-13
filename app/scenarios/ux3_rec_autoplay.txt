@@ -1,0 +1,33 @@
+# UX3-6 on SAMPLE REC: F4 AUTOPLAY says what a take does when it ends (it replaced AFTER). ON (the default): the line before the take reads THE TAKE WILL SPEAK, and a take on a slot
+# that is on neither side becomes the SPEAKS source and loops (PLAYING ON SPEAKS). OFF: the line reads THE TAKE WILL WAIT IN THE SLOT, a take on slot 2 is TAKEN, NOT PLAYING and the
+# slot reads HELD IN THE SLOT; DELETE while the take runs gives it up at the bar line (DELETED). A take never goes to SOUNDS by itself (PERFORM's F3 SOUNDS list picks SLOT n). The dim AUTOPLAY key in TUNE
+# and TRACT is in ux3_sample_cue.txt.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_rec_autoplay.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+wait 100
+snap 01_plan_speaks
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+snap 02_playing_on_speaks
+tap f4
+wait 100
+snap 03_autoplay_off
+tap down
+tap rec
+wait 100
+snap 04_armed_waits
+tap delete
+wait 200
+snap 05_stopping
+wait 2500
+snap 05b_deleted
+tap rec
+wait 9000
+snap 06_taken_not_playing

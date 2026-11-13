@@ -1,4 +1,4 @@
-# Bend moves a playing slot (SB1): a 1 bar take of a tone on the line is made in SAMPLE REC (AFTER SOUNDS, so it is the carrier and plays at once, looped),
+# Bend moves a playing slot (SB1): a 1 bar take of a tone on the line is made in SAMPLE REC (AUTOPLAY OFF, then PERFORM's SOUNDS takes it: it is the carrier and plays at once, looped),
 # then the MIDI wheel is pushed up, let go, pushed down, let go. The slot's speed follows Bend continuously (it used to play at 0.5x, 1x or 2x only).
 # The simulator's input is synthetic: this shows that the bent slot sounds and the screen stays sane; the WAV carries the shift (the four wavs read 220, 246, 196 and 220 Hz at the end of each hold). The sound on real
 # material, the click when the bend returns, and the CPU are for the unit.
@@ -8,14 +8,20 @@ wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
+tap f4              # AUTOPLAY OFF: the take waits in the slot
 wait 100
 tap play
 wait 500
 record on
 tap rec
 wait 9000
+tap performance
+wait 100
+# PERFORM's F3 SOUNDS takes the slot (SLOT 1 is the list's eleventh row): it is the carrier and plays at once, looped
+tap f3
+turn 10
+tap f3
+wait 500
 snap 01_slot_playing
 wav bend_slot_flat
 midi usb e0 00 7f

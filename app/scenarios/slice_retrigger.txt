@@ -1,4 +1,4 @@
-# SAMPLE slices (GitHub issue 3): a 1 BAR take on slot 1 with AFTER SOUNDS (the slot sounds and its loop plays: F5 reads ON), F5 turns LOOP off, a pad slice plays its cut
+# SAMPLE slices (GitHub issue 3): a 1 BAR take on slot 1 with AUTOPLAY OFF and PERFORM's SOUNDS (the slot sounds and its loop plays: F5 reads ON), F5 turns LOOP off, a pad slice plays its cut
 # once, a second hit on the same pad in mid-slice restarts it from its start cut, and after the slice nothing plays until F5 starts the loop again. With LOOP ON a held
 # pad repeats its slice (F5 reads ON SL 6); in TRIG ONE SHOT the repeat goes on after the release and after leaving SAMPLE (PERFORM), F5 still reads ON SL 6 on the way
 # back, and F5 OFF ends it.
@@ -9,13 +9,19 @@ wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
+tap f4              # AUTOPLAY OFF: the take waits in the slot
 tap play
 wait 500
 record on
 tap rec
 wait 9000
+tap performance
+wait 100
+# the take waits in the slot (AUTOPLAY OFF): PERFORM's F3 SOUNDS takes it, SLOT 1 being the list's eleventh row
+tap f3
+turn 10
+tap f3
+wait 300
 tap sampleplay
 wait 4000
 snap 01_loop_on

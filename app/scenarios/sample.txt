@@ -1,4 +1,4 @@
-# SAMPLE: a 1 BAR take of a tone on SAMPLE REC (AFTER PADS), then the slot on SAMPLE: F5 LOOP ON on a slot that neither speaks nor sounds makes it SPEAK first (02_loop: "SLOT 1 SPEAKS"), F2 back to LIVE (03_speaks: the slot is PADS ONLY again and its loop stops), F2 again (03b), a held note of layout row A, SPEED, DIR, LEVEL,
+# SAMPLE: a 1 BAR take of a tone on SAMPLE REC (AUTOPLAY OFF), then the slot on SAMPLE: F5 LOOP ON on a slot that neither speaks nor sounds makes it SPEAK first (02_loop: "SLOT 1 SPEAKS"), F2 back to LIVE (03_speaks: the slot is PADS ONLY again and its loop stops), F2 again (03b), a held note of layout row A, SPEED, DIR, LEVEL,
 # an empty slot, a refusal. The simulator shows the screen and that the unit plays; it cannot say how it sounds or what the frame costs.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -6,9 +6,7 @@ wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
-tap f4
+tap f4              # AUTOPLAY OFF: the take waits in the slot (the pads own it)
 tap play
 wait 500
 record on

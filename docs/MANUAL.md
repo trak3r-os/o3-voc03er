@@ -193,7 +193,7 @@ OCT- and OCT+ pads and SHIFT + F7 move the octave of all of them. VOICING SMOOTH
 moves smoothly, and a row higher sounds higher.
 
 **The arrow keys.** LEFT and RIGHT step the value of the F key that has the focus, one click of the encoder each; UP and DOWN do the same (RIGHT and
-UP raise, LEFT and DOWN lower). F6 ROW is the exception: UP is the row above and DOWN the row below, as the rows are drawn. On PATTERN the arrows keep their own jobs (LEFT and RIGHT the cursor, UP and DOWN the octave); on SAMPLE LEFT and
+UP raise, LEFT and DOWN lower). F6 ROW is the exception: UP is the row above and DOWN the row below, as the rows are drawn. On PATTERN the arrows keep their own jobs (LEFT and RIGHT the cursor, UP and DOWN the octave); on SAMPLE and SAMPLE REC LEFT and
 RIGHT step the F value and UP and DOWN pick the slot. The arrows leave three values to a tap of their key or the encoder, since a stray press there
 changes the sound's character: F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET.
 
@@ -467,11 +467,12 @@ The pads play PERFORM's layout (section 4, PERFORM), so you can play the synth u
 |---|---|
 | F1 SOURCE | LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO or USB |
 | F2 GAIN | The input gain |
-| F3 LENGTH | FREE, or 1, 2, 4 or 8 bars |
-| F4 AFTER | Which side the finished take goes to: SPEAKS, SOUNDS or PADS (the slot is played from SAMPLE's slice pads only) |
-| F5 AUTOPLAY | ON: the take plays at once, looped |
-| F6 MONITOR | Hear the live input while you record |
-| F7 SLOT | Which slot, 1 to 4 (UP and DOWN too) |
+| F3 LENGTH | FREE, or 1, 2, 4 or 8 bars (the lit key when the screen opens) |
+| F4 AUTOPLAY | What the take does when it ends. ON (the default): it plays, looped, where the slot already is, or on SPEAKS if the slot is on neither side. OFF: it waits in the slot and the live input keeps speaking |
+| F5 MONITOR | Hear the live input while you record |
+| F6 SLOT | Which slot, 1 to 4 (UP and DOWN pick it whatever key is lit) |
+
+A tap on an F key lights it and changes nothing; a second tap steps a value (GAIN by 5, MONITOR on or off, LENGTH and SLOT step on and wrap). LEFT and RIGHT are one encoder click of the lit key (held, they repeat; SHIFT makes GAIN's step 5): LENGTH when the screen opens, GAIN after a tap on F2, MONITOR on (RIGHT) or off (LEFT) after a tap on F5, and so on. F4 AUTOPLAY is the exception: it never takes the light, every tap on it switches ON and OFF, so the arrows do not act on it.
 
 A take of 1, 2, 4 or 8 bars plays back **on the bar**: the loop is brought back to the exact frame of every bar line, with a short
 crossfade, so it stays with the tempo (and at half speed, double speed or reverse). A FREE take, and a WAV that is not a whole number of
@@ -491,9 +492,12 @@ fades it over a few milliseconds instead of cutting it.
 DELETE while a take waits for the bar line cancels it, as REC does, and the slot keeps its sound; the strip says CANCELLED. DELETE while it records ends it at the
 bar and throws it away. DELETE with no take running empties the slot.
 
-AFTER is checked when REC arms, not after the take. A slot is one reader: if it already sits on SPEAKS and AFTER says SOUNDS (or the other way round), the take plays where
-the slot already is and AFTER is ignored; REC says "SLOT IS ON SPEAKS: AFTER IGNORED" (or SOUNDS) as it arms, and the take ends with "PLAYING ON SPEAKS: AFTER IGNORED". To move the
-slot, change what it does on SAMPLE first (F2 SPEAKS). In TUNE the AFTER key reads dim when its side is SOUNDS, and in TRACT when it is SPEAKS or PADS: see the mode cue in section 10.
+AUTOPLAY decides what a take does when it ends, and the line under the bar counter says it before and during the take. ON: if the slot is on SPEAKS or SOUNDS it plays there
+again ("THE TAKE WILL SPEAK" or "THE TAKE WILL PLAY ON SOUNDS" before, "PLAYING ON SPEAKS" or "PLAYING ON SOUNDS" after); if it is on neither side it becomes the SPEAKS
+source and loops, so what was sung is heard at once. OFF: nothing is routed ("THE TAKE WILL WAIT IN THE SLOT", then "TAKEN, NOT PLAYING"); the take waits in the slot, shown
+as "HELD IN THE SLOT", and the live input keeps speaking. A take never goes to SOUNDS by itself: pick SLOT n in PERFORM's F3 SOUNDS list (or F2 SPEAKS on SAMPLE to put it on SPEAKS).
+A slot is one reader: if the other side already holds it, the take stays where the slot is and the route's reason shows ("TAKEN: THE ROUTE REFUSES IT" when nothing could be done).
+In TUNE the AUTOPLAY key and the line read dim when the take will play on SOUNDS, and in TRACT with MOUTH on PADS when it will play on SPEAKS: see the mode cue in section 10 (this needs more testing on a unit).
 SHIFT on the GAIN key gives coarser gain steps, not finer.
 
 ### SAMPLE
@@ -752,7 +756,7 @@ This is a first public pre-release. The firmware has been measured on a unit for
 been read there, but several things need more testing, most of all by ear. In particular:
 
 - **The mode cue.** A slot's side means nothing to the ear in two modes. TUNE plays no synth, so a slot on SOUNDS (its loop, its slices) is not heard there. TRACT with MOUTH on PADS listens to nothing,
-  so a SPEAKS slot, and the slices of a slot on PADS, are heard only through DRY. With MOUTH on LIVE the same sides also move the mouth (the TRACT analyses what the modulator carries, a SPEAKS slot included), so they are not dim and the line says "MOVES THE MOUTH (LIVE) AND DRY". SAMPLE, SAMPLE REC AFTER and the side badge show such a side dim with a line saying why; the slot and its
+  so a SPEAKS slot, and the slices of a slot on PADS, are heard only through DRY. With MOUTH on LIVE the same sides also move the mouth (the TRACT analyses what the modulator carries, a SPEAKS slot included), so they are not dim and the line says "MOVES THE MOUTH (LIVE) AND DRY". SAMPLE, SAMPLE REC (its AUTOPLAY key and line) and the side badge show such a side dim with a line saying why; the slot and its
   route are untouched and come back as they were in the other modes. This is a hint on screen: the ear on the unit decides, and it needs more testing there.
 - **The sound.** How the modes sound with a real voice, how the synth sounds at the top of its range, the level of TALK, and the
   eight presets are for your ears. Nothing here says a sound is right.

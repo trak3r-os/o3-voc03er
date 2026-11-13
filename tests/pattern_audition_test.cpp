@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include "rec_take.h"
 #include "tract_skip.h"
 
 #include <o3sdk/app/app.h>
@@ -312,13 +313,12 @@ float unit_param(sim::Harness& h, std::uint16_t id) {
 
 TEST_CASE("slice: a palette pad writes the slice and fires it on the SPEAKS slot; with SPEAKS on LIVE nothing fires") {
   Rig rig;
-  // A 1 BAR take into slot 1 (even cuts), SPEAKS on that slot, as SAMPLE does it.
+  // A 1 BAR take into slot 1 (even cuts), AUTOPLAY OFF: the slot is on no side, SPEAKS stays LIVE until SAMPLE's F2.
   tap(*rig.h, app::Button::SampleRec);
   rig.h->run_ms(60);
-  tap(*rig.h, app::Button::F3);
-  tap(*rig.h, app::Button::F4);
-  tap(*rig.h, app::Button::F4);
-  tap(*rig.h, app::Button::F4);
+  o3_voc03er::test::rec_length_one_bar(*rig.h);
+  o3_voc03er::test::rec_autoplay(*rig.h, false);
+  o3_voc03er::test::rec_slot(*rig.h, 0);
   tap(*rig.h, app::Button::Rec);
   rig.h->run_ms(9000);
   tap(*rig.h, app::Button::Pattern);
@@ -355,16 +355,15 @@ TEST_CASE("slice: PATTERN's fire_slice stays one shot with the slot's LOOP ON (a
   Rig rig;
   tap(*rig.h, app::Button::SampleRec);
   rig.h->run_ms(60);
-  tap(*rig.h, app::Button::F3);
-  tap(*rig.h, app::Button::F4);
-  tap(*rig.h, app::Button::F4);
-  tap(*rig.h, app::Button::F4);
+  o3_voc03er::test::rec_length_one_bar(*rig.h);
+  o3_voc03er::test::rec_autoplay(*rig.h, true);  // the take speaks on its slot
+  o3_voc03er::test::rec_slot(*rig.h, 0);
   tap(*rig.h, app::Button::Rec);
   rig.h->run_ms(9000);
   tap(*rig.h, app::Button::SamplePlay);
   rig.h->run_ms(60);
   for (unsigned i = 0; i < 3; ++i) tap(*rig.h, app::Button::Up);  // SAMPLE keeps its cursor across the harnesses of the process: slot 1
-  // SAMPLE REC's AFTER also persists, so the take may already play (SPEAKS or SOUNDS) or sit on PADS: get to "speaks, and LOOP ON" from either.
+  // SAMPLE REC's AUTOPLAY is ON here, so the take already plays on SPEAKS; the branch also covers a slot that sits on no side: get to "speaks, and LOOP ON" from either.
   const std::uint16_t play0 = Vocoder::loop_param(0, Vocoder::LoopField::Play);
   if (unit_param(*rig.h, play0) != 1.0f) {
     tap(*rig.h, app::Button::F5);  // LOOP ON (on a PADS slot it makes the slot speak first)

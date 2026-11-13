@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// SAMPLE REC: the pure logic (LENGTH, AFTER against route::allowed, bars and seconds) and the screen on the engine (arm, record, stop, the slot
+// SAMPLE REC: the pure logic (LENGTH, the take end against route::allowed, bars and seconds) and the screen on the engine (arm, record, stop, the slot
 // plays, DELETE, HELP, the display list).
 #include <doctest/doctest.h>
 
+#include "rec_take.h"
 #include "tract_skip.h"
 
 #include <o3sdk/app/app.h>
@@ -41,24 +42,28 @@ TEST_CASE("sample_rec: LENGTH steps stop at FREE and 8 BARS") {
   CHECK(sr::kLengthBars[4] == 8u);
 }
 
-TEST_CASE("sample_rec: AFTER places the slot where route::allowed lets it, and says when it cannot") {
-  route::Route cur;
-  sr::AfterPlan p = sr::plan_after(cur, sr::After::Speaks, 1);
-  CHECK(p.place);
-  CHECK(p.to.speaks == route::kFirstSlot + 1);
-  p = sr::plan_after(cur, sr::After::Sounds, 0);
-  CHECK(p.place);
-  CHECK(p.to.sounds == route::kFirstSlot);
-  p = sr::plan_after(cur, sr::After::None, 0);
-  CHECK_FALSE(p.place);
-  CHECK_FALSE(p.refused);
-  route::Route held;
-  held.sounds = route::kFirstSlot + 2;  // SOUNDS holds slot 3: SPEAKS cannot have it
-  p = sr::plan_after(held, sr::After::Speaks, 2);
-  CHECK_FALSE(p.place);
-  CHECK(p.refused);
-  CHECK(p.to.sounds == held.sounds);
-  CHECK(p.to.speaks == held.speaks);
+TEST_CASE("sample_rec: a take ends as AUTOPLAY and the route say, and a take never goes to SOUNDS by itself") {
+  route::Route cur;  // SPEAKS and SOUNDS on their defaults, no slot on either side
+  CHECK(sr::take_end(cur, true, 1) == sr::TakeEnd::SpeaksNow);
+  CHECK(sr::take_end(cur, false, 1) == sr::TakeEnd::Waits);
+  CHECK(sr::take_end(cur, true, route::kSlots) == sr::TakeEnd::Waits);  // no such slot
+  route::Route on_speaks = cur;
+  on_speaks.speaks = route::kFirstSlot + 2;
+  CHECK(sr::take_end(on_speaks, true, 2) == sr::TakeEnd::PlaysSpeaks);
+  CHECK(sr::take_end(on_speaks, false, 2) == sr::TakeEnd::Waits);
+  route::Route on_sounds = cur;
+  on_sounds.sounds = route::kFirstSlot + 3;
+  CHECK(sr::take_end(on_sounds, true, 3) == sr::TakeEnd::PlaysSounds);  // plays where it is: SOUNDS stays
+  CHECK(sr::take_end(on_sounds, true, 0) == sr::TakeEnd::SpeaksNow);    // another slot is free to speak
+  // The route a take leaves: only SpeaksNow moves it, and never SOUNDS.
+  route::Route to = sr::take_end_route(cur, sr::TakeEnd::SpeaksNow, 1);
+  CHECK(to.speaks == route::kFirstSlot + 1);
+  CHECK(to.sounds == cur.sounds);
+  for (const auto e : {sr::TakeEnd::Waits, sr::TakeEnd::PlaysSpeaks, sr::TakeEnd::PlaysSounds, sr::TakeEnd::Refused}) {
+    to = sr::take_end_route(on_sounds, e, 3);
+    CHECK(to.speaks == on_sounds.speaks);
+    CHECK(to.sounds == on_sounds.sounds);
+  }
 }
 
 TEST_CASE("sample_rec: a LENGTH of bars fits the 16 s buffer from its tempo up, FREE always") {
@@ -170,7 +175,7 @@ bool has_row(const app::Help& help, app::Button b) {
 TEST_CASE("sample_rec: a 1 BAR take arms, records, stops by itself and plays the slot looped on SPEAKS") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  o3_voc03er::test::rec_length_one_bar(h);  // F3 lights LENGTH, LEFT to FREE, RIGHT to 1 BAR: the same whatever the test before left
   tap(h, app::Button::Rec);
   h.run_ms(300);
   CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(1.0f));
@@ -182,11 +187,10 @@ TEST_CASE("sample_rec: a 1 BAR take arms, records, stops by itself and plays the
 }
 
 namespace {
-// The app is one static object for the whole test process, so the screen keeps LENGTH from the test before: "fresh" is made by LEFT, which stops at FREE.
+// The app is one static object for the whole test process, so the screen keeps LENGTH and the lit key from the test before: "fresh" is a tap on F3 (LENGTH lit)
+// and LEFT, which stops at FREE.
 void length_to_free(sim::Harness& h) {
-  for (int i = 0; i < 5; ++i) {
-    tap(h, app::Button::Left);
-  }
+  o3_voc03er::test::rec_length_free(h);
 }
 }  // namespace
 
@@ -210,24 +214,103 @@ TEST_CASE("sample_rec: one RIGHT from FREE sets LENGTH to 1 BAR, as the F3 tap d
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("sample_rec: REC again stops a free take, AFTER PADS leaves the slot on no side, DELETE empties it") {
+TEST_CASE("sample_rec: LEFT / RIGHT step the lit key: LENGTH after F3, and nothing else moves (the encoder's step, as the encoder turn makes it)") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  // LENGTH down to FREE with LEFT
+  REQUIRE_FALSE(h.engine().playing());
+  length_to_free(h);  // F3 lit, FREE
+  const unsigned gain = rig.cap.gain();
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Right);  // 2 BARS
+  tap(h, app::Button::Left);   // 1 BAR
+  CHECK(rig.cap.gain() == gain);  // the arrows are not GAIN's while F3 is lit
+  tap(h, app::Button::Rec);
+  h.run_ms(9500);  // only a bar-length take ends by itself; 2 BARS would still be recording
+  CHECK(unit_param(h, Vocoder::loop_param(0, Vocoder::LoopField::Rec)) == doctest::Approx(0.0f));
+  char line[1200];
+  const std::string text(line, h.runtime().state_line(line, sizeof line));
+  const std::size_t at = text.find("loop1=");
+  REQUIRE(at != std::string::npos);
+  CHECK(text.substr(at, text.find(' ', at) - at) == "loop1=88200");
+}
+
+TEST_CASE("sample_rec: after a tap on F2 the arrows step GAIN by 1, SHIFT by 5, and the tap itself changes nothing the first time") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F1);  // lights SOURCE (or steps it on, when it was lit): a known other key
+  tap(h, app::Button::F2);  // lights GAIN: a tap on a key that is not lit changes nothing
+  const unsigned g0 = rig.cap.gain();
+  REQUIRE(g0 <= 90u);
+  tap(h, app::Button::Right);
+  CHECK(rig.cap.gain() == g0 + 1u);
+  tap(h, app::Button::Right);
+  CHECK(rig.cap.gain() == g0 + 2u);
   tap(h, app::Button::Left);
+  CHECK(rig.cap.gain() == g0 + 1u);
+  h.press(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, app::Button::Right);  // SHIFT + RIGHT: the coarse step
+  h.release(app::Button::Shift);
+  h.run_ms(5);
+  CHECK(rig.cap.gain() == g0 + 6u);
+  tap(h, app::Button::F2);  // a second tap on the lit key steps it by 5, as it did
+  CHECK(rig.cap.gain() == g0 + 11u);
+  tap(h, app::Button::Up);  // UP / DOWN stay the slot: GAIN does not move
+  tap(h, app::Button::Down);
+  CHECK(rig.cap.gain() == g0 + 11u);
+  o3_voc03er::test::rec_slot(h, 0);  // the slot outlives the test: back to the first
+}
+
+TEST_CASE("sample_rec: after a tap on F5 the arrows set MONITOR on (RIGHT) and off (LEFT)") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F1);
+  tap(h, app::Button::F5);  // lights MONITOR, changes nothing
   tap(h, app::Button::Left);
+  h.run_ms(20);
+  CHECK(h.engine().input_monitor() == doctest::Approx(0.0f));
+  tap(h, app::Button::Right);
+  h.run_ms(20);
+  CHECK(h.engine().input_monitor() > 0.0f);
+  tap(h, app::Button::Right);  // already on: stays on
+  h.run_ms(20);
+  CHECK(h.engine().input_monitor() > 0.0f);
   tap(h, app::Button::Left);
-  tap(h, app::Button::F4);  // focus AFTER
-  tap(h, app::Button::F4);  // SOUNDS
-  tap(h, app::Button::F4);  // PADS
+  h.run_ms(20);
+  CHECK(h.engine().input_monitor() == doctest::Approx(0.0f));
+}
+
+TEST_CASE("sample_rec: a held arrow repeats on the lit key (GAIN climbs by more than one step), and the release stops it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F1);
+  tap(h, app::Button::F2);  // lights GAIN
+  const unsigned g0 = rig.cap.gain();
+  const bool up = g0 < 50u;
+  const app::Button b = up ? app::Button::Right : app::Button::Left;
+  h.press(b);
+  h.run_ms(1500);  // 400, 300, 200, 150, 100 ms, then 80 ms apart
+  h.release(b);
+  h.run_ms(5);
+  const unsigned g1 = rig.cap.gain();
+  CHECK((up ? g1 - g0 : g0 - g1) >= 5u);
+  h.run_ms(1000);
+  CHECK(rig.cap.gain() == g1);  // released: nothing more
+}
+
+TEST_CASE("sample_rec: REC again stops a free take, AUTOPLAY OFF leaves the slot on no side, DELETE empties it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  length_to_free(h);  // FREE
+  tap(h, app::Button::F4);  // AUTOPLAY OFF: the take waits in the slot
   tap(h, app::Button::Rec);
   h.run_ms(2500);
   tap(h, app::Button::Rec);  // stops at the bar line
   h.run_ms(5000);
   CHECK(unit_param(h, kModSrc) != doctest::Approx(3.0f));
   CHECK(unit_param(h, kCarSrc) != doctest::Approx(3.0f));
-  tap(h, app::Button::F4);  // AFTER back to SPEAKS
-  tap(h, app::Button::F7);  // SLOT: focus, then DOWN / UP move the slot
+  tap(h, app::Button::F4);  // AUTOPLAY back ON (the screen outlives the test)
+  tap(h, app::Button::F6);  // SLOT: focus, then DOWN / UP move the slot
   tap(h, app::Button::Down);
   tap(h, app::Button::Up);
   const auto loop1 = [&h] {  // what the console's state says of slot 1: the unit's own view, the one every screen reads
@@ -266,7 +349,7 @@ TEST_CASE("sample_rec: HELP gives a row to every button the screen answers") {
     INFO(std::string(app::button_name(b)));
     CHECK(has_row(help, b));
   }
-  for (unsigned k = 0; k < 7; ++k) {
+  for (unsigned k = 0; k < 6; ++k) {
     CHECK(help.fkey[k] != nullptr);
   }
 }
@@ -308,7 +391,7 @@ std::string slot1_state(sim::Harness& h) {
 TEST_CASE("sample_rec: DELETE while a take only waits for the bar line cancels it and keeps the audio, a second DELETE empties the slot") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  o3_voc03er::test::rec_length_one_bar(h);  // F3 lights LENGTH, LEFT to FREE, RIGHT to 1 BAR: the same whatever the test before left
   h.run_ms(60);
   tap(h, app::Button::Rec);    // transport stopped: records at once, stops by itself at the bar
   h.run_ms(4500);
@@ -338,7 +421,7 @@ TEST_CASE("sample_rec: DELETE while a take only waits for the bar line cancels i
 TEST_CASE("sample_rec: DELETE while recording stops the take at the bar line and throws it away") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  o3_voc03er::test::rec_length_one_bar(h);  // F3 lights LENGTH, LEFT to FREE, RIGHT to 1 BAR: the same whatever the test before left
   h.run_ms(60);
   tap(h, app::Button::Rec);
   h.run_ms(600);  // recording
@@ -354,7 +437,7 @@ TEST_CASE("sample_rec: DELETE while recording stops the take at the bar line and
 TEST_CASE("sample_rec: DELETE while a take is stopping (REC pressed, the bar line not reached) still throws it away") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F3);  // LENGTH is the lit key at start: a tap steps it to 1 BAR
+  o3_voc03er::test::rec_length_one_bar(h);  // F3 lights LENGTH, LEFT to FREE, RIGHT to 1 BAR: the same whatever the test before left
   h.run_ms(60);
   tap(h, app::Button::Play);  // the transport runs: a stop waits for the bar line (up to 2 s)
   h.run_ms(100);
@@ -418,25 +501,18 @@ TEST_CASE("sample_rec: a tempo change under a recording take that no longer fits
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-// UX3-6: what AFTER cannot do is known when REC arms.
-TEST_CASE("sample rec: UX3 after_note names an ignored AFTER before the take") {
-  route::Route r;
-  const auto slot0 = static_cast<std::uint8_t>(route::kFirstSlot);
-  CHECK(sr::after_note(r, sr::After::None, 0) == sr::AfterNote::None);
-  CHECK(sr::after_note(r, sr::After::Speaks, 0) == sr::AfterNote::None);  // a free slot: AFTER takes it
-  CHECK(sr::after_note(r, sr::After::Sounds, 99) == sr::AfterNote::None);
-  r.speaks = slot0;
-  CHECK(sr::after_note(r, sr::After::Speaks, 0) == sr::AfterNote::None);
-  CHECK(sr::after_note(r, sr::After::Sounds, 0) == sr::AfterNote::SlotOnSpeaks);
-  r.speaks = route::kSpeaksLive;
-  r.sounds = slot0;
-  CHECK(sr::after_note(r, sr::After::Sounds, 0) == sr::AfterNote::None);
-  CHECK(sr::after_note(r, sr::After::Speaks, 0) == sr::AfterNote::SlotOnSounds);
-  CHECK(sr::after_note_text(sr::AfterNote::None) == nullptr);
-  for (const auto n : {sr::AfterNote::SlotOnSpeaks, sr::AfterNote::SlotOnSounds, sr::AfterNote::Refused}) {
-    REQUIRE(sr::after_note_text(n) != nullptr);
-    CHECK(std::strlen(sr::after_note_text(n)) <= 40u);
+// What the screen says of a take: before it (the plan) and when it ends (the done line); the strings are the screen's and fit its width.
+TEST_CASE("sample rec: the take's lines say what will happen and what did") {
+  CHECK(std::string(sr::take_end_plan_text(sr::TakeEnd::SpeaksNow)) == "THE TAKE WILL SPEAK");
+  CHECK(std::string(sr::take_end_plan_text(sr::TakeEnd::PlaysSpeaks)) == "THE TAKE WILL SPEAK");
+  CHECK(std::string(sr::take_end_plan_text(sr::TakeEnd::PlaysSounds)) == "THE TAKE WILL PLAY ON SOUNDS");
+  CHECK(std::string(sr::take_end_plan_text(sr::TakeEnd::Waits)) == "THE TAKE WILL WAIT IN THE SLOT");
+  CHECK(std::string(sr::take_end_done_text(sr::TakeEnd::SpeaksNow)) == "PLAYING ON SPEAKS");
+  CHECK(std::string(sr::take_end_done_text(sr::TakeEnd::PlaysSpeaks)) == "PLAYING ON SPEAKS");
+  CHECK(std::string(sr::take_end_done_text(sr::TakeEnd::PlaysSounds)) == "PLAYING ON SOUNDS");
+  CHECK(std::string(sr::take_end_done_text(sr::TakeEnd::Waits)) == "TAKEN, NOT PLAYING");
+  for (const auto e : {sr::TakeEnd::Waits, sr::TakeEnd::PlaysSpeaks, sr::TakeEnd::PlaysSounds, sr::TakeEnd::SpeaksNow, sr::TakeEnd::Refused}) {
+    CHECK(std::strlen(sr::take_end_plan_text(e)) <= 40u);
+    CHECK(std::strlen(sr::take_end_done_text(e)) <= 40u);
   }
-  CHECK(std::string(sr::playing_on_text(true, sr::AfterNote::None)) == "PLAYING ON SPEAKS");
-  CHECK(std::string(sr::playing_on_text(false, sr::AfterNote::SlotOnSounds)) == "PLAYING ON SOUNDS: AFTER IGNORED");
 }

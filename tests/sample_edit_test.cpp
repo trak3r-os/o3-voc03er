@@ -3,6 +3,7 @@
 // pads audition it), the cuts reaching the step sequencer's map and the SLICE lane, and HELP. Synthetic signals only; no card.
 #include <doctest/doctest.h>
 
+#include "rec_take.h"
 #include "tract_skip.h"
 
 #include <o3sdk/app/app.h>
@@ -543,10 +544,9 @@ struct Rig {
   void take() {
     tap(*h, app::Button::SampleRec);
     h->run_ms(60);
-    tap(*h, app::Button::F3);
-    tap(*h, app::Button::F4);
-    tap(*h, app::Button::F4);
-    tap(*h, app::Button::F4);
+    o3_voc03er::test::rec_length_one_bar(*h);
+    o3_voc03er::test::rec_autoplay(*h, false);  // the take waits in the slot, on no side
+    o3_voc03er::test::rec_slot(*h, 0);
     tap(*h, app::Button::Rec);
     h->run_ms(9000);
   }
@@ -779,8 +779,10 @@ TEST_CASE("sample edit: a hand cut survives at the same length, a new take start
   // a new take (SAMPLE REC) of another length: eight even cuts, edited cleared
   tap(h, app::Button::SampleRec);
   h.run_ms(60);
-  tap(h, app::Button::F3);  // LENGTH: next value
-  tap(h, app::Button::F3);
+  o3_voc03er::test::rec_length_one_bar(h);
+  tap(h, app::Button::Right);  // LENGTH: 2 BARS
+  o3_voc03er::test::rec_autoplay(h, false);
+  o3_voc03er::test::rec_slot(h, 0);
   tap(h, app::Button::Rec);
   h.run_ms(20000);
   tap(h, app::Button::SampleEdit);
@@ -1440,10 +1442,9 @@ TEST_CASE("sample edit: F3 CUT HITS scans the take, cuts at its onsets, warns be
   // A take of 220 Hz at -60 dBFS with a -12 dBFS burst every 500 ms: the onsets are the hits.
   tap(h, app::Button::SampleRec);
   h.run_ms(60);
-  tap(h, app::Button::F3);
-  tap(h, app::Button::F4);
-  tap(h, app::Button::F4);
-  tap(h, app::Button::F4);
+  o3_voc03er::test::rec_length_one_bar(h);
+  o3_voc03er::test::rec_autoplay(h, false);
+  o3_voc03er::test::rec_slot(h, 0);
   tap(h, app::Button::Rec);
   for (unsigned i = 0; i < 36u; ++i) {
     rig.cap.input_tone(220.0f, i % 2u ? -60.0f : -12.0f);

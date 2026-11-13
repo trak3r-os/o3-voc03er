@@ -5,10 +5,10 @@
 // STOPPING, then the take's length), the input's meter, source and gain, and the transport's bar. REC arms (the unit starts at the next bar line, at
 // once with the transport stopped); REC again stops at the bar; a LENGTH stops it by itself; DELETE throws the take away.
 //
-//   F1 SOURCE  F2 GAIN  F3 LENGTH  F4 AFTER  F5 AUTOPLAY  F6 MONITOR  F7 SLOT  F8 -
-//   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on. UP / DOWN: the slot. LEFT / RIGHT: the length.
-//   AFTER says where a finished take plays, looped and whole: on SPEAKS, on SOUNDS or nowhere. A take whose side is taken by the slot's other
-//   side is not placed, and the screen says so. The pads play the chords of PERFORM (its code) so the take can have a chord under it.
+//   F1 SOURCE  F2 GAIN  F3 LENGTH  F4 AUTOPLAY  F5 MONITOR  F6 SLOT  F7 -  F8 -
+//   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on. UP / DOWN: the slot. LEFT / RIGHT: one encoder step of the lit key.
+//   AUTOPLAY (ON) says what a finished take does: it plays looped and whole on the side its slot is already on, a slot on neither side becomes
+//   the SPEAKS source; OFF leaves the take waiting in the slot (sample_rec::take_end). A take never goes to SOUNDS by itself: PERFORM's F3 does that. The pads play the chords of PERFORM (its code) so the take can have a chord under it.
 //
 // DELETE cannot empty a loop in the unit (no parameter does; docs/UI-DESIGN.md U4a): it stops the slot, takes it off its side and marks it
 // empty here, and the next take replaces the audio. Main loop only; the state is a few bytes, nothing is big.
@@ -48,7 +48,6 @@ class SampleRecScreen final : public o3sdk::app::Screen {
 
   unsigned slot() const noexcept { return slot_; }
   unsigned length_index() const noexcept { return length_; }
-  sample_rec::After after() const noexcept { return after_; }
   bool autoplay() const noexcept { return autoplay_; }
   bool recording() const noexcept { return phase_ != Phase::Idle; }
 
@@ -59,6 +58,7 @@ class SampleRecScreen final : public o3sdk::app::Screen {
   enum class Phase : std::uint8_t { Idle, Starting, Active };
 
   void turn(o3sdk::app::Context& ctx, unsigned key, int delta) noexcept;
+  void encoder_step(o3sdk::app::Context& ctx, int delta, bool shift) noexcept;  // the encoder's turn, and LEFT / RIGHT: the lit key `focus_`
   void rec_press(o3sdk::app::Context& ctx) noexcept;
   void delete_press(o3sdk::app::Context& ctx) noexcept;
   void tick(o3sdk::app::Context& ctx) noexcept;
@@ -76,7 +76,6 @@ class SampleRecScreen final : public o3sdk::app::Screen {
   void* source_user_ = nullptr;
   std::uint8_t slot_ = 0;        // 0..3
   std::uint8_t length_ = 0;      // sample_rec::kLengthBars index
-  sample_rec::After after_ = sample_rec::After::Speaks;
   bool autoplay_ = true;
   std::uint8_t focus_ = 2;       // the F key the encoder drives (F3, LENGTH)
   Phase phase_ = Phase::Idle;

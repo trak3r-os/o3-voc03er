@@ -2,6 +2,7 @@
 // FILE (U9c2): the pure part (app/src/file_logic.h) and one screen test on a card in a scratch directory: a damaged project is refused and changes nothing.
 #include <doctest/doctest.h>
 
+#include "rec_take.h"
 #include "../app/src/audio_dirty.h"
 #include "../app/src/file_logic.h"
 
@@ -427,10 +428,9 @@ TEST_CASE("file: LE2 a slot whose WAV is still on its way is not empty to SAMPLE
     h->run_ms(300);
     tap(*h, app::Button::SampleRec);
     h->run_ms(200);
-    tap(*h, app::Button::F3);
-    tap(*h, app::Button::F4);
-    tap(*h, app::Button::F4);
-    tap(*h, app::Button::F4);
+    o3_voc03er::test::rec_length_one_bar(*h);
+    o3_voc03er::test::rec_autoplay(*h, false);  // the takes wait in their slots, on no side
+    o3_voc03er::test::rec_slot(*h, 0);
     tap(*h, app::Button::Play);
     h->run_ms(500);
     tap(*h, app::Button::Rec);

@@ -34,7 +34,7 @@ constexpr unsigned kGainTap = 5;  // a second tap on F2 moves the gain this much
 constexpr int kPicX = 548, kPicY = 210;  // the overview picture (240 x 48), right of the slot cards, under the BAR chip
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"SOURCE", "GAIN", "LENGTH", "AFTER", "AUTOPLAY", "MONITOR", "SLOT", ""};
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"SOURCE", "GAIN", "LENGTH", "AUTOPLAY", "MONITOR", "SLOT", "", ""};
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
   std::size_t n = std::strlen(dst);
@@ -164,12 +164,6 @@ void SampleRecScreen::rec_press(app::Context& ctx) noexcept {
   phase_ = Phase::Starting;
   write_rec(ctx, false);  // the Rec parameter's stored value stays 1 after a stop: 0 then 1 records again
   write_rec(ctx, true);
-  if (autoplay_) {  // UX3-6: an AFTER the slot cannot follow is said now, with the take armed (it is not a reason to refuse)
-    const char* why = sr::after_note_text(sr::after_note(perform_ != nullptr ? perform_->route_now(ctx) : route::Route{}, after_, slot_));
-    if (why != nullptr) {
-      say(ctx, why);
-    }
-  }
   ctx.redraw();
 }
 
@@ -208,7 +202,7 @@ void SampleRecScreen::delete_press(app::Context& ctx) noexcept {
   finish(ctx);
 }
 
-// The take is over (or thrown away). Plays whole and looped on the side AFTER says, when AUTOPLAY is on.
+// The take is over (or thrown away). With AUTOPLAY on it plays whole and looped: on the side its slot is on, else as the SPEAKS source (sample_rec::take_end).
 void SampleRecScreen::finish(app::Context& ctx) noexcept {
   phase_ = Phase::Idle;
   stop_ = false;
@@ -247,24 +241,13 @@ void SampleRecScreen::finish(app::Context& ctx) noexcept {
       (void)ctx.engine().set_param(voice_, Vocoder::Load, 0.0f);
     }
   }
-  if (!autoplay_) {
-    say(ctx, "TAKEN, NOT PLAYING");
-    return;
-  }
-  if (cur.speaks == v || cur.sounds == v) {  // the slot is on a side already: it plays there again, and the line names the side
+  const sr::TakeEnd end = sr::take_end(cur, autoplay_, slot);
+  if (end == sr::TakeEnd::PlaysSpeaks || end == sr::TakeEnd::PlaysSounds) {  // the slot is on a side already: it plays there again
     (void)ctx.engine().set_param(voice_, Vocoder::loop_param(slot, Vocoder::LoopField::Play), 1.0f);
-    say(ctx, sr::playing_on_text(cur.speaks == v, sr::after_note(cur, after_, slot)));
-    return;
+  } else if (end == sr::TakeEnd::SpeaksNow) {  // on neither side: it becomes the SPEAKS source and loops
+    perform_->apply_route(ctx, route::Side::Speaks, cur, sr::take_end_route(cur, end, slot));
   }
-  const sr::AfterPlan plan = sr::plan_after(cur, after_, slot);
-  if (plan.place) {
-    perform_->apply_route(ctx, plan.side, cur, plan.to);
-    say(ctx, plan.side == route::Side::Speaks ? "PLAYING ON SPEAKS" : "PLAYING ON SOUNDS");
-  } else if (plan.refused) {  // a slot is one reader: the other side holds it
-    say(ctx, plan.side == route::Side::Speaks ? "SOUNDS HOLDS THE SLOT" : "SPEAKS HOLDS THE SLOT");
-  } else {
-    say(ctx, "TAKEN");
-  }
+  say(ctx, sr::take_end_done_text(end));
 }
 
 void SampleRecScreen::tick(app::Context& ctx) noexcept {
@@ -375,15 +358,10 @@ void SampleRecScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept 
         say(ctx, kTooLong);  // allowed to choose, REC refuses until the tempo is faster
       }
       break;
-    case 3: {  // AFTER
-      const int n = static_cast<int>(sr::kAfterCount);
-      after_ = static_cast<sr::After>(((static_cast<int>(after_) + delta) % n + n) % n);
-      break;
-    }
-    case 4:  // AUTOPLAY
+    case 3:  // AUTOPLAY
       autoplay_ = !autoplay_;
       break;
-    case 5: {  // MONITOR: the kit's, on or off
+    case 4: {  // MONITOR: the kit's, on or off
       app::AudioIn& a = ctx.audio_in();
       if (!a.available()) {
         say(ctx, "NO INPUT");
@@ -392,7 +370,7 @@ void SampleRecScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept 
       a.monitor(tap || delta == 0 ? (a.monitor() == 0u ? app::AudioIn::kMonitorOn : 0u) : (delta > 0 ? app::AudioIn::kMonitorOn : 0u));
       break;
     }
-    case 6: {  // SLOT
+    case 5: {  // SLOT
       if (phase_ != Phase::Idle) {
         say(ctx, "RECORDING");
         return;
@@ -406,13 +384,22 @@ void SampleRecScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept 
   ctx.redraw();
 }
 
+// The encoder's step on the lit key (`focus_`), and LEFT / RIGHT's (delta -1 / +1): SHIFT makes GAIN's step coarse.
+void SampleRecScreen::encoder_step(app::Context& ctx, int delta, bool shift) noexcept {
+  key_tap_ = false;
+  if (focus_ == 1u && shift) {
+    delta *= static_cast<int>(kGainTap);
+  }
+  turn(ctx, focus_, delta);
+}
+
 void SampleRecScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   unsigned k = 0;
   if (in.fkey_press(k)) {
-    if (in.shift || k > 6u) {
+    if (in.shift || k > 5u) {
       return;
     }
-    if (k == focus_ || k == 4u) {  // a second tap steps the value on (AUTOPLAY has nothing else to do)
+    if (k == focus_ || k == 3u) {  // a second tap steps the value on (AUTOPLAY has nothing else to do)
       key_tap_ = true;
       turn(ctx, k, 1);
       key_tap_ = false;
@@ -423,12 +410,7 @@ void SampleRecScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     return;
   }
   if (in.turn()) {
-    key_tap_ = false;
-    int d = in.delta();
-    if (focus_ == 1u && in.shift) {
-      d *= static_cast<int>(kGainTap);
-    }
-    turn(ctx, focus_, d);
+    encoder_step(ctx, in.delta(), in.shift);
     return;
   }
   if (in.press(Button::Rec)) {
@@ -436,13 +418,13 @@ void SampleRecScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   } else if (in.press(Button::Delete)) {
     delete_press(ctx);
   } else if (in.press(Button::Up)) {
-    turn(ctx, 6, -1);
+    turn(ctx, 5, -1);
   } else if (in.press(Button::Down)) {
-    turn(ctx, 6, 1);
-  } else if (in.press(Button::Left)) {  // repeats arrive as presses (repeat_buttons)
-    turn(ctx, 2, -1);
+    turn(ctx, 5, 1);
+  } else if (in.press(Button::Left)) {  // one encoder step of the lit key; repeats arrive as presses (repeat_buttons)
+    encoder_step(ctx, -1, in.shift);
   } else if (in.press(Button::Right)) {
-    turn(ctx, 2, 1);
+    encoder_step(ctx, 1, in.shift);
   } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr) {
     perform_->pad_event(ctx, in);
   }
@@ -479,8 +461,8 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
       {Button::Delete, "CANCEL/DROP TAKE, EMPTY SLOT", nullptr},
       {Button::Up, "SLOT BEFORE", nullptr},
       {Button::Down, "SLOT AFTER", nullptr},
-      {Button::Left, "SHORTER LENGTH, HOLD REPEATS", nullptr},
-      {Button::Right, "LONGER LENGTH, HOLD REPEATS", nullptr},
+      {Button::Left, "LIT KEY DOWN, HOLD REPEATS", nullptr},
+      {Button::Right, "LIT KEY UP, HOLD REPEATS", nullptr},
       {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
@@ -506,14 +488,14 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
     }
   }
   h.summary = "REC ARMS AT THE NEXT BAR LINE; REC AGAIN OR THE LENGTH ENDS IT AT A BAR.\n"
-              "THE TAKE LOOPS WHERE AFTER SAYS. THE PADS PLAY PERFORM'S LAYOUT.";
+              "AUTOPLAY ON: THE TAKE LOOPS ON SPEAKS. LEFT / RIGHT STEP THE LIT KEY.";
   h.fkey[0] = "THE INPUT SOURCE";
   h.fkey[1] = "INPUT GAIN";
   h.fkey[2] = "FREE, 1, 2, 4 OR 8 BARS";
-  h.fkey[3] = "SPEAKS, SOUNDS, PADS";
-  h.fkey[4] = "PLAY THE TAKE AT ONCE";
-  h.fkey[5] = "INPUT TO THE MASTER";
-  h.fkey[6] = "SLOT 1 TO 4";
+  h.fkey[3] = "ON: THE TAKE PLAYS AT ONCE";
+  h.fkey[4] = "INPUT TO THE MASTER";
+  h.fkey[5] = "SLOT 1 TO 4";
+  h.fkey[6] = nullptr;
   h.fkey[7] = nullptr;
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
@@ -568,7 +550,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   ornoir::FKey keys[ornoir::kFKeys];
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     keys[i].name = kKeyNames[i];
-    keys[i].hot = i == focus_ && i != 7u;
+    keys[i].hot = i == focus_ && i < 6u;
   }
   std::strncpy(keys[0].value, src != nullptr ? src->label : "NONE", sizeof keys[0].value - 1u);
   keys[0].role = ornoir::KeyRole::Voice;
@@ -577,23 +559,23 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
     cat_uint(keys[1].value, sizeof keys[1].value, ain.gain());
     cat(keys[1].value, sizeof keys[1].value, "%");
     keys[1].pct = static_cast<int>(ain.gain());
-    cat(keys[5].value, sizeof keys[5].value, ain.monitor() != 0u ? "ON" : "OFF");
+    cat(keys[4].value, sizeof keys[4].value, ain.monitor() != 0u ? "ON" : "OFF");
   } else {
     cat(keys[1].value, sizeof keys[1].value, "-");
-    cat(keys[5].value, sizeof keys[5].value, "-");
+    cat(keys[4].value, sizeof keys[4].value, "-");
   }
   cat(keys[2].value, sizeof keys[2].value, sr::kLengthNames[length_ < sr::kLengthCount ? length_ : 0u]);
-  cat(keys[3].value, sizeof keys[3].value, sr::kAfterNames[static_cast<unsigned>(after_) < sr::kAfterCount ? static_cast<unsigned>(after_) : 0u]);
-  cat(keys[4].value, sizeof keys[4].value, autoplay_ ? "ON" : "OFF");
-  cat_uint(keys[6].value, sizeof keys[6].value, slot_ + 1u);
-  keys[6].role = ornoir::KeyRole::Carrier;
-  {  // UX3-1: AFTER on a side this mode does not play is drawn dim
-    const sm::Side after_side = after_ == sr::After::Speaks ? sm::Side::Speaks : (after_ == sr::After::Sounds ? sm::Side::Sounds : sm::Side::None);
-    keys[3].dim = after_side != sm::Side::None && sm::cue_dim(sm::mode_cue(mode, after_side, sm::tract_live(e)));
-  }
+  cat(keys[3].value, sizeof keys[3].value, autoplay_ ? "ON" : "OFF");
+  cat_uint(keys[5].value, sizeof keys[5].value, slot_ + 1u);
+  keys[5].role = ornoir::KeyRole::Carrier;
 
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   const auto sv = static_cast<std::uint8_t>(route::kFirstSlot + shown);
+  // What the take will do when it ends, and the side it will play on (None: it waits in the slot).
+  const sr::TakeEnd end = sr::take_end(rt, autoplay_, shown);
+  const sm::Side end_side = end == sr::TakeEnd::PlaysSounds ? sm::Side::Sounds : (end == sr::TakeEnd::PlaysSpeaks || end == sr::TakeEnd::SpeaksNow ? sm::Side::Speaks : sm::Side::None);
+  // UX3-1: AUTOPLAY, when the side the take will play on is not heard in this mode, is drawn dim (the reason is under the line below).
+  keys[3].dim = end_side != sm::Side::None && sm::cue_dim(sm::mode_cue(mode, end_side, sm::tract_live(e)));
 
   ui::plot::Canvas c(r);
   c.open();
@@ -686,23 +668,17 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   }
   r.text(centred(r, buf, Face::Label, 316), 190, buf, Color::Text, Face::Label);
 
-  // Where the slot plays.
-  const char* side = "PADS ONLY";
-  if (rt.speaks == sv && rt.sounds == sv) {
-    side = "ON SPEAKS AND SOUNDS";
-  } else if (rt.speaks == sv) {
-    side = "ON SPEAKS";
-  } else if (rt.sounds == sv) {
-    side = "ON SOUNDS";
-  }
-  buf[0] = '\0';
-  cat(buf, sizeof buf, side);
-  if (view == View::Take) {
-    cat(buf, sizeof buf, ls.playing ? "  PLAYING" : (ls.pending ? "  WAITING FOR THE BAR" : "  STOPPED"));
-  }
-  // UX3-1: the side the take plays on (the slot's own, else the one AFTER will give it) may not be heard in this mode: dim, and the reason below.
+  // Where the slot plays (a take or loaded audio), else what the take will do when it ends.
   const sm::Side now = sm::side_of(rt, shown);
-  const sm::Side going = now != sm::Side::None || !autoplay_ ? now : (after_ == sr::After::Speaks ? sm::Side::Speaks : (after_ == sr::After::Sounds ? sm::Side::Sounds : sm::Side::None));
+  buf[0] = '\0';
+  if (view == View::Take) {
+    cat(buf, sizeof buf, now == sm::Side::None ? "HELD IN THE SLOT" : (rt.speaks == sv && rt.sounds == sv ? "ON SPEAKS AND SOUNDS" : (now == sm::Side::Speaks ? "ON SPEAKS" : "ON SOUNDS")));
+    cat(buf, sizeof buf, ls.playing ? "  PLAYING" : (ls.pending ? "  WAITING FOR THE BAR" : "  STOPPED"));
+  } else {
+    cat(buf, sizeof buf, sr::take_end_plan_text(end));
+  }
+  // UX3-1: the side the line speaks of (the slot's own, or the one the take will play on) may not be heard in this mode: dim, and the reason below.
+  const sm::Side going = view == View::Take ? now : end_side;
   const sm::Cue cue = going == sm::Side::None ? sm::Cue::Heard : sm::mode_cue(mode, going, sm::tract_live(ctx.engine()));
   r.text(centred(r, buf, Face::Label, 316), 226, buf, view == View::Take && ls.playing && !sm::cue_dim(cue) ? Color::Play : Color::TextDim, Face::Label);
   if (sm::cue_reason(cue) != nullptr) {
@@ -720,7 +696,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   if (note_ != nullptr) {
     r.text(96, 346, note_, Color::Accent, Face::Label);
   }
-  r.text(96, 384, "PADS: PERFORM'S LAYOUT", Color::TextDim, Face::Micro);
+  r.text(96, 384, "LEFT RIGHT: THE LIT KEY  UP DOWN: SLOT  PADS: PERFORM'S LAYOUT", Color::TextDim, Face::Micro);
 }
 
 }  // namespace o3_voc03er

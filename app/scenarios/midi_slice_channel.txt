@@ -1,14 +1,12 @@
 # MIDI SLICES ON THEIR OWN CHANNEL (MS1): SAMPLE SHIFT + F2 is SLICE CH (SAME, 1..16, OFF). The user's channel is 1 (the Config's IN CHANNEL) and the slice
 # channel 10: a bass note at 36 on channel 1 plays the SYNTH (PATTERN records it as a step) while the same note on channel 10 fires slice 1 of the SPEAKS
-# slot (the take is made with AFTER SOUNDS and PERFORM moves it to SPEAKS) and records nothing. OFF: MIDI fires no slice and note 36 is the synth's again. The WAV carries them; it is not the unit.
+# slot (the take, AUTOPLAY ON, ends on SPEAKS) and records nothing. OFF: MIDI fires no slice and note 36 is the synth's again. The WAV carries them; it is not the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/midi_slice_channel.txt --card <fresh dir> --out <dir>   (the dirs must exist)
 input tone 220 -8
 wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
 tap play
 wait 500
 record on
@@ -24,17 +22,10 @@ wait 600
 snap 01_cuts
 tap performance
 wait 100
-# SOUNDS back to SYNTH (the take is on SOUNDS), then SPEAKS takes SLOT 1 (the list's eighth row)
-tap f3
-turn -9
-tap f3
-wait 100
+# the take is on SPEAKS already (AUTOPLAY ON): F2 opens the SPEAKS list on SLOT 1
 tap f2
-wait 100
-turn 7
 wait 100
 snap 01a_speaks_list
-tap f2
 wait 200
 snap 01b_speaks_slot
 tap play

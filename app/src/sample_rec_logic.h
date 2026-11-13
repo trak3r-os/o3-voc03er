@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// SAMPLE REC's pure logic (docs/UI-DESIGN.md, "SAMPLE REC"): the LENGTH steps, where a take goes AFTER it, bars and seconds as the screen shows
+// SAMPLE REC's pure logic (docs/UI-DESIGN.md, "SAMPLE REC"): the LENGTH steps, what a take does when it ends (AUTOPLAY), bars and seconds as the screen shows
 // them. Apart from the screen so tests/sample_rec_test.cpp holds them. Nothing here allocates or reads the engine.
 
 #include <o3_voc03er/route.h>
@@ -17,74 +17,65 @@ inline constexpr unsigned kLengthCount = 5;
 inline constexpr unsigned kLengthBars[kLengthCount] = {0, 1, 2, 4, 8};
 inline constexpr const char* kLengthNames[kLengthCount] = {"FREE", "1 BAR", "2 BARS", "4 BARS", "8 BARS"};
 
-// F4 AFTER: the side the finished take plays on; None shows as "PADS" (the slot neither speaks nor sounds: only its pads are played).
-enum class After : std::uint8_t { Speaks, Sounds, None };
-inline constexpr unsigned kAfterCount = 3;
-inline constexpr const char* kAfterNames[kAfterCount] = {"SPEAKS", "SOUNDS", "PADS"};
-
 inline constexpr unsigned kSampleRate = static_cast<unsigned>(o3sdk::core::kRefRateHz);  // the loops' rate: the engine's
 inline constexpr unsigned kBeatsPerBar = 4;
 inline constexpr unsigned kTicksPerBeat = 960;  // transport.h kPpqn
 
-// What AFTER does with the slot: `place` the route `to` on `side`; `refused` when the other side holds the slot (a slot is one reader, route.h),
-// then nothing is placed and the screen says why. PADS (None) places nothing and is not a refusal.
-struct AfterPlan {
-  route::Side side = route::Side::Speaks;
-  route::Route to;
-  bool place = false;
-  bool refused = false;
-};
+// What a take does when it ends, from the route, F4 AUTOPLAY and the slot (there is no side to pick: SPEAKS and SOUNDS are PERFORM's F2 and F3).
+//   Waits        AUTOPLAY OFF: nothing is routed, the take waits in the slot, the live input keeps speaking.
+//   PlaysSpeaks  the slot already speaks: it plays there again.
+//   PlaysSounds  the slot already sounds: it plays there again.
+//   SpeaksNow    the slot is on neither side: it becomes the SPEAKS source and loops.
+//   Refused      the route would not take it as the SPEAKS source (the screen then says so; the take stays in the slot).
+// A take never goes to SOUNDS by itself: the player picks the slot in PERFORM's F3 SOUNDS list.
+enum class TakeEnd : std::uint8_t { Waits, PlaysSpeaks, PlaysSounds, SpeaksNow, Refused };
 
-constexpr AfterPlan plan_after(route::Route cur, After after, unsigned slot) noexcept {
-  AfterPlan p;
-  p.to = cur;
-  if (after == After::None || slot >= route::kSlots) {
-    return p;
-  }
-  p.side = after == After::Speaks ? route::Side::Speaks : route::Side::Sounds;
-  const route::Row row{route::Kind::Slot, static_cast<std::uint8_t>(slot)};
-  if (route::pick(p.side, p.to, row)) {
-    p.place = true;
-  } else {
-    p.to = cur;
-    p.refused = true;
-  }
-  return p;
-}
-
-// UX3-6: what AFTER cannot do for a slot, known when REC arms (not after the take). The slot already sits on a side that is not AFTER's: the take
-// plays there and AFTER is ignored (a slot is one reader, route.h). `Refused`: the route would not take it. AFTER PADS and an AFTER that agrees say nothing.
-enum class AfterNote : std::uint8_t { None, SlotOnSpeaks, SlotOnSounds, Refused };
-
-constexpr AfterNote after_note(route::Route cur, After after, unsigned slot) noexcept {
-  if (after == After::None || slot >= route::kSlots) {
-    return AfterNote::None;
+constexpr TakeEnd take_end(route::Route cur, bool autoplay, unsigned slot) noexcept {
+  if (!autoplay || slot >= route::kSlots) {
+    return TakeEnd::Waits;
   }
   const auto v = static_cast<std::uint8_t>(route::kFirstSlot + slot);
   if (cur.speaks == v) {
-    return after == After::Speaks ? AfterNote::None : AfterNote::SlotOnSpeaks;
+    return TakeEnd::PlaysSpeaks;
   }
   if (cur.sounds == v) {
-    return after == After::Sounds ? AfterNote::None : AfterNote::SlotOnSounds;
+    return TakeEnd::PlaysSounds;
   }
-  return plan_after(cur, after, slot).refused ? AfterNote::Refused : AfterNote::None;
+  route::Route to = cur;
+  return route::pick(route::Side::Speaks, to, route::Row{route::Kind::Slot, static_cast<std::uint8_t>(slot)}) ? TakeEnd::SpeaksNow : TakeEnd::Refused;
 }
 
-// The line for a note (nullptr for None): said when REC arms, so the player knows before the take.
-constexpr const char* after_note_text(AfterNote n) noexcept {
-  switch (n) {
-    case AfterNote::SlotOnSpeaks: return "SLOT IS ON SPEAKS: AFTER IGNORED";
-    case AfterNote::SlotOnSounds: return "SLOT IS ON SOUNDS: AFTER IGNORED";
-    case AfterNote::Refused: return "AFTER CANNOT PLACE THE SLOT";
-    case AfterNote::None: break;
+// The route a take that ends as `e` leaves behind: only SpeaksNow changes it (the slot becomes the SPEAKS source); `cur` otherwise.
+constexpr route::Route take_end_route(route::Route cur, TakeEnd e, unsigned slot) noexcept {
+  route::Route to = cur;
+  if (e == TakeEnd::SpeaksNow && slot < route::kSlots) {
+    to.speaks = static_cast<std::uint8_t>(route::kFirstSlot + slot);
   }
-  return nullptr;
+  return to;
 }
 
-// The line when a take ends on a slot that already sits on a side: it names the side it plays on, and says so when AFTER asked for another.
-constexpr const char* playing_on_text(bool speaks, AfterNote n) noexcept {
-  const bool ignored = n == AfterNote::SlotOnSpeaks || n == AfterNote::SlotOnSounds;
-  return speaks ? (ignored ? "PLAYING ON SPEAKS: AFTER IGNORED" : "PLAYING ON SPEAKS") : (ignored ? "PLAYING ON SOUNDS: AFTER IGNORED" : "PLAYING ON SOUNDS");
+// The line under the bar counter before and during a take: what will happen when it ends.
+constexpr const char* take_end_plan_text(TakeEnd e) noexcept {
+  switch (e) {
+    case TakeEnd::PlaysSpeaks:
+    case TakeEnd::SpeaksNow: return "THE TAKE WILL SPEAK";
+    case TakeEnd::PlaysSounds: return "THE TAKE WILL PLAY ON SOUNDS";
+    case TakeEnd::Refused:
+    case TakeEnd::Waits: break;
+  }
+  return "THE TAKE WILL WAIT IN THE SLOT";
+}
+
+// The moment's line when the take has ended.
+constexpr const char* take_end_done_text(TakeEnd e) noexcept {
+  switch (e) {
+    case TakeEnd::PlaysSpeaks:
+    case TakeEnd::SpeaksNow: return "PLAYING ON SPEAKS";
+    case TakeEnd::PlaysSounds: return "PLAYING ON SOUNDS";
+    case TakeEnd::Refused: return "TAKEN: THE ROUTE REFUSES IT";
+    case TakeEnd::Waits: break;
+  }
+  return "TAKEN, NOT PLAYING";
 }
 
 // The length at which Rec 0 goes out is perform::capture_stop_at(); this is whether a take of `bars` stops by itself (0 is FREE).

@@ -1,0 +1,27 @@
+# UX3-7 on SAMPLE REC: LEFT / RIGHT are one encoder step of the lit F key (the same call as the encoder's turn), not LENGTH's alone. F3 LENGTH is lit when the screen is entered, so the first
+# RIGHT is LENGTH 1 BAR with nothing tapped. A tap on F2 lights GAIN (and changes nothing), then RIGHT raises the gain; a tap on F5 lights MONITOR and RIGHT turns it on. UP / DOWN stay the slot.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_rec_arrows.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+snap 01_entry_length_lit
+tap right
+wait 100
+snap 02_right_is_one_bar
+tap f2
+wait 100
+snap 03_gain_lit
+tap right
+tap right
+tap right
+wait 100
+snap 04_gain_up_three
+tap f5
+wait 100
+tap right
+wait 100
+snap 05_monitor_on_by_right
+tap left
+wait 100
+snap 06_monitor_off_by_left

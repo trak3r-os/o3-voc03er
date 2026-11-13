@@ -83,7 +83,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the picked slice's cut, else the cut nearest the cursor in view (SHIFT: the slot's sample, F1 confirms); PERFORM the latched pad; SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
 | SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE EDIT, with a lower pad latches its note, SHIFT + UP / DOWN is the slot and SHIFT + F8 clears the cuts; on SAMPLE, SHIFT + F2 is SLICE CH; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP; on PARAMS, with an F key MIDI learn. Each screen's section lists its own | everywhere |
 | UP / DOWN | Which: the slot (SAMPLE, SAMPLE REC; SAMPLE EDIT: zoom out / in, SHIFT the slot), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
-| LEFT / RIGHT | Where: the octave of the pads (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the take's length (SAMPLE REC); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
+| LEFT / RIGHT | Where: the octave of the pads (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the lit F key's value (SAMPLE REC: one encoder click, SHIFT as the encoder's); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
 | Encoder | The latched F value; in a list the row; in SAMPLE EDIT the picked slice's start, else the cursor, a picture pixel a click at the zoom (SHIFT: coarser, at most a 64th of the view; with a pick, one sample) | everywhere |
 
 ## 4. The screens
@@ -138,19 +138,22 @@ the selected slot's overview waveform with its cuts, the play line moving, the s
 
 The slot's name and state in big type (EMPTY, ARMED, blinking REC with the bars counted, STOPPING, then the length), the IN meter tall, the live
 source and its gain, the transport's bar counter. REC arms (the take starts at the next bar line, at once with the transport stopped) and REC
-again stops at the bar; LENGTH stops it by itself. After the take the slot plays whole, looped (today's behaviour), on the side AFTER says,
-so what was sung is heard at once.
+again stops at the bar; LENGTH stops it by itself. After the take, with AUTOPLAY ON, the slot plays whole, looped, on the side it is already on
+(SPEAKS or SOUNDS), or on SPEAKS when it is on neither, so what was sung is heard at once.
 
-- F1 SOURCE (LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB; a line source starts at gain 0) · F2 GAIN · F3 LENGTH (FREE, 1, 2, 4, 8 BARS; also
-  LEFT / RIGHT) · F4 AFTER (the side the slot takes: SPEAKS, SOUNDS, PADS: the slot is played from SAMPLE's pads only) · F5 AUTOPLAY (ON, OFF) · F6 MONITOR (the kit's: the dry input to the output while
-  recording) · F7 SLOT (1 to 4; also UP / DOWN) · F8 blank. DELETE discards the take.
+- F1 SOURCE (LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB; a line source starts at gain 0) · F2 GAIN · F3 LENGTH (FREE, 1, 2, 4, 8 BARS; lit when the screen opens) · F4 AUTOPLAY (ON by default, OFF: what a take does when it ends) · F5 MONITOR (the kit's: the dry input to the output while
+  recording) · F6 SLOT (1 to 4; also UP / DOWN, whatever key is lit) · F7 and F8 blank. DELETE discards the take. LEFT / RIGHT are one encoder step of the lit key (`encoder_step`, the encoder's own call with SHIFT as the encoder passes it; held, they repeat): a tap on a key lights it, a second tap steps it. F4 AUTOPLAY never takes the light (a tap always switches it), so the arrows skip it.
 - Pads: PERFORM's layout (section 7), so the carrier is played while recording (the take is the input, not the output). While recording the whole
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
 Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
 Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SPEAKS makes the slot speak or returns to LIVE; it refuses only an empty slot or a route `allowed` rejects, and says why. The pads play PERFORM's layout (section 7); LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. F6 and F7 came in U5b.
-A refused AFTER leaves the slot on no side (PADS) and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
-again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
+AFTER (SPEAKS, SOUNDS, PADS) was removed (rd-rec): it repeated PERFORM's F2 SPEAKS and F3 SOUNDS lists, and AUTOPLAY says it in one key. AUTOPLAY ON: a slot on a side plays
+again there ("PLAYING ON SPEAKS" or "ON SOUNDS"); a slot on neither becomes the SPEAKS source ("PLAYING ON SPEAKS"); a refusal keeps the slot where it is ("TAKEN: THE ROUTE REFUSES IT").
+AUTOPLAY OFF places nothing ("TAKEN, NOT PLAYING"): the take waits in the slot and the live input keeps speaking. A take never goes to SOUNDS by itself (PERFORM's F3 list has SLOT n).
+The line under the bar counter reads "ON SPEAKS  PLAYING" and so on once there is audio, "HELD IN THE SLOT" for a slot on neither side, and before and during a take "THE TAKE WILL SPEAK",
+"THE TAKE WILL PLAY ON SOUNDS" or "THE TAKE WILL WAIT IN THE SLOT"; it and the AUTOPLAY key read dim, with the reason below, when the side the take plays on is not heard in the mode (UX3-1).
+Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F1, F2, F3 and F6 step on a second tap, F4 on every tap.
 
 ### SAMPLE EDIT
 

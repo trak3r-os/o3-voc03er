@@ -1,4 +1,4 @@
-# UX3-1, UX3-5, UX3-8 on SAMPLE: the cue line under the slot says what it does now and whether the mode hears it. A 1 BAR take goes to SOUNDS (SAMPLE REC AFTER: SOUNDS); PERFORM's
+# UX3-1, UX3-5, UX3-8 on SAMPLE: the cue line under the slot says what it does now and whether the mode hears it. A 1 BAR take (AUTOPLAY OFF) is put on SOUNDS from PERFORM; PERFORM's
 # mode key goes to TUNE (a SOUNDS slot is not heard there: the line says so), where F2 SPEAKS makes the slot speak and a second tap goes back to LIVE. Then TRACT (the slot on no side
 # plays to nowhere, its pads speak, and SPEAKS is heard only through DRY unless the mouth is LIVE). A slice pad past the count says "n SLICES". At the end the TRACT mouth goes LIVE
 # (PARAMS' MIX page, F1): F2 is then not dim, and the line says the slot "MOVES THE MOUTH (LIVE) AND DRY". The simulator shows the lines; whether a slot is heard in the mode is the unit's and the ear's.
@@ -8,13 +8,19 @@ wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
-tap f4
+tap f4              # AUTOPLAY OFF: the take waits in the slot
 tap play
 wait 500
 record on
 tap rec
 wait 9000
+tap performance
+wait 100
+# the take waits in the slot (AUTOPLAY OFF): PERFORM's F3 SOUNDS takes it, SLOT 1 being the list's eleventh row
+tap f3
+turn 10
+tap f3
+wait 300
 tap sampleplay
 wait 300
 snap 01_take_sounds

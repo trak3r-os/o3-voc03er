@@ -3,6 +3,7 @@
 // LEVEL and LOOP reach the unit; HELP).
 #include <doctest/doctest.h>
 
+#include "rec_take.h"
 #include "tract_skip.h"
 
 #include <o3sdk/app/app.h>
@@ -210,7 +211,7 @@ float unit_param(sim::Harness& h, std::uint16_t id) {
 
 constexpr std::uint16_t kCarSrc = 34, kModSrc = 47;
 
-// SAMPLE REC takes 1 BAR into slot 1 (AFTER PADS: it is on no side), then SAMPLE opens.
+// SAMPLE REC takes 1 BAR into slot 1 with AUTOPLAY OFF (the take waits in the slot, on no side), then SAMPLE opens.
 struct Rig {
   o3sdk::platform::host::FakeCapture cap;
   std::unique_ptr<sim::Harness> h;
@@ -220,20 +221,12 @@ struct Rig {
     REQUIRE(h->start());
     h->run_ms(100);
   }
-  void take() {
+  void take(bool autoplay = false) {
     tap(*h, app::Button::SampleRec);
     h->run_ms(60);
-    // SAMPLE REC keeps its focus and AFTER across the harnesses of one process (one app object): the first take steps LENGTH to 1 BAR and AFTER
-    // to PADS from the defaults; a later one starts with AFTER on PADS and the focus on F4, so it needs one more step to come back to PADS.
-    static bool taken = false;
-    tap(*h, app::Button::F3);  // LENGTH: 1 BAR (a later take only moves the focus)
-    tap(*h, app::Button::F4);  // AFTER
-    tap(*h, app::Button::F4);
-    tap(*h, app::Button::F4);  // PADS
-    if (taken) {
-      tap(*h, app::Button::F4);
-    }
-    taken = true;
+    o3_voc03er::test::rec_length_one_bar(*h);
+    o3_voc03er::test::rec_autoplay(*h, autoplay);
+    o3_voc03er::test::rec_slot(*h, 0);
     tap(*h, app::Button::Rec);
     h->run_ms(9000);
   }
@@ -840,22 +833,26 @@ TEST_CASE("sample: LOOP ON on a slot that neither speaks nor sounds makes it spe
   h.run_ms(300);
   CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
   CHECK(mod_src(h) == doctest::Approx(3.0f));
-  // A take into slot 2 with AFTER SOUNDS: slot 2 sounds (the carrier reads slot 2), and its LOOP ON changes nothing in the route.
+  // A take into slot 2 that SOUNDS holds (CarSrc 4, as PERFORM's F3 list leaves it): AUTOPLAY ON plays it where it is, the route stays,
+  // and its LOOP ON changes nothing in it.
+  for (unsigned u = 0; u < 8; ++u) {
+    if (!o3_voc03er::test::is_tract_unit(h, u)) {
+      (void)h.engine().set_param(static_cast<o3sdk::dsp::UnitId>(u), kCarSrc, 4.0f);
+    }
+  }
+  h.run_ms(60);
   tap(h, app::Button::SampleRec);
   h.run_ms(60);
-  tap(h, app::Button::F7);  // SLOT's focus, then its step: slot 2
-  tap(h, app::Button::F7);
-  tap(h, app::Button::F4);  // AFTER's focus, then its steps: PADS to SPEAKS to SOUNDS
-  tap(h, app::Button::F4);
-  tap(h, app::Button::F4);
+  o3_voc03er::test::rec_slot(h, 1);
+  o3_voc03er::test::rec_autoplay(h, true);
   tap(h, app::Button::Rec);
   h.run_ms(9000);
-  REQUIRE(unit_param(h, kCarSrc) == doctest::Approx(4.0f));  // SOUNDS holds slot 2
+  REQUIRE(unit_param(h, kCarSrc) == doctest::Approx(4.0f));  // SOUNDS still holds slot 2
   rig.open();
   for (unsigned i = 0; i < 3; ++i) tap(h, app::Button::Up);  // the cursor may sit on slot 2 already (a take selects its slot): first the top ...
   tap(h, app::Button::Down);                                  // ... then slot 2
   const float mod_before = mod_src(h);
-  if (lp(h, 1, Vocoder::LoopField::Play) == 1.0f) {  // AUTOPLAY started the SOUNDS slot with its take: F5 ends it, and the second tap is the LOOP ON under test
+  if (lp(h, 1, Vocoder::LoopField::Play) == 1.0f) {  // AUTOPLAY played the SOUNDS slot with its take: F5 ends it, and the second tap is the LOOP ON under test
     tap(h, app::Button::F5);
     h.run_ms(300);
     CHECK(lp(h, 1, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
@@ -867,16 +864,11 @@ TEST_CASE("sample: LOOP ON on a slot that neither speaks nor sounds makes it spe
   CHECK(unit_param(h, kCarSrc) == doctest::Approx(4.0f));
   CHECK(mod_src(h) == doctest::Approx(mod_before));
   CHECK(h.runtime().frame_failures() == 0u);
-  // SAMPLE REC keeps its focus, AFTER and SLOT across the harnesses of the process: put them back where Rig::take expects them (AFTER PADS, SLOT 1, focus on AFTER).
-  for (unsigned i = 0; i < 3; ++i) tap(h, app::Button::Up);
+  // SAMPLE REC keeps its SLOT and AUTOPLAY across the harnesses of the process: back to what Rig::take expects (SLOT 1, AUTOPLAY OFF).
   tap(h, app::Button::SampleRec);
   h.run_ms(60);
-  tap(h, app::Button::F4);  // AFTER: SOUNDS to PADS
-  tap(h, app::Button::F7);  // SLOT's focus, then 2, 3 and 1
-  tap(h, app::Button::F7);
-  tap(h, app::Button::F7);
-  tap(h, app::Button::F7);
-  tap(h, app::Button::F4);  // the focus back on AFTER
+  o3_voc03er::test::rec_slot(h, 0);
+  o3_voc03er::test::rec_autoplay(h, false);
 }
 
 TEST_CASE("sample: a repeating slice goes on after SAMPLE is left, F5 reads ON SL n from the unit again, F5 OFF and a NEW project end it") {
@@ -912,7 +904,7 @@ TEST_CASE("sample: a repeating slice goes on after SAMPLE is left, F5 reads ON S
   h.pad_up(2);
   h.run_ms(200);
   REQUIRE(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
-  rig.take();  // a new take into slot 1 while it repeats: the repeat ends with the old audio
+  rig.take(true);  // a new take into slot 1 (on SPEAKS) while it repeats, AUTOPLAY ON: the repeat ends with the old audio and the new one plays
   CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));
   CHECK_FALSE(f5_window(h) == reads);
   rig.open();
