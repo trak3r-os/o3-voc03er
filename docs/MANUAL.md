@@ -438,7 +438,7 @@ mouth says the phrase.
   uses the tempo as it is now, so a take recorded at another tempo may be read as one spread over LENGTH. A recording of several bars gives its
   first bar. It needs more testing on real voices: it is tested against a synthetic voice, not yet against people.
 
-**What the project keeps.** The MOUTH lane of the eight patterns, and the TRACT page's eight values (VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and
+**What the project keeps.** The MOUTH lane of the eight patterns, and the eight values of PARAMS' MOUTH page (VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and
 HISS). It does not keep CLOSE (the closure held now), MIX, SLIDE or ACCENT: the line writes those as it plays, and F4 NEW puts them back. A project
 saved with a word or a WOB does not open in the build before this one.
 
