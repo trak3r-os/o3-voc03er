@@ -9,7 +9,7 @@
 //   that starts at the cursor (LEFT / RIGHT put the cursor on one). F1 CUT EVEN: OFF, 8, 16, 24: a tap points the encoder at it, a second tap
 //   steps it, turning re-cuts the slot. SHIFT + F8 (CLR CUTS): one cut over the slot (F8 alone only says so). F2 CUT BEATS: OFF, 4, 8, 16 a bar, on the bars a take was recorded on (dim for
 //   a loaded WAV), at most 24 cuts. F6 NORMALISE: the slot's peak to -1 dBFS, a slice of samples a pass. F3 CUT HITS: 0 to 100, the onset detector's sensitivity (0 off; a
-//   second tap steps by 10): one scan of the slot, then the cuts follow the value from the stored hop energies. F7 (SAVE WAV) is drawn dim and says COMES LATER. F4 START and F5 END point the encoder at a trim bracket (SHIFT: coarse); with one moved off its end F1 TRIMS the slot to the
+//   second tap steps by 10): one scan of the slot, then the cuts follow the value from the stored hop energies. F7 SAVE WAV writes the slot to the card's Samples/ folder. F4 START and F5 END point the encoder at a trim bracket (SHIFT: coarse); with one moved off its end F1 TRIMS the slot to the
 //   brackets (destructive, no undo; a slice of samples a pass, then Load). COPY copies the slot, cuts included, to the next empty slot. F6, SHIFT + DELETE
 //   (empty the slot) and COPY ask; F1 confirms. A table the hand edited is replaced only by a second attempt (REPLACES n CUTS). The pads are SAMPLE's.
 //
