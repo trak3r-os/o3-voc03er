@@ -114,6 +114,7 @@ tap performance
 wait 50
 tap f7
 turn 6
+tap f7
 wait 50
 press shift
 tap config
@@ -127,6 +128,7 @@ tap f6
 turn 2
 tap f7
 turn 1
+tap f7
 wait 300
 press shift
 tap config
@@ -142,6 +144,7 @@ tap f6
 turn -2
 tap f7
 turn -3
+tap f7
 wait 300
 press shift
 tap config

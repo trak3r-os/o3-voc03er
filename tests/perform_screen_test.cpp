@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include "tract_skip.h"
+#include "../app/src/strip_logic.h"
 
 #include <o3sdk/app/app.h>
 #include <o3sdk/app/help.h>
@@ -110,13 +111,15 @@ TEST_CASE("perform: HELP names every control, and its legend is the page in forc
   tap(*h, app::Button::Config);
   REQUIRE_FALSE(h->runtime().help_open());
 
-  // A as a parameter strip (F7 takes the focus, the encoder steps A past OFF to the first strip), then C to BEND (F6 to row C, F7 steps it): the legend follows.
+  // A as a parameter strip (F7's list, the cursor past OFF to the first strip, F7 takes it), then C to BEND (F6 steps to row C, F7's list): the legend
+  // follows.
   tap(*h, app::Button::F7);
   h->turn(6);
-  tap(*h, app::Button::F6);
+  tap(*h, app::Button::F7);
   tap(*h, app::Button::F6);
   tap(*h, app::Button::F6);
   tap(*h, app::Button::F7);
+  h->turn(1);
   tap(*h, app::Button::F7);
   h->run_ms(200);
   open_help(*h);
@@ -471,6 +474,15 @@ bool row_dark(sim::Harness& h, unsigned pad_row) {
   }
   return true;
 }
+// F7's list for F6's row: open it, move the cursor `steps` entries (the encoder wraps round the list), take the entry with F7.
+void plays_take(sim::Harness& h, int steps) {
+  tap(h, app::Button::F7);
+  h.run_ms(20);
+  h.turn(steps);
+  h.run_ms(20);
+  tap(h, app::Button::F7);
+  h.run_ms(20);
+}
 }  // namespace
 
 TEST_CASE("perform: F6 steps the row and wraps on a tap, the encoder stops at the ends, and the chosen row flashes") {
@@ -515,11 +527,19 @@ TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, B
   CHECK(h.leds().level(24 + 0) == 70);
   CHECK(h.leds().level(36 + 5) == 255);
 
-  tap(h, app::Button::F6);  // F6 holds the focus at start: A to B
-  tap(h, app::Button::F7);  // F7 takes the focus and changes nothing
+  tap(h, app::Button::F6);  // A to B
+  tap(h, app::Button::F7);  // the list opens and changes nothing
   h.run_ms(300);
   CHECK(h.leds().level(24 + 0) == 70);
-  h.turn(4);  // B: TRIAD to OFF
+  h.turn(4);  // the cursor: TRIAD to OFF, nothing taken yet
+  h.run_ms(300);
+  CHECK(h.leds().level(24 + 0) == 70);
+  tap(h, app::Button::F8);  // backs out: B is still TRIAD
+  h.run_ms(300);
+  CHECK(h.leds().level(24 + 0) == 70);
+  tap(h, app::Button::F7);
+  h.turn(4);
+  tap(h, app::Button::F1);  // F1 takes too
   h.run_ms(300);
   CHECK(row_dark(h, 2));
   CHECK(h.leds().level(12 + 0) == 70);  // A is as it was
@@ -528,19 +548,15 @@ TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, B
   h.pad_up(24 + 5);
   h.run_ms(100);
 
-  tap(h, app::Button::F6);  // focus
   tap(h, app::Button::F6);  // B to C
-  tap(h, app::Button::F7);  // focus
-  h.turn(1);                // FORMANT to BEND: the strip's middle pair is dim, the rest dark
+  plays_take(h, 1);         // FORMANT to BEND: the strip's middle pair is dim, the rest dark
   h.run_ms(300);
   CHECK(h.leds().level(36 + 5) == 24);
   CHECK(h.leds().level(36 + 6) == 24);
   CHECK(h.leds().level(36 + 0) == 0);
 
-  tap(h, app::Button::F6);  // focus
   tap(h, app::Button::F6);  // C wraps to A
-  tap(h, app::Button::F7);  // focus
-  h.turn(6);                // A: NOTE past OFF to the first parameter strip, SHAPE: twelve pads, none dark
+  plays_take(h, 6);         // A: NOTE past OFF to the first parameter strip, SHAPE: twelve pads, none dark
   h.run_ms(300);
   for (unsigned pad = 12; pad < 24; ++pad) {
     CHECK(h.leds().level(pad) != 0);
@@ -551,7 +567,7 @@ TEST_CASE("perform: F7 sets what the chosen row plays: OFF is dark and silent, B
   h.run_ms(100);
   CHECK(unit_param(h, kWave) == doctest::Approx(2.0f));
   CHECK(h.leds().level(12 + 11) == 255);  // the nearest pad to the value is the bright one
-  h.turn(-1);  // back to OFF: A is dark again, and B (OFF) too
+  plays_take(h, -1);  // back to OFF: A is dark again, and B (OFF) too
   h.run_ms(300);
   CHECK(row_dark(h, 1));
   CHECK(row_dark(h, 2));
@@ -574,8 +590,7 @@ TEST_CASE("perform: each mode keeps its own rows, TRACT starts on NOTE, TONGUE a
   using o3_voc03er::TractUnit;
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F7);  // row A is the chosen one at start; F7 takes the focus
-  h.turn(6);                // BANDS, row A: the SHAPE strip
+  plays_take(h, 6);  // row A is the chosen one at start; BANDS, row A: the SHAPE strip
   h.run_ms(300);
   h.pad_down(12 + 11);
   h.run_ms(60);
@@ -645,8 +660,7 @@ TEST_CASE("perform: every row value plays what it says, and row C FORMANT holds 
   h.run_ms(100);
   CHECK(unit_param(h, kFormant) == doctest::Approx(4.0f));
   // A as a 7TH: a chord on a pad, the stored kind is the row's.
-  tap(h, app::Button::F7);
-  h.turn(2);  // NOTE, TRIAD, 7TH
+  plays_take(h, 2);  // NOTE, TRIAD, 7TH
   h.run_ms(100);
   h.pad_down(12 + 1);
   CHECK(rig.listen(300) > kSound);
@@ -655,34 +669,106 @@ TEST_CASE("perform: every row value plays what it says, and row C FORMANT holds 
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("perform: a held pad's row takes F7 at once, and ROW stays where F6 put it") {
+// The maintainer's report (ROW PLAYS broken): a held pad's row used to take F7 while F6 showed another row. F7 always lists F6's row now.
+TEST_CASE("perform: F7 with a pad of another row held lists F6's row and changes only that row") {
   Rig rig;
   sim::Harness& h = *rig.h;
   h.pad_down(24 + 5);  // a pad of row B, held (the chosen row is A)
   h.run_ms(100);
   CHECK(h.leds().level(24 + 5) == 255);
-  tap(h, app::Button::F7);  // B steps now, TRIAD to 7TH, and its notes end; F7 takes the focus
+  tap(h, app::Button::F7);  // the list opens for A; B's note goes on
   h.run_ms(40);
-  CHECK(h.leds().level(24 + 5) != 255);
+  CHECK(h.leds().level(24 + 5) == 255);
+  h.turn(5);  // A: NOTE to OFF
+  tap(h, app::Button::F7);
+  h.run_ms(300);
+  CHECK(row_dark(h, 1));
   h.pad_up(24 + 5);
   h.run_ms(300);
-  tap(h, app::Button::F6);  // takes the focus back
+  CHECK(h.leds().level(24 + 0) == 70);  // B is TRIAD as it was
+  tap(h, app::Button::F6);  // steps from A, the row F6 showed all along, to B
   h.run_ms(40);
-  CHECK(dark_rows(h) == 0u);
-  tap(h, app::Button::F6);  // steps from A, the row F6 showed all along (FX1: the pad's row did not take it), to B
+  CHECK(dark_rows(h) == 3u);  // A is OFF, B flashes
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: F6 steps on its first tap after another key had the focus, and UP is the row above, DOWN the row below") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F2);  // another key takes the focus
+  h.run_ms(300);
+  tap(h, app::Button::F6);  // the first tap steps: A to B
   h.run_ms(40);
   CHECK(dark_rows(h) == 2u);
   h.run_ms(300);
-
-  // The encoder does the same while F7 holds the focus: a pad of A is held, the encoder takes A to OFF.
-  tap(h, app::Button::F7);  // focus
-  h.pad_down(12 + 0);
-  h.run_ms(100);
-  h.turn(5);
+  tap(h, app::Button::Down);  // the row below: C
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 4u);
   h.run_ms(300);
-  CHECK(row_dark(h, 1));
-  CHECK(h.leds().level(24 + 0) == 70);  // B is as it was
-  h.pad_up(12 + 0);
+  tap(h, app::Button::Up);  // the row above: B
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 2u);
+  h.run_ms(300);
+  tap(h, app::Button::Up);  // A
+  h.run_ms(40);
+  CHECK(dark_rows(h) == 1u);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("perform: in F7's list SHIFT + the encoder jumps a group and the arrows move the cursor; nothing is taken before F7 or F1") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F7);  // A: NOTE
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  h.turn(1);  // the next group: CARRIER's first strip, SHAPE
+  h.run_ms(2);
+  h.release(app::Button::Shift);
+  h.run_ms(100);
+  CHECK(h.leds().level(12 + 0) == 70);  // not taken yet: A is NOTE
+  tap(h, app::Button::Down);  // the arrows move the cursor: one down, one up, back on SHAPE
+  tap(h, app::Button::Up);
+  tap(h, app::Button::F7);
+  h.run_ms(300);
+  for (unsigned pad = 12; pad < 24; ++pad) {
+    CHECK(h.leds().level(pad) != 0);  // SHAPE: twelve pads, none dark
+  }
+  h.pad_down(12 + 11);
+  h.run_ms(60);
+  h.pad_up(12 + 11);
+  h.run_ms(60);
+  CHECK(unit_param(h, kWave) == doctest::Approx(2.0f));
+  tap(h, app::Button::F7);  // a fast SHIFT turn back jumps a group a detent: the top of the list, NOTE
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  h.turn(-10);
+  h.run_ms(2);
+  h.release(app::Button::Shift);
+  tap(h, app::Button::F7);
+  h.run_ms(300);
+  CHECK(h.leds().level(12 + 0) == 70);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// TUNE's row C (SPEED) through its whole list: no entry leaves it dark but OFF, the one deliberate dark value (FORMANT is not offered in TUNE).
+TEST_CASE("perform: every entry of F7's list in TUNE lights row C, but OFF") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::F1);
+  h.turn(2);  // TUNE
+  h.run_ms(300);
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(2.0f));
+  tap(h, app::Button::F6);
+  tap(h, app::Button::F6);  // A to B to C
+  h.run_ms(400);  // past F6's flash
+  unsigned dark = 0;
+  const unsigned n = o3_voc03er::strip::entry_count(o3_voc03er::pads::Row::C, 2);
+  for (unsigned i = 0; i < n; ++i) {  // once round the list
+    plays_take(h, 1);
+    h.run_ms(60);
+    dark += row_dark(h, 3) ? 1u : 0u;
+  }
+  CHECK(dark == 1u);  // OFF, once
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
@@ -701,8 +787,7 @@ TEST_CASE("perform: SHIFT latches a chord pad, DELETE lets it go, and a strip pa
   h.run_ms(100);
   CHECK(h.leds().level(24 + 2) != 140);
   // A parameter strip on A: SHIFT with a strip pad held latches nothing and sets the value as a plain press does.
-  tap(h, app::Button::F7);
-  h.turn(6);
+  plays_take(h, 6);
   h.run_ms(100);
   h.pad_down(12 + 11);
   tap(h, app::Button::Shift);
@@ -818,18 +903,10 @@ TEST_CASE("perform: an arrow does not change F1 MODE, QUALITY in TALK or the PRE
 namespace {
 constexpr unsigned kRowC = 36;  // the pad of row C's column 0
 
-// The mode `mode_turn` steps from BANDS under F1, then row C of that mode's layout to MOUTH (F6 takes the focus and steps A, B, C; F7 turned to the
-// top of the list is NOTE, and MOUTH is the eighth value). Each mode has its own layout (TP1), so the mode comes first.
+// The mode `mode_turn` steps from BANDS under F1. Each mode has its own layout (TP1): TRACT's has row C on MOUTH, the only mode whose list offers it.
 void mouth_setup(sim::Harness& h, int mode_turn) {
   tap(h, app::Button::F1);
   h.turn(mode_turn);
-  h.run_ms(300);
-  tap(h, app::Button::F6);  // takes the focus (F1 had it)
-  tap(h, app::Button::F6);  // B
-  tap(h, app::Button::F6);  // C
-  tap(h, app::Button::F7);
-  h.turn(-80);
-  h.turn(7);
   h.run_ms(300);
 }
 }  // namespace
@@ -903,37 +980,29 @@ TEST_CASE("perform: in TRACT a MOUTH row writes VOWEL (sticky) and CLOSE (moment
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("perform: outside TRACT a MOUTH row is dark and writes nothing") {
+TEST_CASE("perform: outside TRACT no list offers MOUTH, and a closure held while the mode leaves TRACT still ends with its pad") {
   using o3_voc03er::TractUnit;
+  namespace st = o3_voc03er::strip;
+  namespace pd = o3_voc03er::pads;
+  for (unsigned m = 0; m < o3_voc03er::kModeCount; ++m) {
+    for (unsigned r = 0; r < pd::kRows; ++r) {
+      const pd::Row row = static_cast<pd::Row>(r);
+      const pd::Layout def = st::default_layout(m);
+      CHECK(st::entry_offered(row, m, def.row[r], def.strip[r]));  // the defaults are on their own lists
+      CHECK(st::entry_offered(row, m, pd::Plays::Mouth, 0) == (m == o3_voc03er::kModeTract && pd::offered(row, pd::Plays::Mouth)));
+    }
+  }
   Rig rig;
   sim::Harness& h = *rig.h;
-  mouth_setup(h, 0);  // BANDS
-  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(0.0f));
-  CHECK(row_dark(h, 3));
-  const float vowel0 = tract_param(h, TractUnit::Vowel);
-  h.pad_down(kRowC + 4);
-  h.run_ms(60);
-  h.pad_up(kRowC + 4);
-  h.pad_down(kRowC + 9);
-  h.run_ms(60);
-  CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
-  h.pad_up(kRowC + 9);
-  h.run_ms(60);
-  CHECK(tract_param(h, TractUnit::Vowel) == doctest::Approx(vowel0));
-  CHECK(row_dark(h, 3));
-  // a closure held while the mode leaves TRACT still ends with its pad (OPEN)
-  tap(h, app::Button::F1);
-  h.turn(8);
-  h.run_ms(100);
-  h.turn(-80);  // TRACT has its own layout (C is TIP): the focus is still on PLAYS of row C, so the encoder walks C to MOUTH
-  h.turn(7);
-  h.run_ms(60);
+  mouth_setup(h, 8);  // TRACT, row C on MOUTH
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(4.0f));
   h.pad_down(kRowC + 10);
   h.run_ms(60);
   CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(2.0f));
-  tap(h, app::Button::F1);
-  h.turn(-8);
+  h.turn(-8);  // F1 still has the focus: BANDS
   h.run_ms(60);
+  REQUIRE(unit_param(h, o3_voc03er::Vocoder::Mode) == doctest::Approx(0.0f));
+  CHECK_FALSE(row_dark(h, 3));  // BANDS' own row C, FORMANT
   h.pad_up(kRowC + 10);
   h.run_ms(60);
   CHECK(tract_param(h, TractUnit::Close) == doctest::Approx(0.0f));
@@ -1035,59 +1104,53 @@ TEST_CASE("perform: the display list of PERFORM in TRACT (the mouth's profile, a
 }
 
 // FX1 (the maintainer's unit report): with ROW on C, F7 held or tapped and the encoder turned, the selected row went back to A. The chosen row stays C
-// through F7's press, the encoder, F7's release and a second turn; the next F6 steps from C (a wrap to A), not from A.
-TEST_CASE("perform: row C stays chosen through F7 held, the encoder and F7's release") {
+// through F7's press, the encoder, F7's release and the take; the next F6 steps from C (a wrap to A), not from A.
+TEST_CASE("perform: row C stays chosen through F7 held, the encoder, F7's release and the take") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F6);  // focus (F6 holds it at start): A to B
+  tap(h, app::Button::F6);  // A to B
   tap(h, app::Button::F6);  // B to C
   h.run_ms(300);
-  h.press(app::Button::F7);  // held: F7 takes the focus
+  h.press(app::Button::F7);  // held: the list opens for C
   h.run_ms(40);
-  h.turn(1);  // C: FORMANT to BEND
+  h.turn(1);  // the cursor: FORMANT to BEND
+  h.run_ms(300);
+  h.release(app::Button::F7);
+  h.run_ms(300);
+  CHECK(h.leds().level(36 + 5) == 255);  // nothing taken yet
+  tap(h, app::Button::F7);  // takes BEND
   h.run_ms(300);
   CHECK(h.leds().level(36 + 5) == 24);  // row C changed, not A
   CHECK(h.leds().level(12 + 0) == 70);  // A is as it was
-  h.release(app::Button::F7);
-  h.run_ms(300);
-  CHECK(h.leds().level(36 + 5) == 24);
-  CHECK(h.leds().level(12 + 0) == 70);
-  tap(h, app::Button::F6);  // focus
   tap(h, app::Button::F6);  // C wraps to A: it was C
   h.run_ms(40);
   CHECK(dark_rows(h) == 1u);
 
-  // The same with a tap of F7 and the encoder after it.
+  // The same with a tap of F7, the encoder back and the take.
   h.run_ms(300);
-  tap(h, app::Button::F6);
   tap(h, app::Button::F6);  // A to B
   tap(h, app::Button::F6);  // B to C
   h.run_ms(300);
-  tap(h, app::Button::F7);
+  plays_take(h, -1);
   h.run_ms(300);
-  CHECK(h.leds().level(12 + 0) == 70);
-  h.turn(-1);
-  h.run_ms(300);
+  CHECK(h.leds().level(36 + 5) == 255);  // FORMANT again
   CHECK(h.leds().level(12 + 0) == 70);
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-// FX1 and a latched pad: a pad that SHIFT latched is not under a finger, so F7 does not follow it. With ROW on C, F7 and the encoder step row C's value, row A
-// keeps its meaning and ROW is still C after F7's release.
-// SP1: PARAMS forwards its pads to PERFORM's surface, and leaving PARAMS does not call PERFORM::leave: held_ keeps a bit with no down_ bit behind it.
-TEST_CASE("perform: a stale held bit (a pad held on PARAMS, PERFORM entered) does not take F7; ROW stays where F6 shows it") {
+// SP1: PARAMS forwards its pads to PERFORM's surface, and leaving PARAMS does not call PERFORM::leave: held_ keeps a bit with no finger behind it. F7 lists
+// F6's row whatever is held.
+TEST_CASE("perform: a stale held bit (a pad held on PARAMS, PERFORM entered) does not move F7 off F6's row") {
   Rig rig;
   sim::Harness& h = *rig.h;
   tap(h, app::Button::Params);
   h.run_ms(100);
-  h.pad_down(24 + 3);  // PARAMS hands it to PERFORM: a row B note, held (and down)
+  h.pad_down(24 + 3);  // PARAMS hands it to PERFORM: a row B note, held
   h.run_ms(60);
-  tap(h, app::Button::Performance);  // enter() forgets down_; the held bit stays
+  tap(h, app::Button::Performance);
   h.run_ms(100);
   CHECK(h.leds().level(24 + 0) == 70);  // row B: TRIAD
-  tap(h, app::Button::F7);  // focus only: no pad is down here
-  h.run_ms(40);
-  h.turn(5);  // the chosen row (A) goes to OFF, not row B's TRIAD
+  plays_take(h, 5);  // the chosen row (A) goes to OFF, not row B's TRIAD
   h.run_ms(300);
   CHECK(row_dark(h, 1));
   CHECK(h.leds().level(24 + 0) == 70);  // B is as it was
@@ -1097,10 +1160,11 @@ TEST_CASE("perform: a stale held bit (a pad held on PARAMS, PERFORM entered) doe
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("perform: a latched row A pad does not take F7, ROW stays on C") {
+// A latched pad is not under a finger and does not move F7 either: with ROW on C, F7's list changes row C, row A keeps its meaning, ROW is still C.
+TEST_CASE("perform: a latched row A pad does not move F7 off row C, ROW stays on C") {
   Rig rig;
   sim::Harness& h = *rig.h;
-  tap(h, app::Button::F6);  // F6 holds the focus at start: A to B
+  tap(h, app::Button::F6);  // A to B
   tap(h, app::Button::F6);  // B to C
   h.run_ms(300);
   h.pad_down(12 + 3);  // a row A note, latched, then let go
@@ -1114,9 +1178,7 @@ TEST_CASE("perform: a latched row A pad does not take F7, ROW stays on C") {
     a_before[c] = h.leds().level(12 + c);
   }
   CHECK(h.leds().level(36 + 5) == 255);  // row C is FORMANT: the pad of the current value is on
-  h.press(app::Button::F7);
-  h.run_ms(40);
-  h.turn(1);  // row C: FORMANT to BEND, not row A's NOTE to TRIAD
+  plays_take(h, 1);  // row C: FORMANT to BEND, not row A's NOTE to TRIAD
   h.run_ms(300);
   CHECK(h.leds().level(36 + 5) == 24);
   // Row A keeps its NOTE meaning (every pad but the latched one, which a change of layout lets go, as it always did).
@@ -1125,17 +1187,13 @@ TEST_CASE("perform: a latched row A pad does not take F7, ROW stays on C") {
     a_same = a_same && (c == 3u || h.leds().level(12 + c) == a_before[c]);
   }
   CHECK(a_same);
-  h.release(app::Button::F7);
-  h.run_ms(300);
-  CHECK(h.leds().level(36 + 5) == 24);
-  tap(h, app::Button::F6);
   tap(h, app::Button::F6);  // C wraps to A: ROW was still C
   h.run_ms(40);
   CHECK(dark_rows(h) == 1u);
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-// FX1 sweep: in every mode, with ROW on C, the encoder through the whole of F7's list (held and released) never moves row A or B and ROW stays C.
+// FX1 sweep: in every mode, with ROW on C, the cursor round the whole of F7's list (held and released) and a take never move row A or B, and ROW stays C.
 TEST_CASE("perform: FX1 sweep, row C stays chosen in every mode") {
   Rig rig;
   sim::Harness& h = *rig.h;
@@ -1145,10 +1203,9 @@ TEST_CASE("perform: FX1 sweep, row C stays chosen in every mode") {
       tap(h, app::Button::F1);  // focus, then a tap steps the mode on
     }
     h.run_ms(300);
-    tap(h, app::Button::F6);
+    tap(h, app::Button::F6);  // A to B
     h.run_ms(40);
-    // ROW to C by the encoder
-    h.turn(5);
+    h.turn(5);  // ROW to C by the encoder (it stops there)
     h.run_ms(300);
     unsigned a_before[12];
     for (unsigned c = 0; c < 12; ++c) {
@@ -1161,13 +1218,14 @@ TEST_CASE("perform: FX1 sweep, row C stays chosen in every mode") {
       h.run_ms(20);
     }
     h.release(app::Button::F7);
+    h.run_ms(40);
+    tap(h, app::Button::F7);  // takes the entry under the cursor
     h.run_ms(400);
     bool a_same = true;
     for (unsigned c = 0; c < 12; ++c) {
       a_same = a_same && h.leds().level(12 + c) == a_before[c];
     }
     CHECK_MESSAGE(a_same, "mode " << m << ": row A changed");
-    tap(h, app::Button::F6);
     tap(h, app::Button::F6);  // C wraps to A
     h.run_ms(40);
     // Row C's own column 5 may be dark after the sweep (its function changed): only A (the flash) and B are judged.

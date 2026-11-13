@@ -25,10 +25,12 @@ wait 400
 snap 04_c_mouth_vowel_o
 padup 42
 tap f6
-tap f6
 tap f7
-turn -80
+press shift
+turn -10
+release shift
 turn 1
+tap f7
 wait 400
 snap 05_b_triad_c_mouth
 paddown 26

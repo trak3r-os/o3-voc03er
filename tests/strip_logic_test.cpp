@@ -256,11 +256,14 @@ TEST_CASE("strip: F7's list is the row's notes and then the mode's parameters, b
       used += st::in_mode(d, m) ? 1u : 0u;
     }
     CHECK(st::entry_count(Row::A, m) == 6u + used);
-    CHECK(st::entry_count(Row::C, m) == 9u + used);
+    // row C: FORMANT only where the formant is heard, MOUTH only in TRACT
+    const unsigned c_notes = 7u + (o3_voc03er::live::voice_heard(o3_voc03er::Vocoder::Formant, m) ? 1u : 0u) + (m == kModeTract ? 1u : 0u);
+    CHECK(st::notes_count(Row::C, m) == c_notes);
+    CHECK(st::entry_count(Row::C, m) == c_notes + used);
     // the notes first: the piano is gone, OFF is the last note entry of A and B
     CHECK(st::entry_at(Row::A, m, 0).plays == Plays::Note);
     CHECK(st::entry_at(Row::A, m, 5).plays == Plays::Off);
-    CHECK(st::entry_at(Row::C, m, 8).plays == Plays::Off);
+    CHECK(st::entry_at(Row::C, m, c_notes - 1u).plays == Plays::Off);
     CHECK(st::entry_at(Row::A, m, 6).plays == Plays::Strip);
     // every entry finds its own index back, and an applied entry reads back
     for (const Row r : {Row::A, Row::B, Row::C}) {
@@ -289,15 +292,8 @@ TEST_CASE("strip: F7's list is the row's notes and then the mode's parameters, b
   }
 }
 
-TEST_CASE("strip: a tap steps on and wraps, the encoder stops at the ends, SHIFT jumps by group") {
+TEST_CASE("strip: SHIFT + the encoder in F7's list jumps by group") {
   const unsigned n = st::entry_count(Row::A, 0);
-  CHECK(st::entry_tap(Row::A, 0, 0) == 1u);
-  CHECK(st::entry_tap(Row::A, 0, n - 1u) == 0u);
-  CHECK(st::entry_step(Row::A, 0, 0, -1) == 0u);
-  CHECK(st::entry_step(Row::A, 0, n - 1u, 1) == n - 1u);
-  CHECK(st::entry_step(Row::A, 0, 3, 2) == 5u);
-  CHECK(st::entry_step(Row::A, 0, 3, -100) == 0u);
-  CHECK(st::entry_step(Row::A, 0, 3, 100) == n - 1u);
   // the groups: the notes, CARRIER, SHAPE, TUNE, PLAY in BANDS
   const unsigned carrier = st::entry_jump(Row::A, 0, 0, 1);
   CHECK(carrier == 6u);
@@ -371,29 +367,22 @@ TEST_CASE("strip: the default layouts, one per mode, every row doing something w
   CHECK(std::strcmp(st::row_name(l, Row::C), "MOUTH") == 0);
 }
 
-TEST_CASE("strip: F7's label names the row and what it plays, and the flash gives the place in the list") {
+TEST_CASE("strip: F7's value is what the row plays, and the hint gives the place in the list") {
   char out[16] = {};
   pd::Layout l = st::default_layout(kModeTract);
-  st::plays_label(l, Row::A, out);
-  CHECK(std::strcmp(out, "A NOTE") == 0);
-  st::plays_label(l, Row::B, out);
-  CHECK(std::strcmp(out, "B TONGUE") == 0);
-  st::plays_label(l, Row::C, out);
-  CHECK(std::strcmp(out, "C MOUTH") == 0);
+  CHECK(std::strcmp(st::row_name(l, Row::A), "NOTE") == 0);
+  CHECK(std::strcmp(st::row_name(l, Row::B), "TONGUE") == 0);
+  CHECK(std::strcmp(st::row_name(l, Row::C), "MOUTH") == 0);
   l = st::default_layout(st::kModeTalk);
-  st::plays_label(l, Row::B, out);
-  CHECK(std::strcmp(out, "B 7TH") == 0);
-  // A strip row: its own name, however long (the buffer holds the longest: "C T GLIDE", "B ACCENT").
+  CHECK(std::strcmp(st::row_name(l, Row::B), "7TH") == 0);
+  // Every entry of every list: its name fits F7's value cell (ten characters) and the hint is "NAME i/n".
   for (unsigned m = 0; m < kModeCount; ++m) {
     for (unsigned r = 0; r < pd::kRows; ++r) {
       const unsigned n = st::entry_count(static_cast<Row>(r), m);
       for (unsigned i = 0; i < n; ++i) {
         pd::Layout t = st::default_layout(m);
         st::apply_entry(t, static_cast<Row>(r), m, i);
-        st::plays_label(t, static_cast<Row>(r), out);
-        CHECK(out[0] == "ABC"[r]);
-        CHECK(out[1] == ' ');
-        CHECK(std::strlen(out) < sizeof out - 1u);
+        CHECK(std::strlen(st::row_name(t, static_cast<Row>(r))) <= 10u);
         st::plays_position(t, static_cast<Row>(r), i, n, out);
         const std::string want = std::string(st::row_name(t, static_cast<Row>(r))) + " " + std::to_string(i + 1u) + "/" + std::to_string(n);
         CHECK(want == out);
@@ -464,4 +453,105 @@ TEST_CASE("strip: a pad's text is the value as PARAMS writes it, and the current
   CHECK(std::strlen(t) < sizeof t);
   st::value_text(by_name("TILT"), -120, t);
   CHECK(std::strlen(t) > 0u);
+}
+
+// The PERFORM report of 2026-11-13 ("ROW PLAYS is broken"): F7's list offered values that do nothing in the mode (FORMANT in TUNE and TRACT, MOUTH outside
+// TRACT: dark pads), and a layout an older image saved could hold a strip the mode no longer uses (GLIDE in TUNE), which the list cannot show (it read as
+// entry 0, so a step went to TRIAD and a step down did nothing).
+TEST_CASE("strip: every entry of F7's list acts in its mode, and a loaded value the list does not offer drops to the mode's default") {
+  using o3_voc03er::Vocoder;
+  namespace lv = o3_voc03er::live;
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    for (const Row r : {Row::A, Row::B, Row::C}) {
+      for (unsigned i = 0; i < st::entry_count(r, m); ++i) {
+        const st::Entry e = st::entry_at(r, m, i);
+        if (e.plays == Plays::Formant) {
+          CHECK(lv::voice_heard(Vocoder::Formant, m));
+        }
+        if (e.plays == Plays::Mouth) {
+          CHECK(m == kModeTract);
+        }
+        if (e.plays == Plays::Strip) {
+          REQUIRE(st::find(e.strip) != nullptr);
+          CHECK(st::in_mode(*st::find(e.strip), m));
+        }
+        CHECK(st::entry_offered(r, m, e.plays, e.strip));
+      }
+    }
+    // the mode's default layout is all offered, so sanitize never drops a default to itself
+    const pd::Layout d = st::default_layout(m);
+    for (unsigned r = 0; r < pd::kRows; ++r) {
+      CHECK(st::entry_offered(static_cast<Row>(r), m, d.row[r], d.strip[r]));
+    }
+  }
+  CHECK_FALSE(st::plays_live(Row::C, Plays::Formant, st::kModeTune));
+  CHECK_FALSE(st::plays_live(Row::C, Plays::Formant, kModeTract));
+  CHECK(st::plays_live(Row::C, Plays::Formant, st::kModeRobot));
+  CHECK_FALSE(st::plays_live(Row::C, Plays::Mouth, 0));
+  CHECK(st::plays_live(Row::C, Plays::Mouth, kModeTract));
+  CHECK(st::plays_live(Row::C, Plays::Bend, st::kModeTune));
+  CHECK(st::plays_live(Row::A, Plays::Off, st::kModeTune));
+  CHECK_FALSE(st::plays_live(Row::A, Plays::Formant, 0));
+
+  // GLIDE on TUNE's row B (an older image's project): not offered, so the load drops it to TUNE's default B SCALE
+  pd::Layout t = st::default_layout(st::kModeTune);
+  REQUIRE(pd::set_strip(t, Row::B, st::id_of(by_name("GLIDE"))));
+  CHECK(st::layout_valid(t));  // a known id: the file is not damaged
+  CHECK(st::entry_find(Row::B, st::kModeTune, t.row[1], t.strip[1]) == st::entry_count(Row::B, st::kModeTune));
+  const pd::Layout ts = st::sanitize(t, st::kModeTune);
+  CHECK(ts.row[1] == Plays::Strip);
+  CHECK(ts.strip[1] == st::kIdScale);
+  // FORMANT on TUNE's row C, MOUTH on BANDS' row C: dropped to the default; FORMANT on BANDS' row C stays
+  pd::Layout f = st::default_layout(st::kModeTune);
+  REQUIRE(pd::set_plays(f, Row::C, Plays::Formant));
+  CHECK(st::sanitize(f, st::kModeTune).strip[2] == st::kIdSpeed);
+  pd::Layout b;
+  REQUIRE(pd::set_plays(b, Row::C, Plays::Mouth));
+  CHECK(st::sanitize(b, 0).row[2] == Plays::Formant);
+  CHECK(st::sanitize(pd::Layout{}, 0).row[2] == Plays::Formant);
+  // a row the list offers stays as it is
+  pd::Layout k;
+  REQUIRE(pd::set_plays(k, Row::C, Plays::Bend));
+  CHECK(st::sanitize(k, st::kModeTune).row[2] == Plays::Bend);
+}
+
+TEST_CASE("strip: F7's list as shown: a heading before each group, every entry once and in order, and a window that keeps the cursor in view") {
+  unsigned longest = 0;
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    for (const Row r : {Row::A, Row::B, Row::C}) {
+      st::ListRow rows[st::kListMax];
+      const unsigned n = st::list_rows(r, m, rows);
+      longest = n > longest ? n : longest;
+      unsigned next = 0;
+      unsigned groups = 0;
+      for (unsigned i = 0; i < n; ++i) {
+        if (rows[i].heading) {
+          ++groups;
+          REQUIRE(i + 1u < n);
+          CHECK_FALSE(rows[i + 1u].heading);  // a heading is followed by its group's first entry
+          CHECK(rows[i + 1u].group == rows[i].group);
+          continue;
+        }
+        CHECK(rows[i].entry == next);
+        CHECK(rows[i].group == st::entry_at(r, m, next).group);
+        ++next;
+      }
+      CHECK(next == st::entry_count(r, m));
+      CHECK(rows[0].heading);
+      CHECK(rows[0].group == st::kGroupNotes);
+      CHECK(groups <= st::kGroupCount);
+    }
+  }
+  CHECK(longest < st::kListMax);  // room to spare: TRACT's row C is the longest
+  // the window: fourteen rows of a long list, the cursor near the middle, never past either end
+  CHECK(st::list_top(0, 10, 14) == 0u);
+  CHECK(st::list_top(9, 10, 14) == 0u);
+  CHECK(st::list_top(0, 40, 14) == 0u);
+  CHECK(st::list_top(20, 40, 14) == 13u);
+  CHECK(st::list_top(39, 40, 14) == 26u);
+  for (unsigned pos = 0; pos < 40; ++pos) {
+    const unsigned top = st::list_top(pos, 40, 14);
+    CHECK(pos >= top);
+    CHECK(pos < top + 14u);
+  }
 }

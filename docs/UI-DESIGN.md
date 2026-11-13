@@ -459,11 +459,15 @@ of the kind per pad: TRIAD, the triad the scale gives on that root, major, minor
 fifth, ninth, the airy vocoder pad; POWER, root, fifth, octave); on C only, FORMANT (a strip of semitones, a tap sets the formant and holds nothing), BEND
 (the strip of section 7b) and MOUTH (TRACT's strip, below); on every row OFF (dark and silent) and the parameter strips (TP1, below). A root outside the scale still plays (its nearest diatonic quality) and is lit
 dimmer. The defaults (one per mode, every row doing something at the mode's default values): BANDS A NOTE, B TRIAD, C FORMANT; TALK A NOTE, B 7TH, C FORMANT; TUNE A NOTE, B SCALE, C SPEED; ROBOT A NOTE, B SHAPE, C FORMANT; TRACT A NOTE, B TONGUE, C MOUTH. A saved project keeps its layouts until F4 NEW.
-**F6 ROW and F7 PLAYS**: F6 chooses A, B or C (a tap steps and wraps, the encoder stops at the ends) and the row's LEDs flash once
-(`kRowFlashMs`, 150 ms); F7 steps the chosen row through its order (A and B: NOTE, TRIAD, 7TH, OPEN, POWER, OFF, then the strips; C: NOTE,
-TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF, then the strips; a tap wraps, the encoder stops at the ends, SHIFT + encoder jumps by group). The
-retired PIANO values (NP1) load as the plain value of the same kind. **The shortcut**: while a pad of A, B or
-C is held, F7 changes that pad's row at once and F6's ROW stays where it is. SHIFT + F7 is OCTAVE (AK1; the arrow keys step the focused F value on PERFORM, except F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET (`arrow_may_step`: a stray press there changes the voicing or loads a sound),
+**F6 ROW and F7 PLAYS** (RP1, 2026-11-13): F6 chooses A, B or C (every tap steps and wraps, the first one too; the encoder stops at the ends; UP is
+the row above, DOWN the row below) and the row's LEDs flash once (`kRowFlashMs`, 150 ms); the chosen row's name is drawn in the accent with a `>`
+while F6 or F7 has the focus (`PadsView::hot_row`). F7 always acts on F6's row, whatever pad is held. A tap opens a list on the SOUNDS panel through
+the picker code (`open_plays`, `build_plays`, `take_plays`; `strip::list_rows` and `list_top`): group headings, the value in force marked, 14 rows
+round the cursor. The order: A and B, NOTE, TRIAD, 7TH, OPEN, POWER, OFF, then the strips; C, NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND,
+MOUTH, OFF, then the strips. Every entry acts in the current mode (`strip::plays_live`: FORMANT where it is heard, MOUTH in TRACT only), and
+`sanitize` puts a loaded row the mode does not offer back on the mode's default. The encoder and UP / DOWN move the cursor (it wraps), SHIFT +
+encoder jumps a group a detent, F7 or F1 takes, F8 backs out; a mode change closes the list. The retired PIANO values (NP1) load as the plain
+value of the same kind. SHIFT + F7 is OCTAVE (AK1; the arrow keys step the focused F value on PERFORM, except F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET (`arrow_may_step`: a stray press there changes the voicing or loads a sound),
 and on PATTERN keep UP / DOWN as the octave and LEFT / RIGHT as the cursor). Each row that plays notes sits one octave above
 the playing rows under it (`row_octave`). The project keeps the layout of each mode (STAT 1.1 for BANDS, PADS 1.0 for all five); a 1.1 file loads
 through STAT alone, and saving also writes the 1.0 chord kind, pads mode and bend row derived from it (`legacy_fields`) for an older build.

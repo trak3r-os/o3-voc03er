@@ -222,15 +222,14 @@ TEST_CASE("liveness: FREEZE is refused outside TALK, works in TALK, and a mode c
 }
 
 namespace {
-// Row C of the mode's layout set to FORMANT (TUNE and TRACT start with a strip and the mouth there): F6 to row C, F7 to PLAYS, FORMANT is the sixth value.
-void row_c_formant(sim::Harness& h) {
-  tap(h, app::Button::F6);  // takes the focus
-  tap(h, app::Button::F6);  // B
-  tap(h, app::Button::F6);  // C
+// F7's list for F6's row: open it, one entry on, take it.
+void plays_next(sim::Harness& h) {
   tap(h, app::Button::F7);
-  h.turn(-80);
-  h.turn(5);
-  h.run_ms(300);
+  h.run_ms(20);
+  h.turn(1);
+  h.run_ms(20);
+  tap(h, app::Button::F7);
+  h.run_ms(60);
 }
 
 void press_pad(sim::Harness& h, unsigned pad) {
@@ -257,20 +256,22 @@ TEST_CASE("liveness: the FORMANT pads of row C are lit and set where FORMANT is 
   }
 }
 
-TEST_CASE("liveness: the FORMANT pads of row C are dark and refuse where FORMANT is not heard") {
+// F7's list offers FORMANT only where it is heard (strip::plays_live): in TUNE and TRACT, row C round its whole list never writes FORMANT from a pad.
+TEST_CASE("liveness: where FORMANT is not heard, F7's list does not offer it and no row C value writes it") {
   for (const unsigned mode : {kTune, kTract}) {
+    CHECK_FALSE(st::plays_live(o3_voc03er::pads::Row::C, o3_voc03er::pads::Plays::Formant, mode));
     sim::Harness h(::o3sdk_app());
     REQUIRE(h.start());
     h.run_ms(100);
     set_mode(h, mode);
-    row_c_formant(h);
-    for (unsigned i = 0; i < 12; ++i) {
-      CHECK(h.leds().level(36 + i) == 0);
+    tap(h, app::Button::F6);  // A to B
+    tap(h, app::Button::F6);  // B to C
+    const unsigned n = st::entry_count(o3_voc03er::pads::Row::C, mode);
+    for (unsigned i = 0; i < n; ++i) {
+      plays_next(h);
+      press_pad(h, 36 + 8);
+      CHECK_MESSAGE(unit_param(h, Vocoder::Formant) == doctest::Approx(0.0f), "mode " << mode << " entry " << i);
     }
-    press_pad(h, 36 + 8);
-    CHECK(unit_param(h, Vocoder::Formant) == doctest::Approx(0.0f));  // refused, nothing set
-    press_pad(h, 36 + 2);
-    CHECK(unit_param(h, Vocoder::Formant) == doctest::Approx(0.0f));
     CHECK(h.runtime().frame_failures() == 0u);
   }
 }

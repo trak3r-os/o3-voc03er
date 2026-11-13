@@ -58,6 +58,7 @@ tap f6
 turn 2
 tap f7
 turn 1
+tap f7
 wait 300
 snap 12_c_bend
 press shift

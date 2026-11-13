@@ -146,6 +146,14 @@
 
 ### Fixed
 
+- **RP1: PERFORM's F6 ROW and F7 PLAYS agree.** F7 always acts on the row F6 shows (a held pad no longer takes it), and a tap opens a list of
+  what that row can play, with group headings and the value in force marked; UP, DOWN or the encoder move, SHIFT + encoder jumps a group, F7 or
+  F1 takes, F8 backs out. F6 steps on its first tap, UP is the row above and DOWN the row below (they were swapped), and the chosen row's name
+  is lit while F6 or F7 is in use. F7's value is what the row plays, without the row's letter (F6 shows the row, and the cell was too narrow for
+  "C FORMANT"). The list offers only what acts in the mode: FORMANT is gone from TUNE and TRACT and MOUTH from every mode
+  but TRACT, so no choice leaves a row dark but OFF; a project that holds such a value, or a strip the mode no longer uses (GLIDE, GATE, ARP or
+  VOICING in TUNE), loads with that row on the mode's default. Tests in `perform_screen_test`, `strip_logic_test`, `liveness_test`; scenario
+  `perform_layout.txt`. Needs more testing on the unit (the list on the display, the lit row name).
 - **NO1: a note sounds until its last holder lets go.** The vocoder unit keeps an owner mask per note (0 MIDI, 1 pads, 2 step sequencer,
   3 console; carried in `Event.flags` bits 4-5, 64 B of SRAM). A NoteOn under another owner's hold only sets the owner's bit and does not
   retrigger; a NoteOff clears the bit and the note ends only when no owner is left; AllNotesOff and the unit's reset clear the masks. The

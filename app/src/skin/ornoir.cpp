@@ -654,7 +654,7 @@ void perform_text(ui::Renderer& r, const HeaderState& h, const FKey (&keys)[kFKe
   // Pads.
   for (unsigned row = 0; row < 4; ++row) {
     const char* nm = pads.row_name[row];
-    r.text(60 - len(nm) * 6, kPadY + static_cast<int>(row) * kPadH + 8, nm, Color::TextDim, Face::Micro);
+    r.text(60 - len(nm) * 6, kPadY + static_cast<int>(row) * kPadH + 8, nm, row != 0u && row == pads.hot_row ? Color::Accent : Color::TextDim, Face::Micro);
   }
   if (pads.label != nullptr) {
     for (unsigned p = 0; p < 48; ++p) {

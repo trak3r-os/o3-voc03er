@@ -127,8 +127,8 @@ now.
 | F3 SOUNDS | A list: SYNTH, NOISE, LIVE, or SLOT 1 to 4 |
 | F4 KEY | The root of the key. Chords and pitch correction share it |
 | F5 SCALE | The scale: the chords and TUNE stay in it |
-| F6 ROW | Which pad row F7 sets: A, B or C. A tap steps and wraps; the encoder stops at the ends. The row's pads flash once |
-| F7 PLAYS | What the chosen row plays: notes, chords or a parameter strip (below). Hold a pad of A, B or C and F7 changes that pad's row at once. Its value names the row and what it plays (for example A VOWEL) |
+| F6 ROW | Which pad row F7 sets: A, B or C. Every tap steps and wraps, the first one too; the encoder stops at the ends; UP is the row above, DOWN the row below. The row's pads flash once, and its name stays lit (with a `>`) while F6 or F7 is in use |
+| F7 PLAYS | A list of what F6's row can play in this mode: notes, chords or a parameter strip (below). UP, DOWN or the encoder move, SHIFT with the encoder jumps a group, F7 or F1 takes the row, F8 backs out. A held pad does not change which row it sets. Its value is what F6's row plays (for example VOWEL) |
 | F8 | By mode: BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL |
 | SHIFT + F1 | FREEZE the vowel. TALK only: in any other mode it says HEARD IN TALK ONLY and does nothing, and it clears when you leave TALK |
 | SHIFT + F2 | GATE: chops the sound in time (OFF, 1/4, 1/8, 1/16, 1/32) |
@@ -156,11 +156,14 @@ the key and scale of F4 and F5. Each row has a PLAYS value. F6 ROW chooses the r
 plays, in this order:
 
 - **Rows A and B:** NOTE, TRIAD, 7TH, OPEN, POWER, OFF, then the parameter strips of the current mode (below).
-- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT, BEND, MOUTH, OFF, then the parameter strips.
+- **Row C:** NOTE, TRIAD, 7TH, OPEN, POWER, FORMANT (BANDS, TALK and ROBOT only), BEND, MOUTH (TRACT only), OFF, then the parameter strips.
 
-A tap on F7 steps on and wraps round; the encoder stops at the ends, and SHIFT with the encoder jumps from one group of the list to the next
-(NOTES, CARRIER, SHAPE, TUNE, TRACT, PLAY; the screen names the group). The row's name sits beside it on the screen: a note value shows its
-kind, a strip shows the parameter's name.
+A tap on F7 opens the list in the SOUNDS panel, headed by group (NOTES, CARRIER, SHAPE, TUNE, TRACT, PLAY), with the row's current value
+marked and each strip's current value beside its name. UP, DOWN and the encoder move the cursor round the list; SHIFT with the encoder jumps
+to the next group or back to the start of one; F7 or F1 takes the entry, F8 backs out and changes nothing. The list only offers what acts in
+the current mode, so no choice leaves a row dark except OFF. A project that holds a value this mode does not offer (from an older version)
+loads with that row on the mode's default. The row's name sits beside it on the screen: a note value shows its kind, a strip shows the
+parameter's name. The list needs more testing on the unit.
 
 - NOTE: one note per pad. TRIAD, 7TH (the seventh chord), OPEN (root, fifth, ninth: open and airy) and POWER (root, fifth, octave: the
   classic robot fifth): a chord per pad, the one the scale gives on that root.
@@ -190,14 +193,13 @@ OCT- and OCT+ pads and SHIFT + F7 move the octave of all of them. VOICING SMOOTH
 moves smoothly, and a row higher sounds higher.
 
 **The arrow keys.** LEFT and RIGHT step the value of the F key that has the focus, one click of the encoder each; UP and DOWN do the same (RIGHT and
-UP raise, LEFT and DOWN lower). On PATTERN the arrows keep their own jobs (LEFT and RIGHT the cursor, UP and DOWN the octave); on SAMPLE LEFT and
+UP raise, LEFT and DOWN lower). F6 ROW is the exception: UP is the row above and DOWN the row below, as the rows are drawn. On PATTERN the arrows keep their own jobs (LEFT and RIGHT the cursor, UP and DOWN the octave); on SAMPLE LEFT and
 RIGHT step the F value and UP and DOWN pick the slot. The arrows leave three values to a tap of their key or the encoder, since a stray press there
 changes the sound's character: F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET.
 
-**The shortcut:** while you hold a pad of A, B or C, F7 changes that pad's row at once. Only a pad that is physically down counts: a latched pad,
-or one you let go of, does not, and with no pad down F7 changes the row F6 shows. F6's row never moves by itself. SHIFT tapped while a pad is held
-latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it, and F7's own value says which row it acts
-on and what that row plays (A VOWEL, B 7TH, C MOUTH). **The five layouts are saved with the project** (section 9) and F4 NEW puts them back to the
+**F7 always sets the row F6 shows.** A pad you hold, of any row, does not change that, and F6's row never moves by itself. SHIFT tapped while a
+pad is held latches it, on any row that plays notes; DELETE lets it go. The screen names each row's value beside it (A VOWEL, B 7TH, C MOUTH), and
+F7's own value is what F6's row plays. **The five layouts are saved with the project** (section 9) and F4 NEW puts them back to the
 default. A project you saved earlier keeps its own layouts until you press NEW.
 
 **The defaults.** Every row does something out of the box: BANDS is A NOTE, B TRIAD, C FORMANT (melody, chords, formant); TALK is A NOTE, B 7TH,

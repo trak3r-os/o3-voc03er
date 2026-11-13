@@ -37,6 +37,7 @@ snap 07_tune
 tap f1
 tap f7
 turn 2
+tap f7
 paddown 28
 paddown 18
 wait 300

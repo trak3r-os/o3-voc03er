@@ -439,8 +439,8 @@ inline const char* key_hint(unsigned focus, unsigned mode, unsigned sfocus = kNo
   }
   static constexpr const char* kHints[7] = {
       "F1 MODE: BANDS, TALK, TUNE, ROBOT, TRACT", "F2 SPEAKS: A LIST OF WHAT TALKS", "F3 SOUNDS: A LIST OF THE CARRIERS",
-      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 ROW: A, B OR C; F7 SETS WHAT IT PLAYS",
-      "F7 PLAYS: WHAT THE CHOSEN ROW'S PADS DO",
+      "F4 KEY: THE ROOT OF THE PADS AND OF TUNE", "F5 SCALE: THE COLUMNS THAT LIGHT",       "F6 ROW: EACH TAP A, B, C; F7 SETS IT",
+      "F7 PLAYS: A LIST FOR F6'S ROW",
   };
   static constexpr const char* kF8[kModePages] = {"F8 SPREAD: THE CARRIER'S DETUNE", "F8 QUALITY: THE LPC ORDER", "F8 SPEED: HOW FAST THE PITCH MOVES",
                                                   "F8 VOWEL: MORPHS THE MOUTH A TO U"};

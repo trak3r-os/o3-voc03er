@@ -162,6 +162,7 @@ struct PadsView {
   std::uint64_t held = 0;             // bit pad: held
   int latched = -1;                   // the latched pad, or -1
   const char* row_name[4] = {"", "", "", ""};
+  unsigned hot_row = 0;  // 1..3: that row's name is drawn bright (PERFORM's chosen row while F6 or F7 has the focus); 0: none
   bool column_in_scale_known = true;
   const char* hint_left = "";
   const char* key_hint = "";  // right of the same line: what the F key under the encoder does

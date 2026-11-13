@@ -12,6 +12,7 @@ tap f6
 turn -2
 tap f7
 turn 6
+tap f7
 wait 300
 snap 02_bands_a_shape_strip
 paddown 23

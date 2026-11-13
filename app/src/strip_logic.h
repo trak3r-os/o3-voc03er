@@ -2,8 +2,8 @@
 #pragma once
 
 // The parameter strips of PLAYS (TP1), pure: a row of PERFORM's layout (pads_logic.h) set to a STRIP gives its twelve pads to one parameter. This file
-// holds the table of the parameters that make sense played live, what each pad of a strip means, the pad LEDs, and the list F7 walks (the notes, then
-// the mode's parameters by group). No engine, no screen, no heap; tests/strip_logic_test.cpp holds it. Values go through params_logic.h's KeyDef, so
+// holds the table of the parameters that make sense played live, what each pad of a strip means, the pad LEDs, and the list F7 opens (the notes values
+// that act in the mode, then the mode's parameters by group). No engine, no screen, no heap; tests/strip_logic_test.cpp holds it. Values go through params_logic.h's KeyDef, so
 // a strip and PARAMS agree on ranges and text.
 //
 // Shapes. Cont: twelve pads over the range, pad 1 the minimum and pad 12 the maximum (a log range spaces them by ratio). Bipolar: a range that
@@ -40,7 +40,7 @@ inline constexpr unsigned kTagTract = 2;
 inline constexpr unsigned kTagApp = 3;
 inline constexpr unsigned kTagHold = 4;  // a held closure: the parameter byte is the CLOSE value (1 LIPS, 2 TIP, 3 BACK)
 
-// The groups F7's list steps through (SHIFT + the encoder jumps from one to the next).
+// The groups of F7's list, each under its heading (SHIFT + the encoder jumps from one to the next).
 inline constexpr unsigned kGroupNotes = 0;
 inline constexpr unsigned kGroupCount = 6;
 inline constexpr const char* kGroupNames[kGroupCount] = {"NOTES", "CARRIER", "SHAPE", "TUNE", "TRACT", "PLAY"};
@@ -266,9 +266,31 @@ struct Entry {
   unsigned group = kGroupNotes;
 };
 
-// The number of entries for row `r` in `mode`: the row's notes (pads::order_count, OFF last of them), then every strip the mode uses.
+// Whether a plain PLAYS value (not a strip) does something on row `r` in `mode`: FORMANT only where the formant is heard (liveness.h: BANDS, TALK,
+// ROBOT), MOUTH only in TRACT (elsewhere its pads are dark and write nothing). OFF is offered everywhere: it is the row turned off on purpose (and the rows
+// above it drop an octave, pads::row_octave). The notes and BEND act in every mode (BEND also bends the slots).
+constexpr bool plays_live(pd::Row r, pd::Plays p, unsigned mode) noexcept {
+  if (!pd::offered(r, p) || p == pd::Plays::Strip || mode >= kModeCount) {
+    return false;
+  }
+  if (p == pd::Plays::Formant) {
+    return live::voice_heard(Vocoder::Formant, mode);
+  }
+  return p != pd::Plays::Mouth || mode == kModeTract;
+}
+
+// The number of the row's notes values the mode's list offers (pads::order_of, those plays_live keeps, OFF last).
+constexpr unsigned notes_count(pd::Row r, unsigned mode) noexcept {
+  unsigned n = 0;
+  for (unsigned i = 0; i < pd::order_count(r); ++i) {
+    n += plays_live(r, pd::order_of(r)[i], mode) ? 1u : 0u;
+  }
+  return n;
+}
+
+// The number of entries for row `r` in `mode`: the row's live notes values, then every strip the mode uses.
 constexpr unsigned entry_count(pd::Row r, unsigned mode) noexcept {
-  unsigned n = pd::order_count(r);
+  unsigned n = notes_count(r, mode);
   for (unsigned i = 0; i < kStripCount; ++i) {
     n += in_mode(kStrips[i], mode) ? 1u : 0u;
   }
@@ -277,12 +299,18 @@ constexpr unsigned entry_count(pd::Row r, unsigned mode) noexcept {
 
 constexpr Entry entry_at(pd::Row r, unsigned mode, unsigned index) noexcept {
   Entry e;
-  const unsigned notes = pd::order_count(r);
-  if (index < notes) {
-    e.plays = pd::order_of(r)[index];
-    return e;
+  unsigned k = index;
+  for (unsigned i = 0; i < pd::order_count(r); ++i) {
+    const pd::Plays p = pd::order_of(r)[i];
+    if (!plays_live(r, p, mode)) {
+      continue;
+    }
+    if (k == 0u) {
+      e.plays = p;
+      return e;
+    }
+    --k;
   }
-  unsigned k = index - notes;
   for (unsigned i = 0; i < kStripCount; ++i) {
     if (!in_mode(kStrips[i], mode)) {
       continue;
@@ -298,8 +326,9 @@ constexpr Entry entry_at(pd::Row r, unsigned mode, unsigned index) noexcept {
   return e;
 }
 
-// The place of a row's value in the list (a strip the mode does not use, or an unknown one, is taken as the first entry).
-constexpr unsigned entry_index(pd::Row r, unsigned mode, pd::Plays p, std::uint16_t strip) noexcept {
+// The place of a row's value in the list, or entry_count when the list does not offer it (a strip the mode does not use, an unknown id, FORMANT in TUNE,
+// MOUTH outside TRACT: a layout an older image saved).
+constexpr unsigned entry_find(pd::Row r, unsigned mode, pd::Plays p, std::uint16_t strip) noexcept {
   const unsigned n = entry_count(r, mode);
   for (unsigned i = 0; i < n; ++i) {
     const Entry e = entry_at(r, mode, i);
@@ -307,20 +336,19 @@ constexpr unsigned entry_index(pd::Row r, unsigned mode, pd::Plays p, std::uint1
       return i;
     }
   }
-  return 0;
+  return n;
+}
+// Whether the mode's list offers that value for the row (so its pads do something in this mode).
+constexpr bool entry_offered(pd::Row r, unsigned mode, pd::Plays p, std::uint16_t strip) noexcept { return entry_find(r, mode, p, strip) < entry_count(r, mode); }
+
+// The place of a row's value in the list (a value the list does not offer is taken as the first entry).
+constexpr unsigned entry_index(pd::Row r, unsigned mode, pd::Plays p, std::uint16_t strip) noexcept {
+  const unsigned i = entry_find(r, mode, p, strip);
+  return i < entry_count(r, mode) ? i : 0u;
 }
 
-// The encoder: `delta` places, stopping at the ends. A tap: the next, wrapping.
-constexpr unsigned entry_step(pd::Row r, unsigned mode, unsigned cur, int delta) noexcept {
-  const int n = static_cast<int>(entry_count(r, mode));
-  int i = static_cast<int>(cur) + delta;
-  i = i < 0 ? 0 : (i > n - 1 ? n - 1 : i);
-  return static_cast<unsigned>(i);
-}
-constexpr unsigned entry_tap(pd::Row r, unsigned mode, unsigned cur) noexcept { return (cur + 1u) % entry_count(r, mode); }
-
-// SHIFT + the encoder: the first entry of the next group (delta > 0; the last group stays) or of the group before (delta < 0: the start of the current
-// group when inside one, else the previous group's start).
+// SHIFT + the encoder in F7's list: the first entry of the next group (delta > 0; the last group stays) or of the group before (delta < 0: the start of
+// the current group when inside one, else the previous group's start).
 constexpr unsigned entry_jump(pd::Row r, unsigned mode, unsigned cur, int delta) noexcept {
   const unsigned n = entry_count(r, mode);
   const unsigned g = entry_at(r, mode, cur).group;
@@ -330,7 +358,7 @@ constexpr unsigned entry_jump(pd::Row r, unsigned mode, unsigned cur, int delta)
         return i;
       }
     }
-    return n - 1u;
+    return cur;
   }
   unsigned start = cur;
   while (start > 0u && entry_at(r, mode, start - 1u).group == g) {
@@ -348,6 +376,46 @@ constexpr unsigned entry_jump(pd::Row r, unsigned mode, unsigned cur, int delta)
     --i;
   }
   return i;
+}
+
+// F7's list as PERFORM shows it: every group's heading, then its entries. At most kGroupCount headings and entry_count entries (TRACT's row C is the longest,
+// tests/strip_logic_test.cpp holds the bound).
+struct ListRow {
+  bool heading = false;
+  std::uint8_t group = 0;  // a heading's group (kGroupNames)
+  std::uint8_t entry = 0;  // an entry's index in the list
+};
+inline constexpr unsigned kListMax = 56;
+
+// Fills `out` with the rows of the list for row `r` in `mode`; returns how many.
+constexpr unsigned list_rows(pd::Row r, unsigned mode, ListRow (&out)[kListMax]) noexcept {
+  unsigned n = 0;
+  unsigned last = kGroupCount;
+  const unsigned count = entry_count(r, mode);
+  for (unsigned i = 0; i < count && n < kListMax; ++i) {
+    const unsigned g = entry_at(r, mode, i).group;
+    if (g != last && n + 1u < kListMax) {
+      out[n].heading = true;
+      out[n].group = static_cast<std::uint8_t>(g);
+      out[n].entry = 0;
+      ++n;
+      last = g;
+    }
+    out[n].heading = false;
+    out[n].group = static_cast<std::uint8_t>(g);
+    out[n].entry = static_cast<std::uint8_t>(i);
+    ++n;
+  }
+  return n;
+}
+
+// The first of `rows` visible rows of a list of `count` that keeps row `pos` in view, the cursor near the middle (the list scrolls with it).
+constexpr unsigned list_top(unsigned pos, unsigned count, unsigned rows) noexcept {
+  if (count <= rows) {
+    return 0;
+  }
+  const unsigned want = pos > rows / 2u ? pos - rows / 2u : 0u;
+  return want > count - rows ? count - rows : want;
 }
 
 // Sets row `r` of `l` to entry `index` of the mode's list.
@@ -394,14 +462,8 @@ constexpr std::size_t cat_uint(char* out, std::size_t cap, std::size_t n, unsign
 }
 }  // namespace detail
 
-// F7's value on PERFORM (FX1): the row it acts on and what that row plays, "A VOWEL", "B 7TH", "C MOUTH".
-constexpr void plays_label(const pd::Layout& l, pd::Row r, char (&out)[16]) noexcept {
-  std::size_t n = detail::cat(out, sizeof out, 0, pd::kRowNames[pd::idx(r)]);
-  n = detail::cat(out, sizeof out, n, " ");
-  (void)detail::cat(out, sizeof out, n, row_name(l, r));
-}
-
-// The flash while the encoder or a tap moves F7: what the row plays now and its place in the list, "VOWEL 7/30" (entry `index` of `total`, one-based).
+// The hint while F7's list is open: the entry under the cursor (as applied to `l`) and its place in the list, "VOWEL 7/30" (entry `index` of `total`,
+// one-based).
 constexpr void plays_position(const pd::Layout& l, pd::Row r, unsigned index, unsigned total, char (&out)[16]) noexcept {
   std::size_t n = detail::cat(out, sizeof out, 0, row_name(l, r));
   n = detail::cat(out, sizeof out, n, " ");
@@ -467,12 +529,14 @@ constexpr bool layout_valid(const pd::Layout& l) noexcept {
   return true;
 }
 
-// A layout read from a file: a STRIP row whose id this build does not know (a newer image's strip) drops to the mode's default row, the others stay.
+// A layout read from a file: a row whose value the mode's list does not offer drops to the mode's default row, the others stay. That is a STRIP whose id
+// this build does not know (a newer image's strip), a strip the mode does not use (an older image let GLIDE, GATE, ARP and VOICING into TUNE), FORMANT in
+// TUNE or TRACT and MOUTH outside TRACT: rows that would be dark, and that F7's list could not show as the row's value.
 constexpr pd::Layout sanitize(pd::Layout l, unsigned mode) noexcept {
   const pd::Layout def = default_layout(mode);
   for (unsigned r = 0; r < pd::kRows; ++r) {
     const bool bad = l.row[r] == pd::Plays::Strip ? find(l.strip[r]) == nullptr : l.strip[r] != pd::kNoStrip;
-    if (bad || !pd::offered(static_cast<pd::Row>(r), l.row[r])) {
+    if (bad || !pd::offered(static_cast<pd::Row>(r), l.row[r]) || !entry_offered(static_cast<pd::Row>(r), mode, l.row[r], l.strip[r])) {
       l.row[r] = def.row[r];
       l.strip[r] = def.strip[r];
     }

@@ -16,6 +16,7 @@
 #include <o3sdk/app/context.h>
 #include <o3sdk/core/placement.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -186,7 +187,6 @@ void PerformScreen::init(dsp::UnitId voice, dsp::UnitId tract, const InputMeter*
   flash_until_ = 0;
   latched_ = -1;
   held_ = 0;
-  down_ = 0;
   label_sig_ = 0xFFFFFFFFu;
   frame_ = 0;
   pick_ = 0;
@@ -204,7 +204,6 @@ void PerformScreen::init(dsp::UnitId voice, dsp::UnitId tract, const InputMeter*
 const ui::Theme* PerformScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
 
 void PerformScreen::enter(app::Context& ctx) noexcept {
-  down_ = 0;
   sync_mode(ctx);
   ctx.redraw();
 }
@@ -221,13 +220,15 @@ void PerformScreen::sync_mode(app::Context& ctx) noexcept {
   }
   release_all(ctx);
   mode_ = m;
+  if (pick_ == 3u) {  // F7's list was the old mode's
+    pick_ = 0;
+  }
   label_sig_ = 0xFFFFFFFFu;
   ctx.redraw();
 }
 
 void PerformScreen::leave(app::Context& ctx) noexcept {
   pick_ = 0;  // a picker does not outlive the screen; a capture does (update() resumes it)
-  down_ = 0;  // a pad let go on another screen is never seen here
   release_all(ctx);
 }
 
@@ -262,7 +263,6 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
   if (pad >= app::kPadCount) {
     return;
   }
-  down_ |= std::uint64_t{1} << pad;
   sync_mode(ctx);
   dsp::Engine& e = ctx.engine();
   const pl::PadSpec sp = pl::pad_spec(lay(), app::pad_row(pad), app::pad_col(pad), octave_);
@@ -572,9 +572,6 @@ void PerformScreen::audition_release_all(app::Context& ctx) noexcept {
 }
 
 void PerformScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
-  if (pad < app::kPadCount) {
-    down_ &= ~(std::uint64_t{1} << pad);
-  }
   if (pad < app::kPadCount && ((mouth_pads_ >> pad) & 1u) != 0u) {
     mouth_release(ctx, pad);
     return;
@@ -678,45 +675,6 @@ void PerformScreen::choose_row(app::Context& ctx, pads::Row r) noexcept {
   row_ = r;
   row_flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
   ctx.redraw();
-}
-
-// The row of the lowest pad physically down in A, B or C (down_, FX1), or the chosen row when none is: F7 changes the row whose pad is under the finger and
-// otherwise the row F6 shows. A latched pad, a pad whose notes still sound and a bit another screen left in held_ do not count.
-pads::Row PerformScreen::pressed_row() const noexcept {
-  for (unsigned r = 1; r <= pads::kRows; ++r) {
-    if (((down_ >> (r * app::kPadCols)) & 0xFFFu) != 0u) {
-      return pl::layout_row(r);
-    }
-  }
-  return row_;
-}
-
-// F7: PLAYS of the chosen row, or of the row a pad is held in (and ROW moves to it). The list is the row's notes and OFF, then every parameter strip the
-// mode uses by group (strip_logic.h). A tap steps and wraps, a detent stops at the ends, SHIFT + a detent jumps a group (`jump`). A change of layout
-// ends the notes and held strips: they were started by the old meaning.
-void PerformScreen::step_plays(app::Context& ctx, int delta, bool tap, bool jump) noexcept {
-  sync_mode(ctx);
-  const pads::Row r = pressed_row();
-  const pads::Layout& cur_l = lay();
-  const unsigned cur = strip::entry_index(r, mode_, cur_l.row[pads::idx(r)], cur_l.strip[pads::idx(r)]);
-  const unsigned next = tap ? strip::entry_tap(r, mode_, cur) : (jump ? strip::entry_jump(r, mode_, cur, delta) : strip::entry_step(r, mode_, cur, delta));
-  // F6's row stays as it is (FX1): the row F7 changed is the pad's while one is down, and ROW does not follow it.
-  if (next == cur) {
-    ctx.redraw();
-    return;
-  }
-  pads::Layout l = cur_l;
-  strip::apply_entry(l, r, mode_, next);
-  release_all(ctx);
-  lay() = l;
-  const strip::Entry e = strip::entry_at(r, mode_, next);
-  // "A VOWEL 7/30": the row, what it plays now and its place in the list; a jump into a strip group names the group instead, so a long list is readable.
-  char pos[16] = {};
-  strip::plays_position(l, r, next, strip::entry_count(r, mode_), pos);
-  show_flash(ctx, pads::kRowNames[pads::idx(r)], pos);
-  if (jump && e.group != strip::kGroupNotes) {
-    show_flash(ctx, strip::kGroupNames[e.group], strip::row_name(l, r));
-  }
 }
 
 // The unit's Bend: the local and the wheel's semitones added, held to +-12 (the unit ramps it; main loop only).
@@ -932,6 +890,10 @@ void PerformScreen::close_picker(app::Context& ctx) noexcept {
 
 // The rows of the open picker, from route.h, with the state the engine and the loops are in now.
 void PerformScreen::build_picker(app::Context& ctx) noexcept {
+  if (pick_ == 3u) {
+    build_plays(ctx);
+    return;
+  }
   const route::Side side = pick_ == 1u ? route::Side::Speaks : route::Side::Sounds;
   const route::Route r = route_of(ctx.engine(), voice_);
   const route::LiveSrc cur = static_cast<route::LiveSrc>(live_index(ctx.audio_in()));
@@ -982,6 +944,92 @@ void PerformScreen::build_picker(app::Context& ctx) noexcept {
     pick_cursor_ = static_cast<std::uint8_t>(v.count != 0u ? v.count - 1u : 0u);
   }
   v.cursor = pick_cursor_;
+}
+
+// F7: the list of what row_ can play in this mode, over the SOUNDS column (the same picker as F2 and F3). The cursor starts on the value in force (on the
+// first entry when the row holds a value the list does not offer); nothing changes until F7 or F1 takes the cursor's entry.
+void PerformScreen::open_plays(app::Context& ctx) noexcept {
+  sync_mode(ctx);
+  pick_ = 3;
+  focus_ = 6;
+  sfocus_ = pl::kNoShiftFocus;
+  const pads::Layout& l = layout();
+  pick_cursor_ = static_cast<std::uint8_t>(strip::entry_index(row_, mode_, l.row[pads::idx(row_)], l.strip[pads::idx(row_)]));
+  build_plays(ctx);
+  ctx.redraw();
+}
+
+// The visible window of F7's list (ornoir::kPickerRows rows of strip::list_rows, scrolled to keep the cursor in view): a heading per group ("- CARRIER -",
+// dimmed, never under the cursor), then each entry's name, a parameter's value now beside it, the value in force marked.
+void PerformScreen::build_plays(app::Context& ctx) noexcept {
+  const dsp::Engine& e = ctx.engine();
+  const pads::Layout& l = layout();
+  const unsigned count = strip::entry_count(row_, mode_);
+  const unsigned in_force = strip::entry_find(row_, mode_, l.row[pads::idx(row_)], l.strip[pads::idx(row_)]);
+  if (pick_cursor_ >= count) {
+    pick_cursor_ = static_cast<std::uint8_t>(count != 0u ? count - 1u : 0u);
+  }
+  strip::ListRow rows[strip::kListMax];
+  const unsigned n = strip::list_rows(row_, mode_, rows);
+  unsigned pos = 0;
+  for (unsigned i = 0; i < n; ++i) {
+    if (!rows[i].heading && rows[i].entry == pick_cursor_) {
+      pos = i;
+    }
+  }
+  const unsigned top = strip::list_top(pos, n, ornoir::kPickerRows);
+  ornoir::PickerView& v = g_pd.pick;
+  v.count = n - top < ornoir::kPickerRows ? n - top : ornoir::kPickerRows;
+  v.cursor = pos - top;
+  for (unsigned i = 0; i < v.count; ++i) {
+    const strip::ListRow& lr = rows[top + i];
+    ornoir::PickerRow& pr = v.row[i];
+    pr.name[0] = pr.note[0] = '\0';
+    pr.on = false;
+    pr.dimmed = lr.heading;
+    if (lr.heading) {
+      put(pr.name, "- ");
+      cat(pr.name, sizeof pr.name, strip::kGroupNames[lr.group < strip::kGroupCount ? lr.group : 0u]);
+      cat(pr.name, sizeof pr.name, " -");
+      continue;
+    }
+    const strip::Entry en = strip::entry_at(row_, mode_, lr.entry);
+    pr.on = lr.entry == in_force;
+    if (en.plays != pads::Plays::Strip) {
+      put(pr.name, pads::kPlaysShort[pads::idx(en.plays)]);
+      continue;
+    }
+    const strip::StripDef* d = strip::find(en.strip);
+    if (d == nullptr) {
+      continue;
+    }
+    put(pr.name, d->name);
+    if (d->shape == strip::Shape::Hold) {
+      put(pr.note, "HOLD");
+    } else {
+      char t[12];
+      strip::value_text(*d, strip_current(e, *d), t);
+      put(pr.note, t);
+    }
+  }
+}
+
+// F7 or F1 in F7's list: row_ takes the cursor's entry. A change ends the held notes and strips first (they were started by the old meaning).
+void PerformScreen::take_plays(app::Context& ctx) noexcept {
+  const unsigned at = pick_cursor_;
+  close_picker(ctx);
+  sync_mode(ctx);
+  if (at >= strip::entry_count(row_, mode_)) {
+    return;
+  }
+  const pads::Layout& cur = lay();
+  pads::Layout l = cur;
+  strip::apply_entry(l, row_, mode_, at);
+  if (l.row[pads::idx(row_)] != cur.row[pads::idx(row_)] || l.strip[pads::idx(row_)] != cur.strip[pads::idx(row_)]) {
+    release_all(ctx);
+    lay() = l;
+  }
+  show_flash(ctx, pads::kRowNames[pads::idx(row_)], strip::row_name(l, row_));
 }
 
 void PerformScreen::loop_rec(app::Context& ctx, unsigned slot, bool on) noexcept {
@@ -1040,6 +1088,10 @@ void header_route(const dsp::Engine& e, dsp::UnitId voice, const char* live, boo
 
 // The cursor's row is taken. A dimmed LIVE source arms a capture (REC does it, the source follows); another dimmed row says why it cannot.
 void PerformScreen::take_choice(app::Context& ctx) noexcept {
+  if (pick_ == 3u) {
+    take_plays(ctx);
+    return;
+  }
   const route::Side side = pick_ == 1u ? route::Side::Speaks : route::Side::Sounds;
   const route::Route r = route_of(ctx.engine(), voice_);
   route::Row rows[route::kMaxRows];
@@ -1270,6 +1322,25 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) no
     ctx.redraw();
     return;
   }
+  if (pick_ == 3u) {  // F7's list: the cursor goes round its entries (headings skipped), SHIFT jumps to the next group's first or back to a group's start
+    sync_mode(ctx);
+    if (pick_ == 3u) {
+      const unsigned n = strip::entry_count(row_, mode_);
+      if (coarse) {  // a group a detent; there are kGroupCount groups, so more detents than that change nothing more
+        unsigned cur = pick_cursor_ < n ? pick_cursor_ : 0u;
+        const unsigned jumps = std::min<unsigned>(static_cast<unsigned>(delta < 0 ? -delta : delta), strip::kGroupCount);
+        for (unsigned j = 0; j < jumps; ++j) {
+          cur = strip::entry_jump(row_, mode_, cur, delta);
+        }
+        pick_cursor_ = static_cast<std::uint8_t>(cur);
+      } else {
+        pick_cursor_ = static_cast<std::uint8_t>(pl::step_wrapped(pick_cursor_, delta, n != 0u ? n : 1u));
+      }
+      build_plays(ctx);
+    }
+    ctx.redraw();
+    return;
+  }
   if (pick_ != 0u) {  // an open picker: the encoder moves its cursor
     build_picker(ctx);
     pick_cursor_ = static_cast<std::uint8_t>(pl::step_wrapped(pick_cursor_, delta, g_pd.pick.count != 0u ? g_pd.pick.count : 1u));
@@ -1319,12 +1390,11 @@ void PerformScreen::turn(app::Context& ctx, int delta, bool coarse, bool tap) no
       }
       break;
     }
-    case 6:  // PLAYS of the chosen row (or of the row a pad is held in)
+    case 6:  // PLAYS of the chosen row: a detent (or an arrow) opens its list, as F2 and F3 do
       if (delta != 0) {
-        step_plays(ctx, delta, tap, coarse && !tap);  // SHIFT + a detent: the next group of the list
-        return;
+        open_plays(ctx);
       }
-      break;
+      return;
     default:
       if (mode == kModeTract) {  // VOWEL: 1 % a detent (SHIFT 10 %), written in the unit's 0..1; the mouth strip's LEDs follow
         if (tract_ != dsp::kNoUnit) {
@@ -1400,7 +1470,7 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     if (in.shift) {
       close_picker(ctx);
       shift_key(ctx, k);
-    } else if (pick_ != 0u && (k == 0u || k == pick_)) {  // F1 or the picker's own key takes the cursor's row
+    } else if (pick_ != 0u && (k == 0u || k == pick_key())) {  // F1 or the picker's own key takes the cursor's row
       take_choice(ctx);
     } else if (pick_ != 0u && k == 7u) {  // F8 backs out
       close_picker(ctx);
@@ -1408,7 +1478,10 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
     } else if (pick_ == 0u && sfocus_ == pl::kNoShiftFocus && (k == 1u || k == 2u)) {  // F2 SPEAKS, F3 SOUNDS: a list, not a step
       open_picker(ctx, k == 1u ? route::Side::Speaks : route::Side::Sounds);
-    } else if (k == 6u && pick_ == 0u && (down_ >> app::kPadCols) != 0u) {  // F7 with a pad of A, B or C down: that row's PLAYS steps at once
+    } else if (k == 6u) {  // F7 PLAYS: a list of what row_ can play (the row F6 shows, whatever pad is down), not a blind step
+      open_plays(ctx);
+    } else if (k == 5u) {  // F6 ROW: every tap steps the row (it has three values and nothing else to do)
+      close_picker(ctx);
       sfocus_ = pl::kNoShiftFocus;
       focus_ = k;
       turn(ctx, 1, false, true);
@@ -1435,10 +1508,11 @@ void PerformScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     latch(ctx, false);
   } else if (in.press(Button::Rec)) {
     rec_press(ctx);
-  } else if (in.press(Button::Up)) {  // an open picker: the cursor up; else the focused F value one step up, as a detent (AK1)
-    step_focused(ctx, pick_ != 0u ? -1 : 1, in.shift);
-  } else if (in.press(Button::Down)) {
-    step_focused(ctx, pick_ != 0u ? 1 : -1, in.shift);
+  } else if (in.press(Button::Up) || in.press(Button::Down)) {  // an open picker: the cursor up / down; F6: the row above / below, as the pads lie; else
+                                                                  // the focused F value one step up / down, as a detent (AK1)
+    const bool by_place = pick_ != 0u || (sfocus_ == pl::kNoShiftFocus && focus_ == 5u);
+    const int up = by_place ? -1 : 1;
+    step_focused(ctx, in.press(Button::Up) ? up : -up, in.shift);
   } else if (in.press(Button::Left) || in.press(Button::Right)) {  // the focused F value one step down or up; repeats arrive as presses (repeat_buttons)
     step_focused(ctx, in.press(Button::Left) ? -1 : 1, in.shift);
   } else if (in.pad_press()) {
@@ -1631,11 +1705,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   set(3, pl::kKeyNames[key % 12u]);
   set(4, pl::kScaleNames[scale < kScaleTableCount ? scale : 0u]);
   set(5, pads::kRowNames[pads::idx(row_)]);
-  {  // F7 names the row it acts on and what that row plays: "A VOWEL" (the row of a pad that is down, else F6's)
-    char lbl[16] = {};
-    strip::plays_label(layout(), pressed_row(), lbl);
-    set(6, lbl);
-  }
+  set(6, strip::row_name(layout(), row_));  // F7: what F6's row plays ("VOWEL"); the row itself is F6's value, so the cell keeps room for the longest name
   {
     char num[12] = {};
     if (mode == kModeTract) {  // VOWEL: a pure column's name (A, AE, E ...) or the percentage
@@ -1797,7 +1867,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     so.held = latched_ >= 0 ? "LATCHED" : "HELD";
   }
 
-  if (pick_ == 2u) {
+  if (pick_ == 2u || pick_ == 3u) {  // SOUNDS' list and F7's both open over the right column
     so.picker = &g_pd.pick;
   }
   ornoir::PadsView pads;
@@ -1808,14 +1878,28 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   pads.latched = latched_;
   char row_text[pads::kRows][12] = {};  // "A TRIAD": the row's letter and what it plays (the margin holds ten characters)
   pads.row_name[0] = "CONTROLS";
+  const bool rows_hot = sfocus_ == pl::kNoShiftFocus && (focus_ == 5u || focus_ == 6u || pick_ == 3u);  // F6 or F7 in hand: the chosen row is marked
+  pads.hot_row = rows_hot ? pads::idx(row_) + 1u : 0u;
   for (unsigned i = 0; i < pads::kRows; ++i) {
-    put(row_text[i], pads::kRowNames[i]);
+    if (rows_hot && i == pads::idx(row_)) {
+      put(row_text[i], ">");
+    }
+    cat(row_text[i], sizeof row_text[i], pads::kRowNames[i]);
     cat(row_text[i], sizeof row_text[i], " ");
     cat(row_text[i], sizeof row_text[i], strip::row_name(layout(), static_cast<pads::Row>(i)));
     pads.row_name[i + 1u] = row_text[i];
   }
-  pads.key_hint = flash_[0] != '\0' ? flash_ : (dim_line[0] != '\0' ? dim_line : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_)));
-  if (pick_ != 0u) {
+  char plays_pos[16] = {};  // F7's list: the cursor's entry and its place, "SPEED 12/23"
+  if (pick_ == 3u) {
+    pads::Layout t = layout();
+    strip::apply_entry(t, row_, mode_, pick_cursor_);
+    strip::plays_position(t, row_, pick_cursor_, strip::entry_count(row_, mode_), plays_pos);
+  }
+  // F7's list open: the cursor's place stays on show (a flash or a dim line would hide where the cursor is).
+  pads.key_hint = pick_ == 3u ? plays_pos : (flash_[0] != '\0' ? flash_ : (dim_line[0] != '\0' ? dim_line : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_))));
+  if (pick_ == 3u) {
+    pads.hint_left = "UP DOWN OR TURN: CURSOR  SHIFT TURN: GROUP  F7 OR F1: TAKE  F8: BACK";
+  } else if (pick_ != 0u) {
     pads.hint_left = "UP DOWN OR TURN: CURSOR   F1 OR SAME KEY: TAKE   F8: BACK";
   } else {
     pads.hint_left = "SHIFT LATCH  DELETE RELEASE  ARROWS: F VALUE  SHIFT F7 OCTAVE";
@@ -1969,8 +2053,8 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Rec, "CAPTURE LIVE INTO A SLOT", nullptr},
       {Button::Shift, "HOLD A PAD, TAP: LATCH CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
-      {Button::Up, "LIST UP, ELSE F VALUE UP", nullptr},
-      {Button::Down, "LIST DOWN, ELSE F VALUE DOWN", nullptr},
+      {Button::Up, "LIST UP; F6 ROW ABOVE; F UP", nullptr},
+      {Button::Down, "LIST DN; F6 ROW BELOW; F DN", nullptr},
       {Button::Left, "F VALUE DOWN (HOLD: REPEAT)", nullptr},
       {Button::Right, "F VALUE UP (HOLD: REPEAT)", nullptr},
   };
@@ -1989,15 +2073,15 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
                 "SET ROW C TO MOUTH: NINE VOWEL PADS, AND HOLD LIPS, TIP OR BACK TO CLOSE THE MOUTH.";
   } else {
     h.summary = "SPEAKS > SOUNDS: THE AUDIO INPUT SPEAKS THROUGH THE CARRIER, PLAYED FROM THE PADS OR BY MIDI.\n"
-                "F2 F3: A LIST (UP DOWN, F1 TAKES, F8 BACKS). OTHER F KEYS: A 2ND TAP STEPS. SHIFT: MORE.";
+                "F2 F3 F7: A LIST (UP DOWN, F1 TAKES, F8 BACKS). F6 STEPS. OTHERS: A 2ND TAP STEPS. SHIFT: MORE.";
   }
   h.fkey[0] = "THE 5 MODES, TRACT LAST";
   h.fkey[1] = "A LIST OF WHAT TALKS";
   h.fkey[2] = "SYNTH, LOOPS, VOICE, LIVE";
   h.fkey[3] = "THE SCALE'S ROOT";
   h.fkey[4] = "SCALE OF THE CHORDS";
-  h.fkey[5] = "ROW: A, B OR C";
-  h.fkey[6] = "WHAT THE ROW PLAYS";
+  h.fkey[5] = "EACH TAP: THE NEXT ROW";
+  h.fkey[6] = "A LIST: WHAT F6'S ROW PLAYS";
   for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row (all eight keys have a name)
     h.fkey_shift[i] = pl::kShiftKeys[i].name[0] != '\0' ? pl::kShiftKeys[i].name : nullptr;
   }
@@ -2007,7 +2091,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.encoder = "VALUE OR BEND (SHIFT COARSE)";
   h.groups = help_groups_;
   h.group_count = 5;
-  h.pads = "TOP ROW: CONTROLS. A, B, C BELOW: F6 CHOOSES THE ROW, F7 WHAT IT PLAYS (A HELD PAD'S ROW FIRST).";
+  h.pads = "TOP ROW: CONTROLS. A, B, C BELOW: F6 CHOOSES THE ROW (ITS NAME LIT), F7 LISTS WHAT IT CAN PLAY.";
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
     const pl::PadSpec sp = pl::pad_spec(layout(), app::pad_row(pad), app::pad_col(pad), octave_);
     h.pad_group[pad] = static_cast<std::uint8_t>(app::pad_row(pad) + 1u);  // a dark pad belongs to its row's group, with no label

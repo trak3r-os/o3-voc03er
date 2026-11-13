@@ -5,7 +5,8 @@
 // of the vocoder's 16 bands in the middle, what sounds (the carrier) on the right, and the pads as a chord grid under them.
 //
 //   F1 MODE  F2 SPEAKS  F3 SOUNDS  F4 KEY  F5 SCALE  F6 ROW  F7 PLAYS  F8 by mode (BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL)
-//   A tap on an F key points the encoder at it (the key stays lit); a second tap steps it on. The encoder changes the value.
+//   A tap on an F key points the encoder at it (the key stays lit); a second tap steps it on. The encoder changes the value. F6 steps on its first tap,
+//               F2, F3 and F7 open their list on it.
 //   F2, F3      a tap opens a list over the column (SPEAKS: sources and slots; SOUNDS: SYNTH, NOISE, LIVE, sources, slots): UP / DOWN or the encoder move the
 //               cursor, the key again or F1 takes the row, F8 backs out; F4..F7, SHIFT, PERFORMANCE and the screen buttons close it, the pads sound as ever.
 //               A dimmed row (a second LIVE source) arms a capture. REC records the live source for two bars into the first empty slot, which then takes
@@ -14,15 +15,18 @@
 //                 value: a note, a chord kind, OFF, on C the FORMANT strip, the BEND strip or the MOUTH strip (TRACT: nine vowel pads and the closures LIPS, TIP,
 //                 BACK), or a PARAMETER STRIP on any row (strip_logic.h: twelve pads over one parameter's range, or a closure held while pressed). There is one
 //                 layout per mode (BANDS, TALK, TUNE, ROBOT, TRACT), kept when the mode changes and saved in the project. F6 ROW picks
-//                 A, B or C (a tap steps and wraps, the encoder stops at the ends; the row's LEDs flash once); F7 PLAYS sets that row (SHIFT + the encoder jumps
-//                 by group). Holding a pad of a
-//                 row and tapping F7 (or turning) changes THAT row at once, and F6 stays where it is. A row above plays one octave higher per playing row below it
+//                 A, B or C (every tap steps and wraps, the encoder and LEFT / RIGHT stop at the ends, UP goes to the row above and DOWN to the row below; the
+//                 row's LEDs flash once and its name beside the pads stays marked while F6 or F7 has the focus). F7 PLAYS acts on that row and no other: a tap
+//                 opens the row's list over the SOUNDS column (the notes values, then the mode's parameter strips under their group headings, only what acts in
+//                 this mode), the cursor on the value in force; UP / DOWN or the encoder move it, SHIFT + the encoder jumps a group, F7 again or F1 takes it,
+//                 F8 backs out. A row above plays one octave higher per playing row below it
 //   bend          PERFORMANCE while PERFORM is up frees the encoder (no F key hot): it bends the carrier, range / 8 a detent, and springs back to 0
 //                 about 120 ms after the last one. A tap on an F key takes the encoder back. MIDI pitch bend adds to it (set_wheel)
 //   SHIFT row     while SHIFT is held the F row shows a second row (FREEZE, GATE, ARP, GLIDE, FORMANT, THRU, OCTAVE, PRESET); SHIFT + F key focuses
 //                 its value, shown while it has the focus; a plain F tap goes back (perform_logic.h kShiftKeys)
 //   SHIFT         latches the held pad's note or chord (it keeps sounding); DELETE releases it
-//   LEFT / RIGHT  one step down / up of the focused F value (the encoder's detent; they repeat when held); UP / DOWN the same when no list is open
+//   LEFT / RIGHT  one step down / up of the focused F value (the encoder's detent; they repeat when held); UP / DOWN the same when no list is open (on F6
+//                 UP is the row above, DOWN the row below, as the pads lie)
 //   PLAY          the transport (the app's); the other screen buttons open their screen (app.cpp), MODE is F1
 //
 // Everything runs in the main loop (o3-sdk app/screen.h). The tables (labels, the chord of each pad, the peak holds) are one O3SDK_BIG struct
@@ -140,7 +144,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   // The pads' layout (docs/REVIEW-2026-11-11.md section 3): what rows A, B and C play, the current mode's of the five (`layouts()`). PERFORM's own pads
   // (rows 1, 2 and 3) follow it and nothing else does (strips live on PERFORM only). Main loop only. Saved in the project (PADS); init() sets the defaults
   // (strip::default_layout: one per mode, see strip_logic.h). The mode is read in service() (every main-loop pass),
-  // in enter() and on a pad press. PERFORM's own F7 lets the held pads go first (step_plays).
+  // in enter() and on a pad press. PERFORM's own F7 lets the held pads go first (take_plays).
   const pads::Layout& layout() const noexcept { return layouts_[mode_]; }
   unsigned layout_mode() const noexcept { return mode_; }
   // The notes palette (SP1): what the pad rows A and B play on PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD, the same in every mode. Notes only
@@ -160,7 +164,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   void release_closures(o3sdk::app::Context& ctx) noexcept;
   // The LED level of that pad (the value's pad on, the others dim, those past the choices dark; a held closure's pad on); dark for a row without a strip.
   std::uint8_t strip_led(const o3sdk::dsp::Engine& e, pads::Row row, unsigned col, unsigned pad_id) const noexcept;
-  // The row F6 points at (A, B or C) and the one whose LEDs flash.
+  // The row F6 points at (A, B or C): the one F7 sets, whose LEDs flash and whose name is marked.
   pads::Row row() const noexcept { return row_; }
   int latched() const noexcept { return latched_; }
   // The audition (Q3): another screen (PATTERN) plays a palette pad through PERFORM's local-note path, so the sequencer's note-offs do not cut it.
@@ -208,13 +212,15 @@ class PerformScreen final : public o3sdk::app::Screen {
   void control_release(o3sdk::app::Context& ctx, unsigned pad, perform::PadFn fn) noexcept;
   void choose_row(o3sdk::app::Context& ctx, pads::Row row) noexcept;
   void step_focused(o3sdk::app::Context& ctx, int delta, bool coarse) noexcept;
-  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap, bool jump = false) noexcept;
-  pads::Row pressed_row() const noexcept;
   void show_flash(o3sdk::app::Context& ctx, const char* name, const char* value) noexcept;
   void refresh_labels(const o3sdk::dsp::Engine& e) noexcept;
   bool note_in_use(std::uint8_t note, unsigned except_pad) const noexcept;
-  // The pickers and the capture (perform_screen.cpp).
+  // The pickers and the capture (perform_screen.cpp). F7's list (pick_ 3) is the same picker over the SOUNDS column, its rows strip::list_rows.
   void open_picker(o3sdk::app::Context& ctx, route::Side side) noexcept;
+  void open_plays(o3sdk::app::Context& ctx) noexcept;
+  void build_plays(o3sdk::app::Context& ctx) noexcept;
+  void take_plays(o3sdk::app::Context& ctx) noexcept;
+  unsigned pick_key() const noexcept { return pick_ == 3u ? 6u : pick_; }  // the F key that opened the list (and takes its cursor)
   void close_picker(o3sdk::app::Context& ctx) noexcept;
   void build_picker(o3sdk::app::Context& ctx) noexcept;
   void take_choice(o3sdk::app::Context& ctx) noexcept;
@@ -248,7 +254,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   pads::Layout layouts_[kModeCount] = {};  // see layout(); init() fills the defaults
   pads::Layout notes_ = {};  // see notes(): rows A and B, notes only
   unsigned mode_ = 0;        // the mode whose layout is in force (sync_mode)
-  pads::Row row_ = pads::Row::A;  // F6: the row F7 and the encoder set (main loop only)
+  pads::Row row_ = pads::Row::A;  // F6: the row F7's list sets, the only one (main loop only)
   std::uint64_t row_flash_until_ = 0;  // the chosen row's LEDs are dark until then, a short off-on when F6 changes the row (leds() checks it)
   std::uint8_t slots_waiting_ = 0;  // see set_slots_waiting
   unsigned strip_last_ = 0;  // the strip pad pressed last
@@ -268,9 +274,9 @@ class PerformScreen final : public o3sdk::app::Screen {
   float vib_sent_ = 0.0f;            // the last Vib written (only a change is written)
   char flash_[40] = {};              // a moment's text on the hint line (VOL, ROOT, OCT), until flash_until_
   std::uint64_t flash_until_ = 0;
-  // The pickers: 0 closed, 1 SPEAKS, 2 SOUNDS (its rows are g_pd.pick). Main loop only.
+  // The pickers: 0 closed, 1 SPEAKS, 2 SOUNDS, 3 F7's PLAYS list for row_ (its rows are g_pd.pick). Main loop only.
   std::uint8_t pick_ = 0;
-  std::uint8_t pick_cursor_ = 0;
+  std::uint8_t pick_cursor_ = 0;  // SPEAKS and SOUNDS: the row; PLAYS: the entry of strip::entry_at (headings never take it)
   // The capture (REC): Starting (Rec written, waiting for the unit to show it), Active (armed or recording). Main loop only, advanced by service() (App::update, every pass).
   enum class Cap : std::uint8_t { Idle, Starting, Active };
   Cap cap_ = Cap::Idle;
@@ -282,8 +288,6 @@ class PerformScreen final : public o3sdk::app::Screen {
   std::uint64_t cap_t0_ = 0;
   int latched_ = -1;         // the latched pad, or -1
   std::uint64_t held_ = 0;   // the pads this screen holds notes for (bit pad)
-  std::uint64_t down_ = 0;   // FX1: the pads physically down on this screen (bit pad: set by a press, cleared by its release, by leave() and init(); a latched pad and an OFF pad
-                             // count while the finger is on them, nothing else does). F7 follows a pad of A, B or C only through this mask. Main loop only.
   std::uint32_t label_sig_ = 0xFFFFFFFFu;  // what the labels were built for
   std::uint32_t frame_ = 0;
   mutable o3sdk::app::HelpPadGroup help_groups_[5] = {};

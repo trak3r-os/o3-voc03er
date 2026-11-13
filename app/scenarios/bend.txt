@@ -26,12 +26,14 @@ wait 400
 padup 26
 tap f7
 turn 2
+tap f7
 wait 100
 snap 06_keys
 tap f6
 turn 2
 tap f7
 turn 1
+tap f7
 wait 300
 snap 07_c_bend
 paddown 28

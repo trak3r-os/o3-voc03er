@@ -44,11 +44,14 @@ wait 300
 # ---- a parameter strip: A on SHAPE (F7 PLAYS, the first parameter after the notes), a pad held (perform-keys.png is retired, see docs/MANUAL.md)
 tap f7
 turn 6
+tap f7
 paddown 30
 wait 300
 snap m_perform_strip
 padup 30
+tap f7
 turn -6
+tap f7
 wait 200
 # ---- PARAMS: its three pages with a chord held
 tap params
@@ -320,11 +323,13 @@ tap f1
 turn 8
 wait 300
 tap f6
-tap f6
-tap f6
 wait 100
 tap f7
-turn 2
+press shift
+turn -10
+release shift
+turn 1
+tap f7
 wait 200
 paddown 26
 paddown 40
