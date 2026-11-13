@@ -31,6 +31,7 @@ wait 60
 tap f3              # SPEED (the first tap of a key only selects it)
 wait 40
 tap f3              # 1X to 2X
+tap f4              # DIR lit (H2: the first tap of a value key lights it)
 tap f4              # DIR: REV
 wait 60
 expect state speed1=2

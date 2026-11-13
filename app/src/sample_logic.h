@@ -2,9 +2,10 @@
 #pragma once
 
 // SAMPLE's pure logic (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"): SPEAKS against route::allowed, LOW PADS pairs, the SPEED and LEVEL steps, the
-// dB text, the pads' split. Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates; tract_live is the one engine read.
+// dB text, the pads' split, and the two rules that make one finger sound (a slice pad brings a note, a lower pad starts the picked slice). Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates; tract_live is the one engine read.
 
 #include "pads_logic.h"
+#include "liveness.h"
 #include "strip_logic.h"
 
 #include <o3_voc03er/modes.h>
@@ -24,10 +25,10 @@ inline constexpr const char* kDirNames[2] = {"FWD", "REV"};                    /
 inline constexpr float kLevelMinDb = -24.0f;
 inline constexpr float kLevelMaxDb = 12.0f;
 
-// Which side of the route a slot is on: the vocoder's input (SPEAKS), the carrier (SOUNDS), or neither (PADS: only its pads are played).
+// Which side of the route a slot is on: the vocoder's input (SPEAKS), the carrier (SOUNDS), or neither (HELD: only its pads play it).
 enum class Side : std::uint8_t { Speaks, Sounds, None };
 inline constexpr unsigned kSideCount = 3;
-inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "PADS"};
+inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "HELD"};
 
 // The top two rows (pads 0..23) are the slices of the selected slot.
 inline constexpr unsigned kTopPads = 24;
@@ -86,7 +87,7 @@ constexpr SidePlan plan_side(route::Route cur, Side target, unsigned slot, bool 
 
 // ---- F2 SPEAKS --------------------------------------------------------------------------------------------------------------------------
 // F2 shows and chooses what the vocoder listens to, as PERFORM's SPEAKS chip names it: position 0 is LIVE, 1..4 are SLOT 1..4. SOUNDS for a slot is
-// PERFORM's to choose, so there is no PADS ONLY choice here: a slot that does not speak is simply not the one that speaks.
+// PERFORM's to choose, so there is no HELD choice here: a slot that does not speak is simply not the one that speaks.
 
 inline constexpr unsigned kSpeaksPositions = 1u + route::kSlots;
 
@@ -121,6 +122,33 @@ inline constexpr const char* kSpeaksNote[route::kSlots] = {"SLOT 1 SPEAKS", "SLO
 inline constexpr const char* kSpeaksFreedNote[route::kSlots] = {"SLOT 1 SPEAKS. SOUNDS BACK TO SYNTH", "SLOT 2 SPEAKS. SOUNDS BACK TO SYNTH",
                                                                 "SLOT 3 SPEAKS. SOUNDS BACK TO SYNTH", "SLOT 4 SPEAKS. SOUNDS BACK TO SYNTH"};
 inline constexpr const char* kSpeaksLiveNote = "SPEAKS: BACK TO LIVE";
+
+// ---- one finger sounds ------------------------------------------------------------------------------------------------------------------
+// In BANDS, TALK and ROBOT a slice is the voice and is heard only while a synth note sounds; a lower pad is a synth note, heard only while something speaks.
+// So each half of the pads brings the other half when it is pressed alone (docs/UI-DESIGN.md, "SAMPLE"):
+//   RULE 1  a slice pad alone also plays "the note" (the last note or chord a lower pad played on the screen) while the slice sounds;
+//   RULE 2  a lower pad alone also starts "the picked slice" (the last slice a top pad fired on the slot) while the pad is held.
+
+// The modes whose voice needs a synth note under a slice: the ones liveness.h lists as BANDS, TALK and ROBOT (TUNE plays no synth, TRACT no note).
+constexpr bool mode_needs_note(unsigned mode) noexcept { return mode < o3_voc03er::kModeCount && ((o3_voc03er::live::kBandsTalkRobot >> mode) & 1u) != 0u; }
+
+// Rule 1: does a slice pad pressed now bring the note? `side` is the pressed slice's slot's, `lower_held` any lower pad down (a latched SAMPLE EDIT note counts),
+// `seq_notes` the sequencer is running a pattern that holds a note (it plays its own).
+constexpr bool slice_press_brings_note(unsigned mode, Side side, bool lower_held, bool seq_notes) noexcept {
+  return mode_needs_note(mode) && side != Side::Sounds && !lower_held && !seq_notes;
+}
+
+// Rule 2: does a lower pad pressed now start the picked slice? `has_audio` the selected slot holds audio, `slice_held` any top pad down, `looping` the slot's
+// loop plays or waits for the bar, `repeating` a slice repeats on the slot (LOOP ON + a pad). Every mode: the slice is the voice of a speaking slot, the
+// lower pad's note makes it heard where it needs one, and in TUNE and TRACT it simply plays.
+constexpr bool lower_press_starts_slice(Side side, bool has_audio, bool slice_held, bool looping, bool repeating) noexcept {
+  return has_audio && side != Side::Sounds && !slice_held && !looping && !repeating;
+}
+
+// The picked slice after a top pad fired slice `fired` (0..23) of a slot with `count` slices: that one when it exists, else the pick stays.
+constexpr unsigned picked_after(unsigned pick, unsigned fired, unsigned count) noexcept { return fired < count ? fired : pick; }
+// The pick held inside the slot's slices (slice 1 for a slot without them, or after its cuts changed).
+constexpr unsigned picked_valid(unsigned pick, unsigned count) noexcept { return pick < count ? pick : 0u; }
 
 // ---- F1 LOW PADS ------------------------------------------------------------------------------------------------------------------------
 // One key sets both lower rows: a pair (row A, row B). The first is the palette's own default; the others give both rows the same kind (row A sounds

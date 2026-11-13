@@ -316,7 +316,7 @@ void FileScreen::capture(app::Context& ctx) noexcept {
     const std::uint32_t len = t2.length != 0u ? t2.length : sample_->status(s).length;
     fl::merge_slot(p.slot[s], p.slot[s], t2, len);
     p.slot[s].gate = sample_->gate(s) ? 1u : 0u;  // after merge_slot, which rebuilds the record
-    p.slot[s].choke_off = sample_->choke_off(s) ? 1u : 0u;
+    p.slot[s].choke_off = 0u;  // the screen is always MONO; the field stays in the file (a loaded 1 is ignored)
     if (len != 0u) {
       // What is live goes in the record: SAMPLE's speed, direction and level, SAMPLE EDIT's trim brackets.
       const Vocoder::LoopStatus st = sample_->status(s);
@@ -592,9 +592,8 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
     fl::project_layouts(g_proj, lay);  // an older file's one layout serves every mode but TRACT
     perform_->set_layouts(lay);
   }
-  for (unsigned s = 0; s < route::kSlots; ++s) {  // TRIG and CHOKE ride with every record, audio or not (a record without them is ONE SHOT, SLICES MONO)
+  for (unsigned s = 0; s < route::kSlots; ++s) {  // TRIG rides with every record, audio or not (a record without it is ONE SHOT)
     sample_->set_gate(s, g_proj.slot[s].gate != 0u);
-    sample_->set_choke_off(s, g_proj.slot[s].choke_off != 0u);
   }
   g_fd.stage = kMenu;
   if (!g_fd.reset_slots && wavs && fl::next_load_slot(g_proj, 0) < fl::kWavSlots) {

@@ -37,10 +37,11 @@ constexpr int kLevelTap = 6;  // a second tap on F8 moves the level this many ha
 
 constexpr pads::Layout kDefaultNotes{};  // A NOTE, B TRIAD: when no PERFORM is wired (a standalone screen)
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"LOW PADS", "SPEAKS", "SPEED", "DIR", "LOOP", "TRIG", "SLICES", "LEVEL"};
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"SLOT", "SPEAKS", "SPEED", "DIR", "LOOP", "TRIG", "", "LEVEL"};
 // The SHIFT row: F1 to F3 only (the others are blank and dim), labelled the way PATTERN's and PERFORM's are.
 constexpr const char* kShiftNames[ornoir::kFKeys] = {"", "SLICE CH", "OCTAVE", "", "", "", "", ""};
-constexpr unsigned kKeyPlays = 0;  // F1
+constexpr unsigned kKeySlot = 0;  // F1
+constexpr unsigned kKeyBlank = 6;  // F7: inert
 constexpr unsigned kKeySliceCh = 1;  // F2, with SHIFT
 constexpr unsigned kKeyOctave = 2;   // F3, with SHIFT (AK1: the octave was LEFT and RIGHT)
 
@@ -100,14 +101,14 @@ struct SliceVoice {
 };
 
 // SAMPLE's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just the cursor in the SRAM). Zero means TRIG ONE SHOT and
-// SLICES MONO (a slice cuts the one before; `choke_off` is 0), the defaults. The help tables are valid while HELP is open.
+// MONO (a slice cuts the one before: the screen has no POLY), the defaults. The help tables are valid while HELP is open.
 struct SampleData {
   sm::SliceTable table[sm::kReaders];
   SliceVoice voice[sm::kReaders];
   std::uint8_t edited[sm::kReaders];     // the cuts are the hand's or a re-cut's (SAMPLE EDIT): service() leaves them alone until the length changes
   std::uint8_t even_code[sm::kReaders];  // SAMPLE EDIT's CUT EVEN value (sample_edit_logic.h even_cuts_of); 0 = 8, the cuts a take starts from
   std::uint8_t gate[sm::kReaders];       // TRIG per slot: 1 GATE (the release also stops the slice), 0 ONE SHOT
-  std::uint8_t choke_off[sm::kReaders];  // SLICES per slot: 1 POLY (the slices overlap), 0 MONO (the code calls it choke)
+  std::uint8_t picked[sm::kReaders];     // the picked slice of each slot (a top pad index): the last slice a top pad fired, 0 at first and when the slot's cuts change; rule 2 plays it
   std::uint8_t was_region[sm::kReaders]; // service(): the reader's region bit of the last pass (a slice that begins turns its slot's loop off)
   std::uint32_t seq;
   SliceMap map;                 // the SPEAKS slot's slices for the step sequencer's SLICE lane (published through StepSeq::slices_open)
@@ -141,8 +142,9 @@ unsigned repeating_slice(unsigned slot) noexcept {
 
 }  // namespace
 
-void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform, StepSeq* seq) noexcept {
+void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* perform, StepSeq* seq, const Bank* bank) noexcept {
   seq_ = seq;
+  bank_ = bank;
   voice_ = voice;
   voc_ = voc;
   perform_ = perform;
@@ -151,8 +153,14 @@ void SampleScreen::init(dsp::UnitId voice, const Vocoder* voc, PerformScreen* pe
   slice_ch_ = 0;
   shift_slice_ = false;
   shift_oct_ = false;
-  flash_until_ = 0;
   aud_ = 0;
+  note_on_ = false;
+  note_pad_ = 0;
+  note_slot_ = 0;
+  last_note_ = -1;
+  last_kind_ = 0;
+  top_held_ = 0;
+  r2_pad_ = 0xFF;
   g_sd = SampleData{};  // a restarted app starts from the defaults
 }
 
@@ -167,7 +175,12 @@ void SampleScreen::set_edited(unsigned slot, bool v) noexcept { g_sd.edited[slot
 unsigned SampleScreen::even_code(unsigned slot) const noexcept { return g_sd.even_code[slot & 3u]; }
 void SampleScreen::set_even_code(unsigned slot, unsigned code) noexcept { g_sd.even_code[slot & 3u] = static_cast<std::uint8_t>(code); }
 // publish_slices compares only the slot and the length: a table edited in place needs the next service() pass to publish it again.
-void SampleScreen::cuts_changed() noexcept { g_sd.published = sm::SlicePublished{}; }
+void SampleScreen::cuts_changed() noexcept {
+  g_sd.published = sm::SlicePublished{};
+  for (std::uint8_t& p : g_sd.picked) {
+    p = 0;  // the cuts changed: the picked slice may not exist any more
+  }
+}
 
 const ui::Theme* SampleScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
 
@@ -183,9 +196,12 @@ void SampleScreen::leave(app::Context& ctx) noexcept { pad_leave(ctx); }
 void SampleScreen::pad_leave(app::Context& ctx) noexcept {
   release_all(ctx);
   if (perform_ != nullptr) {
-    perform_->audition_release_all(ctx);  // the lower pads' notes let go
+    perform_->audition_release_all(ctx);  // the lower pads' notes and rule 1's note let go
   }
+  note_on_ = false;  // audition_release_all sent its note off
   aud_ = 0;
+  top_held_ = 0;
+  r2_pad_ = 0xFF;
 }
 
 std::uint64_t SampleScreen::repeat_buttons(const app::Context&) const noexcept {
@@ -221,9 +237,7 @@ void SampleScreen::write_slot(app::Context& ctx, unsigned loop, Field f, float v
 }
 
 bool SampleScreen::gate(unsigned slot) const noexcept { return g_sd.gate[slot & 3u] != 0u; }
-bool SampleScreen::choke_off(unsigned slot) const noexcept { return g_sd.choke_off[slot & 3u] != 0u; }
 void SampleScreen::set_gate(unsigned slot, bool on) noexcept { g_sd.gate[slot & 3u] = on ? 1u : 0u; }
-void SampleScreen::set_choke_off(unsigned slot, bool off) noexcept { g_sd.choke_off[slot & 3u] = off ? 1u : 0u; }
 
 void SampleScreen::set_values(app::Context& ctx, unsigned loop, unsigned speed, bool reverse, float level_db) noexcept {
   write_slot(ctx, loop, Field::Speed, static_cast<float>(speed < sm::kSpeedCount ? speed : 1u));
@@ -250,16 +264,16 @@ Vocoder::LoopStatus SampleScreen::view(unsigned loop) const noexcept {
 //
 // A pad of this screen (`pressed`) while the slot's whole loop plays (or waits) does not turn the loop off: it repeats that slice (Trig 2) on the slot's own reader, where the unit
 // pauses the loop under it. The repeat's span is the one latched at the trigger (loop.cpp begin_region, `again`). The slot has one repeating slice (the MONO choice whatever SLICES says): another pad takes it over, F5 OFF or (TRIG GATE) the release lets it go.
-void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad, bool pressed) noexcept {
+bool SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad, bool pressed) noexcept {
   slot &= 3u;
   if (voc_ == nullptr || perform_ == nullptr) {
-    return;
+    return false;
   }
   if (pad >= g_sd.table[slot].count) {  // UX3-8: a pad past the count says how many slices there are
     static char line[32];                // main loop only; note_ points at it for kNoteMs
     sm::slices_line(g_sd.table[slot].count, line);
     say(ctx, line);
-    return;
+    return false;
   }
   dsp::Engine& e = ctx.engine();
   const sm::Cut cut = g_sd.table[slot].cut[pad];
@@ -274,10 +288,10 @@ void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad, bool 
     rs[k].seq = g_sd.voice[k].seq;
   }
   const bool repeat = pressed && rs[slot].loop_on && !rs[slot].recording;
-  const int pick = sm::pick_reader(rs, slot, repeat || g_sd.choke_off[slot] == 0u);
+  const int pick = sm::pick_reader(rs, slot, true);  // always MONO: a new slice cuts the one before
   if (pick < 0) {
     say(ctx, sm::no_reader_line(voc_->loop_status(slot).rec == Vocoder::LoopStatus::Rec::Armed));
-    return;
+    return false;
   }
   const unsigned k = static_cast<unsigned>(pick);
   const Vocoder::LoopStatus src = view(slot);  // before reader k's values change (k may be borrowed)
@@ -305,12 +319,10 @@ void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad, bool 
   if (!repeat) {
     stop_loop(ctx, slot);
   }
-  if (g_sd.choke_off[slot] == 0u || repeat) {  // SLICES MONO: a slice of this slot on a borrowed reader (SLICES was POLY) fades out
-    for (unsigned j = 0; j < sm::kReaders; ++j) {
-      if (j != k && g_sd.voice[j].active && g_sd.voice[j].slot == slot) {
-        g_sd.voice[j].gate = false;
-        (void)e.set_param(voice_, Vocoder::region_param(j, Vocoder::RegionField::Trig), 0.0f);
-      }
+  for (unsigned j = 0; j < sm::kReaders; ++j) {  // MONO: a slice of this slot on another reader fades out
+    if (j != k && g_sd.voice[j].active && g_sd.voice[j].slot == slot) {
+      g_sd.voice[j].gate = false;
+      (void)e.set_param(voice_, Vocoder::region_param(j, Vocoder::RegionField::Trig), 0.0f);
     }
   }
   (void)e.set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Start), static_cast<float>(sm::region_start(slot, Loop::kMaxSamples, cut)));
@@ -325,6 +337,7 @@ void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad, bool 
   v.seq = ++g_sd.seq;
   v.started_ms = ctx.uptime_ms();
   ctx.redraw();
+  return true;
 }
 
 void SampleScreen::fire_slice(app::Context& ctx, unsigned pad) noexcept {
@@ -350,15 +363,18 @@ void SampleScreen::stop_loop(app::Context& ctx, unsigned slot) noexcept {
 }
 
 // TRIG GATE: the pad's release fades the voice out. A ONE SHOT voice (the default) ignores it and plays its cut to the end cut.
-void SampleScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
+bool SampleScreen::release_pad(app::Context& ctx, unsigned pad) noexcept {
+  bool ended = false;
   for (unsigned k = 0; k < sm::kReaders; ++k) {
     SliceVoice& v = g_sd.voice[k];
     if (v.active && v.gate && v.pad == pad) {
       v.gate = false;
       v.rep = false;  // the unit's release also ends a repeat: the slot's loop goes on
       (void)ctx.engine().set_param(voice_, Vocoder::region_param(k, Vocoder::RegionField::Trig), 0.0f);
+      ended = true;
     }
   }
+  return ended;
 }
 
 // F5 OFF: the slot's repeating slice lets go (Trig 0 fades it out; the loop's own Play 0 is the caller's).
@@ -425,6 +441,7 @@ void SampleScreen::service(app::Context& ctx) noexcept {
       v.modified = false;
     }
   }
+  note_check(ctx);  // rule 1: the note ends with its slice (ONE SHOT's end, a repeat that stopped, another source that took the reader)
   for (unsigned j = 0; j < sm::kReaders; ++j) {  // the cuts follow the slot's length (SAMPLE EDIT, U7, will edit them)
     const Vocoder::LoopStatus st = voc_->loop_status(j);
     const std::uint32_t len = st.rec == Vocoder::LoopStatus::Rec::Idle ? st.length : 0u;
@@ -435,6 +452,7 @@ void SampleScreen::service(app::Context& ctx) noexcept {
       sm::even_cuts(g_sd.table[j], len);
       g_sd.edited[j] = 0;
       g_sd.even_code[j] = 0;
+      g_sd.picked[j] = 0;  // a new take or length: the picked slice is slice 1 again
     }
   }
   std::uint32_t lens[ov::kSlots];  // the overview waveform follows the lengths too (a take starts it, an empty slot clears it)
@@ -547,8 +565,8 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
   const bool tap = delta == 1 && key_tap_;
   const Vocoder::LoopStatus ls = view(slot_);
   switch (key) {
-    case kKeyPlays:  // LOW PADS: the row's note kind, in the notes palette
-      step_plays(ctx, delta, tap);
+    case kKeySlot:  // SLOT: the selected slot (value: the encoder and the arrows stop at the ends, a second tap wraps)
+      step_slot(ctx, delta, tap);
       break;
     case 1:  // SPEAKS
       set_speaks(ctx, delta, tap);
@@ -580,10 +598,6 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
     case 5:  // TRIG: a flip
       g_sd.gate[slot_ & 3u] ^= 1u;
       break;
-    case 6:  // SLICES: MONO (a new slice cuts the one before) or POLY (they overlap)
-      g_sd.choke_off[slot_ & 3u] ^= 1u;
-      say(ctx, g_sd.choke_off[slot_ & 3u] != 0u ? "SLICES: POLY, THEY OVERLAP" : "SLICES: MONO, A NEW SLICE CUTS THE ONE BEFORE");
-      break;
     case 7:  // LEVEL
       write(ctx, Field::Level, sm::step_level(ls.level_db, tap ? kLevelTap : delta));
       break;
@@ -613,7 +627,10 @@ void SampleScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     }
     shift_slice_ = false;
     shift_oct_ = false;
-    if (k == focus_ || k <= 1u || (k >= 3u && k <= 6u)) {  // a second tap steps the value on (LOW PADS, SPEAKS, DIR, LOOP, TRIG and SLICES act on the first)
+    if (k == kKeyBlank) {  // F7 is blank: no focus, nothing happens
+      return;
+    }
+    if (k == focus_ || k == 1u || k == 4u) {  // H2: a value key lights on the first tap and a second steps it on; SPEAKS and LOOP are actions and act on the tap
       key_tap_ = true;
       turn(ctx, k, 1);
       key_tap_ = false;
@@ -658,19 +675,53 @@ void SampleScreen::step_value(app::Context& ctx, bool shift, int delta) noexcept
   turn(ctx, focus_, delta);
 }
 
-// The pads, here and on SAMPLE EDIT: the top rows play the selected slot's slices, the bottom rows this screen's own rows A and B (notes only).
+// F1 SLOT: the selected slot 1..4, as UP and DOWN choose it. A second tap wraps (4 to 1), the encoder and the arrows stop at the ends. The new slot's picked slice is its own.
+void SampleScreen::step_slot(app::Context& ctx, int delta, bool tap) noexcept {
+  const int cur = static_cast<int>(slot_ & 3u);
+  int next = cur + (delta > 64 ? 64 : (delta < -64 ? -64 : delta));
+  if (tap) {
+    next = (cur + 1) % static_cast<int>(sm::kReaders);
+  } else if (next < 0) {
+    next = 0;
+  } else if (next >= static_cast<int>(sm::kReaders)) {
+    next = static_cast<int>(sm::kReaders) - 1;
+  }
+  slot_ = static_cast<std::uint8_t>(next);
+  ctx.redraw();
+}
+
+// The pads, here and on SAMPLE EDIT: the top rows play the selected slot's slices, the bottom rows this screen's own rows A and B (notes only). One finger on either half
+// is heard (rules 1 and 2 in the header comment).
 bool SampleScreen::pad_input(app::Context& ctx, const app::Input& in, bool repeat_ok) noexcept {
   if (in.pad_press()) {
-    if (sm::layout_pad(in.pad())) {
-      play_pad(ctx, in.pad());
+    const unsigned pad = in.pad();
+    if (sm::layout_pad(pad)) {
+      lower_press(ctx, pad);
     } else {
-      trigger(ctx, slot_, in.pad(), repeat_ok);
+      if (pad < sm::kTopPads) {
+        top_held_ |= std::uint32_t{1} << pad;
+      }
+      r2_pad_ = 0xFF;  // a slice pad takes the slot's voice over: the lower pads no longer own it
+      if (trigger(ctx, slot_, pad, repeat_ok) && pad < sm::kTopPads && perform_ != nullptr && voc_ != nullptr) {
+        const unsigned slot = slot_ & 3u;
+        g_sd.picked[slot] = static_cast<std::uint8_t>(sm::picked_after(g_sd.picked[slot], pad, g_sd.table[slot].count));
+        const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
+        if (sm::slice_press_brings_note(mode, sm::side_of(perform_->route_now(ctx), slot), aud_ != 0u, seq_plays_notes())) {
+          note_start(ctx, pad);
+        }
+      }
     }
   } else if (in.pad_release()) {
-    if (sm::layout_pad(in.pad())) {
-      release_play(ctx, in.pad());
+    const unsigned pad = in.pad();
+    if (sm::layout_pad(pad)) {
+      lower_release(ctx, pad);
     } else {
-      release_pad(ctx, in.pad());
+      if (pad < sm::kTopPads) {
+        top_held_ &= ~(std::uint32_t{1} << pad);
+      }
+      if (release_pad(ctx, pad) && note_on_ && note_pad_ == pad) {
+        note_stop(ctx);  // TRIG GATE: the slice fades out with its pad, and the note with it
+      }
     }
   } else {
     return false;
@@ -683,18 +734,21 @@ bool SampleScreen::pad_input(app::Context& ctx, const app::Input& in, bool repea
 // whatever mode PERFORM is in (SP1).
 const pads::Layout& SampleScreen::lay() const noexcept { return perform_ != nullptr ? perform_->notes() : kDefaultNotes; }
 
-void SampleScreen::play_pad(app::Context& ctx, unsigned pad) noexcept {
+bool SampleScreen::play_pad(app::Context& ctx, unsigned pad) noexcept {
   if (perform_ == nullptr || !sm::layout_pad(pad) || pad >= app::kPadCount) {
-    return;
+    return false;
   }
   const unsigned p = pad - sm::kTopPads;  // 0..23
   const pads::Row prow = p < app::kPadCols ? pads::Row::A : pads::Row::B;
   const pads::PadPlay pp = pads::pad_play(lay(), prow, p % app::kPadCols, perform_->octave());
   if (pp.note < 1) {
-    return;
+    return false;
   }
   perform_->audition_press(ctx, p, static_cast<unsigned>(pp.note), pp.kind);
   aud_ |= std::uint32_t{1} << p;
+  last_note_ = static_cast<std::int16_t>(pp.note);  // rule 1's note: the last note or chord a lower pad played
+  last_kind_ = pp.kind;
+  return true;
 }
 
 void SampleScreen::release_play(app::Context& ctx, unsigned pad) noexcept {
@@ -708,23 +762,112 @@ void SampleScreen::release_play(app::Context& ctx, unsigned pad) noexcept {
   }
 }
 
-// F1 LOW PADS: both rows at once, one of sm::kLowPadsNames (NOTE+TRIAD is the palette's default: A NOTE, B TRIAD; the others give both rows that kind; never OFF). The first
-// tap steps, a tap wraps, a detent stops at the ends. A pair the list has no place for (the key says MIXED) steps to the first, NOTE+TRIAD. A new
-// value ends the notes: the old meaning started them (the held pad stays down and sounds again at its next press).
-void SampleScreen::step_plays(app::Context& ctx, int delta, bool tap) noexcept {
+// Rule 2: a lower pad plays its note, and with no slice pad held, audio in the slot (not the SOUNDS source), no loop and no repeat it also starts the picked slice from its start.
+// Every lower press starts it again (a keyboard's retrigger). A pad that plays nothing starts nothing.
+void SampleScreen::lower_press(app::Context& ctx, unsigned pad) noexcept {
+  if (!play_pad(ctx, pad)) {
+    return;
+  }
+  note_stop(ctx);  // rule 1's note: the pad's own note takes over (the same pitch stays on: audition_release keeps a note another pad holds)
+  if (voc_ == nullptr || perform_ == nullptr) {
+    return;
+  }
+  const unsigned slot = slot_ & 3u;
+  const Vocoder::LoopStatus st = voc_->loop_status(slot);
+  const sm::SliceTable& t = g_sd.table[slot];
+  if (st.rec != Vocoder::LoopStatus::Rec::Idle || t.count == 0u) {
+    return;
+  }
+  if (!sm::lower_press_starts_slice(sm::side_of(perform_->route_now(ctx), slot), st.length != 0u, top_held_ != 0u, st.playing || st.pending, repeating_slice(slot) != 0u)) {
+    return;
+  }
+  const unsigned pick = sm::picked_valid(g_sd.picked[slot], t.count);
+  if (trigger(ctx, slot, pick, false)) {
+    r2_pad_ = static_cast<std::uint8_t>(pick);
+  }
+}
+
+// The release of a lower pad; the last one let go also releases the slice it started (it stops in GATE and plays out in ONE SHOT). A latched note (SAMPLE EDIT) keeps its bit.
+void SampleScreen::lower_release(app::Context& ctx, unsigned pad) noexcept {
+  release_play(ctx, pad);
+  if (aud_ == 0u && r2_pad_ != 0xFF) {
+    (void)release_pad(ctx, r2_pad_);
+    r2_pad_ = 0xFF;
+  }
+}
+
+// Rule 1. Does the sequencer play notes now: it runs and the pattern that plays holds one (no bank wired: a running sequencer counts).
+bool SampleScreen::seq_plays_notes() const noexcept {
+  if (seq_ == nullptr) {
+    return false;
+  }
+  const StepSeq::Position pos = seq_->position();
+  if (!pos.playing) {
+    return false;
+  }
+  return bank_ == nullptr || pos.pattern >= kBankPatterns || notes_used(bank_->pattern[pos.pattern]) != 0u;
+}
+
+// The note a slice press brings: the last note or chord a lower pad played here, at first the root chord (row B at the key's root; row A when B plays nothing; PERFORM's octave).
+// It sounds through the audition entry under kAuditionNoteId. A note already up stays and follows the new slice (another slice replaces the one before).
+void SampleScreen::note_start(app::Context& ctx, unsigned pad) noexcept {
+  if (note_on_) {
+    note_pad_ = static_cast<std::uint8_t>(pad);
+    note_slot_ = static_cast<std::uint8_t>(slot_ & 3u);
+    return;
+  }
   if (perform_ == nullptr) {
     return;
   }
-  const pads::Layout& l = lay();
-  const unsigned next = sm::low_pads_step(sm::low_pads_index(l.row[0], l.row[1]), delta, tap);
-  if (l.row[0] != sm::kLowA[next] || l.row[1] != sm::kLowB[next]) {
-    (void)perform_->notes_set(pads::Row::A, sm::kLowA[next]);
-    (void)perform_->notes_set(pads::Row::B, sm::kLowB[next]);
-    perform_->audition_release_all(ctx);
-    aud_ = 0;
-    flash_until_ = ctx.uptime_ms() + pads::kRowFlashMs;
+  pads::PadPlay pp;
+  if (last_note_ >= 1) {
+    pp.note = last_note_;
+    pp.kind = last_kind_;
+  } else {
+    const unsigned key = round_param(ctx.engine(), voice_, Vocoder::Key) % 12u;
+    for (unsigned ri = 0; ri < 2; ++ri) {
+      const pads::Row row = ri == 0 ? pads::Row::B : pads::Row::A;  // row B's chord first, then row A
+      unsigned col = 0;
+      for (unsigned c = 0; c < app::kPadCols; ++c) {
+        const pads::PadPlay q = pads::pad_play(lay(), row, c, perform_->octave());
+        if (q.note >= 1 && static_cast<unsigned>(q.note) % 12u == key) {
+          col = c;
+          break;
+        }
+      }
+      pp = pads::pad_play(lay(), row, col, perform_->octave());
+      if (pp.note >= 1) {
+        break;
+      }
+    }
   }
-  ctx.redraw();
+  if (pp.note < 1) {
+    return;  // the palette plays nothing: the slice sounds as it can
+  }
+  perform_->audition_press(ctx, PerformScreen::kAuditionNoteId, static_cast<unsigned>(pp.note), pp.kind);
+  note_on_ = true;
+  note_pad_ = static_cast<std::uint8_t>(pad);
+  note_slot_ = static_cast<std::uint8_t>(slot_ & 3u);
+}
+
+void SampleScreen::note_stop(app::Context& ctx) noexcept {
+  if (note_on_ && perform_ != nullptr) {
+    perform_->audition_release(ctx, PerformScreen::kAuditionNoteId);
+  }
+  note_on_ = false;
+}
+
+// service(): the note ends when no slice voice of its slot and pad sounds (the end of a ONE SHOT slice, a repeat that stopped, a voice another source took over).
+void SampleScreen::note_check(app::Context& ctx) noexcept {
+  if (!note_on_) {
+    return;
+  }
+  for (const SliceVoice& v : g_sd.voice) {
+    if (v.active && v.slot == note_slot_ && v.pad == note_pad_) {
+      return;
+    }
+  }
+  note_stop(ctx);
 }
 
 void SampleScreen::pad_update(app::Context& ctx) noexcept {
@@ -746,7 +889,7 @@ void SampleScreen::update(app::Context& ctx) noexcept {
 }
 
 // The top two rows are the slot's slices: a cut dim, a sounding one on, an empty slot dark. The bottom two are this screen's rows A and B as they play now (the
-// key's root low, the scale dim, the rest and the pads that play nothing dark, a held pad on), both going dark for a moment when LOW PADS changes.
+// key's root low, the scale dim, the rest and the pads that play nothing dark, a held pad on).
 void SampleScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept { pad_leds(ctx, leds); }
 
 void SampleScreen::pad_leds(app::Context& ctx, app::PadLeds& leds) noexcept {
@@ -757,13 +900,12 @@ void SampleScreen::pad_leds(app::Context& ctx, app::PadLeds& leds) noexcept {
     const dsp::Engine& e = ctx.engine();
     const unsigned key = round_param(e, voice_, Vocoder::Key) % 12u;
     const std::uint16_t cols = pl::scale_cols(key, round_param(e, voice_, Vocoder::Scale));
-    const bool flash = ctx.uptime_ms() < flash_until_;
     for (unsigned pad = sm::kTopPads; pad < app::kPadCount; ++pad) {
       const unsigned p = pad - sm::kTopPads;
       const unsigned row = p / app::kPadCols;
       const pads::PadPlay pp = pads::pad_play(lay(), static_cast<pads::Row>(row), p % app::kPadCols, perform_->octave());
       std::uint8_t level = app::kLedOff;
-      if (pp.note > 0 && !flash) {
+      if (pp.note > 0) {
         const unsigned pc = static_cast<unsigned>(pp.note) % 12u;
         level = pc == key ? app::kLedLow : (((cols >> pc) & 1u) != 0u ? app::kLedDim : app::kLedOff);
       }
@@ -801,8 +943,8 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "SLOT BEFORE", nullptr},
       {Button::Down, "SLOT AFTER", nullptr},
-      {Button::Left, "F VALUE DOWN, HOLD REPEATS", nullptr},
-      {Button::Right, "F VALUE UP, HOLD REPEATS", nullptr},
+      {Button::Left, "LIT F KEY DOWN, HOLD REPEATS", nullptr},
+      {Button::Right, "LIT F KEY UP, HOLD REPEATS", nullptr},
       {Button::Shift, "F2 SLICE CH, F3 OCTAVE", nullptr},
       {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
@@ -824,14 +966,14 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
   }
-  h.summary = "THE FOUR SLOTS: UP AND DOWN PICK ONE; F2 CHOOSES WHO SPEAKS; THE F KEYS DO THE REST.\n"
-              "UPPER PADS: SLICES; LOWER: NOTES (F1). MIDI FROM 36: SLICES (CHANNEL: SHIFT + F2).";
+  h.summary = "THE FOUR SLOTS: UP AND DOWN OR F1 PICK ONE; F2 CHOOSES WHO SPEAKS; THE F KEYS DO THE REST.\n"
+              "TOP PADS: SLICES. LOWER PADS: A NOTE AND THE PICKED SLICE. MIDI FROM 36: SLICES (SHIFT + F2).";
   // The legend: the slices, then this screen's rows A and B as they play now (a pad's group is its row + 1: the slices 1, A 2, B 3).
   const pads::Layout& layout = lay();
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
-  g_sd.groups[0] = {"SLICES", "A SLICE PLAYS ITS CUT; WITH LOOP ON IT REPEATS", ui::Color::Accent};
-  g_sd.groups[1] = {pads::kPlaysNames[pads::idx(layout.row[0])], "ROW A: F1 LOW PADS SETS WHAT IT PLAYS", ui::Color::Vol};
-  g_sd.groups[2] = {pads::kPlaysNames[pads::idx(layout.row[1])], "ROW B: F1 LOW PADS SETS IT TOO", ui::Color::Fx};
+  g_sd.groups[0] = {"SLICES", "A SLICE, WITH THE NOTE; LOOP ON REPEATS IT", ui::Color::Accent};
+  g_sd.groups[1] = {pads::kPlaysNames[pads::idx(layout.row[0])], "ROW A: A NOTE, AND THE PICKED SLICE", ui::Color::Vol};
+  g_sd.groups[2] = {pads::kPlaysNames[pads::idx(layout.row[1])], "ROW B: A CHORD, AND THE PICKED SLICE", ui::Color::Fx};
   h.groups = g_sd.groups;
   h.group_count = 3;
   for (unsigned pad = 0; pad < app::kPadCount; ++pad) {
@@ -853,8 +995,8 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
     }
     h.pad_label[pad] = l[0] != '\0' ? l : nullptr;
   }
-  h.pads = "UPPER ROWS: THE SLOT'S SLICES. LOWER ROWS: NOTES; F1 LOW PADS SETS THE KIND.";
-  h.fkey[0] = "BOTH LOWER ROWS' KIND";
+  h.pads = "TOP ROWS: THE SLOT'S SLICES. LOWER ROWS: A NOTE OR A CHORD THAT PLAYS THE PICKED SLICE.";
+  h.fkey[0] = "THE SLOT 1 TO 4";
   h.fkey_shift[1] = kShiftNames[1];
   h.fkey_shift[2] = kShiftNames[2];
   h.fkey[1] = "WHO SPEAKS: LIVE OR A SLOT";
@@ -862,7 +1004,6 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[3] = "FORWARD, REVERSE";
   h.fkey[4] = "LOOP. PADS REPEAT";
   h.fkey[5] = "GATE STOPS AT THE RELEASE";
-  h.fkey[6] = "MONO CUTS THE ONE BEFORE";
   h.fkey[7] = "-24 TO +12 DB";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
@@ -965,7 +1106,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const Vocoder::LoopStatus& ls = st[slot_ & 3u];
   const bool empty = ls.length == 0u;
   const sm::Side side = sm::side_of(rt, slot_);
-  // UX3-1: in TUNE a SOUNDS slot is not heard, in TRACT a SPEAKS or PADS ONLY slot only through DRY: that side is drawn dim, with the reason below.
+  // UX3-1: in TUNE a SOUNDS slot is not heard, in TRACT a SPEAKS or HELD slot only through DRY: that side is drawn dim, with the reason below.
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   const bool mouth_live = sm::tract_live(ctx.engine());
   const auto ink = [mode, mouth_live](sm::Side sd) { return sm::cue_dim(sm::mode_cue(mode, sd, mouth_live)) ? Color::TextDim : side_ink(sd); };
@@ -979,7 +1120,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     keys[i].name = kKeyNames[i];
     keys[i].hot = i == focus_;
   }
-  cat(keys[0].value, sizeof keys[0].value, sm::low_pads_key(layout.row[0], layout.row[1]));  // "NOTE+TRI": what both rows play (the full name is in the notes)
+  cat_uint(keys[kKeySlot].value, sizeof keys[kKeySlot].value, (slot_ & 3u) + 1u);  // F1: the selected slot 1..4
   const unsigned speaks_at = sm::speaks_pos(rt);  // F2 as PERFORM's SPEAKS chip: LIVE or SLOT n
   if (speaks_at == 0u) {
     cat(keys[1].value, sizeof keys[1].value, "LIVE");
@@ -994,7 +1135,6 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   cat(keys[3].value, sizeof keys[3].value, sm::kDirNames[ls.reverse ? 1 : 0]);
   sm::loop_text(ls.playing || ls.pending, ls.repeat ? repeating_slice(slot_ & 3u) : 0u, keys[4].value);  // the unit's status says it repeats; the table says which slice
   cat(keys[5].value, sizeof keys[5].value, g_sd.gate[slot_ & 3u] != 0u ? "GATE" : "ONE SHOT");
-  cat(keys[6].value, sizeof keys[6].value, g_sd.choke_off[slot_ & 3u] != 0u ? "POLY" : "MONO");
   {
     char num[8];
     sm::level_text(ls.level_db, num);
@@ -1088,12 +1228,12 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     r.text(centred(r, buf, Face::Label, mid), kRowY + 100, buf, Color::Text, Face::Label);
     const char* word = ls.playing ? "PLAYING" : (ls.pending ? "WAITING FOR THE BAR" : "STOPPED");
     r.text(centred(r, word, Face::Label, mid), kRowY + 134, word, ls.playing ? Color::Play : Color::TextDim, Face::Label);
-    const char* on = side == sm::Side::Speaks ? "ON SPEAKS" : (side == sm::Side::Sounds ? "ON SOUNDS" : "PADS ONLY");
+    const char* on = side == sm::Side::Speaks ? "ON SPEAKS" : (side == sm::Side::Sounds ? "ON SOUNDS" : "HELD: ITS PADS PLAY IT");
     r.text(centred(r, on, Face::Label, mid), kRowY + 168, on, ink(side), Face::Label);
     draw_line(ctx, r, slot_, ls.length, kMidX + 14, kRowY + 214, kMidW - 28);
   }
 
-  // The right: SOUNDS as PERFORM shows it, and what the two lower pad rows play (F1 LOW PADS sets both).
+  // The right: SOUNDS as PERFORM shows it, and what the two lower pad rows play (PATTERN sets both) and the slice they start.
   r.text(kRightX + 12, kRowY + 12, "SOUNDS", Color::TextDim, Face::Micro);
   r.text(kRightX + 12, kRowY + 34, h.sounds, Color::Sel, Face::Label);
   r.text(kRightX + 12, kRowY + 84, "LOWER PADS", Color::TextDim, Face::Micro);
@@ -1104,29 +1244,28 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     cat(buf, sizeof buf, pads::kPlaysNames[pads::idx(layout.row[i])]);
     r.text(kRightX + 12, kRowY + 104 + static_cast<int>(i) * 22, buf, Color::Text, Face::Label);
   }
+  if (!empty) {  // the slice a lower pad starts (the last one a top pad fired on this slot)
+    buf[0] = '\0';
+    cat(buf, sizeof buf, "SLICE ");
+    cat_uint(buf, sizeof buf, static_cast<unsigned>(g_sd.picked[slot_ & 3u]) + 1u);
+    r.text(kRightX + 12, kRowY + 152, buf, Color::Accent, Face::Label);
+  }
   {  // MS1: the channel MIDI fires slices on; "SET MIDI CH" when it cannot work (the user's channel is omni: the route takes every channel)
     char val[12];
     midislice::format(slice_ch_, val);
     buf[0] = '\0';
     cat(buf, sizeof buf, "SLICE CH ");
     cat(buf, sizeof buf, val);
-    r.text(kRightX + 12, kRowY + 168, buf, Color::TextDim, Face::Micro);
+    r.text(kRightX + 12, kRowY + 198, buf, Color::TextDim, Face::Micro);
     if (midislice::needs_hint(slice_ch_, ctx.midi().config().channel)) {
-      r.text(kRightX + 12, kRowY + 190, "SET MIDI CH", Color::Accent, Face::Label);
+      r.text(kRightX + 12, kRowY + 218, "SET MIDI CH", Color::Accent, Face::Label);
     }
   }
 
   if (note_ != nullptr) {
     r.text(kColX, kRowY + 4 * kRowH + 2, note_, Color::Accent, Face::Label);
   } else {
-    char hint[64];
-    hint[0] = '\0';
-    cat(hint, sizeof hint, "UPPER PADS: SLICES. LOWER PADS: ");
-    for (unsigned i = 0; i < 2; ++i) {
-      cat(hint, sizeof hint, i == 0 ? "A " : "  B ");
-      cat(hint, sizeof hint, pads::kPlaysNames[pads::idx(layout.row[i])]);
-    }
-    r.text(kColX, kRowY + 4 * kRowH + 36, hint, Color::TextDim, Face::Micro);
+    r.text(kColX, kRowY + 4 * kRowH + 36, "TOP PADS: SLICES. LOWER PADS: PLAY THE PICKED SLICE AT A NOTE OR A CHORD", Color::TextDim, Face::Micro);
     if (!empty) {  // the cue line: what the selected slot does now, or why it is quiet in this mode
       static char line[64];  // main loop only
       sm::cue_line(line, slot_, side, cue, ls.playing || ls.pending, rt.speaks);

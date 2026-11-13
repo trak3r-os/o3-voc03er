@@ -1156,8 +1156,8 @@ void SampleEditScreen::latch_release(app::Context& ctx) noexcept {
   ctx.redraw();
 }
 
-// A slice pad is heard in BANDS, TALK and ROBOT only while a synth note sounds, and the live input is mixed unless the slot speaks: with the SYNTH carrier and no
-// latch or held lower pad, one line says how to get the note. It cannot see a note the step sequencer plays.
+// A slice pad alone brings the last note of a lower pad (SAMPLE's rule 1) while it sounds: with the SYNTH carrier and no latch or held lower pad, one line says
+// how to make a note stay for the slices. It cannot see a note the step sequencer plays.
 void SampleEditScreen::hint_latch(app::Context& ctx) noexcept {
   if (perform_ == nullptr || g_se.latch_pad != 0u || g_se.lower != 0u) {
     return;
@@ -1170,7 +1170,7 @@ void SampleEditScreen::hint_latch(app::Context& ctx) noexcept {
   if (rt.sounds != route::kSoundsSynth || sm::side_of(rt, sample_->slot() & 3u) == sm::Side::Sounds) {
     return;
   }
-  say(ctx, "SHIFT + LOW PAD LATCHES A NOTE");
+  say(ctx, "SHIFT + LOW PAD LATCHES A NOTE THAT STAYS");
 }
 
 void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
@@ -1194,9 +1194,10 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   // SE1: a picked slice owns the encoder and LEFT / RIGHT; an F key (not SHIFT's, not F8) or SHIFT + UP / DOWN (another slot) lets it go; UP / DOWN zoom and keep
   // it. The key that lets it go is a first tap: a bracket or a value it points at is not stepped, reset or trimmed by the press that only leaves the slice.
   const bool was_sel = selected() != 0u;
+  const bool arrow = in.press(Button::Left) || in.press(Button::Right);  // H2: with a value key lit, a plain arrow is one encoder step of it
   const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 1u || k == 2u)) ||
                          (fk && in.shift && k == 7u) || (in.press(Button::Shift) && g_se.warn_key1 == 8u) ||
-                         (in.turn() && !was_sel && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats || g_se.focus == kFocusHits));
+                         ((in.turn() || (arrow && !in.shift)) && !was_sel && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats || g_se.focus == kFocusHits));
   if (!keeps_arm) {
     se::arm_cancel(g_se.arm);
     g_se.warn_key1 = 0;
@@ -1261,18 +1262,28 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     }
     return;
   }
+  // The lit value key's step, the encoder's call: LEFT / RIGHT make it too (false when no value key is lit).
+  const auto step_lit = [this, &ctx](int delta, bool shift) noexcept {
+    g_se.key_tap = false;
+    if (g_se.focus == kFocusCut) {
+      turn(ctx, delta);
+    } else if (g_se.focus == kFocusBeats) {
+      turn_beats(ctx, delta);
+    } else if (g_se.focus == kFocusHits) {
+      turn_hits(ctx, delta);
+    } else if (g_se.focus == kFocusStart || g_se.focus == kFocusEnd) {
+      turn_bracket(ctx, delta, shift);
+    } else {
+      return false;
+    }
+    return true;
+  };
   if (in.turn()) {
     g_se.key_tap = false;
     if (was_sel) {
       turn_slice(ctx, in.delta(), in.shift);
-    } else if (g_se.focus == kFocusCut) {
-      turn(ctx, in.delta());
-    } else if (g_se.focus == kFocusBeats) {
-      turn_beats(ctx, in.delta());
-    } else if (g_se.focus == kFocusHits) {
-      turn_hits(ctx, in.delta());
-    } else if (g_se.focus == kFocusStart || g_se.focus == kFocusEnd) {
-      turn_bracket(ctx, in.delta(), in.shift);
+    } else if (step_lit(in.delta(), in.shift)) {
+      // a value key is lit: its value moved
     } else {
       const unsigned slot = sample_->slot() & 3u;
       const std::uint32_t len = sample_->table(slot).length;
@@ -1291,11 +1302,18 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     } else {
       zoom_by(ctx, in.press(Button::Up) ? 1 : -1);
     }
-  } else if (in.press(Button::Left) || in.press(Button::Right)) {  // repeats arrive as presses (repeat_buttons)
-    if (was_sel) {
-      step_slice(ctx, in.press(Button::Left) ? -1 : 1);  // a slice is picked: the one before or after it
-      return;
+  } else if (arrow) {  // repeats arrive as presses (repeat_buttons)
+    const int dir = in.press(Button::Left) ? -1 : 1;
+    if (!in.shift) {
+      if (was_sel) {
+        step_slice(ctx, dir);  // a slice is picked: the one before or after it
+        return;
+      }
+      if (step_lit(dir, false)) {  // H2: a value key is lit: one encoder step of it
+        return;
+      }
     }
+    g_se.sel1 = 0;  // SHIFT + arrow, or no key lit: the cursor jumps cut to cut (a pick, which owns the plain arrows, is let go)
     g_se.focus = kFocusCursor;
     const sm::SliceTable& t = sample_->table(slot);
     set_cursor(ctx, in.press(Button::Left) ? se::prev_cut(t, cursor()) : se::next_cut(t, cursor()));
@@ -1444,10 +1462,10 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "ZOOM IN, SHIFT: SLOT BEFORE", nullptr},
       {Button::Down, "ZOOM OUT, SHIFT: SLOT AFTER", nullptr},
-      {Button::Left, "PREVIOUS CUT OR SLICE", nullptr},
-      {Button::Right, "NEXT CUT OR SLICE", nullptr},
+      {Button::Left, "LIT F KEY -1, ELSE PREV CUT", "CURSOR: PREVIOUS CUT"},
+      {Button::Right, "LIT F KEY +1, ELSE NEXT CUT", "CURSOR: NEXT CUT"},
       {Button::Insert, "A CUT AT CURSOR OR IN SLICE", nullptr},
-      {Button::Delete, "REMOVES THE PICKED CUT", nullptr},
+      {Button::Delete, "REMOVES THE PICKED CUT", "EMPTIES THE SLOT"},
       {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
       {Button::Shift, "COARSE; + UP/DOWN: SLOT", nullptr},
       {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
@@ -1470,7 +1488,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
     sample_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
   }
   h.summary = "TAP A PAD TO PICK AND HEAR A SLICE. UP, DOWN: ZOOM. INSERT CUTS, DELETE REMOVES A CUT.\n"
-              "F8: THE SLOT SPEAKS. SHIFT + A LOW PAD LATCHES A NOTE. SHIFT + DELETE EMPTIES THE SLOT.";
+              "LEFT / RIGHT: THE LIT F KEY, ELSE CUT TO CUT. SHIFT + LEFT / RIGHT: THE CURSOR.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -1484,7 +1502,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   h.fkey[5] = "PEAK TO -1 DB, F1 CONFIRMS";
   h.fkey[7] = "SLOT SPEAKS, OR LIVE AGAIN";
   h.fkey_shift[7] = "CLR CUTS";
-  h.pads = "UPPER: A TAP PICKS AND PLAYS A SLICE. LOWER: THE NOTES PALETTE; SHIFT + A PAD LATCHES ITS NOTE.";
+  h.pads = "UPPER: TAP A SLICE. LOWER: A NOTE THAT PLAYS THE PICKED SLICE; SHIFT + A PAD LATCHES THE NOTE.";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "PICKED START, ELSE CURSOR";
@@ -1798,15 +1816,18 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   } else if (g_se.note != nullptr) {
     r.text(kX, 398, g_se.note, Color::Accent, Face::Label);
   } else if (shift) {
-    r.text(kX, 402, "SHIFT: UP DOWN SLOT   LOW PAD LATCHES A NOTE   F8 CLEARS THE CUTS", Color::TextDim, Face::Micro);
+    r.text(kX, 397, "SHIFT: UP DOWN SLOT   LEFT RIGHT CURSOR   LOW PAD LATCHES A NOTE   F8 CLEARS THE CUTS", Color::TextDim, Face::Micro);
+    r.text(kX, 409, "LEFT / RIGHT: THE LIT F KEY, ELSE CUT TO CUT. SHIFT + LEFT / RIGHT: THE CURSOR", Color::TextDim, Face::Micro);
   } else if (sel != 0u) {
-    r.text(kX, 402, sel == 1u ? "SLICE 1 STARTS AT THE TRIM START. ENCODER MOVES IT, SHIFT FINE. DELETE CANNOT REMOVE IT"
+    r.text(kX, 397, sel == 1u ? "SLICE 1 STARTS AT THE TRIM START. ENCODER MOVES IT, SHIFT FINE. DELETE CANNOT REMOVE IT"
                               : "ENCODER MOVES THE START, SHIFT FINE. LEFT RIGHT PICK, INSERT SPLITS, DELETE REMOVES THE CUT", Color::TextDim, Face::Micro);
+    r.text(kX, 409, "LEFT / RIGHT: THE LIT F KEY, ELSE CUT TO CUT. SHIFT + LEFT / RIGHT: THE CURSOR", Color::TextDim, Face::Micro);
   } else if (has && se::trim_moved(br, len)) {  // a bracket off its end: say what F1 does now
     const bool armed = g_se.focus == kFocusStart || g_se.focus == kFocusEnd;
     r.text(kX, 398, armed ? "TRIM TO THE BRACKETS: F1 CONFIRMS (NO UNDO)" : "BRACKETS MOVED: F4 OR F5, THEN F1 TRIMS", Color::Accent, Face::Label);
   } else {
-    r.text(kX, 402, "UP DOWN ZOOM   INSERT CUTS AT THE CURSOR   DELETE REMOVES THE NEAREST CUT", Color::TextDim, Face::Micro);
+    r.text(kX, 397, "UP DOWN ZOOM   INSERT CUTS AT THE CURSOR   DELETE REMOVES THE NEAREST CUT", Color::TextDim, Face::Micro);
+    r.text(kX, 409, "LEFT / RIGHT: THE LIT F KEY, ELSE CUT TO CUT. SHIFT + LEFT / RIGHT: THE CURSOR", Color::TextDim, Face::Micro);
   }
 }
 

@@ -1,0 +1,56 @@
+# SAMPLE with one finger (rd-sam): BANDS, a 1 BAR take cut in eight, the slot speaks and LOOP is off. The WAV has four stretches, in this order: nothing held (silence: the tone in
+# does not speak without a note), one top pad alone (the slice speaks: the pad brings the note, the root chord of row B, and it ends with the slice), one lower pad alone (its note and
+# the picked slice, the last a top pad fired: slice 3 here), and the same lower pad after a top pad fired slice 6 (the picked slice follows the top pads).
+# The simulator shows the screens and that the unit plays; how it feels under the fingers and the note's level against the slice are for the unit and the ear.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_one_finger.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4              # AUTOPLAY OFF: the take waits in the slot
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleplay
+wait 300
+snap 01_held_slot
+# the slot speaks (its loop starts with it); F5 turns LOOP off so that a pad is one slice, and F3 SPEED 0.5X makes a slice last half a second
+tap f2
+wait 300
+tap f5
+wait 300
+tap f3
+tap f3
+tap f3
+wait 300
+snap 02_speaks_loop_off
+wait 1500
+wav one_finger_0_nothing_held
+# one slice pad alone: no lower pad held, and the slice speaks
+paddown 2
+wait 300
+snap 03_slice_pad_alone
+wav one_finger_1_slice_pad
+padup 2
+wait 2500
+snap 04_slice_ended
+# one lower pad alone: its note, and slice 3 (the picked one: the last a top pad fired)
+paddown 29
+wait 300
+snap 05_lower_pad_alone
+wav one_finger_2_lower_pad
+padup 29
+wait 2500
+# a top pad moves the pick, the lower pad follows it
+pad 5 100
+wait 2500
+paddown 29
+wait 300
+snap 06_lower_pad_picked_slice_6
+wav one_finger_3_picked_follows
+padup 29
+wait 2500
+snap 07_end

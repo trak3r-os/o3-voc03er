@@ -523,7 +523,7 @@ void PerformScreen::mouth_word_end(app::Context& ctx) noexcept {
 }
 
 void PerformScreen::audition_press(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
-  constexpr unsigned kAuditionPads = 24;  // the palette: rows A and B (and C, which PATTERN does not use)
+  constexpr unsigned kAuditionPads = kAuditionNoteId + 1u;  // the palette: rows A and B (and C, which PATTERN does not use), then SAMPLE's slice note
   if (pad >= kAuditionPads || note < 1u || note > 127u) {
     return;
   }
@@ -566,7 +566,7 @@ void PerformScreen::audition_release(app::Context& ctx, unsigned pad) noexcept {
 }
 
 void PerformScreen::audition_release_all(app::Context& ctx) noexcept {
-  for (unsigned p = 0; p < 24u; ++p) {
+  for (unsigned p = 0; p <= kAuditionNoteId; ++p) {
     audition_release(ctx, p);
   }
 }

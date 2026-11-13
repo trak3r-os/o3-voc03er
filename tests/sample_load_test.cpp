@@ -864,7 +864,7 @@ TEST_CASE("sample load: UX3 the refusal names what to stop, and the cap says so"
   CHECK(std::string(sl::capped_text(true)).find("64") != std::string::npos);
 }
 
-TEST_CASE("sample load: UX3 the note after a load fits the line in the worst case, the PADS ONLY hint on a line of its own") {
+TEST_CASE("sample load: UX3 the note after a load fits the line in the worst case, the HELD hint on a line of its own") {
   sl::Info i;
   i.verdict = sl::Verdict::Ok;
   i.frames = sl::kMaxFrames;

@@ -603,7 +603,7 @@ TEST_CASE("file: P3 a load puts the layout, FOLLOW, BEND ROW, RANGE, VOICING, th
   CHECK(std::memcmp(got.layout, src.layout, sizeof got.layout) == 0);
   for (unsigned i = 0; i < o3_voc03er::route::kSlots; ++i) {
     CHECK(got.slot[i].gate == src.slot[i].gate);
-    CHECK(got.slot[i].choke_off == src.slot[i].choke_off);
+    CHECK(got.slot[i].choke_off == 0u);  // the screen is always MONO: a saved 1 comes back as 0
   }
   CHECK(h->runtime().frame_failures() == 0u);
 
@@ -667,8 +667,8 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
   REQUIRE(h->start());
   h->run_ms(300);
-  // SAMPLE's lower two rows are the palette (pads 24..47); F1 LOW PADS is the lit key there and sets both rows (never OFF).
-  // The LEDs show roots, the same for every kind, so the screen itself tells the kinds apart: the F1 key reads NOTE+TRI or POWER.
+  // SAMPLE's lower two rows are the palette (pads 24..47); PATTERN's F6 TOP PADS sets both rows (never OFF).
+  // The LEDs show roots, the same for every kind, so the screen itself tells the kinds apart: its right panel names the pair.
   platform::host::ScratchDir shots("o3_voc03er-file-sp1-png");
   REQUIRE(shots.ok());
   const auto lower = [&](const char* name) {  // the screen's PNG, as bytes
@@ -701,19 +701,21 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
   const std::string first = lower("first");  // NOTE+TRIAD
-  // The palette is back at NOTE+TRIAD when a detent down changes nothing: the encoder stops at the first value (the rest of the screen moves with the project).
-  const auto at_first = [&] {
-    const std::string before = lower("before");
-    h->turn(-1);
-    h->run_ms(900);
-    return lower("after") == before;
+  // POWER on both rows, from anywhere: PATTERN's F6 steps once and the encoder stops at the last pair. The palette is back at the default when this
+  // changes the screen (the pair named in its right panel), and already POWER when it does not.
+  const auto set_power = [&] {
+    tap(*h, app::Button::Pattern);
+    h->run_ms(60);
+    tap(*h, app::Button::F6);
+    h->turn(30);
+    h->run_ms(300);
+    open_sample();
   };
-  h->turn(5);  // LOW PADS: NOTE+TRIAD to POWER, both rows (they flash dark first)
-  h->run_ms(900);
+  set_power();
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
-  CHECK(lower("power") != first);
-  // NEW.
+  const std::string power = lower("power");
+  CHECK(power != first);
   tap(*h, app::Button::File);
   h->run_ms(60);
   tap(*h, app::Button::F4);  // NEW asks
@@ -722,11 +724,10 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   open_sample();
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
-  CHECK(at_first());
+  const std::string after_new = lower("after_new");
+  set_power();
+  CHECK(lower("new_power") != after_new);  // NEW had put the pair back: POWER changes the screen again
   // The same after a LOAD.
-  h->turn(5);
-  h->run_ms(900);
-  CHECK(lower("power") != first);
   tap(*h, app::Button::File);
   h->run_ms(60);
   tap(*h, app::Button::F1);  // LOAD asks
@@ -737,7 +738,9 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   open_sample();
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
-  CHECK(at_first());
+  const std::string after_load = lower("after_load");
+  set_power();
+  CHECK(lower("load_power") != after_load);  // the LOAD had put the pair back
   tap(*h, app::Button::File);  // leave the app as a fresh one: the singleton keeps the loaded name
   h->run_ms(60);
   tap(*h, app::Button::F4);

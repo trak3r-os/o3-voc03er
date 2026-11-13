@@ -222,7 +222,7 @@ B SHAPE, C FORMANT; TRACT is A NOTE, B TONGUE, C MOUTH (the pads' notes are the 
 
 **Strips live on PERFORM only.** A strip is a PERFORM thing: PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD never show one. They share
 one pair of note rows of their own, A and B, with NOTE, TRIAD, 7TH, OPEN, POWER or OFF (A NOTE and B TRIAD at first), the same in every mode.
-Setting a row on PERFORM does not change that pair, and changing the pair (F4 CHORD on PATTERN, F1 LOW PADS on SAMPLE) does not touch PERFORM's
+Setting a row on PERFORM does not change that pair, and changing the pair (F4 CHORD on PATTERN) does not touch PERFORM's
 layouts. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load (needs more testing). Recording a
 strip into a PATTERN lane is not built: a strip sets the value live, on PERFORM.
 
@@ -517,14 +517,13 @@ SHIFT on the GAIN key gives coarser gain steps, not finer.
 
 ![SAMPLE: four slots on the left, the selected slot's waveform and cuts, the slices on the pads](manual/img/sample.png)
 
-*SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom two rows play notes, and the screen says which (LOW PADS). One slice is sounding.*
+*SAMPLE: the top two pad rows are slices 1 to 24 of the slot. The bottom two rows play notes and start the picked slice. One slice is sounding.*
 
-The top two pad rows are the slices of the selected slot. The bottom two rows always play notes, in a pair of rows of their own (the shared notes palette of section 4): row A on the
-upper one (NOTE at first) and row B on the lower one (TRIAD), at PERFORM's octave (SHIFT + F3 moves it). Whatever mode PERFORM is in, and whatever its pads
-play there (the strips included), these two rows do not change. F1 LOW PADS sets both at once. The right column (LOW PADS) and the line under the slots (for example "LOW
-PADS: A NOTE  B TRIAD") say what each row plays. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load. A pad sounds while it is held, and
-leaving the screen lets everything go. **Hold a slice and a layout pad together, and the slice sings that note or chord.** There is no latch on
-this screen: the hand holds the pad. Four slices can sound at once.
+**One finger is enough.** A top pad plays its slice, and in BANDS, TALK and ROBOT it brings a note with it, because there the slice is heard only while a synth note sounds: the note is the last one a lower pad played (the first time, row B's chord on the key's root) and it stops when the slice does. A lower pad plays its note or chord and also starts the picked slice, the last slice a top pad played on this slot (slice 1 at first); letting go of the last lower pad lets that slice go. So the top rows pick and fire slices, and the lower rows are a keyboard that sings the picked slice.
+
+The lower rows play the shared notes palette of section 4 (row A NOTE at first, row B TRIAD), at PERFORM's octave (SHIFT + F3 moves it); PATTERN's F6 TOP PADS changes the pair, SAMPLE has no key for it. Whatever mode PERFORM is in, and whatever its pads play there (the strips included), these two rows do not change. The right column (LOWER PADS, and the slice that is picked) and the line under the slots say what the rows play. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load. A pad sounds while it is held, and leaving the screen lets everything go. **Hold a slice and a lower pad together, and the slice sings that note or chord** (the lower pad then plays only its note). There is no latch on this screen: the hand holds the pad. The screen is always MONO: a new slice cuts the one before.
+
+The note a top pad brings is left out where it would be wrong: in TUNE and TRACT, on a SOUNDS slot, while a lower pad is held, and while the pattern is playing notes. The picked slice is left out when a slice pad is held, with LOOP ON, on a SOUNDS slot and on an empty slot. With LOOP ON a top pad repeats its slice and the note stays until the repeat ends. The note and the picked slice need more testing on the unit: how they feel under the fingers, and the note's level against the slice.
 
 With LOOP OFF a slice pad plays its own cut once, from its start cut to its end cut, and then stops; a new hit on it starts it again from its start cut. A slice from
 PATTERN's SLICE lane or from MIDI plays its cut once in the same way.
@@ -534,23 +533,25 @@ With TRIG ONE SHOT it repeats until you press another slice pad (that one repeat
 when you let go the slot's whole loop goes on from where it is. A slot has one repeating slice at a time. LOOP OFF stops everything of the slot, the repeat included. A ONE SHOT
 repeat goes on after you leave the screen, until F5 or another pad stops it; when you come back F5 still reads ON SL 5, and F5 OFF, loading a project or a new take in the slot also ends it. A repeating slice is heard where the slot is heard: on SPEAKS the vocoder hears it.
 
+The value keys (F1, F3, F4, F6, F8) light on the first tap and change nothing; a second tap steps the value, and the encoder or LEFT / RIGHT change the lit key. F2 and F5 act on the tap.
+
 | Key | What it does |
 |---|---|
-| F1 LOW PADS | What both lower pad rows play, never off: NOTE+TRIAD (the default: row A plays notes, row B triads), NOTE, TRIAD, 7TH, OPEN, POWER. A tap steps to the next and wraps to the first; the encoder steps and stops at the ends. Both rows flash dark for a moment. With one kind (NOTE, TRIAD, 7TH, OPEN or POWER) both rows play the same kind, row A one octave above row B. A pair set elsewhere that is not in the list (for example PATTERN's) shows row A's kind |
+| F1 SLOT | The selected slot, 1 to 4 (UP and DOWN choose it too). The first tap lights the key; a second tap steps to the next slot and wraps from 4 to 1; the encoder and LEFT / RIGHT step and stop at the ends. A slot's picked slice is its own and starts at slice 1 |
 | SHIFT + F2 SLICE CH | The MIDI channel that fires slices: SAME, 1 to 16 or OFF (section 8). Hold SHIFT and turn the encoder; its value shows in the SHIFT row, and the screen's right column reads SLICE CH |
 | F2 SPEAKS | What the vocoder listens to, as PERFORM's SPEAKS chip names it: LIVE or SLOT 1 to 4. A tap makes the selected slot speak; a second tap goes back to LIVE. The encoder steps LIVE, SLOT 1, 2, 3, 4 over the slots that hold a sound and stops at the ends. An empty slot says "EMPTY: NOTHING TO PLAY". The line under the slots says what the slot does now. The key is dim where SPEAKS is silent (TUNE's SOUNDS slot, TRACT), and a tap says why |
 | F3 SPEED | 0.5X, 1X or 2X |
 | F4 DIR | FWD or REV |
 | F5 LOOP | The whole slot plays round from the bar. ON SL 5 while a slice pad repeats that slice (see above) |
 | F6 TRIG | ONE SHOT (the default): the slice plays to its end cut. GATE: it also stops when you let go of the pad |
-| F7 SLICES | MONO (the default): a hit fades out the slot's sounding slice and starts the new one. POLY: up to four slices overlap |
+| F7 | Blank: no name, no value, no focus |
 | F8 LEVEL | -24 to +12 dB |
 
-A slice pad past the slot's count says how many slices there are ("5 SLICES", "NO SLICES: SLOT IS EMPTY" on an empty slot). A slot that does not speak and is not the carrier (the slot panel reads PADS, and the centre says PADS ONLY) has its loop stopped and only its slice pads
-speak, over LIVE or together with the slot that speaks ("SLOT 1: ITS PADS SPEAK OVER LIVE" says so); if you turn its F5 LOOP on, the slot is made to speak first ("SLOT 1 SPEAKS"), so the loop is heard; F2 takes it back to LIVE. A slot that sounds (SOUNDS) keeps its side when LOOP goes on. While the slot itself records, a slice pad says "SLOT IS RECORDING: NO SLICE", and while it is armed to record "SLOT IS ARMED TO RECORD: NO SLICE". When a change of the slot's length
+A slice pad past the slot's count says how many slices there are ("5 SLICES", "NO SLICES: SLOT IS EMPTY" on an empty slot). A slot that does not speak and is not the carrier (the slot panel reads HELD, and the centre says "HELD: ITS PADS PLAY IT") has its loop stopped and only its pads
+play it, over LIVE or together with the slot that speaks ("SLOT 1: ITS PADS SPEAK OVER LIVE" says so); if you turn its F5 LOOP on, the slot is made to speak first ("SLOT 1 SPEAKS"), so the loop is heard; F2 takes it back to LIVE. A slot that sounds (SOUNDS) keeps its side when LOOP goes on. While the slot itself records, a slice pad says "SLOT IS RECORDING: NO SLICE", and while it is armed to record "SLOT IS ARMED TO RECORD: NO SLICE". When a change of the slot's length
 puts hand-edited cuts back to even ones, the strip says "LENGTH CHANGED: CUTS EVEN AGAIN". In TUNE a SOUNDS slot, and in TRACT a SPEAKS or PADS slot with MOUTH on PADS, shows dim with a line saying why (section 10, "The mode cue"); with MOUTH on LIVE the slot is not dim and the line says it moves the mouth.
 
-UP and DOWN pick the slot. F1 LOW PADS changes the shared pair of note rows (PATTERN's NOTE lane uses it too); PERFORM's F6 and F7 are separate. SAMPLE EDIT, FILE and SAMPLE LOAD play the same two rows.
+UP and DOWN pick the slot. PATTERN's F4 CHORD sets the shared pair of note rows (the NOTE lane uses it too); PERFORM's F6 and F7 are separate. SAMPLE EDIT, FILE and SAMPLE LOAD play the same two rows.
 
 ### SAMPLE EDIT
 
@@ -559,8 +560,8 @@ UP and DOWN pick the slot. F1 LOW PADS changes the shared pair of note rows (PAT
 *SAMPLE EDIT: the take across the screen, cuts as numbered marks, trim as brackets.*
 
 SAMPLE EDIT shows the take across the whole screen. Cuts are marks numbered 1 to 24. The encoder moves the cursor, about one picture pixel a click
-(SHIFT: coarser); LEFT and RIGHT jump from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice;
-the bottom rows play SAMPLE's two note rows (A NOTE, B TRIAD at first; F1 LOW PADS on SAMPLE changes them). The header names the slot's place in the
+(SHIFT: coarser); LEFT and RIGHT jump from cut to cut, or, with a value key lit (F1 to F5), take one encoder step of it; SHIFT + LEFT and RIGHT always jump the cursor and give the focus back to it. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice;
+the bottom rows play SAMPLE's two note rows (A NOTE, B TRIAD at first; PATTERN's F4 CHORD sets row B's kind). As on SAMPLE, a top pad alone brings the note and a lower pad alone starts the picked slice; SHIFT + a lower pad latches its note, and while a note is latched a top pad brings no other. The header names the slot's place in the
 route: `SLOT 2  SPEAKS` (the slot is the vocoder's voice), `SLOT 3  SOUNDS` (it is the carrier) or nothing.
 
 **Picking a slice.** Tap a top pad: that slice plays, its pad lights bright, and the screen marks it three ways: its span is filled on the cut strip,
@@ -611,8 +612,8 @@ SAMPLE LOAD lists the WAV files in `Apps/o3_voc03er/` on the card. To put files 
 computer, or put the card in a computer. The encoder (or a pad) picks a file, LEFT and RIGHT turn a page of the list (held, they repeat), UP and DOWN pick the slot, F1 loads the file into it, F8 goes back. A slot that already
 holds a sample asks first: F1 confirms, any other key cancels. A slot that cannot take a load says what to stop: "SLOT IS RECORDING: STOP THE TAKE FIRST", "SLOT LOOP IS ON: STOP THE LOOP FIRST"
 (the loop playing or queued) or "A SLICE IS SOUNDING: WAIT FOR IT" (a slice of any slot borrows the slot's memory while it sounds). The list shows at most 64 files; a folder with more says
-"LIST CUT AT 64 FILES: THE FIRST 64 SHOW" (keep the files you want in the first 64 by name, or move the rest into another folder). A file loaded into a slot that is on PADS says "PADS ONLY":
-only its slices speak, and F2 SPEAKS on SAMPLE makes it speak.
+"LIST CUT AT 64 FILES: THE FIRST 64 SHOW" (keep the files you want in the first 64 by name, or move the rest into another folder). A file loaded into a slot that is on no side says "HELD: ITS PADS PLAY IT":
+only its pads play it, and F2 SPEAKS on SAMPLE makes it speak.
 
 What loads: PCM WAV files of 8, 16, 24 or 32 bits, and 32-bit float files, mono or stereo (stereo is mixed to mono), at any rate from 22.05 to 96 kHz
 (so 48 kHz, 24-bit files from a computer load as they are). A slot is always mono, 16-bit, 44.1 kHz, so a file that is not that is converted while
@@ -739,9 +740,9 @@ A project is a folder under `Apps/o3_voc03er/` that holds one project file. It k
 vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current pattern, the octave, VOICING, the BEND ROW and its range,
 the pads layout of each of the five modes (the three rows' plays, a strip being kept by the parameter it sets), the preset's name, PATTERN's FOLLOW, the MOUTH lane, TRACT's
 mouth values (section 5b says what is not kept), and each slot's cuts,
-trim, speed, direction, level, TRIG, SLICES (MONO or POLY) and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
+trim, speed, direction, level, TRIG and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
 writes the sounds into the project folder. TRACT's CLOSE, SLIDE, ACCENT and MIX, and SOURCE set from a strip, are not saved with the project. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
-becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and SLICES MONO. The preset is kept by name: a
+becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset and TRIG ONE SHOT. The preset is kept by name: a
 name this build does not know opens as no preset. A project saved before the layouts were per mode opens with its one layout on BANDS, TALK, TUNE
 and ROBOT and the TRACT default (A NOTE, B TONGUE, C MOUTH); a saved piano value opens as the plain note, chord or OFF of the same kind. An older
 image that opens a new project reads the BANDS layout and ignores the rest (needs more testing). F4 NEW puts all of these back to their defaults (a project you saved earlier keeps its own pads layouts until NEW; the defaults are the ones in section 4).

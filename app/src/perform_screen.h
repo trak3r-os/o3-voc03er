@@ -178,6 +178,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   int latched() const noexcept { return latched_; }
   // The audition (Q3): another screen (PATTERN) plays a palette pad through PERFORM's local-note path, so the sequencer's note-offs do not cut it.
   // `pad` 0..23 (it takes that pad's slot of the tables and its bit of held_; PERFORM is not on screen meanwhile, and its leave() lets the pads go),
+  // or kAuditionNoteId (24: SAMPLE's slice note, which no lower pad uses),
   // `note` a MIDI note, `kind` 0 a single note, 1..4 a chord of that kind on the note (root pc = note % 12, the octave of kChordBaseNote, PERFORM's
   // voicing and the SMOOTH memory as press_pad uses them). No latch. Main loop only.
   void audition_press(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity = kAuditionVelocity,
@@ -185,6 +186,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   void audition_release(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void audition_release_all(o3sdk::app::Context& ctx) noexcept;
   static constexpr std::uint8_t kAuditionVelocity = 110;
+  static constexpr unsigned kAuditionNoteId = 24;  // audition id of SAMPLE's slice note (rule 1: a slice pad alone brings a note); the lower pads are 0..23
   static constexpr unsigned kCurrentVoicing = 4;  // audition_press: the chord uses PERFORM's voicing (0..3 is a voicing of its own, a step's)  // what PERFORM's pads play
 
   // V3: PATTERN's MOUTH palette sounds a mouth byte live in TRACT (a vowel sets VOWEL, a closure sets CLOSE until mouth_sound_release); nothing outside TRACT.

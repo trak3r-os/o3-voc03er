@@ -846,7 +846,7 @@ TEST_CASE("sample edit: HELP gives a row to every button the screen answers") {
   CHECK(help.summary != nullptr);
   CHECK(std::string(help.summary).find("INSERT") != std::string::npos);
   CHECK(std::string(help.summary).find("DELETE") != std::string::npos);
-  CHECK(std::string(help.summary).find("EMPTIES THE SLOT") != std::string::npos);
+  CHECK(std::string(help.summary).find("THE LIT F KEY, ELSE CUT TO CUT") != std::string::npos);  // H2 / H3: what the arrows do
   CHECK(std::string(help.fkey[5]).find("-1 DB") != std::string::npos);
 }
 
@@ -972,7 +972,7 @@ TEST_CASE("sample edit: F2 CUT BEATS cuts 4, 8 or 16 a bar on a take, and warns 
   h.run_ms(40);
   check(4u);
   const unsigned cuts = bars * 4u;
-  tap(h, app::Button::Right);  // the cursor goes back to the waveform
+  shift_tap(h, app::Button::Right);  // the cursor goes back to the waveform (a plain arrow would step the lit F2)
   rig.fkey = app::Button::Shift;
   rig.shift_turn(3);
   tap(h, app::Button::Insert);
@@ -2406,5 +2406,94 @@ TEST_CASE("sample edit: NORMALISE lets the pick go and the slices still play the
   CHECK(s == doctest::Approx(s0));
   CHECK(l == doctest::Approx(l0));
   CHECK(cuts_heard(rig) == 8u);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// ---- H2 / H3: LEFT and RIGHT are one encoder step of the lit F key; SHIFT + LEFT / RIGHT are the cursor ------------------------------------------
+
+TEST_CASE("sample edit: with CUT EVEN lit, LEFT and RIGHT step it like the encoder; with CUT BEATS lit they step that") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l = 0, l0 = 0;
+  REQUIRE(rig.audition(0, s, l0));
+  tap(h, app::Button::F1);  // lights CUT EVEN and changes nothing
+  rig.fkey = app::Button::F1;
+  CHECK_FALSE(rig.audition(8, s, l));
+  tap(h, app::Button::Right);  // 16: a take's own cuts go at once
+  h.run_ms(60);
+  REQUIRE(rig.audition(15, s, l));
+  CHECK(l == doctest::Approx(l0 / 2.0f).epsilon(0.01));
+  // The re-cut counts as the hand's now, and the pad let the arm go: the encoder's rule, so the first arrow warns and the second takes it (24).
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  CHECK(rig.audition(23, s, l));
+  tap(h, app::Button::Right);  // the end stops, as the encoder does
+  h.run_ms(60);
+  CHECK(rig.audition(23, s, l));
+  tap(h, app::Button::Left);  // warns (the pad let the arm go), then 16, then 8
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK_FALSE(rig.audition(8, s, l));
+  CHECK(rig.audition(7, s, l));
+  // CUT BEATS: a take of one bar cut in 8 now, so 4 a bar replaces the re-cut: warn first, then it takes.
+  tap(h, app::Button::F2);
+  rig.fkey = app::Button::F2;
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Right);  // 4 a bar
+  h.run_ms(60);
+  CHECK(rig.audition(3, s, l));
+  CHECK_FALSE(rig.audition(4, s, l));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: with no key lit LEFT and RIGHT walk the cuts; SHIFT + LEFT and RIGHT are the cursor and give the focus back to it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l = 0, l0 = 0;
+  REQUIRE(rig.audition(0, s, l0));
+  tap(h, app::Button::F1);  // CUT EVEN lit
+  shift_tap(h, app::Button::Right);  // the cursor on cut 2's start, F1 let go
+  tap(h, app::Button::Right);        // the cursor again (cut 3), not a CUT EVEN step
+  tap(h, app::Button::Delete);       // cut 3 goes: cut 2 is two long, and there are still seven cuts
+  h.run_ms(60);
+  REQUIRE(rig.audition(1, s, l));
+  CHECK(l == doctest::Approx(l0 * 2.0f).epsilon(0.01));
+  CHECK_FALSE(rig.audition(7, s, l));
+  tap(h, app::Button::F1);  // lit again
+  shift_tap(h, app::Button::Left);  // the cursor back to cut 2's start (l0), the focus on the cursor: F1 is let go
+  tap(h, app::Button::Left);        // cut 1 (0)
+  tap(h, app::Button::Right);       // cut 2 (l0)
+  tap(h, app::Button::Right);       // the next cut (3 * l0, as cut 3 went)
+  tap(h, app::Button::Delete);      // it goes: none of the four arrows stepped CUT EVEN
+  h.run_ms(60);
+  REQUIRE(rig.audition(1, s, l));
+  CHECK(l == doctest::Approx(l0 * 3.0f).epsilon(0.01));
+  CHECK(rig.audition(5, s, l));
+  CHECK_FALSE(rig.audition(6, s, l));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: with a slice picked LEFT and RIGHT step the pick, and SHIFT + LEFT lets it go and the lit key is the arrows' again") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l = 0;
+  tap(h, app::Button::F1);  // CUT EVEN lit
+  REQUIRE(rig.tap_pad(2, s, l));  // slice 3 picked
+  tap(h, app::Button::Right);     // the pick steps: CUT EVEN is untouched
+  h.run_ms(60);
+  CHECK_FALSE(rig.tap_pad(8, s, l));
+  shift_tap(h, app::Button::Left);  // the pick goes, the cursor jumps, the focus is the cursor's
+  tap(h, app::Button::F1);          // lit again
+  tap(h, app::Button::Right);       // 16
+  h.run_ms(60);
+  CHECK(rig.tap_pad(15, s, l));
   CHECK(h.runtime().frame_failures() == 0u);
 }

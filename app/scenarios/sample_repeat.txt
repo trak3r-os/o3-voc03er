@@ -1,4 +1,4 @@
-# SAMPLE: F1 LOW PADS sets both lower rows at once (NOTE, then TRIAD and 7TH: a pad of row A and one of row B held together), F2 SPEAKS (the selected slot speaks, a second tap
+# SAMPLE: a lower pad alone plays its note and the picked slice (slice 1 at first), a pad of each lower row held together plays a note and a triad, F2 SPEAKS (the selected slot speaks, a second tap
 # goes back to LIVE), and F5 LOOP with a slice pad: the pad repeats that slice (ONE SHOT: until another pad or F5; GATE: while held, then the whole loop goes on). F5 OFF stops everything.
 # The simulator shows the screens and that the unit plays; the WAV has the loop, the repeating slice and the notes. It cannot say how it sounds.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_repeat.txt --out <dir>   (the dir must exist)
@@ -16,24 +16,16 @@ wait 9000
 tap sampleplay
 wait 300
 snap 01_take
-# F1 LOW PADS: the first tap steps NOTE+TRIAD to NOTE; one pad of each lower row held together
-tap f1
-wait 100
+# a lower pad alone: the slot is HELD (it speaks and sounds on no side), so the pad plays its note (A NOTE) and starts the picked slice, slice 1 at first; one pad of
+# each lower row held together plays the note and the triad
 paddown 26
 paddown 38
 wait 800
 snap 02_low_note_both_rows
 padup 26
 padup 38
-tap f1
-tap f1
-wait 100
-paddown 26
-paddown 38
-wait 800
-snap 03_low_7th_both_rows
-padup 26
-padup 38
+wait 300
+snap 03_released
 # F2 SPEAKS: slot 1 speaks, then LIVE again
 tap f2
 wait 300
@@ -57,6 +49,7 @@ tap f5
 wait 300
 snap 09_loop_off
 # GATE: the slice repeats while the pad is held, the release goes back to the whole loop
+tap f6
 tap f6
 tap f5
 wait 2500
