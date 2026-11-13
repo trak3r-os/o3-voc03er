@@ -8,6 +8,8 @@
 
 #include <o3sdk/dsp/engine.h>
 
+#include "../app/src/pattern_logic.h"
+
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -17,6 +19,7 @@
 using namespace o3_voc03er;
 namespace dsp = o3sdk::dsp;
 namespace chunk = o3sdk::formats::chunk;
+namespace pt = o3_voc03er::pattern;
 
 namespace {
 
@@ -399,6 +402,12 @@ TEST_CASE("bank file: a file that fails a check loads nothing") {
   // the carrier field is three bits and 7 (LIVE, LC1) is valid: no pattern file can hold a bad carrier
   CHECK(refused(with_bank(8, 16, 0x00000080u)));                                     // note 128
   CHECK(refused(with_bank(8, 16, 5u << 8)));                                         // kind 5
+  CHECK(refused(with_bank(8, 16, 6u << 8)));                                         // kind 6
+  CHECK(refused(with_bank(8, 16, (7u << 8) | 60u)));                                 // kind 7 (a TIE) with a note
+  CHECK(refused(with_bank(8, 16, (7u << 8) | (1u << 11))));                          // a TIE with a voicing
+  const std::vector<std::uint8_t> tie = with_bank(8, 16, 7u << 8);
+  CHECK(read_bank(tie.data(), tie.size(), t));                                       // a TIE: note 0, kind 7, loads
+  CHECK(is_tie(get_step(t.pattern[6], 9)));
   CHECK(refused(with_bank(8, 16, 25u << 24)));                                       // slice 25
   const std::vector<std::uint8_t> s24 = with_bank(8, 16, 24u << 24);
   CHECK(read_bank(s24.data(), s24.size(), t));                                       // slice 24 is the last one
@@ -1624,4 +1633,451 @@ TEST_CASE("bank file: a MOUT chunk that is wrong refuses the file whole") {
     return v;
   }();
   CHECK(refused(cut));
+}
+
+// ---- TIE: a step that holds the notes before it ---------------------------------------------------------------------------------
+
+TEST_CASE("tie: note 0 with kind 7 is the only valid kind 7, kinds 5 and 6 never are, and the word round trips") {
+  Step t;
+  t.kind = kTieKind;
+  CHECK(is_tie(t));
+  CHECK(step_valid(t));
+  CHECK_FALSE(is_tie(Step{}));
+  Step n = t;
+  n.note = 60;  // kind 7 with a note is not a TIE and not valid
+  CHECK_FALSE(is_tie(n));
+  CHECK_FALSE(step_valid(n));
+  Step v = t;
+  v.voicing = 1;  // a TIE has no voicing
+  CHECK_FALSE(step_valid(v));
+  for (unsigned kind : {5u, 6u}) {
+    Step k;
+    k.kind = static_cast<std::uint8_t>(kind);
+    CHECK_FALSE(step_valid(k));
+    k.note = 60;
+    CHECK_FALSE(step_valid(k));
+  }
+  Step full = t;
+  full.carrier = 5;
+  full.level = 90;
+  full.slice = 12;
+  REQUIRE(step_valid(full));
+  const Step back = unpack_step(pack_step(full));
+  CHECK(is_tie(back));
+  CHECK(back.kind == kTieKind);
+  CHECK(back.carrier == 5);
+  CHECK(back.level == 90);
+  CHECK(back.slice == 12);
+  CHECK(back.voicing == 0);
+}
+
+TEST_CASE("tie: set_tie keeps carrier, level and slice; set_note, set_rest and set_chord clear it") {
+  Bank b = {};
+  PatternData& p = b.pattern[0];
+  REQUIRE(set_chord(p, 3, 60, ChordKind::Seventh, Voicing::Wide));
+  REQUIRE(set_carrier(p, 3, 5));
+  REQUIRE(set_level(p, 3, 64));
+  REQUIRE(set_slice(p, 3, 9));
+  REQUIRE(set_tie(p, 3));
+  Step s = get_step(p, 3);
+  CHECK(is_tie(s));
+  CHECK(s.note == 0);
+  CHECK(s.kind == kTieKind);
+  CHECK(s.voicing == 0);
+  CHECK(s.carrier == 5);
+  CHECK(s.level == 64);
+  CHECK(s.slice == 9);
+  CHECK(step_valid(s));
+  const std::uint32_t before = load_word(p.step[3]);
+  CHECK_FALSE(set_tie(p, 16));
+  CHECK(load_word(p.step[3]) == before);
+  REQUIRE(set_note(p, 3, 40));
+  s = get_step(p, 3);
+  CHECK_FALSE(is_tie(s));
+  CHECK(s.kind == 0);
+  CHECK(s.note == 40);
+  CHECK(s.carrier == 5);
+  REQUIRE(set_tie(p, 3));
+  REQUIRE(set_rest(p, 3));
+  CHECK_FALSE(is_tie(get_step(p, 3)));
+  CHECK(get_step(p, 3).kind == 0);
+  REQUIRE(set_tie(p, 3));
+  REQUIRE(set_chord(p, 3, 50, ChordKind::Power, Voicing::Close));
+  CHECK_FALSE(is_tie(get_step(p, 3)));
+  CHECK(get_step(p, 3).kind == 4);
+  // an empty step becomes a TIE and a TIE has no note for the legacy reader
+  REQUIRE(set_tie(p, 0));
+  CHECK(to_legacy(p).note[0] == 0);
+  std::uint8_t none[kChordMaxNotes] = {};
+  CHECK(step_notes(get_step(p, 0), 0, 0, none, nullptr) == 0u);
+}
+
+TEST_CASE("tie: pattern, bank file and clipboard carry a TIE as it is") {
+  Bank b = full_bank();
+  for (unsigned p = 0; p < kBankPatterns; ++p) {
+    REQUIRE(set_tie(b.pattern[p], (p * 3u + 1u) % kPatternSteps));
+    REQUIRE(set_tie(b.pattern[p], 15));
+  }
+  const std::vector<std::uint8_t> f = bytes_of(b);
+  Bank back = {};
+  REQUIRE(read_bank(f.data(), f.size(), back));  // a file with ties loads
+  CHECK(same_bank(b, back));
+  for (unsigned p = 0; p < kBankPatterns; ++p) {
+    CHECK(is_tie(get_step(back.pattern[p], 15)));
+    CHECK(is_tie(get_step(back.pattern[p], (p * 3u + 1u) % kPatternSteps)));
+  }
+  PatternData c = {};
+  copy_pattern(c, b.pattern[2]);
+  CHECK(same_pattern(c, b.pattern[2]));
+  CHECK(is_tie(get_step(c, 15)));
+  // the clipboard: a copied TIE pastes as a TIE, a pasted note over a TIE is not one, DELETE leaves a rest
+  PatternData q = {};
+  REQUIRE(set_length(q, 4));
+  REQUIRE(set_note(q, 0, 60));
+  REQUIRE(set_tie(q, 1));
+  REQUIRE(set_level(q, 1, 77));
+  pt::Clip clip;
+  pt::copy_step(clip, q, 1);
+  REQUIRE(pt::insert_step(q, 0, clip));
+  CHECK(is_tie(get_step(q, 0)));
+  CHECK(get_step(q, 0).level == 77);
+  CHECK(get_step(q, 1).note == 60);  // the note moved one step right
+  CHECK(is_tie(get_step(q, 2)));
+  pt::Clip whole;
+  pt::copy_whole(whole, q);
+  PatternData r = {};
+  REQUIRE(pt::paste_whole(r, whole));
+  CHECK(same_pattern(r, q));
+  REQUIRE(pt::clear_step(r, 0));
+  CHECK_FALSE(is_tie(get_step(r, 0)));
+  CHECK(get_step(r, 0).kind == 0);
+  // the VALUE key on a TIE: the NOTE lane starts a note (48) and the tie is gone; the other lanes keep it
+  REQUIRE(pt::step_value(q, 0, pt::Lane::Level, -1));
+  CHECK(is_tie(get_step(q, 0)));
+  REQUIRE(pt::step_value(q, 0, pt::Lane::Carrier, 1));
+  CHECK(is_tie(get_step(q, 0)));
+  REQUIRE(pt::step_value(q, 0, pt::Lane::Note, 1));
+  CHECK_FALSE(is_tie(get_step(q, 0)));
+  CHECK(get_step(q, 0).note == 48);
+}
+
+TEST_CASE("tie hook: [C, TIE, TIE, rest] is one note-on and one note-off, at the gate of the last tie") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_tie(a, 2));
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen> on = rig.of(dsp::EventKind::NoteOn);
+  const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+  REQUIRE(on.size() == 1);
+  CHECK(on[0].note == 60);
+  CHECK(near(on[0].at, 0));
+  REQUIRE(off.size() == 1);
+  CHECK(off[0].note == 60);
+  CHECK(near(off[0].at, 2.75 * kSixteenth));  // 75 % of step 2, where the next step is no TIE
+  CHECK(rig.hanging() == 0);
+}
+
+TEST_CASE("tie hook: a tied chord holds every note, each goes off once, together") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_chord(a, 0, 60, ChordKind::Triad, Voicing::Close));
+  REQUIRE(set_tie(a, 1));
+  rig.seq.set_key_scale(0, 0);
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen> on = rig.of(dsp::EventKind::NoteOn);
+  const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+  REQUIRE(on.size() == 3);
+  REQUIRE(off.size() == 3);
+  for (unsigned i = 0; i < 3; ++i) {
+    CHECK(on[i].note == off[i].note);
+    CHECK(near(on[i].at, 0));
+    CHECK(near(off[i].at, 1.75 * kSixteenth));
+    CHECK(off[i].flags == Vocoder::owner_flags(Vocoder::Owner::Seq));
+  }
+  CHECK(rig.hanging() == 0);
+}
+
+TEST_CASE("tie hook: with nothing sounding a TIE is a rest") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 2));
+  REQUIRE(set_tie(a, 1));  // [rest, TIE], looping
+  REQUIRE(rig.e.play());
+  rig.run_samples(6.5 * kSixteenth);
+  CHECK(rig.of(dsp::EventKind::NoteOn).empty());
+  CHECK(rig.of(dsp::EventKind::NoteOff).empty());
+}
+
+TEST_CASE("tie hook: [C, TIE, D] sends C off at the gate of the TIE, then D on at its edge") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_note(a, 2, 62));
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen> on = rig.of(dsp::EventKind::NoteOn);
+  const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+  REQUIRE(on.size() == 2);
+  REQUIRE(off.size() == 2);
+  CHECK(on[0].note == 60);
+  CHECK(near(on[0].at, 0));
+  CHECK(on[1].note == 62);
+  CHECK(near(on[1].at, 2 * kSixteenth));
+  CHECK(off[0].note == 60);
+  CHECK(near(off[0].at, 1.75 * kSixteenth));  // the TIE's own gate: the step after it is no TIE
+  CHECK(off[1].note == 62);
+  CHECK(near(off[1].at, 2.75 * kSixteenth));
+  CHECK(rig.hanging() == 0);
+}
+
+TEST_CASE("tie hook: an edit after a skipped gate: the next edge releases, and a new note follows it") {
+  for (int replace : {0, 1}) {  // the TIE becomes a rest, or a note
+    Rig rig;
+    REQUIRE(rig.ok);
+    PatternData& a = rig.bank.pattern[0];
+    REQUIRE(set_length(a, 4));
+    REQUIRE(set_note(a, 0, 60));
+    REQUIRE(set_tie(a, 1));
+    REQUIRE(rig.e.play());
+    rig.run_samples(0.9 * kSixteenth);  // past step 0's gate, which saw a TIE next and did not release
+    REQUIRE(rig.of(dsp::EventKind::NoteOff).empty());
+    REQUIRE((replace == 0 ? set_rest(a, 1) : set_note(a, 1, 64)));
+    rig.run_samples(1.5 * kSixteenth);
+    const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+    REQUIRE(off.size() >= 1);
+    CHECK(off[0].note == 60);
+    CHECK(near(off[0].at, 1.0 * kSixteenth));  // the edge of the step that stopped being a TIE
+    CHECK(rig.of(dsp::EventKind::NoteOn).size() == (replace == 0 ? 1u : 2u));
+  }
+}
+
+TEST_CASE("tie hook: a TIE at step 0 holds the last step's notes across the loop, and on the first pass it is a rest") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 2));
+  REQUIRE(set_tie(a, 0));
+  REQUIRE(set_note(a, 1, 60));  // [TIE, C], looping
+  REQUIRE(rig.e.play());
+  rig.run_samples(5.5 * kSixteenth);
+  const std::vector<Seen> on = rig.of(dsp::EventKind::NoteOn);
+  const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+  REQUIRE(on.size() == 3);  // nothing on the first pass of step 0; C on steps 1, 3 and 5
+  CHECK(near(on[0].at, 1 * kSixteenth));
+  CHECK(near(on[1].at, 3 * kSixteenth));
+  CHECK(near(on[2].at, 5 * kSixteenth));
+  REQUIRE(off.size() == 2);  // the gate of step 1 sees the TIE of the loop and holds; the TIE's own gate releases
+  CHECK(near(off[0].at, 2.75 * kSixteenth));
+  CHECK(near(off[1].at, 4.75 * kSixteenth));
+  CHECK(rig.hanging() == 1);  // step 5's note is still sounding at 5.5
+}
+
+TEST_CASE("tie hook: a Stop during a tie sends the offs, once, and the next Play starts clean") {
+  for (double stop_at : {0.5, 1.5, 2.9}) {
+    Rig rig;
+    REQUIRE(rig.ok);
+    PatternData& a = rig.bank.pattern[0];
+    REQUIRE(set_length(a, 4));
+    REQUIRE(set_chord(a, 0, 60, ChordKind::Seventh, Voicing::Close));
+    REQUIRE(set_tie(a, 1));
+    REQUIRE(set_tie(a, 2));
+    REQUIRE(set_tie(a, 3));
+    REQUIRE(rig.e.play());
+    rig.run_samples(stop_at * kSixteenth);
+    REQUIRE(rig.e.stop());
+    rig.run(4);
+    INFO("stopped at " << stop_at << " of a step");
+    CHECK(rig.hanging() == 0);
+    CHECK(rig.of(dsp::EventKind::NoteOn).size() == rig.of(dsp::EventKind::NoteOff).size());
+    rig.spy.seen.clear();
+    REQUIRE(rig.e.play());  // the tie of step 3 holds nothing at the top: step 0 plays its chord again
+    rig.run_samples(0.4 * kSixteenth);
+    CHECK(rig.of(dsp::EventKind::NoteOn).size() >= 4);
+    REQUIRE(rig.e.stop());
+    rig.run(4);
+    CHECK(rig.hanging() == 0);
+  }
+}
+
+TEST_CASE("tie hook: a TIE holds across a pattern change when the next pattern starts with one, and is released at the gate when it does not") {
+  for (int next_tie : {0, 1}) {
+    Rig rig;
+    REQUIRE(rig.ok);
+    PatternData& a = rig.bank.pattern[0];
+    PatternData& b = rig.bank.pattern[1];
+    REQUIRE(set_length(a, 2));
+    REQUIRE(set_length(b, 2));
+    REQUIRE(set_note(a, 0, 60));
+    REQUIRE(set_tie(a, 1));
+    if (next_tie != 0) {
+      REQUIRE(set_tie(b, 0));  // [TIE, rest]
+    } else {
+      REQUIRE(set_note(b, 0, 72));
+    }
+    REQUIRE(rig.e.play());
+    rig.run_samples(0.5 * kSixteenth);
+    rig.seq.request_pattern(1);
+    rig.run_samples(3.0 * kSixteenth);  // up to 3.5 steps: B's step 0 (time 2) and step 1, not its second loop
+    const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+    REQUIRE(off.size() >= 1);
+    CHECK(off[0].note == 60);
+    // A: C, TIE; the pattern ends at step 1's edge (time 1) and B follows. B starts with a TIE: C goes on to B's step 0 (time 2) and off at its gate.
+    CHECK(near(off[0].at, (next_tie != 0 ? 2.75 : 1.75) * kSixteenth));
+    CHECK(rig.seq.playing_pattern() == 1);
+    CHECK(rig.of(dsp::EventKind::NoteOn).size() == (next_tie != 0 ? 1u : 2u));
+  }
+}
+
+TEST_CASE("tie hook: every note-on has its note-off over many loops, with ties, chords and a Stop") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 8));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_chord(a, 2, 55, ChordKind::Triad, Voicing::Close));
+  REQUIRE(set_tie(a, 3));
+  REQUIRE(set_tie(a, 4));
+  REQUIRE(set_note(a, 6, 65));
+  REQUIRE(set_tie(a, 7));  // the last step ties into the first: C comes in again at the loop
+  rig.seq.set_key_scale(0, 0);
+  REQUIRE(rig.e.play());
+  rig.run_samples(8 * 4 * kSixteenth - 0.5 * kSixteenth);  // four loops, ending inside the last TIE with a note sounding
+  REQUIRE(rig.e.stop());
+  rig.run(4);
+  CHECK(rig.of(dsp::EventKind::NoteOn).size() == rig.of(dsp::EventKind::NoteOff).size());
+  CHECK(rig.of(dsp::EventKind::NoteOn).size() == 4u * (1u + 3u + 1u));
+  CHECK(rig.hanging() == 0);
+}
+
+TEST_CASE("tie hook: CARRIER and SLICE act on a TIE, LEVEL does nothing, no new note is sent") {
+  Rig rig;
+  REQUIRE(rig.ok);
+  rig.publish(2, 8);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_level(a, 0, 80));
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_carrier(a, 1, 3));
+  REQUIRE(set_level(a, 1, 127));
+  REQUIRE(set_slice(a, 1, 5));
+  REQUIRE(rig.e.play());
+  rig.run_samples(2.5 * kSixteenth);
+  std::vector<Seen> car;
+  for (const Seen& x : rig.of(dsp::EventKind::Param)) {
+    if (x.param == Vocoder::CarSrc) {
+      car.push_back(x);
+    }
+  }
+  REQUIRE(car.size() == 1);
+  CHECK(car[0].value == 3.0f);
+  CHECK(near(car[0].at, 1 * kSixteenth));
+  const std::vector<Seen> r = rig.region(2);
+  REQUIRE(r.size() == 3);
+  CHECK(near(r[2].at, 1 * kSixteenth));
+  const std::vector<Seen> on = rig.of(dsp::EventKind::NoteOn);
+  REQUIRE(on.size() == 1);  // the TIE's LEVEL 127 plays nothing
+  CHECK(on[0].vel == 80);
+}
+
+TEST_CASE("tie mouth: a closure with a held note ends at the TIE's edge, not at the gate before it") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_mouth(a, 0, 10));  // LIPS
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen>& v = rig.ev();
+  REQUIRE(v.size() == 2);  // no CLOSE 0 at 0.75: the note goes on
+  CHECK(v[0].param == kCloseId);
+  CHECK(v[0].value == 1.0f);
+  CHECK(at_near(v[0].at, 0));
+  CHECK(v[1].param == kCloseId);
+  CHECK(v[1].value == 0.0f);
+  CHECK(at_near(v[1].at, 1 * kSixteenth));
+  const std::vector<Seen> off = rig.of(dsp::EventKind::NoteOff);
+  REQUIRE(off.size() == 1);
+  CHECK(near(off[0].at, 1.75 * kSixteenth));  // the note is released at the TIE's gate
+}
+
+TEST_CASE("tie mouth: a TIE with its own closure moves the mouth and ends it at the gate that releases the note") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_mouth(a, 1, 12));  // BACK
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen>& v = rig.ev();
+  REQUIRE(v.size() == 2);
+  CHECK(v[0].value == 3.0f);
+  CHECK(at_near(v[0].at, 1 * kSixteenth));
+  CHECK(v[1].param == kCloseId);
+  CHECK(v[1].value == 0.0f);
+  CHECK(at_near(v[1].at, 1.75 * kSixteenth));
+}
+
+TEST_CASE("tie mouth: a TIE over silence is a rest for the mouth too, a closure ends at the next edge") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_mouth(a, 1, 11));  // TIP
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen>& v = rig.ev();
+  REQUIRE(v.size() == 2);
+  CHECK(v[0].value == 2.0f);
+  CHECK(at_near(v[0].at, 1 * kSixteenth));
+  CHECK(v[1].value == 0.0f);
+  CHECK(at_near(v[1].at, 2 * kSixteenth));
+}
+
+TEST_CASE("tie mouth: a closure runs on through a chain of ties, one that closes again replaces it, and ACCENT is not touched by a TIE") {
+  MouthRig rig;
+  REQUIRE(rig.ok);
+  PatternData& a = rig.bank.pattern[0];
+  REQUIRE(set_length(a, 4));
+  REQUIRE(set_note(a, 0, 60));
+  REQUIRE(set_level(a, 0, 127));
+  REQUIRE(set_mouth(a, 0, 10));  // LIPS
+  REQUIRE(set_tie(a, 1));
+  REQUIRE(set_mouth(a, 1, 12));  // BACK again
+  REQUIRE(set_tie(a, 2));
+  REQUIRE(set_level(a, 2, 0));
+  REQUIRE(rig.e.play());
+  rig.run_samples(3.5 * kSixteenth);
+  const std::vector<Seen>& v = rig.ev();
+  REQUIRE(v.size() == 4);
+  CHECK(v[0].param == kAccentId);  // the note's ACCENT, once, on step 0
+  CHECK(at_near(v[0].at, 0));
+  CHECK(v[1].param == kCloseId);
+  CHECK(v[1].value == 1.0f);
+  CHECK(v[2].param == kCloseId);
+  CHECK(v[2].value == 3.0f);
+  CHECK(at_near(v[2].at, 1 * kSixteenth));
+  CHECK(v[3].param == kCloseId);
+  CHECK(v[3].value == 0.0f);
+  CHECK(at_near(v[3].at, 2 * kSixteenth));  // step 2 is a TIE with FOLLOW: the closure ends with its edge
+  CHECK(rig.of(dsp::EventKind::NoteOn).size() == 1);
+  CHECK(rig.hanging_mouth() == 0);
 }

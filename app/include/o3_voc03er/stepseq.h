@@ -8,7 +8,8 @@
 // during playback is seen as the old step or the new one, never a mix of the two:
 //   byte 0  note     0 a rest, else 1..127: the single note, or the chord's ROOT as a MIDI note (pitch class = note % 12, octave = note / 12 - 4,
 //                    the way make_chord counts: MIDI = 48 + 12 * octave + pitch class)
-//   byte 1  bits 0..2 kind     0 a single note, 1..4 a chord of ChordKind (Triad, Seventh, Open, Power) + 1
+//   byte 1  bits 0..2 kind     0 a single note, 1..4 a chord of ChordKind (Triad, Seventh, Open, Power) + 1, 7 a TIE (note 0, voicing 0: the
+//                              step holds the notes the sequencer is sounding; 5 and 6 never exist)
 //           bits 3..4 voicing  Voicing (chords only)
 //           bits 5..7 carrier  CARRIER lane: 0 FOLLOW (the step changes nothing: what SOUNDS says stays), 1 SYNTH, 2 NOISE, 3..6 SLOT 1..4, 7 LIVE
 //                              (LC1: the audio input as the carrier, as SOUNDS LIVE; the ids are Vocoder::CarSrc's and the saved ones never change)
@@ -54,6 +55,10 @@ inline constexpr std::size_t kBankFileMax = 1024;  // about 750 bytes with a mou
 // SliceMap (the SPEAKS slot's slices: the hook's SLICE lane and the unit's MIDI slices read the same map) and kSliceMax live in vocoder.h; the
 // main loop writes it through StepSeq::slices_open / slices_close.
 
+// A TIE is a step with note 0 and kind 7: it plays no note and keeps the previous step's notes sounding (the hook's rule: it holds whatever is
+// sounding, with nothing sounding it is a rest). Note 0 keeps every "note == 0 means no note-on" reader right.
+inline constexpr std::uint8_t kTieKind = 7;
+
 struct Step {
   std::uint8_t note = 0;
   std::uint8_t kind = 0;
@@ -63,8 +68,11 @@ struct Step {
   std::uint8_t slice = 0;
 };
 
+constexpr bool is_tie(const Step& s) noexcept { return s.note == 0u && s.kind == kTieKind; }
+// Kind 7 is valid only as a TIE (no note, no voicing); kinds 5 and 6 are not valid.
 constexpr bool step_valid(const Step& s) noexcept {
-  return s.note <= 127u && s.kind <= 4u && s.voicing <= 3u && s.carrier <= kCarrierMax && s.level <= 127u && s.slice <= kSliceMax;
+  return s.note <= 127u && (s.kind <= 4u || (s.kind == kTieKind && s.note == 0u && s.voicing == 0u)) && s.voicing <= 3u && s.carrier <= kCarrierMax &&
+         s.level <= 127u && s.slice <= kSliceMax;
 }
 constexpr std::uint32_t pack_step(const Step& s) noexcept {
   return static_cast<std::uint32_t>(s.note) |
@@ -254,6 +262,17 @@ inline bool set_note(PatternData& p, unsigned i, unsigned note) noexcept {
   return set_step(p, i, s);
 }
 inline bool set_rest(PatternData& p, unsigned i) noexcept { return set_note(p, i, 0); }
+// A TIE (kTieKind): the step holds the notes before it. Keeps the carrier, the level and the slice; set_note, set_rest and set_chord clear it.
+inline bool set_tie(PatternData& p, unsigned i) noexcept {
+  if (i >= kPatternSteps) {
+    return false;
+  }
+  Step s = get_step(p, i);
+  s.note = 0;
+  s.kind = kTieKind;
+  s.voicing = 0;
+  return set_step(p, i, s);
+}
 // A chord: its root as a MIDI note (1..127), the kind and the voicing. Keeps the carrier and the level.
 inline bool set_chord(PatternData& p, unsigned i, unsigned root, ChordKind kind, Voicing voicing) noexcept {
   if (i >= kPatternSteps || root < 1u || root > 127u) {
@@ -388,7 +407,9 @@ inline unsigned step_notes(const Step& s, unsigned key, unsigned scale, std::uin
 
 // --- the file ---
 // BANK: u16 version (0x0100), u8 pattern count (8), then per pattern u8 length (1..16) and 16 u32 steps. A BANK with a wrong count, a length or a
-// step field out of range refuses the whole file; no BANK is a v1 file, which loads into pattern A only.
+// step field out of range refuses the whole file; no BANK is a v1 file, which loads into pattern A only. A TIE step (note 0, kind 7) is the word
+// unchanged and loads; an image older than the TIE refuses a file that holds one (its step_valid says no to kind 7), as one older than LIVE refuses a
+// LIVE carrier. No version bump.
 // MOUT (V3, written only when a step has a mouth byte): u16 version, u8 pattern count (8), then per pattern its 16 mouth bytes. A MOUT with a
 // wrong count or a byte mouth_valid refuses the file; no MOUT means every step FOLLOWs. V3b writes version 0x0101 (WORD and WOB values); a 0x0100 file
 // (a V3 build's) loads, since the reader takes any minor of major 1; a V3 build refuses a 0x0101 file that holds a WORD or a WOB (its mouth_valid says no).
@@ -526,6 +547,13 @@ inline bool read_bank(const std::uint8_t* data, std::size_t n, Bank& b) noexcept
 //   CARRIER  a Param event for Vocoder::CarSrc at the step's frame when the lane is not FOLLOW (the unit starts its 5 ms fade there);
 //   NOTE     the previous step's notes off, then the notes on at the step's frame; they go off at 75 % of the step (a gate of 180 ticks, a second
 //            for_each_step grid), so a step never runs into the next, and at a Stop;
+//   TIE      a step with note 0 and kind 7 holds what is sounding: at its edge no release and no note-on, and the gate that comes before a TIE
+//            (the step that plays next, read at the pattern's `pos_` after the edge advanced it and the pattern change was taken) does not release
+//            either, so the notes go off at the first gate whose next step is not a TIE. With nothing sounding a TIE is a rest. If the next step stops
+//            being a TIE after its gate was skipped (an edit), the next edge releases; a Stop releases always. A TIE at step 0 holds the last step's
+//            notes over the loop point and over a pattern change. LEVEL does nothing on a TIE (no new note: ACCENT stays too); CARRIER and SLICE act
+//            as on any step. For the mouth a TIE over a held note counts as a step with a note (a closure on it ends at its gate), and the gate's
+//            CLOSE 0 of the step before a TIE is skipped too (the closure ends at the TIE's edge, as a closure with no gate does).
 //   SLICE    when the step's slice is 1..count of the SPEAKS slot's map: Start, Len and Trig 1 of that slot's own reader at the step's frame (a
 //            rest in NOTE still fires it). Always one shot: it plays to its end or until the next slice on that reader; the slot's TRIG and
 //            CHOKE are the pads' and do not apply. A slice above the count, or no source, emits nothing. At a Stop one Trig 0 releases the
@@ -684,7 +712,10 @@ class StepSeq final : public o3sdk::dsp::Clocked {
         take_next();
         note_lap();
       }
-      release(ctx, static_cast<std::uint16_t>(frame));  // a note never runs into the next step
+      const bool tie = is_tie(s);  // holds what sounds: no release now (nothing sounding: release() is a no-op, a rest) and no note-on below
+      if (!tie) {
+        release(ctx, static_cast<std::uint16_t>(frame));  // a note never runs into the next step
+      }
       if (s.carrier != 0u && s.carrier <= kCarrierMax) {
         changed_ = true;
         (void)ctx.emit(unit_, dsp::param_change(Vocoder::CarSrc, static_cast<float>(s.carrier), static_cast<std::uint16_t>(frame)));
@@ -725,17 +756,18 @@ class StepSeq final : public o3sdk::dsp::Clocked {
       }
       stepped = true;
       accent_step(ctx, static_cast<std::uint16_t>(frame), step_velocity(s), count != 0u);
-      if (mouth_step(ctx, t, static_cast<std::uint16_t>(frame), k, p, i, len, count != 0u)) {
+      if (mouth_step(ctx, t, static_cast<std::uint16_t>(frame), k, p, i, len, count != 0u || (tie && sounding_))) {
         close_frame = static_cast<int>(frame);
       }
     });
     mouth_points(ctx, t, stepped);
     // The gate: 180 ticks after each step edge.
     dsp::for_each_step(t, dsp::kTicksPerSixteenth, kGateTicks, 0, [&](std::uint32_t frame, std::uint64_t) {
-      if (sounding_ && (on_frame < 0 || static_cast<int>(frame) >= on_frame)) {
+      const bool held = next_is_tie();  // a TIE plays next: the notes (and a closure that ends with them) go on
+      if (!held && sounding_ && (on_frame < 0 || static_cast<int>(frame) >= on_frame)) {
         release(ctx, static_cast<std::uint16_t>(frame));
       }
-      if (closing_ && close_gate_ && (close_frame < 0 || static_cast<int>(frame) >= close_frame) && mouth_emit(ctx, TractParam::Close, 0.0f, static_cast<std::uint16_t>(frame))) {
+      if (!held && closing_ && close_gate_ && (close_frame < 0 || static_cast<int>(frame) >= close_frame) && mouth_emit(ctx, TractParam::Close, 0.0f, static_cast<std::uint16_t>(frame))) {
         closing_ = false;
       }
     });
@@ -745,6 +777,14 @@ class StepSeq final : public o3sdk::dsp::Clocked {
   static constexpr std::uint32_t kGateTicks = 180;  // 75 % of a sixteenth (offset + swing < period)
 
   std::uint32_t source() const noexcept { return map_ != nullptr ? __atomic_load_n(&map_->source, __ATOMIC_ACQUIRE) : 0u; }
+  // The step that plays next is a TIE. The gate grid runs after the edges of its block and the gate is 60 ticks before the next edge, so pos_ is
+  // already advanced past the step whose gate it is, and take_next() has already named the pattern the next step is in (the edge's own order). A
+  // block never holds a gate and the edge after it: 60 ticks are 600 frames at the 300 BPM ceiling, a block a small fraction of that.
+  bool next_is_tie() const noexcept {
+    const PatternData& p = bank_->pattern[cur_.load(std::memory_order_relaxed) % kBankPatterns];
+    const unsigned len = length_of(p);
+    return is_tie(get_step(p, pos_ < len ? pos_ : 0u));
+  }
   void note_lap() noexcept { laps_.store(static_cast<std::uint8_t>(laps_.load(std::memory_order_relaxed) + 1u), std::memory_order_relaxed); }
   void take_next() noexcept {
     const std::uint8_t n = next_.exchange(kNoPattern, std::memory_order_relaxed);

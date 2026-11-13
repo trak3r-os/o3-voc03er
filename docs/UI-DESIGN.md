@@ -230,7 +230,7 @@ mouth events (not ACCENT).
 
 Built in U6a (data and sequencer, no screen; `stepseq.h`, `tests/stepseq_test.cpp`): a step is one 32-bit word (note, kind, voicing, carrier, level,
 slice), the bank of eight patterns is `O3SDK_BIG`, and the hook reads one word per step with a relaxed atomic, so an edit is heard whole at the
-step's next visit. A chord step stores its root as the note, so a pattern of single notes stays valid. Settled where the spec was open:
+step's next visit. A chord step stores its root as the note, so a pattern of single notes stays valid. A TIE is note 0 with kind 7 (it holds what sounds, and is a rest over silence); the BANK chunk carries the word unchanged and an image older than the TIE refuses a file that holds one. Settled where the spec was open:
 the gate is 75 % of a sixteenth, notes also end at Stop; carrier 0 (FOLLOW) emits nothing, and a Stop restores the carrier the user picked only
 if a step changed it (LC1: LIVE, carrier 7, is the last lane value, appended so the saved ids never moved); LEVEL 0 means 100 and is sent as the NoteOn velocity: the last note sets the synth's level, 100 and up being full, so a level above 100 sounds as 100 and the
 lane only turns a step down; a soft note also lowers what is still held, because it is one gain and not one a voice. It acts on the SYNTH and NOISE carriers, not on a slot or LIVE; a requested pattern starts at the playing pattern's end (or at the next Play); SMOOTH voicing leads from the

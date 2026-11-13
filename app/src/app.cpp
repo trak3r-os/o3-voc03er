@@ -557,7 +557,9 @@ class MyApp final : public app::App {
       for (unsigned i = 0; i < ov::length_of(pd); ++i) {
         const ov::Step s = ov::get_step(pd, i);
         out.chr(' ');
-        if (s.note == 0u) {
+        if (ov::is_tie(s)) {
+          out.chr('T');
+        } else if (s.note == 0u) {
           out.chr('-');
         } else {
           out.dec(s.note);
