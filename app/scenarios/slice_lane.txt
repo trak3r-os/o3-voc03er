@@ -1,4 +1,4 @@
-# SLICE LANE (U6c): a 1 BAR take with the even cuts (8), SAMPLE's slot on SPEAKS, then PATTERN's SLICE lane written from the palette (slices 1, 3, 5, 8),
+# SLICE LANE (U6c): a 1 BAR take with the even cuts (8), taken with AFTER SOUNDS and then put on SPEAKS from PERFORM, then PATTERN's SLICE lane written from the palette (slices 1, 3, 5, 8),
 # a dark pad that does nothing, VALUE stepping a step, SHIFT + step and CLEAR LANE, then played and stopped. The simulator shows the screen, the LEDs and
 # that the unit plays; it cannot say how the cuts sound or what the frame costs.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/slice_lane.txt --out <dir>   (the dir must exist)
@@ -9,7 +9,6 @@ wait 200
 tap f3
 tap f4
 tap f4
-tap f4
 tap play
 wait 500
 record on
@@ -17,11 +16,6 @@ tap rec
 wait 9000
 tap sampleplay
 wait 200
-tap f2
-tap f2
-wait 100
-tap f2
-wait 100
 paddown 26
 wait 100
 tap shift

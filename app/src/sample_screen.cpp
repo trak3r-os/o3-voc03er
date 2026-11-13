@@ -100,14 +100,14 @@ struct SliceVoice {
 };
 
 // SAMPLE's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just the cursor in the SRAM). Zero means TRIG ONE SHOT and
-// SLICES MONO (CHOKE ON in the code), the defaults. The help tables are valid while HELP is open.
+// SLICES MONO (a slice cuts the one before; `choke_off` is 0), the defaults. The help tables are valid while HELP is open.
 struct SampleData {
   sm::SliceTable table[sm::kReaders];
   SliceVoice voice[sm::kReaders];
   std::uint8_t edited[sm::kReaders];     // the cuts are the hand's or a re-cut's (SAMPLE EDIT): service() leaves them alone until the length changes
   std::uint8_t even_code[sm::kReaders];  // SAMPLE EDIT's CUT EVEN value (sample_edit_logic.h even_cuts_of); 0 = 8, the cuts a take starts from
   std::uint8_t gate[sm::kReaders];       // TRIG per slot: 1 GATE (the release also stops the slice), 0 ONE SHOT
-  std::uint8_t choke_off[sm::kReaders];  // CHOKE per slot: 1 OFF
+  std::uint8_t choke_off[sm::kReaders];  // SLICES per slot: 1 POLY (the slices overlap), 0 MONO (the code calls it choke)
   std::uint8_t was_region[sm::kReaders]; // service(): the reader's region bit of the last pass (a slice that begins turns its slot's loop off)
   std::uint32_t seq;
   SliceMap map;                 // the SPEAKS slot's slices for the step sequencer's SLICE lane (published through StepSeq::slices_open)
@@ -249,7 +249,7 @@ Vocoder::LoopStatus SampleScreen::view(unsigned loop) const noexcept {
 // (kMaxParamsPerBlock) and the ring holds 512, and the 24 slice pads give at most 24 * 7 in a frame, which the frame cadence does not allow.
 //
 // A pad of this screen (`pressed`) while the slot's whole loop plays (or waits) does not turn the loop off: it repeats that slice (Trig 2) on the slot's own reader, where the unit
-// pauses the loop under it. The slot has one repeating slice (the CHOKE-ON choice whatever SLICES says): another pad takes it over, F5 OFF or (TRIG GATE) the release lets it go.
+// pauses the loop under it. The repeat's span is the one latched at the trigger (loop.cpp begin_region, `again`). The slot has one repeating slice (the MONO choice whatever SLICES says): another pad takes it over, F5 OFF or (TRIG GATE) the release lets it go.
 void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad, bool pressed) noexcept {
   slot &= 3u;
   if (voc_ == nullptr || perform_ == nullptr) {
@@ -528,6 +528,11 @@ void SampleScreen::set_speaks(app::Context& ctx, int delta, bool tap) noexcept {
   }
 }
 
+void SampleScreen::speaks_tap(app::Context& ctx) noexcept {
+  set_speaks(ctx, 1, true);
+  ctx.redraw();
+}
+
 // `delta` is the encoder's detents, or +-1 for a tap; a tap wraps where a detent stops at the end.
 void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
   const bool tap = delta == 1 && key_tap_;
@@ -554,6 +559,12 @@ void SampleScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
         stop_repeat(ctx, slot_);  // F5 OFF stops everything of the slot: a repeating slice fades out with the loop
         write(ctx, Field::Play, 0.0f);
       } else {
+        if (on_no_side(ctx, slot_)) {  // a loop nobody hears is not offered: LOOP ON makes the slot speak first, as a tap on F2 does (its line: SLOT n SPEAKS); a SOUNDS slot's route stays
+          set_speaks(ctx, 1, true);
+          if (on_no_side(ctx, slot_)) {  // refused (set_speaks said why): the slot is still not heard, so the loop does not start
+            break;
+          }
+        }
         write(ctx, Field::Play, 1.0f);
       }
       break;
@@ -689,7 +700,7 @@ void SampleScreen::release_play(app::Context& ctx, unsigned pad) noexcept {
 }
 
 // F1 LOW PADS: both rows at once, one of sm::kLowPadsNames (NOTE+TRIAD is the palette's default: A NOTE, B TRIAD; the others give both rows that kind; never OFF). The first
-// tap steps, a tap wraps, a detent stops at the ends. A pair the list has no place for steps to the first (or, from the end, repairs to the pair the step names). A new
+// tap steps, a tap wraps, a detent stops at the ends. A pair the list has no place for (the key says MIXED) steps to the first, NOTE+TRIAD. A new
 // value ends the notes: the old meaning started them (the held pad stays down and sounds again at its next press).
 void SampleScreen::step_plays(app::Context& ctx, int delta, bool tap) noexcept {
   if (perform_ == nullptr) {
@@ -945,7 +956,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const Vocoder::LoopStatus& ls = st[slot_ & 3u];
   const bool empty = ls.length == 0u;
   const sm::Side side = sm::side_of(rt, slot_);
-  // UX3-1: in TUNE a SOUNDS slot is not heard, in TRACT a SPEAKS or NONE slot only through DRY: that side is drawn dim, with the reason below.
+  // UX3-1: in TUNE a SOUNDS slot is not heard, in TRACT a SPEAKS or PADS ONLY slot only through DRY: that side is drawn dim, with the reason below.
   const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
   const bool mouth_live = sm::tract_live(ctx.engine());
   const auto ink = [mode, mouth_live](sm::Side sd) { return sm::cue_dim(sm::mode_cue(mode, sd, mouth_live)) ? Color::TextDim : side_ink(sd); };
@@ -972,7 +983,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   keys[1].dim = speaks_at != 0u && sm::cue_dim(speaks_cue);
   cat(keys[2].value, sizeof keys[2].value, sm::kSpeedNames[ls.speed < sm::kSpeedCount ? ls.speed : 1u]);
   cat(keys[3].value, sizeof keys[3].value, sm::kDirNames[ls.reverse ? 1 : 0]);
-  sm::loop_text(ls.playing || ls.pending, repeating_slice(slot_ & 3u), keys[4].value);
+  sm::loop_text(ls.playing || ls.pending, ls.repeat ? repeating_slice(slot_ & 3u) : 0u, keys[4].value);  // the unit's status says it repeats; the table says which slice
   cat(keys[5].value, sizeof keys[5].value, g_sd.gate[slot_ & 3u] != 0u ? "GATE" : "ONE SHOT");
   cat(keys[6].value, sizeof keys[6].value, g_sd.choke_off[slot_ & 3u] != 0u ? "POLY" : "MONO");
   {
@@ -1068,7 +1079,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     r.text(centred(r, buf, Face::Label, mid), kRowY + 100, buf, Color::Text, Face::Label);
     const char* word = ls.playing ? "PLAYING" : (ls.pending ? "WAITING FOR THE BAR" : "STOPPED");
     r.text(centred(r, word, Face::Label, mid), kRowY + 134, word, ls.playing ? Color::Play : Color::TextDim, Face::Label);
-    const char* on = side == sm::Side::Speaks ? "ON SPEAKS" : (side == sm::Side::Sounds ? "ON SOUNDS" : "ON NO SIDE");
+    const char* on = side == sm::Side::Speaks ? "ON SPEAKS" : (side == sm::Side::Sounds ? "ON SOUNDS" : "PADS ONLY");
     r.text(centred(r, on, Face::Label, mid), kRowY + 168, on, ink(side), Face::Label);
     draw_line(ctx, r, slot_, ls.length, kMidX + 14, kRowY + 214, kMidW - 28);
   }

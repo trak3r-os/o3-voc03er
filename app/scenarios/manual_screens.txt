@@ -81,7 +81,6 @@ wait 200
 tap f3
 tap f4
 tap f4
-tap f4
 tap play
 wait 500
 record on
@@ -145,11 +144,9 @@ wait 600
 # ---- SAMPLE: the slices on the pads, one sounding over a held triad of row B
 tap sampleplay
 wait 200
-tap f2
-tap f2
-wait 100
-tap f2
-wait 100
+# the take went to SOUNDS (AFTER SOUNDS) and its loop plays: LOOP off, so that a pad plays one slice
+tap f5
+wait 300
 paddown 38
 wait 600
 paddown 0

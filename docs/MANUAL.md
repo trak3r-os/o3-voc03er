@@ -468,7 +468,7 @@ The pads play PERFORM's layout (section 4, PERFORM), so you can play the synth u
 | F1 SOURCE | LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO or USB |
 | F2 GAIN | The input gain |
 | F3 LENGTH | FREE, or 1, 2, 4 or 8 bars |
-| F4 AFTER | Which side the finished take goes to: SPEAKS, SOUNDS or NONE |
+| F4 AFTER | Which side the finished take goes to: SPEAKS, SOUNDS or PADS (the slot is played from SAMPLE's slice pads only) |
 | F5 AUTOPLAY | ON: the take plays at once, looped |
 | F6 MONITOR | Hear the live input while you record |
 | F7 SLOT | Which slot, 1 to 4 (UP and DOWN too) |
@@ -493,7 +493,7 @@ bar and throws it away. DELETE with no take running empties the slot.
 
 AFTER is checked when REC arms, not after the take. A slot is one reader: if it already sits on SPEAKS and AFTER says SOUNDS (or the other way round), the take plays where
 the slot already is and AFTER is ignored; REC says "SLOT IS ON SPEAKS: AFTER IGNORED" (or SOUNDS) as it arms, and the take ends with "PLAYING ON SPEAKS: AFTER IGNORED". To move the
-slot, change what it does on SAMPLE first (F2 SPEAKS). In TUNE the AFTER key reads dim when its side is SOUNDS, and in TRACT when it is SPEAKS or NONE: see the mode cue in section 10.
+slot, change what it does on SAMPLE first (F2 SPEAKS). In TUNE the AFTER key reads dim when its side is SOUNDS, and in TRACT when it is SPEAKS or PADS: see the mode cue in section 10.
 SHIFT on the GAIN key gives coarser gain steps, not finer.
 
 ### SAMPLE
@@ -515,7 +515,7 @@ PATTERN's SLICE lane or from MIDI plays its cut once in the same way.
 **LOOP ON and a slice pad: the slice repeats.** While the slot's loop is on, a slice pad repeats that slice instead of playing it once; F5 reads ON SL 5 (the slice's number).
 With TRIG ONE SHOT it repeats until you press another slice pad (that one repeats instead) or turn LOOP off with F5. With TRIG GATE it repeats while you hold the pad, and
 when you let go the slot's whole loop goes on from where it is. A slot has one repeating slice at a time. LOOP OFF stops everything of the slot, the repeat included. A ONE SHOT
-repeat goes on after you leave the screen, until F5 or another pad stops it. A repeating slice is heard where the slot is heard: on SPEAKS the vocoder hears it.
+repeat goes on after you leave the screen, until F5 or another pad stops it; when you come back F5 still reads ON SL 5, and F5 OFF, loading a project or a new take in the slot also ends it. A repeating slice is heard where the slot is heard: on SPEAKS the vocoder hears it.
 
 | Key | What it does |
 |---|---|
@@ -529,9 +529,9 @@ repeat goes on after you leave the screen, until F5 or another pad stops it. A r
 | F7 SLICES | MONO (the default): a hit fades out the slot's sounding slice and starts the new one. POLY: up to four slices overlap |
 | F8 LEVEL | -24 to +12 dB |
 
-A slice pad past the slot's count says how many slices there are ("5 SLICES", "NO SLICES: SLOT IS EMPTY" on an empty slot). A slot that does not speak and is not the carrier (the slot panel reads NO SIDE) has its loop stopped and only its slice pads
-speak, over LIVE or together with the slot that speaks ("SLOT 1: ITS PADS SPEAK OVER LIVE" says so); if you start its loop with F5 LOOP, the loop is not heard ("LOOP NOT HEARD, PADS SPEAK OVER LIVE"): make the slot speak with F2 to hear it. While the slot itself records, a slice pad says "SLOT IS RECORDING: NO SLICE", and while it is armed to record "SLOT IS ARMED TO RECORD: NO SLICE". When a change of the slot's length
-puts hand-edited cuts back to even ones, the strip says "LENGTH CHANGED: CUTS EVEN AGAIN". In TUNE a SOUNDS slot, and in TRACT a SPEAKS or NONE slot with MOUTH on PADS, shows dim with a line saying why (section 10, "The mode cue"); with MOUTH on LIVE the slot is not dim and the line says it moves the mouth.
+A slice pad past the slot's count says how many slices there are ("5 SLICES", "NO SLICES: SLOT IS EMPTY" on an empty slot). A slot that does not speak and is not the carrier (the slot panel reads PADS, and the centre says PADS ONLY) has its loop stopped and only its slice pads
+speak, over LIVE or together with the slot that speaks ("SLOT 1: ITS PADS SPEAK OVER LIVE" says so); if you turn its F5 LOOP on, the slot is made to speak first ("SLOT 1 SPEAKS"), so the loop is heard; F2 takes it back to LIVE. A slot that sounds (SOUNDS) keeps its side when LOOP goes on. While the slot itself records, a slice pad says "SLOT IS RECORDING: NO SLICE", and while it is armed to record "SLOT IS ARMED TO RECORD: NO SLICE". When a change of the slot's length
+puts hand-edited cuts back to even ones, the strip says "LENGTH CHANGED: CUTS EVEN AGAIN". In TUNE a SOUNDS slot, and in TRACT a SPEAKS or PADS slot with MOUTH on PADS, shows dim with a line saying why (section 10, "The mode cue"); with MOUTH on LIVE the slot is not dim and the line says it moves the mouth.
 
 UP and DOWN pick the slot. F1 LOW PADS changes the shared pair of note rows (PATTERN's NOTE lane uses it too); PERFORM's F6 and F7 are separate. SAMPLE EDIT, FILE and SAMPLE LOAD play the same two rows.
 
@@ -594,8 +594,8 @@ SAMPLE LOAD lists the WAV files in `Apps/o3_voc03er/` on the card. To put files 
 computer, or put the card in a computer. UP and DOWN pick a file, F1 loads it into the selected slot, F8 goes back. A slot that already
 holds a sample asks first: F1 confirms, any other key cancels. A slot that cannot take a load says what to stop: "SLOT IS RECORDING: STOP THE TAKE FIRST", "SLOT LOOP IS ON: STOP THE LOOP FIRST"
 (the loop playing or queued) or "A SLICE IS SOUNDING: WAIT FOR IT" (a slice of any slot borrows the slot's memory while it sounds). The list shows at most 64 files; a folder with more says
-"LIST CUT AT 64 FILES: THE FIRST 64 SHOW" (keep the files you want in the first 64 by name, or move the rest into another folder). A file loaded into a slot that is on NONE says the slot has
-no side: only its slices speak, and F2 SPEAKS on SAMPLE makes it speak.
+"LIST CUT AT 64 FILES: THE FIRST 64 SHOW" (keep the files you want in the first 64 by name, or move the rest into another folder). A file loaded into a slot that is on PADS says "PADS ONLY":
+only its slices speak, and F2 SPEAKS on SAMPLE makes it speak.
 
 What loads: PCM WAV files of 8, 16, 24 or 32 bits, and 32-bit float files, mono or stereo (stereo is mixed to mono), at any rate from 22.05 to 96 kHz
 (so 48 kHz, 24-bit files from a computer load as they are). A slot is always mono, 16-bit, 44.1 kHz, so a file that is not that is converted while
@@ -752,7 +752,7 @@ This is a first public pre-release. The firmware has been measured on a unit for
 been read there, but several things need more testing, most of all by ear. In particular:
 
 - **The mode cue.** A slot's side means nothing to the ear in two modes. TUNE plays no synth, so a slot on SOUNDS (its loop, its slices) is not heard there. TRACT with MOUTH on PADS listens to nothing,
-  so a SPEAKS slot, and the slices of a slot on NONE, are heard only through DRY. With MOUTH on LIVE the same sides also move the mouth (the TRACT analyses what the modulator carries, a SPEAKS slot included), so they are not dim and the line says "MOVES THE MOUTH (LIVE) AND DRY". SAMPLE, SAMPLE REC AFTER and the side badge show such a side dim with a line saying why; the slot and its
+  so a SPEAKS slot, and the slices of a slot on PADS, are heard only through DRY. With MOUTH on LIVE the same sides also move the mouth (the TRACT analyses what the modulator carries, a SPEAKS slot included), so they are not dim and the line says "MOVES THE MOUTH (LIVE) AND DRY". SAMPLE, SAMPLE REC AFTER and the side badge show such a side dim with a line saying why; the slot and its
   route are untouched and come back as they were in the other modes. This is a hint on screen: the ear on the unit decides, and it needs more testing there.
 - **The sound.** How the modes sound with a real voice, how the synth sounds at the top of its range, the level of TALK, and the
   eight presets are for your ears. Nothing here says a sound is right.

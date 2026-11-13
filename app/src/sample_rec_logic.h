@@ -17,17 +17,17 @@ inline constexpr unsigned kLengthCount = 5;
 inline constexpr unsigned kLengthBars[kLengthCount] = {0, 1, 2, 4, 8};
 inline constexpr const char* kLengthNames[kLengthCount] = {"FREE", "1 BAR", "2 BARS", "4 BARS", "8 BARS"};
 
-// F4 AFTER: the side the finished take plays on.
+// F4 AFTER: the side the finished take plays on; None shows as "PADS" (the slot neither speaks nor sounds: only its pads are played).
 enum class After : std::uint8_t { Speaks, Sounds, None };
 inline constexpr unsigned kAfterCount = 3;
-inline constexpr const char* kAfterNames[kAfterCount] = {"SPEAKS", "SOUNDS", "NONE"};
+inline constexpr const char* kAfterNames[kAfterCount] = {"SPEAKS", "SOUNDS", "PADS"};
 
 inline constexpr unsigned kSampleRate = static_cast<unsigned>(o3sdk::core::kRefRateHz);  // the loops' rate: the engine's
 inline constexpr unsigned kBeatsPerBar = 4;
 inline constexpr unsigned kTicksPerBeat = 960;  // transport.h kPpqn
 
 // What AFTER does with the slot: `place` the route `to` on `side`; `refused` when the other side holds the slot (a slot is one reader, route.h),
-// then nothing is placed and the screen says why. NONE places nothing and is not a refusal.
+// then nothing is placed and the screen says why. PADS (None) places nothing and is not a refusal.
 struct AfterPlan {
   route::Side side = route::Side::Speaks;
   route::Route to;
@@ -53,7 +53,7 @@ constexpr AfterPlan plan_after(route::Route cur, After after, unsigned slot) noe
 }
 
 // UX3-6: what AFTER cannot do for a slot, known when REC arms (not after the take). The slot already sits on a side that is not AFTER's: the take
-// plays there and AFTER is ignored (a slot is one reader, route.h). `Refused`: the route would not take it. AFTER NONE and an AFTER that agrees say nothing.
+// plays there and AFTER is ignored (a slot is one reader, route.h). `Refused`: the route would not take it. AFTER PADS and an AFTER that agrees say nothing.
 enum class AfterNote : std::uint8_t { None, SlotOnSpeaks, SlotOnSounds, Refused };
 
 constexpr AfterNote after_note(route::Route cur, After after, unsigned slot) noexcept {

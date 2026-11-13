@@ -12,7 +12,7 @@
 //   are the slot's slices 1..24 (even cuts, 8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), it plays its cut once and stops at the end cut
 //   (TRIG ONE SHOT, the default; GATE also stops it at the release). A slice turns the slot's whole loop off (LOOP reads OFF) until F5 starts it again; a new hit restarts the slice from
 //   its start cut. With LOOP ON a pad does not turn it off: it repeats that slice (the unit's Trig 2) on the slot's own reader, until another pad or F5 OFF (TRIG GATE: until the
-//   release, then the whole loop goes on). A ONE SHOT repeat goes on when the screen is left (PERFORM's pads play over it).
+//   release, then the whole loop goes on). A repeat (LOOP ON, TRIG ONE SHOT) goes on when the screen is left, like the loop it narrows (PERFORM's pads play over it); back on SAMPLE F5 still reads ON SL n, F5 OFF ends it, and a project load or a new take in the slot does too. LOOP ON on a slot that neither speaks nor sounds makes it speak first (the F2 route), so the loop is heard.
 //   TRIG and SLICES are per slot; SLICES MONO (default) gives a slot one voice (a hit fades the sounding slice out and starts the new one), POLY lets its slices overlap on the free readers
 //   (or steal the oldest). F2 SPEAKS is what the vocoder listens to, as PERFORM's SPEAKS chip names it: LIVE or SLOT 1..4. A tap makes the selected slot speak (again: back to LIVE), the
 //   encoder steps LIVE, SLOT 1..4 over the slots that hold audio; an empty slot is refused and the screen says why. The line under the panes says what the selected slot does now.
@@ -72,7 +72,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void set_even_code(unsigned slot, unsigned code) noexcept;
   // FILE's load puts a slot's SPEED (0 0.5X, 1 1X, 2 2X), DIR and LEVEL back by the path the screen's own keys take (write): the unit's Loop n Speed, Dir and Level.
   void set_values(o3sdk::app::Context& ctx, unsigned loop, unsigned speed, bool reverse, float level_db) noexcept;
-  // TRIG (true GATE, false ONE SHOT) and CHOKE (true OFF, false ON) of a slot 0..3, as the keys flip them (P3: the project keeps them per slot).
+  // TRIG (true GATE, false ONE SHOT) and SLICES (true POLY, false MONO; the code and the project keep it as CHOKE OFF / ON) of a slot 0..3, as the keys flip them (P3: the project keeps them per slot).
   bool gate(unsigned slot) const noexcept;
   bool choke_off(unsigned slot) const noexcept;
   void set_gate(unsigned slot, bool on) noexcept;
@@ -90,14 +90,17 @@ class SampleScreen final : public o3sdk::app::Screen {
   // sequencer when the slot or its cuts changed.
   void service(o3sdk::app::Context& ctx) noexcept;
 
-  // PATTERN's SLICE audition (Q5): slice `pad` (0..23) of the slot that SPEAKS, fired as a pad of this screen fires it (reader, TRIG, CHOKE and the
+  // PATTERN's SLICE audition (Q5): slice `pad` (0..23) of the slot that SPEAKS, fired as a pad of this screen fires it (reader, TRIG, SLICES and the
   // slot's loop as there). Nothing when SPEAKS is LIVE or the slot has no such slice. release_slice is the pad's release (it ends a GATE slice).
   void fire_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void release_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept { release_pad(ctx, pad); }
 
+  // What a tap on F2 does for the selected slot (it speaks; again: SPEAKS back to LIVE), through the same function. SAMPLE EDIT's F8 calls it.
+  void speaks_tap(o3sdk::app::Context& ctx) noexcept;
+
   // The side's ink of a slot (SPEAKS, SOUNDS, or the neutral rule colour): the tint of its overview picture.
   o3sdk::ui::Rgb slot_ink(o3sdk::app::Context& ctx, unsigned slot) const noexcept;
-  // The slot is on neither side (NONE): its loop is off and only its slices speak (UX3-5: SAMPLE LOAD says so after a load).
+  // The slot neither speaks nor sounds (PADS ONLY): its loop is off and only its pads are played (UX3-5: SAMPLE LOAD says so after a load).
   bool on_no_side(o3sdk::app::Context& ctx, unsigned slot) const noexcept;
 
   // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.

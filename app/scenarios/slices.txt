@@ -1,4 +1,4 @@
-# SLICES: a 1 BAR take, the even cuts (8), pads 0 to 7 in turn on SOUNDS with a layout pad (row B, a triad) held, then CHOKE OFF and five pads held: the fifth steals the oldest.
+# SLICES: a 1 BAR take, the even cuts (8), AFTER SOUNDS (the slot sounds), LOOP OFF, pads 0 to 7 in turn with a layout pad (row B, a triad) held, then SLICES POLY (F7) and five pads held: they overlap, and the fifth steals the oldest voice.
 # The simulator shows the screen, the LEDs and that the unit plays; it cannot say how the cuts sound or what the frame costs.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/slices.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -8,7 +8,6 @@ wait 200
 tap f3
 tap f4
 tap f4
-tap f4
 tap play
 wait 500
 record on
@@ -16,11 +15,9 @@ tap rec
 wait 9000
 tap sampleplay
 wait 200
-tap f2
-tap f2
-wait 100
-tap f2
-wait 100
+# AFTER SOUNDS put the slot on SOUNDS and its loop plays (AUTOPLAY): F5 turns LOOP off, so that a pad is one slice, played once
+tap f5
+wait 300
 paddown 38
 wait 600
 snap 01_cuts
@@ -60,7 +57,7 @@ padup 7
 wait 150
 tap f7
 wait 100
-snap 03_choke_off
+snap 03_slices_poly
 paddown 0
 wait 20
 paddown 1

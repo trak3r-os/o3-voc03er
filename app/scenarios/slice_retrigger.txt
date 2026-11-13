@@ -1,5 +1,7 @@
-# SAMPLE slices (GitHub issue 3): a 1 BAR take on slot 1, SIDE SOUNDS, the whole loop on (a slot on a side plays it); a pad slice turns the loop off (LOOP reads OFF), plays its cut
-# once, and a second hit on the same pad in mid-slice restarts it from its start cut; after the slice nothing plays until F5 starts the loop again.
+# SAMPLE slices (GitHub issue 3): a 1 BAR take on slot 1 with AFTER SOUNDS (the slot sounds and its loop plays: F5 reads ON), F5 turns LOOP off, a pad slice plays its cut
+# once, a second hit on the same pad in mid-slice restarts it from its start cut, and after the slice nothing plays until F5 starts the loop again. With LOOP ON a held
+# pad repeats its slice (F5 reads ON SL 6); in TRIG ONE SHOT the repeat goes on after the release and after leaving SAMPLE (PERFORM), F5 still reads ON SL 6 on the way
+# back, and F5 OFF ends it.
 # The simulator shows the screen (the lit tick and the remaining bar of the sounding slice) and that the unit plays; it cannot say how it sounds.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/slice_retrigger.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -9,20 +11,17 @@ wait 200
 tap f3
 tap f4
 tap f4
-tap f4
 tap play
 wait 500
 record on
 tap rec
 wait 9000
 tap sampleplay
-wait 200
-tap f2
-tap f2
-wait 100
-tap f2
 wait 4000
 snap 01_loop_on
+tap f5
+wait 300
+snap 01b_loop_off
 paddown 5
 wait 120
 snap 02_slice_mid
@@ -39,4 +38,18 @@ snap 05_loop_stays_off
 tap f5
 wait 2500
 snap 06_loop_restarted
+paddown 5
+wait 700
+snap 07_repeating
+padup 5
+wait 400
+snap 08_repeat_goes_on
+tap performance
+wait 500
+tap sampleplay
+wait 300
+snap 09_way_back
+tap f5
+wait 400
+snap 10_f5_off_ends_it
 wav slice_retrigger

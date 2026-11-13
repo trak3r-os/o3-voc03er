@@ -510,7 +510,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
   h.fkey[0] = "THE INPUT SOURCE";
   h.fkey[1] = "INPUT GAIN";
   h.fkey[2] = "FREE, 1, 2, 4 OR 8 BARS";
-  h.fkey[3] = "SPEAKS, SOUNDS, NONE";
+  h.fkey[3] = "SPEAKS, SOUNDS, PADS";
   h.fkey[4] = "PLAY THE TAKE AT ONCE";
   h.fkey[5] = "INPUT TO THE MASTER";
   h.fkey[6] = "SLOT 1 TO 4";
@@ -684,7 +684,7 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   r.text(centred(r, buf, Face::Label, 316), 190, buf, Color::Text, Face::Label);
 
   // Where the slot plays.
-  const char* side = "ON NO SIDE";
+  const char* side = "PADS ONLY";
   if (rt.speaks == sv && rt.sounds == sv) {
     side = "ON SPEAKS AND SOUNDS";
   } else if (rt.speaks == sv) {

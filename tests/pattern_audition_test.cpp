@@ -350,3 +350,52 @@ TEST_CASE("slice: a palette pad writes the slice and fires it on the SPEAKS slot
   rig.h->run_ms(60);
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
+
+TEST_CASE("slice: PATTERN's fire_slice stays one shot with the slot's LOOP ON (a repeat is the SAMPLE pad's)") {
+  Rig rig;
+  tap(*rig.h, app::Button::SampleRec);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::F3);
+  tap(*rig.h, app::Button::F4);
+  tap(*rig.h, app::Button::F4);
+  tap(*rig.h, app::Button::F4);
+  tap(*rig.h, app::Button::Rec);
+  rig.h->run_ms(9000);
+  tap(*rig.h, app::Button::SamplePlay);
+  rig.h->run_ms(60);
+  for (unsigned i = 0; i < 3; ++i) tap(*rig.h, app::Button::Up);  // SAMPLE keeps its cursor across the harnesses of the process: slot 1
+  // SAMPLE REC's AFTER also persists, so the take may already play (SPEAKS or SOUNDS) or sit on PADS: get to "speaks, and LOOP ON" from either.
+  const std::uint16_t play0 = Vocoder::loop_param(0, Vocoder::LoopField::Play);
+  if (unit_param(*rig.h, play0) != 1.0f) {
+    tap(*rig.h, app::Button::F5);  // LOOP ON (on a PADS slot it makes the slot speak first)
+    rig.h->run_ms(300);
+  }
+  if (unit_param(*rig.h, 47) != 3.0f) {
+    tap(*rig.h, app::Button::F2);  // SPEAKS: this slot
+    rig.h->run_ms(300);
+  }
+  REQUIRE(unit_param(*rig.h, 47) == doctest::Approx(3.0f));  // ModSrc: slot 1 speaks
+  REQUIRE(unit_param(*rig.h, play0) == doctest::Approx(1.0f));  // and its loop plays
+  rig.h->run_ms(2500);
+  tap(*rig.h, app::Button::Pattern);
+  rig.h->run_ms(60);
+  tap(*rig.h, app::Button::Fx);  // the SLICE lane
+  rig.h->pad_down(1);
+  rig.h->run_ms(60);
+  // The slot's own reader plays the loop, so the slice runs on another reader: look at the Trig of all four. One shot is 1, a repeat would be 2.
+  float most = 0.0f;
+  float seen = 0.0f;
+  for (unsigned k = 0; k < 4; ++k) {
+    const float t = unit_param(*rig.h, Vocoder::region_param(k, Vocoder::RegionField::Trig));
+    most = std::max(most, t);
+    seen += t > 0.0f ? 1.0f : 0.0f;
+  }
+  CHECK(seen >= 1.0f);                       // the slice sounds
+  CHECK(most == doctest::Approx(1.0f));      // one shot, not Trig 2
+  rig.h->pad_up(1);
+  rig.h->run_ms(200);
+  for (unsigned k = 0; k < 4; ++k) {
+    CHECK(unit_param(*rig.h, Vocoder::region_param(k, Vocoder::RegionField::Trig)) < 1.5f);
+  }
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}

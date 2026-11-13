@@ -24,10 +24,10 @@ inline constexpr const char* kDirNames[2] = {"FWD", "REV"};                    /
 inline constexpr float kLevelMinDb = -24.0f;
 inline constexpr float kLevelMaxDb = 12.0f;
 
-// Which side of the route a slot is on: the vocoder's input (SPEAKS), the carrier (SOUNDS), or neither (NO SIDE: only its pads speak).
+// Which side of the route a slot is on: the vocoder's input (SPEAKS), the carrier (SOUNDS), or neither (PADS: only its pads are played).
 enum class Side : std::uint8_t { Speaks, Sounds, None };
 inline constexpr unsigned kSideCount = 3;
-inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "NO SIDE"};
+inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "PADS"};
 
 // The top two rows (pads 0..23) are the slices of the selected slot.
 inline constexpr unsigned kTopPads = 24;
@@ -86,7 +86,7 @@ constexpr SidePlan plan_side(route::Route cur, Side target, unsigned slot, bool 
 
 // ---- F2 SPEAKS --------------------------------------------------------------------------------------------------------------------------
 // F2 shows and chooses what the vocoder listens to, as PERFORM's SPEAKS chip names it: position 0 is LIVE, 1..4 are SLOT 1..4. SOUNDS for a slot is
-// PERFORM's to choose, so there is no NONE here: a slot that does not speak is simply not the one that speaks.
+// PERFORM's to choose, so there is no PADS ONLY choice here: a slot that does not speak is simply not the one that speaks.
 
 inline constexpr unsigned kSpeaksPositions = 1u + route::kSlots;
 
@@ -132,23 +132,18 @@ inline constexpr const char* kLowPadsNames[kLowPadsCount] = {"NOTE+TRIAD", "NOTE
 // The same for the F1 key's value: the Data face holds about eight characters in a 100 px key.
 inline constexpr const char* kLowPadsKey[kLowPadsCount] = {"NOTE+TRI", "NOTE", "TRIAD", "7TH", "OPEN", "POWER"};
 
-// The pair the palette holds: the exact one, else (a pair that is not in the list) the one that gives both rows row A's kind, else -1 (row A is OFF or
-// a parameter strip).
+// The pair the palette holds when it is one of the six, else -1 (a pair PATTERN set that the key has no place for, such as A NOTE with B 7TH, or a row that is OFF
+// or a parameter strip): the key says MIXED for it.
 constexpr int low_pads_index(pads::Plays a, pads::Plays b) noexcept {
   for (unsigned i = 0; i < kLowPadsCount; ++i) {
     if (kLowA[i] == a && kLowB[i] == b) {
       return static_cast<int>(i);
     }
   }
-  for (unsigned i = 1; i < kLowPadsCount; ++i) {
-    if (kLowA[i] == a && kLowB[i] == a) {
-      return static_cast<int>(i);
-    }
-  }
   return -1;
 }
 
-// The pair after a step: a tap goes on and wraps, the encoder stops at the ends. From a pair the list has no place for (-1) the step lands on the first.
+// The pair after a step: a tap goes on and wraps, the encoder stops at the ends. From MIXED (-1, a pair the list has no place for) the first step lands on NOTE+TRIAD, either way.
 constexpr unsigned low_pads_step(int cur, int delta, bool wrap) noexcept {
   if (cur < 0) {
     return 0u;
@@ -161,14 +156,14 @@ constexpr unsigned low_pads_step(int cur, int delta, bool wrap) noexcept {
   return v < 0 ? 0u : (v >= n ? kLowPadsCount - 1u : static_cast<unsigned>(v));
 }
 
-// The key's value: the pair's name; a pair outside the list shows row A's kind.
+// The key's value: the pair's name; a pair outside the list is MIXED (never row A's kind alone: row B may play something else).
 constexpr const char* low_pads_name(pads::Plays a, pads::Plays b) noexcept {
   const int i = low_pads_index(a, b);
-  return i >= 0 ? kLowPadsNames[i] : pads::kPlaysNames[pads::idx(a)];
+  return i >= 0 ? kLowPadsNames[i] : "MIXED";
 }
 constexpr const char* low_pads_key(pads::Plays a, pads::Plays b) noexcept {
   const int i = low_pads_index(a, b);
-  return i >= 0 ? kLowPadsKey[i] : pads::kPlaysShort[pads::idx(a)];
+  return i >= 0 ? kLowPadsKey[i] : "MIXED";
 }
 
 // SPEED held inside 0.5X..2X by a detent; a tap wraps.
@@ -255,7 +250,7 @@ struct SlicePublished {
 };
 
 // The SPEAKS slot's slices to the step sequencer (U6c), only when the slot or its table's length changed since the last call: a pass that finds
-// nothing new costs two compares. `slot` >= kReaders (SPEAKS LIVE or NONE) or an empty table publishes none (reader 0xFF, count 0). The hook
+// nothing new costs two compares. `slot` >= kReaders (SPEAKS LIVE) or an empty table publishes none (reader 0xFF, count 0). The hook
 // never reads the map while it is rewritten (StepSeq::slices_open stores count 0 first). Returns true when it published. Only the length is
 // compared because even cuts follow from it: SAMPLE EDIT (U7) moves cuts at the same length and has to clear `st` to force a publish.
 inline bool publish_slices(StepSeq& seq, SlicePublished& st, unsigned slot, const SliceTable* table, std::uint32_t per_loop) noexcept {
@@ -420,7 +415,7 @@ struct ReaderState {
   std::uint32_t seq = 0;   // when that slice started (higher: newer)
 };
 
-// The reader a slice of `slot` plays on; -1 when none can. CHOKE ON: the slot's own reader, which a new slice retriggers. CHOKE OFF: the own
+// The reader a slice of `slot` plays on; -1 when none can. `choke` (SLICES MONO): the slot's own reader, which a new slice retriggers. SLICES POLY: the own
 // reader if no slice sounds on it, else a free one, else the oldest slice voice is stolen. A reader that records is never taken, nor one whose
 // whole loop plays while it is another slot's (a slice would pause it), nor one whose slot is on a side.
 constexpr int pick_reader(const ReaderState (&r)[kReaders], unsigned slot, bool choke) noexcept {

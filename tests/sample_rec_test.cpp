@@ -210,7 +210,7 @@ TEST_CASE("sample_rec: one RIGHT from FREE sets LENGTH to 1 BAR, as the F3 tap d
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("sample_rec: REC again stops a free take, AFTER NONE leaves the slot unplaced, DELETE empties it") {
+TEST_CASE("sample_rec: REC again stops a free take, AFTER PADS leaves the slot on no side, DELETE empties it") {
   Rig rig;
   sim::Harness& h = *rig.h;
   // LENGTH down to FREE with LEFT
@@ -219,7 +219,7 @@ TEST_CASE("sample_rec: REC again stops a free take, AFTER NONE leaves the slot u
   tap(h, app::Button::Left);
   tap(h, app::Button::F4);  // focus AFTER
   tap(h, app::Button::F4);  // SOUNDS
-  tap(h, app::Button::F4);  // NONE
+  tap(h, app::Button::F4);  // PADS
   tap(h, app::Button::Rec);
   h.run_ms(2500);
   tap(h, app::Button::Rec);  // stops at the bar line

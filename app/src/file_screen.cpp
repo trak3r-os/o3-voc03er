@@ -592,7 +592,7 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
     fl::project_layouts(g_proj, lay);  // an older file's one layout serves every mode but TRACT
     perform_->set_layouts(lay);
   }
-  for (unsigned s = 0; s < route::kSlots; ++s) {  // TRIG and CHOKE ride with every record, audio or not (a record without them is ONE SHOT, CHOKE ON)
+  for (unsigned s = 0; s < route::kSlots; ++s) {  // TRIG and CHOKE ride with every record, audio or not (a record without them is ONE SHOT, SLICES MONO)
     sample_->set_gate(s, g_proj.slot[s].gate != 0u);
     sample_->set_choke_off(s, g_proj.slot[s].choke_off != 0u);
   }

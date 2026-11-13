@@ -33,7 +33,7 @@ namespace sm = o3_voc03er::sample;
 namespace route = o3_voc03er::route;
 using o3_voc03er::Vocoder;
 
-TEST_CASE("sample: SIDE moves a slot between SPEAKS, SOUNDS and NONE, refuses an empty one") {
+TEST_CASE("sample: SPEAKS moves a slot between SPEAKS, SOUNDS and PADS ONLY, refuses an empty one") {
   route::Route cur;
   sm::SidePlan p = sm::plan_side(cur, sm::Side::Speaks, 1, true);
   CHECK(p.refused);
@@ -83,15 +83,19 @@ TEST_CASE("sample: F1 LOW PADS values, steps and the name of a pair outside the 
   CHECK(std::strcmp(sm::kLowPadsNames[0], "NOTE+TRIAD") == 0);
   CHECK(sm::low_pads_index(Plays::Note, Plays::Triad) == 0);
   CHECK(sm::low_pads_index(Plays::Power, Plays::Power) == 5);
-  CHECK(sm::low_pads_index(Plays::Seventh, Plays::Note) == 3);  // not a pair of the list: row A's kind
+  CHECK(sm::low_pads_index(Plays::Seventh, Plays::Note) == -1);  // not a pair of the list: MIXED
   CHECK(sm::low_pads_index(Plays::Off, Plays::Note) == -1);
   CHECK(sm::low_pads_step(0, 1, false) == 1u);
   CHECK(sm::low_pads_step(5, 1, false) == 5u);  // the encoder stops
   CHECK(sm::low_pads_step(5, 1, true) == 0u);   // a tap wraps
   CHECK(sm::low_pads_step(0, -1, false) == 0u);
   CHECK(sm::low_pads_step(-1, 1, false) == 0u);
-  CHECK(std::strcmp(sm::low_pads_name(Plays::Seventh, Plays::Off), "7TH") == 0);
-  CHECK(std::strcmp(sm::low_pads_name(Plays::Off, Plays::Note), "OFF") == 0);  // shown as it is; the next step repairs it
+  CHECK(std::strcmp(sm::low_pads_name(Plays::Seventh, Plays::Off), "MIXED") == 0);
+  CHECK(std::strcmp(sm::low_pads_name(Plays::Note, Plays::Seventh), "MIXED") == 0);  // PATTERN's A NOTE with B 7TH: row B is not NOTE
+  CHECK(std::strcmp(sm::low_pads_key(Plays::Note, Plays::Seventh), "MIXED") == 0);
+  CHECK(sm::low_pads_step(sm::low_pads_index(Plays::Note, Plays::Seventh), 1, false) == 0u);  // the first step from MIXED: NOTE+TRIAD
+  CHECK(sm::low_pads_step(sm::low_pads_index(Plays::Note, Plays::Seventh), -1, true) == 0u);
+  CHECK(std::strcmp(sm::low_pads_name(Plays::Off, Plays::Note), "MIXED") == 0);  // the next step repairs it
   CHECK(std::strcmp(sm::low_pads_name(Plays::Note, Plays::Triad), "NOTE+TRIAD") == 0);
 }
 
@@ -206,7 +210,7 @@ float unit_param(sim::Harness& h, std::uint16_t id) {
 
 constexpr std::uint16_t kCarSrc = 34, kModSrc = 47;
 
-// SAMPLE REC takes 1 BAR into slot 1 (AFTER NONE: it is not placed), then SAMPLE opens.
+// SAMPLE REC takes 1 BAR into slot 1 (AFTER PADS: it is on no side), then SAMPLE opens.
 struct Rig {
   o3sdk::platform::host::FakeCapture cap;
   std::unique_ptr<sim::Harness> h;
@@ -220,12 +224,12 @@ struct Rig {
     tap(*h, app::Button::SampleRec);
     h->run_ms(60);
     // SAMPLE REC keeps its focus and AFTER across the harnesses of one process (one app object): the first take steps LENGTH to 1 BAR and AFTER
-    // to NONE from the defaults; a later one starts with AFTER on NONE and the focus on F4, so it needs one more step to come back to NONE.
+    // to PADS from the defaults; a later one starts with AFTER on PADS and the focus on F4, so it needs one more step to come back to PADS.
     static bool taken = false;
     tap(*h, app::Button::F3);  // LENGTH: 1 BAR (a later take only moves the focus)
     tap(*h, app::Button::F4);  // AFTER
     tap(*h, app::Button::F4);
-    tap(*h, app::Button::F4);  // NONE
+    tap(*h, app::Button::F4);  // PADS
     if (taken) {
       tap(*h, app::Button::F4);
     }
@@ -267,12 +271,17 @@ TEST_CASE("sample: SIDE, SPEED, DIR, LEVEL and LOOP reach the unit") {
   rig.open();
   const auto slot1 = [&h](Vocoder::LoopField f) { return unit_param(h, Vocoder::loop_param(0, f)); };
   CHECK(slot1(Vocoder::LoopField::Play) == doctest::Approx(0.0f));
-  tap(h, app::Button::F5);  // LOOP on, from the bar
+  tap(h, app::Button::F5);  // LOOP on, from the bar: a slot on no side is made to speak first (the same route change as a tap on F2)
   h.run_ms(5000);
   CHECK(slot1(Vocoder::LoopField::Play) == doctest::Approx(1.0f));
-  tap(h, app::Button::F5);  // and off
+  CHECK(unit_param(h, kModSrc) == doctest::Approx(3.0f));
+  tap(h, app::Button::F5);  // and off: the loop stops, the slot goes on speaking
   h.run_ms(300);
   CHECK(slot1(Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+  CHECK(unit_param(h, kModSrc) == doctest::Approx(3.0f));
+  tap(h, app::Button::F2);  // it speaks already: SPEAKS goes back to LIVE
+  h.run_ms(60);
+  CHECK(unit_param(h, kModSrc) != doctest::Approx(3.0f));
   tap(h, app::Button::F2);  // SPEAKS: the first tap makes SLOT 1 speak
   h.run_ms(60);
   CHECK(unit_param(h, kModSrc) == doctest::Approx(3.0f));
@@ -716,7 +725,7 @@ TEST_CASE("sample: in TRACT the lower pads still play notes, F1 is a note kind, 
 
 // ---- UX3: the mode cue, the slices line, the reader refusal -------------------------------------------------------------------------------
 
-TEST_CASE("sample: UX3 mode cue: TUNE does not hear SOUNDS, TRACT hears SPEAKS and NONE through DRY, and moves the mouth with MOUTH LIVE") {
+TEST_CASE("sample: UX3 mode cue: TUNE does not hear SOUNDS, TRACT hears SPEAKS and PADS ONLY through DRY, and moves the mouth with MOUTH LIVE") {
   CHECK(std::strcmp(o3_voc03er::kModeNames[sm::kModeTune], "TUNE") == 0);
   for (unsigned mode = 0; mode < o3_voc03er::kModeCount; ++mode) {
     for (const bool live : {false, true}) {
@@ -798,4 +807,157 @@ TEST_CASE("sample: UX3 slices_line says how many slices there are") {
   CHECK(std::string(b) == "5 SLICES");
   sm::slices_line(24, b);
   CHECK(std::string(b) == "24 SLICES");
+}
+
+// ---- FOLD: LOOP ON makes a slot speak, the repeat survives leaving SAMPLE, SLICES POLY with LOOP ON ----------------------------------------------
+
+namespace {
+// The pixels of the F5 key's value window (x 400..499, y 424..447 of the 800 x 480 frame): what the key reads, as bytes.
+std::string f5_window(const sim::Harness& h) {
+  const std::uint8_t* px = h.raster().rgba();
+  std::string out;
+  for (int y = 424; y < 448; ++y) {
+    out.append(reinterpret_cast<const char*>(px + (static_cast<std::size_t>(y) * 800u + 400u) * 4u), 100u * 4u);
+  }
+  return out;
+}
+
+float mod_src(sim::Harness& h) { return unit_param(h, kModSrc); }
+}  // namespace
+
+TEST_CASE("sample: LOOP ON on a slot that neither speaks nor sounds makes it speak first; on a SOUNDS slot the route stays") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();  // slot 1, PADS ONLY
+  rig.open();
+  CHECK(mod_src(h) != doctest::Approx(3.0f));
+  CHECK(unit_param(h, kCarSrc) != doctest::Approx(3.0f));
+  tap(h, app::Button::F5);  // LOOP ON
+  h.run_ms(300);
+  CHECK(mod_src(h) == doctest::Approx(3.0f));  // the slot speaks now (the route of a tap on F2) ...
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));  // ... and the loop plays
+  tap(h, app::Button::F5);  // OFF: the loop stops, the slot goes on speaking
+  h.run_ms(300);
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+  CHECK(mod_src(h) == doctest::Approx(3.0f));
+  // A take into slot 2 with AFTER SOUNDS: slot 2 sounds (the carrier reads slot 2), and its LOOP ON changes nothing in the route.
+  tap(h, app::Button::SampleRec);
+  h.run_ms(60);
+  tap(h, app::Button::F7);  // SLOT's focus, then its step: slot 2
+  tap(h, app::Button::F7);
+  tap(h, app::Button::F4);  // AFTER's focus, then its steps: PADS to SPEAKS to SOUNDS
+  tap(h, app::Button::F4);
+  tap(h, app::Button::F4);
+  tap(h, app::Button::Rec);
+  h.run_ms(9000);
+  REQUIRE(unit_param(h, kCarSrc) == doctest::Approx(4.0f));  // SOUNDS holds slot 2
+  rig.open();
+  for (unsigned i = 0; i < 3; ++i) tap(h, app::Button::Up);  // the cursor may sit on slot 2 already (a take selects its slot): first the top ...
+  tap(h, app::Button::Down);                                  // ... then slot 2
+  const float mod_before = mod_src(h);
+  if (lp(h, 1, Vocoder::LoopField::Play) == 1.0f) {  // AUTOPLAY started the SOUNDS slot with its take: F5 ends it, and the second tap is the LOOP ON under test
+    tap(h, app::Button::F5);
+    h.run_ms(300);
+    CHECK(lp(h, 1, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+    CHECK(unit_param(h, kCarSrc) == doctest::Approx(4.0f));
+  }
+  tap(h, app::Button::F5);
+  h.run_ms(500);
+  CHECK(lp(h, 1, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  CHECK(unit_param(h, kCarSrc) == doctest::Approx(4.0f));
+  CHECK(mod_src(h) == doctest::Approx(mod_before));
+  CHECK(h.runtime().frame_failures() == 0u);
+  // SAMPLE REC keeps its focus, AFTER and SLOT across the harnesses of the process: put them back where Rig::take expects them (AFTER PADS, SLOT 1, focus on AFTER).
+  for (unsigned i = 0; i < 3; ++i) tap(h, app::Button::Up);
+  tap(h, app::Button::SampleRec);
+  h.run_ms(60);
+  tap(h, app::Button::F4);  // AFTER: SOUNDS to PADS
+  tap(h, app::Button::F7);  // SLOT's focus, then 2, 3 and 1
+  tap(h, app::Button::F7);
+  tap(h, app::Button::F7);
+  tap(h, app::Button::F7);
+  tap(h, app::Button::F4);  // the focus back on AFTER
+}
+
+TEST_CASE("sample: a repeating slice goes on after SAMPLE is left, F5 reads ON SL n from the unit again, F5 OFF and a NEW project end it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  tap(h, app::Button::F5);  // LOOP ON
+  h.run_ms(2500);
+  h.pad_down(5);
+  h.run_ms(40);
+  h.pad_up(5);
+  h.run_ms(200);
+  REQUIRE(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
+  const std::string reads = f5_window(h);  // "ON SL 6"
+  tap(h, app::Button::Performance);
+  h.run_ms(500);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));  // kept: PERFORM's pads play over it
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  rig.open();
+  h.run_ms(200);
+  CHECK(f5_window(h) == reads);  // the way back: the key still reads the repeat (the unit's status, not the screen's memory)
+  tap(h, app::Button::F5);       // OFF ends it
+  h.run_ms(200);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+  CHECK(f5_window(h) != reads);
+  // A repeat again, then a NEW project: the slot is emptied, nothing repeats, and F5 does not read a slice.
+  tap(h, app::Button::F5);
+  h.run_ms(2500);
+  h.pad_down(2);
+  h.run_ms(40);
+  h.pad_up(2);
+  h.run_ms(200);
+  REQUIRE(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
+  rig.take();  // a new take into slot 1 while it repeats: the repeat ends with the old audio
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));
+  CHECK_FALSE(f5_window(h) == reads);
+  rig.open();
+  if (lp(h, 0, Vocoder::LoopField::Play) != 1.0f) {  // the new take may be playing already (the slot speaks)
+    tap(h, app::Button::F5);
+    h.run_ms(2500);
+  }
+  REQUIRE(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  h.pad_down(4);
+  h.run_ms(40);
+  h.pad_up(4);
+  h.run_ms(200);
+  REQUIRE(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
+  tap(h, app::Button::File);
+  h.run_ms(60);
+  tap(h, app::Button::F4);  // NEW asks
+  tap(h, app::Button::F1);  // confirmed
+  h.run_ms(600);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: SLICES POLY with LOOP ON still repeats one slice per slot: the next pad takes the repeat over on the slot's own reader") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  tap(h, app::Button::F7);  // SLICES: POLY
+  tap(h, app::Button::F5);  // LOOP ON
+  h.run_ms(2500);
+  h.pad_down(5);
+  h.run_ms(40);
+  h.pad_up(5);
+  h.run_ms(40);
+  REQUIRE(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
+  const float start5 = rp(h, 0, Vocoder::RegionField::Start);
+  h.pad_down(2);
+  h.run_ms(40);
+  h.pad_up(2);
+  h.run_ms(40);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
+  CHECK(rp(h, 0, Vocoder::RegionField::Start) != doctest::Approx(start5));
+  for (unsigned reader = 1; reader < 4; ++reader) {  // no other reader took a slice
+    CHECK(rp(h, reader, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));
+  }
+  CHECK(h.runtime().frame_failures() == 0u);
 }

@@ -322,14 +322,18 @@ TEST_CASE("region: a gated repeat releases to the whole loop, which resumes wher
   b.l.set_region_len(0, 600);  // from 256 samples up the loop ducks under the region, so the resume is a ramp too
   REQUIRE(b.l.trig_region(0, 0, 100, true));
   std::vector<float> rep(1900, 0.0f);
-  for (std::uint32_t p = 0; p < 1900; p += 100) b.l.play(0, rep.data() + p, 100, false);
+  b.l.play(0, rep.data(), 100, false);  // the loop ducks under the region over its 64-sample fade-in, then it is paused
+  const std::uint32_t paused_at = b.l.position(0);
+  for (std::uint32_t p = 100; p < 1900; p += 100) b.l.play(0, rep.data() + p, 100, false);
   CHECK(b.l.region_repeating(0));
-  CHECK(b.l.playing(0));  // the loop is only paused
+  CHECK(b.l.playing(0));  // the loop is only paused ...
+  CHECK(b.l.position(0) == paused_at);  // ... its position does not move under 1900 samples of the repeat (Play is not turned off: the unit pauses it)
   b.l.release_region(0, 0);
   std::vector<float> after(400, 0.0f);
   for (std::uint32_t p = 0; p < 400; p += 100) b.l.play(0, after.data() + p, 100, false);
   CHECK_FALSE(b.l.region(0));
   CHECK(b.l.playing(0));
+  CHECK(b.l.position(0) != paused_at);  // the loop goes on after the release
   CHECK(max_step(rep) < 0.02f);
 
   CHECK(max_step(after) < 0.02f);
@@ -355,4 +359,159 @@ TEST_CASE("region: Vocoder Trig 2 repeats, shows in the status, and Trig 0 ends 
   CHECK_FALSE(r.v.loop_status(0).repeat);
   for (int k = 0; k < 20; ++k) r.block({});
   CHECK_FALSE(r.v.loop_status(0).region);
+}
+
+// ---- the repeat's span is the trigger's (FOLD 4) ----------------------------------------------------------------------------------------------
+
+TEST_CASE("region: a repeat wraps over the span the trigger latched, not the staged Start / Len written since") {
+  Bank b;
+  const std::uint32_t start = 100, len = 300;
+  b.l.set_region_start(0, start);
+  b.l.set_region_len(0, len);
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  std::vector<float> out = b.render(150, 50);  // inside the first pass
+  // the next pad's span arrives half written (its Start, the old Len), then whole, with no Trig yet
+  b.l.set_region_start(0, 2000);
+  const std::vector<float> p1 = b.render(300, 50);
+  b.l.set_region_len(0, 200);
+  const std::vector<float> p2 = b.render(600, 50);
+  out.insert(out.end(), p1.begin(), p1.end());
+  out.insert(out.end(), p2.begin(), p2.end());
+  REQUIRE(b.l.region_repeating(0));
+  // every pass, the first included, plays [start, start + len): the bank's samples there are 1100 .. 1400, never the 3000s of the staged Start
+  for (const float v : out) {
+    CHECK(std::fabs(v) < b.at(start + len) + 1e-6f);
+  }
+  // the second pass begins at out[len] with the same ramp-in and samples as the first (the unchanged span), the third at 2 * len
+  for (std::uint32_t j = 0; j < 100; ++j) {
+    const float f = j < 64 ? static_cast<float>(j + 1) / 64.0f : 1.0f;
+    CHECK(out[len + j] == doctest::Approx(b.at(start + j) * f).epsilon(1e-5).scale(1.0));
+    CHECK(out[2 * len + j] == doctest::Approx(b.at(start + j) * f).epsilon(1e-5).scale(1.0));
+  }
+  // a new Trig takes what is staged then: the new pad plays its own span
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  const std::vector<float> n = b.render(400, 50);
+  CHECK(n[150] > b.at(start + len));  // past the retrigger's crossfade the new pad plays its own span (the bank rises: 2000+ is above 400)
+  b.l.release_region(0, 0);
+  (void)b.render(200, 50);
+  CHECK_FALSE(b.l.region(0));
+}
+
+TEST_CASE("region: a repeat under a held bend (region_chunk_bent) keeps its span, its continuity and ends on a release") {
+  Bank b;
+  b.l.set_bend(1.5f);
+  const std::uint32_t start = 100, len = 300;
+  b.l.set_region_start(0, start);
+  b.l.set_region_len(0, len);
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  const auto out = b.render(1500, 37);
+  CHECK(b.l.region_repeating(0));
+  CHECK(max_step(out) < 0.02f);
+  float peak = 0.0f;
+  float low = 1.0f;
+  for (std::uint32_t k = 0; k < out.size(); ++k) {
+    CHECK(std::isfinite(out[k]));
+    peak = std::fmax(peak, std::fabs(out[k]));
+    if (k > 3u * len && k < 1500u) low = std::fmin(low, std::fabs(out[k]));
+  }
+  CHECK(peak < b.at(start + len) + 1e-6f);  // the span's samples only (the bank rises: a wrap that read further would exceed it)
+  CHECK(peak > 0.03f);
+  // the next pad staged while it repeats does not leak in at a wrap
+  b.l.set_region_start(0, 3000);
+  const auto more = b.render(900, 37);
+  float peak2 = 0.0f;
+  for (const float v : more) peak2 = std::fmax(peak2, std::fabs(v));
+  CHECK(peak2 < b.at(start + len) + 1e-6f);
+  b.l.release_region(0, 0);
+  const auto tail = b.render(300, 64);
+  CHECK_FALSE(b.l.region(0));
+  CHECK(tail[299] == 0.0f);
+  (void)low;
+}
+
+TEST_CASE("region: clear, forget and a new recording end a repeat for good") {
+  const auto repeating = [](Bank& b) {
+    b.l.set_region_start(0, 100);
+    b.l.set_region_len(0, 300);
+    REQUIRE(b.l.trig_region(0, 0, 100, true));
+    (void)b.render(700, 64);
+    REQUIRE(b.l.region_repeating(0));
+  };
+  const auto silent_after = [](Bank& b) {
+    CHECK_FALSE(b.l.region(0));
+    CHECK_FALSE(b.l.region_repeating(0));
+    const auto out = b.render(800, 64);  // the old wrap does not start again
+    CHECK(max_step(out) == 0.0f);
+    CHECK_FALSE(b.l.region(0));
+  };
+  {
+    Bank b;
+    repeating(b);
+    b.l.clear();
+    silent_after(b);
+  }
+  {
+    Bank b;
+    repeating(b);
+    b.l.forget(0);
+    silent_after(b);
+  }
+  {
+    Bank b;
+    repeating(b);
+    b.l.begin_record(0);  // a new take in the slot
+    CHECK_FALSE(b.l.region(0));
+    CHECK_FALSE(b.l.region_repeating(0));
+    std::vector<float> in(500, 0.0f);
+    (void)b.l.record(0, in.data(), 500);
+    b.l.end_record(0);
+    (void)b.render(800, 64);
+    CHECK_FALSE(b.l.region(0));  // nothing of the old repeat comes back after the take
+  }
+}
+
+TEST_CASE("region: a tiny Len (under the two fades) plays once and repeats without a jump or a NaN") {
+  for (const std::uint32_t len : {1u, 10u, 50u, 127u}) {
+    CAPTURE(len);
+    Bank once;
+    once.l.set_region_start(0, 100);
+    once.l.set_region_len(0, len);
+    REQUIRE(once.l.trig_region(0, 0, 100, false));
+    const auto o = once.render(600, 64);
+    CHECK_FALSE(once.l.region(0));
+    CHECK(max_step(o) < 0.02f);
+    for (const float v : o) CHECK(std::isfinite(v));
+    CHECK(o[599] == 0.0f);
+
+    Bank rep;
+    rep.l.set_region_start(0, 100);
+    rep.l.set_region_len(0, len);
+    REQUIRE(rep.l.trig_region(0, 0, 100, true));
+    const auto r = rep.render(2000, 37);
+    CHECK(rep.l.region_repeating(0));  // it goes on, one tiny pass after another
+    CHECK(max_step(r) < 0.02f);
+    for (const float v : r) CHECK(std::isfinite(v));
+    rep.l.release_region(0, 0);
+    (void)rep.render(400, 64);
+    CHECK_FALSE(rep.l.region(0));
+  }
+}
+
+TEST_CASE("region: a release during the fade-in fades out from where the ramp was, without a jump") {
+  Bank b;
+  b.l.set_region_start(0, 100);
+  b.l.set_region_len(0, 600);
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  std::vector<float> out = b.render(20, 20);  // 20 of the 64 samples of the ramp in
+  CHECK(out[19] > 0.0f);
+  b.l.release_region(0, 0);
+  const auto tail = b.render(300, 20);
+  out.insert(out.end(), tail.begin(), tail.end());
+  CHECK_FALSE(b.l.region(0));
+  CHECK_FALSE(b.l.region_repeating(0));
+  CHECK(max_step(out) < 0.02f);
+  CHECK(out.back() == 0.0f);
+  float peak = 0.0f;
+  for (const float v : out) peak = std::fmax(peak, std::fabs(v));
+  CHECK(peak < 0.0338f * 0.5f);  // the ramp never reached half of the sample (about 0.034): it fades out from where it was
 }

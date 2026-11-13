@@ -107,7 +107,7 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
   first slot that is empty, on no side and not recording (none: "NO EMPTY SLOT"; there is no re-record), records 2 bars (`kCapBars`; the
   stop is written in the middle of the second bar while the transport plays, so the unit stops at the bar line, and at once when it is stopped),
   and REC again cancels while it waits for the bar or stops early while it records. The ADC and the route change in one step, when the loop holds audio.
-  The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side is simply one that SAMPLE's F2 SPEAKS and F3 SOUNDS do not name, and FOLLOW is a value of the pattern's CARRIER lane.
+  The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side (PADS ONLY: its slices answer the pads of SAMPLE and nothing else) is simply one that SAMPLE's F2 SPEAKS and PERFORM's SOUNDS picker do not name, and FOLLOW is a value of the pattern's CARRIER lane.
 - Pads: row 0 the controls, rows A, B and C the layout (section 7); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
   releases. REC captures.
 - LEDs: section 7 (the layout's rows: root, scale, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays).
@@ -121,7 +121,7 @@ Left: the four slots as a column (the selected framed: name, length, 0.5X / 1X /
 the selected slot's overview waveform with its cuts, the play line moving, the sounding slices lit. Right: SOUNDS as on PERFORM, the chord.
 
 - F1 LOW PADS (what the two lower rows play, both at once and never off: NOTE+TRIAD (the default), NOTE, TRIAD, 7TH, OPEN, POWER; a tap steps and wraps, the encoder stops at the ends; both rows flash; it writes PERFORM's notes pair, so a pair outside the list shows row A's kind; with one kind on both rows, row A plays it one octave above row B; MODE stays on PERFORM and PARAMS) · F2 SPEAKS (LIVE, SLOT 1 to 4: a tap makes the selected slot speak (its loop starts), a second tap returns to LIVE and stops that loop; the encoder steps over slots that hold audio; an empty slot refuses with "EMPTY: NOTHING TO PLAY"; the cue line says what the slot does now; SHIFT + F2 SLICE CH, MS1: the MIDI slice channel, below in 7c) · F3 SPEED (0.5X, 1X, 2X)
-  · F4 DIR (FWD, REV) · F5 LOOP (the whole slot plays round, from the bar: ON, OFF; ON plus a slice pad repeats that slice, one repeating slice a slot, the key reads ON SL n; OFF stops everything of the slot) · F6 TRIG (GATE: a slice stops at the pad's release, and with LOOP on it repeats while held, then the whole loop goes on; ONE SHOT:
+  · F4 DIR (FWD, REV) · F5 LOOP (the whole slot plays round, from the bar: ON, OFF; ON plus a slice pad repeats that slice, one repeating slice a slot, the key reads ON SL n; ON on a slot that neither speaks nor sounds makes it SPEAK first, "SLOT n SPEAKS"; OFF stops everything of the slot. A repeating slice goes on after the pad is released in ONE SHOT and after leaving SAMPLE; coming back, F5 still reads ON SL n, from the unit's status, and F5 OFF, a project load or a new take in the slot ends it) · F6 TRIG (GATE: a slice stops at the pad's release, and with LOOP on it repeats while held, then the whole loop goes on; ONE SHOT:
   to its end, and with LOOP on it repeats until another pad or F5) · F7 SLICES (MONO, the default: a new slice of this slot cuts the one sounding; POLY: they overlap) · F8 LEVEL (-24 to +12 dB). UP / DOWN the slot.
 - **Pads, the split.** The top two rows (pads 0 to 23) are slices 1 to 24 of the selected slot. The bottom two rows (pads 24 to 47) play PERFORM's
   layout rows A and B (section 7), at PERFORM's octave, through PERFORM's audition entry like PATTERN's palette; a pad sounds while it is held
@@ -142,14 +142,14 @@ again stops at the bar; LENGTH stops it by itself. After the take the slot plays
 so what was sung is heard at once.
 
 - F1 SOURCE (LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB; a line source starts at gain 0) · F2 GAIN · F3 LENGTH (FREE, 1, 2, 4, 8 BARS; also
-  LEFT / RIGHT) · F4 AFTER (the side the slot takes: SPEAKS, SOUNDS, NONE) · F5 AUTOPLAY (ON, OFF) · F6 MONITOR (the kit's: the dry input to the output while
+  LEFT / RIGHT) · F4 AFTER (the side the slot takes: SPEAKS, SOUNDS, PADS: the slot is played from SAMPLE's pads only) · F5 AUTOPLAY (ON, OFF) · F6 MONITOR (the kit's: the dry input to the output while
   recording) · F7 SLOT (1 to 4; also UP / DOWN) · F8 blank. DELETE discards the take.
 - Pads: PERFORM's layout (section 7), so the carrier is played while recording (the take is the input, not the output). While recording the whole
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
 Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
 Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SPEAKS makes the slot speak or returns to LIVE; it refuses only an empty slot or a route `allowed` rejects, and says why. The pads play PERFORM's layout (section 7); LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. F6 and F7 came in U5b.
-A refused AFTER leaves the slot on no side and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
+A refused AFTER leaves the slot on no side (PADS) and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
 again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
 
 ### SAMPLE EDIT
@@ -287,7 +287,7 @@ every edit that would write it (SAVING on the strip). Progress and result are th
 the kit removes its temporary file, so a half file never stays. The cuts are not in the WAV.
 
 Built in U6c (`sample_logic.h` publish_slices, `stepseq.h`, `tests/slice_lane_test.cpp`, `app/scenarios/slice_lane.txt`): a step's slice fires a cut of the
-SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and CHOKE do not apply). Stop releases it
+SPEAKS slot only, on that slot's own reader (Start, Len, Trig 1 at the step's frame), always as one shot (TRIG and SLICES do not apply, and neither does the slot's LOOP: a repeat is the SAMPLE pad's). Stop releases it
 (Trig 0, once). A slice above the slot's cut count stays silent, and LEVEL does not touch a slice. The palette's two upper rows are slices 1 to 24, lit up to
 the count; with no slices a palette pad or the encoder says SPEAKS HAS NO SLICES and writes nothing. No new unit parameter.
 
@@ -577,7 +577,7 @@ Asked by the maintainer on 2026-11-06: the carrier, the slices and the patterns 
 | 43 | Vib | 0..1: a ~5.5 Hz vibrato, +-0.5 st at 1, added to Bend; 0 is bit-identical to no vibrato |
 | 47 | ModSrc | 0 LIVE (today), 1 NONE, 3 .. 6 SLOT 1 to 4 (the values of CarSrc, for one table): what speaks. With a slot, the live input leaves the modulator sum (no microphone bleed) |
 | 48 | LiveCh | 0 L, 1 R: the channel a live carrier reads. The app writes R with USB (section 2): SPEAKS takes USB L, SOUNDS USB R. Built in U3c |
-| 49 .. 60 | Reader n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples at the reader's speed and direction, Trig 0 releases it (GATE) or it ends by itself (ONE SHOT). Start counts from the start of the bank, not of a slot (both exact in a float up to 16.7 M; the bank is 2,822,400), so any reader plays any slot and CHOKE OFF can overlap slices of one slot. Speed, direction, level and role are the reader's own `Loop n` values: the app copies the source slot's before the Trig. A whole-loop play on that reader pauses under the slice and resumes at its position |
+| 49 .. 60 | Reader n Start, Len, Trig (3 x 4) | a region play: Trig 1 at a frame starts reader n at Start for Len samples at the reader's speed and direction, Trig 2 repeats it (REPEAT: the span is latched at the trigger and the region goes round with the 64-sample fades at each pass until Trig 0 or another Trig, so the repeat goes on after the app leaves SAMPLE), Trig 0 releases it (GATE) or it ends by itself (ONE SHOT). Start counts from the start of the bank, not of a slot (both exact in a float up to 16.7 M; the bank is 2,822,400), so any reader plays any slot and SLICES POLY can overlap slices of one slot. Speed, direction, level and role are the reader's own `Loop n` values: the app copies the source slot's before the Trig. A whole-loop play on that reader pauses under the slice and resumes at its position |
 | 61 | Load | the length of a sample the app wrote into a slot's memory from the main loop while the slot was stopped (seam fades baked by the app), so the render adopts it (`Loop::adopt`; refused while the slot records, plays or has a region): one value, slot x 705,600 + length with length 1..705,600, exact in a float (slot 3, 16 s is 2,822,400, so a value reads one way: slot = (v - 1) / 705,600). 0 does nothing, and the app writes 0 back after every Load so a saved project holds none. Built in U7c2a. One id and not four: `kMaxParamsPerUnit` is 64, and U10's SUB and TILT need 62 and 63 (`Wave` and `Detune` become SHAPE and SPREAD). That fills the table |
 | CarSrc | value 7 LIVE | `in_l` on the carrier bus: the line, the radio or USB R sounds. A routing inside the unit, instant and click-free with the same 5 ms ramp; the ADC source itself is the app's one `AudioIn::select` |
 
@@ -588,11 +588,11 @@ unvoiced mix, the talk coefficients as 16 x 8-bit in four words at each publish,
 bytes of atomics in the unit, no SDRAM; the packing under 300 cycles a block [est].
 
 Built in U5a, ids 49 to 60 (R1Start on). One command a block and reader, the last wins; a release in the block of its start cancels it. A whole loop asked for while a region sounds waits at position 0 and starts when the region ends, off the bar line. Regions under 128 samples can end on a step of up to 2/64, and under 256 samples the loop under them is not ducked: both far below the shortest cut SAMPLE EDIT makes. A region stays in its memory: CLEAR on a slot does not stop another reader that is reading it.
-Built in U5b. Pads 0 to 23 are slices 1 to 24 of the selected slot (even cuts, 8, rebuilt when the slot's length changes; a slot shorter than the count gets one sample a cut). A press picks a reader (`pick_reader`: CHOKE ON the slot's own, OFF a free one, else the oldest slice voice; never a recording reader or another slot's whole loop) and writes Speed, Dir, Level and Role from the source slot, then Start, Len, Trig 1: at most 7 writes, 56 for eight pads against 64 a block. Role is CAR only for a slot on SOUNDS. The first slice on a reader keeps its Speed, Dir, Level and Role and the end of the region writes them back; SAMPLE shows slot k from the kept values while k is borrowed, and its edits wait there. Known edge, unit check: a borrowed reader whose own slot is on a side follows that side (CarSrc/ModSrc beat Role in `run_loops`). F6 TRIG (GATE, ONE SHOT) and F7 CHOKE (ON, OFF) are per slot, not saved. The play line is a bar, a tick per cut and a head per reader inside the slot.
+Built in U5b. Pads 0 to 23 are slices 1 to 24 of the selected slot (even cuts, 8, rebuilt when the slot's length changes; a slot shorter than the count gets one sample a cut). A press picks a reader (`pick_reader`: SLICES MONO the slot's own, POLY a free one, else the oldest slice voice; never a recording reader or another slot's whole loop) and writes Speed, Dir, Level and Role from the source slot, then Start, Len, Trig 1: at most 7 writes, 56 for eight pads against 64 a block. Role is CAR only for a slot on SOUNDS. The first slice on a reader keeps its Speed, Dir, Level and Role and the end of the region writes them back; SAMPLE shows slot k from the kept values while k is borrowed, and its edits wait there. Known edge, unit check: a borrowed reader whose own slot is on a side follows that side (CarSrc/ModSrc beat Role in `run_loops`). F6 TRIG (GATE, ONE SHOT; with F5 LOOP on, the unit's Trig 2 REPEAT) and F7 SLICES (MONO, POLY) are per slot, not saved. The play line is a bar, a tick per cut and a head per reader inside the slot.
 
 **Polyphony and cost.** A slice voice is a loop reader: 3,000 to 8,000 cycles a block from the unit reads (1x to 2x, `docs/PLAN.md` 4f), so four at
 once are 1.1 to 3 % each, the 4.6 to 12 % the four loops already cost; past four the oldest is stolen. BANDS with eight notes and four readers at
-2x is the 72.9 % peak already measured (4g): slices add no new worst case, and SAMPLE's defaults (CHOKE ON, a four-note chord) keep the ordinary
+2x is the 72.9 % peak already measured (4g): slices add no new worst case, and SAMPLE's defaults (SLICES MONO, a four-note chord) keep the ordinary
 case near 55 %. A fifth reader is not planned; SPREAD's third oscillator was read on the unit and three of them stay at eight notes (`docs/PLAN.md` 4l).
 
 **The app:** the two pickers and the capture gesture (the routing as pure state, host-tested: every pair and what the screen says of it); the chord
@@ -660,7 +660,7 @@ screen it touches. The unit checks owed are named, not run here.
 | P3 | GATE, ARP, GLIDE on the SHIFT row; the eight presets | `presets.txt` |
 | U3 | The routing: the two pickers, `ModSrc`, CarSrc LIVE, the roles derived, the one-rule rows, the capture gesture on REC and from a dimmed row | `route.txt` (every pair, the dimmed rows snapped, a capture to a slot with its WAV) |
 | U4 | SAMPLE REC and SAMPLE on the four slots as they are (whole play, side, speed, direction, level) | `sample_rec.txt`, `sample.txt` (a take through the chord, then the same as the carrier) |
-| U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, CHOKE and TRIG (the SLICE lane moved to U6) | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
+| U5 | Slices: the unit's region play and triggers, the slice tables, SAMPLE's split pads, SLICES (once CHOKE) and TRIG (the SLICE lane moved to U6) | `slices.txt` (even cuts, pads 0 to 7 in turn over a latched chord, a fifth voice stolen; WAV) |
 | U6 | PATTERN with lanes, chords in the NOTE lane, pads, patterns A to H in the SDRAM; LEVEL as velocity | `pattern.txt` |
 | U7a | SAMPLE EDIT: the cursor and the cut table (INSERT, DELETE, LEFT, RIGHT, CUT EVEN, CLR CUTS) | `sample_edit.txt` |
 | U7b | SAMPLE EDIT: the waveform bitmap of the slot | `sample_edit.txt` grows (the snaps show the waveform) |

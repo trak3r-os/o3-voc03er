@@ -484,7 +484,7 @@ void SampleLoadScreen::tick_wait(app::Context& ctx) noexcept {
   const std::uint64_t now = ctx.uptime_ms();
   if (st.rec == Vocoder::LoopStatus::Rec::Idle && st.length == g_sl.info.frames) {
     (void)sl::loaded_note(g_sl.info, g_sl.note_buf, sizeof g_sl.note_buf);
-    g_sl.tail = !g_sl.ext && sample_->on_no_side(ctx, slot) ? sl::kLoadedNoSideTail : nullptr;  // UX3-5: a slot on NONE has no loop, so a load would otherwise look like nothing happened
+    g_sl.tail = !g_sl.ext && sample_->on_no_side(ctx, slot) ? sl::kLoadedNoSideTail : nullptr;  // UX3-5: a slot that is PADS ONLY has no loop, so a load would otherwise look like nothing happened
     g_sl.ext_ok = true;
     if (!g_sl.ext) {
       audio_dirty().mark(slot);  // a WAV the hand loaded: no saved WAV of the project holds it (FILE's own project load clears it again)

@@ -770,21 +770,25 @@ void Loop::release_region(unsigned i, std::uint32_t frame) noexcept {
   cf_[i] = static_cast<std::uint16_t>(frame);
 }
 
-// Begins the staged region (the memory clamps it); false when it is empty.
-bool Loop::begin_region(unsigned i) noexcept {
+// Begins the staged region (the memory clamps it); false when it is empty. `again` is a repeat's next pass: it begins the span (rs_, rl_) and the level the
+// trigger latched, not what is staged now, so a Start / Len written for the next pad between two passes never plays (the staged values are for the next Trig).
+bool Loop::begin_region(unsigned i, bool again) noexcept {
   const std::uint32_t bank = bank_samples();
-  const std::uint32_t a = st_s_[i];
-  if (a >= bank || st_l_[i] == 0u) {
+  const std::uint32_t a = again ? rs_[i] : st_s_[i];
+  const std::uint32_t sl = again ? rl_[i] : st_l_[i];
+  if (a >= bank || sl == 0u) {
     return false;
   }
-  const std::uint32_t l = st_l_[i] < bank - a ? st_l_[i] : bank - a;
+  const std::uint32_t l = sl < bank - a ? sl : bank - a;
   rs_[i] = a;
   rl_[i] = l;
   rh_[i] = rev_[i] ? 2u * (l - 1u) : 0u;
   rhf_[i] = 0;
   rrq_[i] = bq_;  // a region that starts while bent plays at the bent speed from its first sample
-  rv_[i] = st_v_[i];
-  rep_[i] = st_r_[i];
+  if (!again) {
+    rv_[i] = st_v_[i];
+    rep_[i] = st_r_[i];
+  }
   rg_[i] = rv_[i] >= 100u ? gain_[i] : gain_[i] * (static_cast<float>(rv_[i]) * 0.01f);
   ghost_off(i);  // the loop's own stop tail or jump fade is not carried under a region
   fn_[i] = 0;
@@ -871,7 +875,7 @@ std::uint32_t Loop::region_chunk(unsigned i, float* dst, std::uint32_t n, bool a
   if (nn == outs || (dir < 0 && fn == 0u)) {  // the region is over
     act_[i] = false;
     if (rst_[i] || rep_[i]) {
-      (void)begin_region(i);  // a retrigger (the new region follows the fade-out at once) or a repeat (this one again)
+      (void)begin_region(i, !rst_[i]);  // a retrigger (the new region follows the fade-out at once) or a repeat (the span the trigger latched, again)
     }
     if (!act_[i]) {
       region_off(i);
@@ -1029,7 +1033,7 @@ std::uint32_t Loop::region_chunk_bent(unsigned i, float* dst, std::uint32_t n, b
   if (over) {
     act_[i] = false;
     if (rst_[i] || rep_[i]) {
-      (void)begin_region(i);
+      (void)begin_region(i, !rst_[i]);
     }
     if (!act_[i]) {
       region_off(i);

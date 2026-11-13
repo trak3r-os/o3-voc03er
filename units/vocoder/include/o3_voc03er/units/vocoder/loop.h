@@ -154,7 +154,7 @@ class Loop {
  private:
   enum class Cmd : std::uint8_t { None, Start, Release };
   std::uint32_t bank_samples() const noexcept { return kCount * cap_; }
-  bool begin_region(unsigned i) noexcept;
+  bool begin_region(unsigned i, bool again = false) noexcept;
   std::uint32_t region_chunk(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;
   std::uint32_t advance(unsigned i, float* dst, std::uint32_t from, std::uint32_t to, bool add) noexcept;
   void mix_region(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;

@@ -157,9 +157,9 @@ inline std::size_t conversion_text(const Info& i, char* dst, std::size_t cap) no
 // ---- the line after a load ---------------------------------------------------------------------------------------------------------------
 
 // The screen's note line is kNoteCols characters of the Label face (8 px each, 748 px wide); a longer note goes on a second line. The first line is the load itself,
-// worst case "FIRST 16.000 S LOADED, FILE HAS 97391.123 S, 22.05K 32B TO 44.1K 16B" (79); the second is the NO SIDE hint alone (a slot on no side has no loop to show it).
+// worst case "FIRST 16.000 S LOADED, FILE HAS 97391.123 S, 22.05K 32B TO 44.1K 16B" (79); the second is the PADS ONLY hint alone (a slot that neither speaks nor sounds has no loop to show it).
 inline constexpr std::size_t kNoteCols = 93;
-inline constexpr const char* kLoadedNoSideTail = "NO SIDE: F2 SPEAKS ON SAMPLE";
+inline constexpr const char* kLoadedNoSideTail = "PADS ONLY: F2 SPEAKS ON SAMPLE";
 
 inline std::size_t loaded_note(const Info& i, char* dst, std::size_t cap) noexcept {
   if (cap == 0u) {
