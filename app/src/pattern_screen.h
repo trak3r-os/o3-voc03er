@@ -85,6 +85,8 @@ class PatternScreen final : public o3sdk::app::Screen {
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void lane_chosen(o3sdk::app::Context& ctx) noexcept;  // the lane changed: the MOUTH lane outside TRACT says where it speaks
   bool tract_on(const o3sdk::app::Context& ctx) const noexcept;  // the vocoder is in TRACT mode
+  unsigned mode_of(const o3sdk::app::Context& ctx) const noexcept;  // the vocoder's mode, 0..kModeCount - 1
+  void say_heard(o3sdk::app::Context& ctx, std::uint8_t modes) noexcept;  // the line that says where `modes` hear a value ("HEARD IN TRACT ONLY")
   void show_pattern(o3sdk::app::Context& ctx, unsigned p, bool by_hand) noexcept;  // by_hand: a chain that plays keeps its own request
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
   void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
@@ -120,7 +122,8 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint32_t cap_length_ = 0;  // that slot's length when it started (a change ends the capture)
   SaveFn save_ = nullptr;
   void* save_user_ = nullptr;
-  const char* note_ = nullptr;  // a moment's line (a static string), until note_until_
+  const char* note_ = nullptr;  // a moment's line (a static string, or where_), until note_until_
+  char where_[40] = {};         // the "HEARD IN ..." line say_heard builds (main loop only)
   std::uint64_t note_until_ = 0;
   std::uint8_t cursor_ = 0;  // 0..15
   std::uint8_t lane_ = 0;    // pattern::Lane

@@ -266,7 +266,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   float vib_pad_ = 0.0f;             // the pad's vibrato depth 0..1
   unsigned cc1_ = 0;                 // the mod wheel, 0..127
   float vib_sent_ = 0.0f;            // the last Vib written (only a change is written)
-  char flash_[24] = {};              // a moment's text on the hint line (VOL, ROOT, OCT), until flash_until_
+  char flash_[40] = {};              // a moment's text on the hint line (VOL, ROOT, OCT), until flash_until_
   std::uint64_t flash_until_ = 0;
   // The pickers: 0 closed, 1 SPEAKS, 2 SOUNDS (its rows are g_pd.pick). Main loop only.
   std::uint8_t pick_ = 0;

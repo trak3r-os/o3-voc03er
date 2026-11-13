@@ -6,11 +6,12 @@
 //
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on. SHIFT + the encoder: coarse steps.
 //   PARAMS pressed again (app.cpp calls next_page()), DOWN: the next page; UP: the one before.
-//   A key whose parameter the unit does not have yet is drawn dim with no value, and a tap says COMES LATER.
+//   A DIM key is not heard in this mode (liveness.h, the table the strips and the SHIFT row read): a tap on it still sets the value, for the modes that
+//   hear it, and the line under the key's name says where ("HEARD IN TALK ONLY").
 //   MIDI learn (ML1): SHIFT + an F key arms the kit's learn for that value (the next controller binds, the strip says LEARNED CC n); the same keys
 //   again cancel. Held SHIFT turns the F row into LEARN cells ("-" where a value is not a unit parameter: VOICING). Leaving the page or the screen cancels.
 //
-//   The TRACT page writes the tract unit's own parameters (Kind::Tract); it is live in every mode and says TRACT MODE ONLY outside TRACT.
+//   The TRACT page writes the tract unit's own parameters (Kind::Tract); settable in every mode, dim outside TRACT, where the mouth speaks.
 //
 // Every value goes through the engine's parameters, the ids and units PERFORM writes, so the two screens never disagree. The pads play PERFORM's
 // chords (its code), as on SAMPLE REC. Main loop only; the state is a few bytes, nothing is big.

@@ -27,6 +27,7 @@
 // audio_in() (line and microphone input, the monitor), radio() (the FM radio) and recorder() (a take of the input or the master, saved to
 // the card as a WAV). The template uses none of them; each is a short call like files() and a line in the app's state.
 
+#include "liveness.h"
 #include "pattern_screen.h"
 #include "perform_screen.h"
 #include "skin/ornoir_assets.h"
@@ -257,7 +258,8 @@ class MyApp final : public app::App {
     }
   }
 
-  // The keys the screens do not use: the screen buttons and the transport. FILE saves and loads the project and the pattern.
+  // The keys the app takes before the screen sees them (the kit calls this first; false hands the key to the screen): the screen buttons and the
+  // transport. FILE saves and loads the project and the pattern.
   bool input(app::Context& ctx, const app::Input& in) noexcept override {
     if (in.press(app::Button::Params)) {  // PARAMS, and on it the next page (SHIFT + PARAMS does the same)
       if (ctx.screen() == &params_) {
@@ -413,7 +415,15 @@ class MyApp final : public app::App {
   // ML1: a controller the user bound by MIDI learn moved a unit parameter. The kit has already written it to the engine, the one place every screen
   // reads its values from each frame and the project's save reads them at SAVE (nothing is shadowed in a screen: VOICING is not learnable), and
   // apply_mode() follows Mode in update(); so the news only asks for a redraw. Main loop.
-  void midi_learned_moved(app::Context& ctx, dsp::UnitId, std::uint16_t, float) noexcept override { ctx.redraw(); }
+  // UX2: FREEZE latches and is TALK's, so a controller bound to it outside TALK is refused as PERFORM's key is: the kit has written 1, and it is put back
+  // to 0 here (FREEZE is not heard outside TALK, so nothing sounded; the unit's own tract unit has no such parameter).
+  void midi_learned_moved(app::Context& ctx, dsp::UnitId unit, std::uint16_t param, float value) noexcept override {
+    if (unit == voc_id_ && param == o3_voc03er::Vocoder::Freeze && value >= 0.5f &&
+        !o3_voc03er::live::voice_heard(o3_voc03er::Vocoder::Freeze, o3_voc03er::mode_index(ctx.engine().param(voc_id_, o3_voc03er::Vocoder::Mode)))) {
+      (void)ctx.engine().set_param(voc_id_, o3_voc03er::Vocoder::Freeze, 0.0f);
+    }
+    ctx.redraw();
+  }
 
   // MIDI pitch bend and the mod wheel (docs/UI-DESIGN.md 7c), on the user's channel (0 is omni). The wheel is scaled into BEND RANGE and adds to the
   // screen's own bend (the encoder and the strip), so the encoder's spring leaves a held wheel where it is; CC1 is the vibrato depth, held apart
@@ -606,12 +616,21 @@ class MyApp final : public app::App {
   // The one function that couples the vocoder's Mode to the tract unit: TRACT writes the tract's MIX 1, any other mode writes 0 (the tract is then a
   // bit-exact bypass and runs nothing, so BANDS, TALK, TUNE and ROBOT sound as they did before the tract existed). Main loop. The tract unit itself holds
   // the MIX rise back for 12 ms (TractUnit::kEnterHoldMs), so the tube does not start while the old engine's 10 ms crossfade is still running.
+  // UX2: FREEZE is TALK's gesture and it latches, so every mode change clears it: leaving TALK ends it, and TALK is never frozen on entry (a PARAMS tap can
+  // set Freeze in another mode, where it is not heard; the next change of mode drops it).
   void apply_mode(dsp::Engine& e) noexcept {
     const unsigned m = o3_voc03er::mode_index(e.param(voc_id_, o3_voc03er::Vocoder::Mode));
-    if (m == applied_mode_ || tract_id_ == dsp::kNoUnit) {
+    if (m == applied_mode_) {
       return;
     }
-    if (e.set_param(tract_id_, o3_voc03er::TractUnit::Mix, m == o3_voc03er::kModeTract ? 1.0f : 0.0f)) {
+    bool done = true;
+    if (e.param(voc_id_, o3_voc03er::Vocoder::Freeze) >= 0.5f) {
+      done = e.set_param(voc_id_, o3_voc03er::Vocoder::Freeze, 0.0f);
+    }
+    if (tract_id_ != dsp::kNoUnit) {
+      done = e.set_param(tract_id_, o3_voc03er::TractUnit::Mix, m == o3_voc03er::kModeTract ? 1.0f : 0.0f) && done;
+    }
+    if (done) {
       applied_mode_ = m;  // a refused write (a full queue) is tried again on the next pass
     }
   }

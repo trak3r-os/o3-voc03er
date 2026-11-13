@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "pattern_screen.h"
 
+#include "liveness.h"
 #include "midi_pattern_logic.h"
 #include "mouth_capture.h"
 #include "perform_logic.h"
@@ -23,6 +24,7 @@ namespace o3_voc03er {
 using namespace o3sdk;
 namespace pl = perform;
 namespace pt = pattern;
+namespace lv = o3_voc03er::live;
 using ui::Color;
 using ui::Face;
 using Button = app::Button;
@@ -245,7 +247,16 @@ void PatternScreen::lane_chosen(app::Context& ctx) noexcept {
 }
 
 bool PatternScreen::tract_on(const app::Context& ctx) const noexcept {
-  return pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode)) == kModeTract;
+  return mode_of(ctx) == kModeTract;
+}
+
+unsigned PatternScreen::mode_of(const app::Context& ctx) const noexcept {
+  return pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
+}
+
+void PatternScreen::say_heard(app::Context& ctx, std::uint8_t modes) noexcept {
+  lv::heard_text(modes, where_);
+  say(ctx, where_);
 }
 
 void PatternScreen::show_pattern(app::Context& ctx, unsigned p, bool by_hand) noexcept {
@@ -259,6 +270,9 @@ void PatternScreen::show_pattern(app::Context& ctx, unsigned p, bool by_hand) no
   const bool owned = by_hand && song_ != nullptr && song_->playing_chain();
   if (seq_ != nullptr && !owned) {
     seq_->request_pattern(shown_);  // it starts when the playing one ends (or at the next Play)
+  }
+  if (owned) {
+    say(ctx, pt::kSongPlays);  // the pad shows the pattern and edits it; which one sounds is the chain's
   }
   if (cursor_ >= length_of(pattern_now())) {
     cursor_ = 0;
@@ -352,7 +366,7 @@ void PatternScreen::write_palette(app::Context& ctx, unsigned pad, bool shift) n
         ok |= pad < pt::kCarrierPads && set_carrier(p, i, pad);
         break;
       case pt::Lane::Level:
-        ok |= set_level(p, i, pt::level_of_pad(pad));
+        ok |= set_level(p, i, pt::level_of_pad(pad, pt::level_top(tract_on(ctx))));
         break;
       case pt::Lane::Slice: {
         const pt::SliceWrite w = pt::slice_write(p, i, pad, seq_ != nullptr ? seq_->slice_count() : 0u);
@@ -443,12 +457,12 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
         say(ctx, "SPEAKS HAS NO SLICES");
         return;
       }
-      (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u);
+      (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u, pt::level_top(tract_on(ctx)));
       break;
     case kKeyRow:  // ROW: A or B, the row F7 sets (a tap flips, a detent stops at the ends)
     case kKeyPlays: {  // PLAYS: the chosen row's note kind, in the notes palette
       if (lane() != pt::Lane::Note || perform_ == nullptr) {
-        return;
+        return;  // (input() has said why for a tap)
       }
       if (key == kKeyRow) {
         const int n = static_cast<int>(row_) + delta;
@@ -522,13 +536,17 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       if (k == kKeyRow) {
         page_ ^= 1u;
         ctx.redraw();
+        if (!tract_on(ctx)) {
+          say_heard(ctx, pt::lane_modes(pt::Lane::Mouth));  // it still sets; the line says where it is heard
+        }
       } else {
         fill_press(ctx);
       }
       return;
     }
     if ((k == kKeyRow || k == kKeyPlays) && lane() != pt::Lane::Note) {
-      return;  // ROW and PLAYS are the NOTE lane's palette (dim elsewhere)
+      say(ctx, "ROW AND PLAYS: NOTE LANE ONLY");  // they are the NOTE lane's palette (dim elsewhere)
+      return;
     }
     if (k == focus_) {  // a second tap steps the value on
       key_tap_ = true;
@@ -636,6 +654,21 @@ void PatternScreen::fill_now(app::Context& ctx) noexcept {
     fill_out_[pi][i] = get_mouth(p, i);
   }
   fill_has_ = static_cast<std::uint8_t>(fill_has_ | (1u << pi));
+  if (!tract_on(ctx)) {  // it still fills; the line says where the lane is heard
+    static constexpr char kHead[] = "FILLED: ";
+    char heard[40];
+    lv::heard_text(pt::lane_modes(pt::Lane::Mouth), heard);
+    std::size_t n = 0;
+    for (; kHead[n] != '\0'; ++n) {
+      where_[n] = kHead[n];
+    }
+    for (std::size_t k = 0; heard[k] != '\0' && n + 1u < sizeof where_; ++k) {
+      where_[n++] = heard[k];
+    }
+    where_[n] = '\0';
+    say(ctx, where_);
+    return;
+  }
   say(ctx, pt::kFilled);
 }
 
@@ -842,7 +875,7 @@ void PatternScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
     } else if (lane() == pt::Lane::Mouth) {  // the strip and its GLD row; the dark pads off
       level = pt::mouth_of_pad(pad, mouth_page()) == 0u ? app::kLedOff
                                                            : (pt::palette_matches(lane(), pad, cur, oct, layout, curm, mouth_page()) ? app::kLedMid : app::kLedDim);
-    } else if (pt::palette_matches(lane(), pad, cur, oct, layout)) {
+    } else if (pt::palette_matches(lane(), pad, cur, oct, layout, 0, pt::MouthPage::Vowels, pt::level_top(tract_on(ctx)))) {  // LEVEL: the range of this mode
       level = app::kLedMid;
     }
     if (((aud_ >> pad) & 1u) != 0u) {
@@ -878,7 +911,7 @@ void PatternScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
 }
 
 // HELP: every button input() answers has a row (tests/pattern_screen_test.cpp holds it), the pads in three groups.
-void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
+void PatternScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "OCTAVE UP", nullptr},
       {Button::Down, "OCTAVE DOWN", nullptr},
@@ -886,7 +919,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Right, "CURSOR ON, HOLD REPEATS", nullptr},
       {Button::Note, "NOTE LANE", nullptr},
       {Button::Instr, "CARRIER LANE", nullptr},
-      {Button::Vol, "LEVEL LANE", nullptr},
+      {Button::Vol, "LEVEL LANE (ACCENT IN TRACT)", nullptr},
       {Button::Fx, "SLICE LANE, THEN MOUTH LANE", nullptr},
       {Button::Shift, "SHIFT + STEP: A REST", nullptr},
       {Button::Copy, "COPY THE STEP", "COPY THE PATTERN"},
@@ -956,7 +989,7 @@ void PatternScreen::help(const app::Context&, app::Help& h) const noexcept {
         }
         break;
       case pt::Lane::Level:
-        cat_uint(l, sizeof g_pd.name[i], pt::level_of_pad(i));
+        cat_uint(l, sizeof g_pd.name[i], pt::level_of_pad(i, pt::level_top(tract_on(ctx))));
         break;
       case pt::Lane::Slice:
         cat_uint(l, sizeof g_pd.name[i], i + 1u);
@@ -1008,7 +1041,10 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   const unsigned head = playing ? seq_->playing_step() : kPatternSteps;
   const Step cur = get_step(p, cursor_);
   const std::uint8_t curm = get_mouth(p, cursor_);
-  const bool mouth_dim = !tract_on(ctx);  // the MOUTH lane speaks in TRACT only: shown dim elsewhere
+  const bool tract = mode == kModeTract;
+  // A lane this mode does not hear (pattern::lane_modes) is shown dim and says so in the header; it still edits (the rule in docs/MANUAL.md).
+  const auto lane_dim = [mode](unsigned l) noexcept { return !lv::heard(pt::lane_modes(static_cast<pt::Lane>(l)), mode); };
+  const bool mouth_dim = lane_dim(static_cast<unsigned>(pt::Lane::Mouth));
 
   ornoir::HeaderState h;
   header_route(e, voice_, src != nullptr ? src->label : "NONE", src != nullptr && src->source == hal::capture::Source::Usb, h);
@@ -1023,7 +1059,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     keys[i].hot = i == focus_;
   }
   keys[0].value[0] = kLetters[shown_ & 7u];
-  cat(keys[1].value, sizeof keys[1].value, pt::kLaneNames[lane_ % pt::kLanes]);
+  cat(keys[1].value, sizeof keys[1].value, pt::lane_name(lane(), tract));
   cat_uint(keys[2].value, sizeof keys[2].value, len);
   cat_uint(keys[3].value, sizeof keys[3].value, e.own_tempo() / 1000u);
   {
@@ -1082,7 +1118,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   for (unsigned l = 0; l < pt::kLanes; ++l) {  // the lane in force: a bar at the left of its row
     if (l == lane_) {
       ornoir::fill_rect(c, 12, kCellY + static_cast<int>(l) * kLaneStep + 2, 6, kCellH - 4,
-                        l == static_cast<unsigned>(pt::Lane::Mouth) && mouth_dim ? Color::TextDim : Color::Accent);
+                        lane_dim(l) ? Color::TextDim : Color::Accent);
     }
   }
   c.close();
@@ -1100,12 +1136,23 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   cat_uint(buf, sizeof buf, tempo / 1000u);
   cat(buf, sizeof buf, follow_ ? "   FOLLOW" : "");
   r.text(kGridX, 56, buf, Color::Text, Face::Label);
-  r.text(kGridX, 82, playing ? "PLAYING" : "PATTERN A TO H ON THE LOWER RIGHT PADS", playing ? Color::Play : Color::TextDim, Face::Micro);
+  if (lane_dim(lane_)) {  // the lane in force is not heard in this mode: said before any press
+    char cue[56];
+    cue[0] = '\0';
+    char where[40];
+    lv::heard_text(pt::lane_modes(lane()), where);
+    cat(cue, sizeof cue, pt::lane_name(lane(), tract));
+    cat(cue, sizeof cue, " LANE: ");
+    cat(cue, sizeof cue, where);
+    r.text(kGridX, 82, cue, Color::Accent, Face::Micro);
+  } else {
+    r.text(kGridX, 82, playing ? "PLAYING" : "PATTERN A TO H ON THE LOWER RIGHT PADS", playing ? Color::Play : Color::TextDim, Face::Micro);
+  }
 
   for (unsigned l = 0; l < pt::kLanes; ++l) {
     const int y = kCellY + static_cast<int>(l) * kLaneStep;
-    const bool dim = l == static_cast<unsigned>(pt::Lane::Mouth) && mouth_dim;
-    r.text(24, y + 16, pt::kLaneNames[l], l == lane_ && !dim ? Color::Text : Color::TextDim, Face::Label);
+    const bool dim = lane_dim(l);
+    r.text(24, y + 16, pt::lane_name(static_cast<pt::Lane>(l), tract), l == lane_ && !dim ? Color::Text : Color::TextDim, Face::Label);
   }
   for (unsigned i = 0; i < kPatternSteps; ++i) {
     const int x = kGridX + static_cast<int>(i) * kCellW;
@@ -1124,7 +1171,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
       const int y = kCellY + static_cast<int>(l) * kLaneStep;
       const int cx = x + kCellW / 2 - 1;
       const bool content = has_content(static_cast<pt::Lane>(l), s, sm);
-      const bool dim = static_cast<pt::Lane>(l) == pt::Lane::Mouth && mouth_dim;
+      const bool dim = lane_dim(l);
       const Color ink = content ? (l == lane_ && !dim ? Color::Text : Color::TextDim) : Color::Empty;
       const bool shown_text = t1[0] != '\0' && (content || static_cast<pt::Lane>(l) == pt::Lane::Level);
       if (shown_text) {
@@ -1148,10 +1195,11 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   } else if (note_ != nullptr) {
     r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, note_, Color::Accent, Face::Label);
   } else {
-    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 14,
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 6,  // two micro lines, clear of the F row at y 419 (UX2)
            lane() == pt::Lane::Note ? "PADS: ROWS A AND B ABOVE (F6, F7), STEPS AND PATTERNS BELOW. SHIFT + STEP: REST"
                                     : "PADS: PALETTE ABOVE, STEPS AND PATTERNS BELOW. SHIFT + STEP: REST",
            Color::TextDim, Face::Micro);
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 18, "F8 SAVES. HOLD SHIFT FOR THE SHIFT ROW: CLR LANE, FOLLOW, CAPTURE", Color::TextDim, Face::Micro);
   }
 }
 

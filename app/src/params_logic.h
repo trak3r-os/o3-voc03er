@@ -5,10 +5,10 @@
 // reads, and the over-budget test of QUALITY. Apart from the screen so a host test (tests/params_test.cpp) holds it. Nothing here allocates or
 // reads the engine; values go through the unit's own parameter ids, in the units PERFORM writes them (so the two screens never disagree).
 //
-// A key is blank (None), drawn dim with no value (Later: a key whose setting does not exist yet; a tap says COMES LATER; no row uses it now), or
-// live: Value (an engine parameter of the vocoder), Tract (a parameter of the tract unit: the screen knows its id) or App (a setting the app holds, because the unit's table is full: VOICING, kept by PerformScreen). A live
+// A key is blank (None) or live: Value (an engine parameter of the vocoder), Tract (a parameter of the tract unit: the screen knows its id) or App (a setting the app holds, because the unit's table is full: VOICING, kept by PerformScreen). A live
 // key has a "display value", an int: a percent for a 0..1 parameter, tenths of a dB for the level, otherwise the parameter itself.
 
+#include "liveness.h"
 #include "perform_logic.h"
 
 #include <o3_voc03er/units/tract/tract.h>
@@ -23,7 +23,7 @@ inline constexpr unsigned kPages = 4;
 inline constexpr unsigned kTractPage = 3;  // the page of the tract unit's parameters (Kind::Tract)
 inline constexpr unsigned kKeys = 8;
 
-enum class Kind : std::uint8_t { None, Later, Value, App, Tract };
+enum class Kind : std::uint8_t { None, Value, App, Tract };
 // How a live key reads and steps.
 enum class Fmt : std::uint8_t {
   Pct,      // a 0..1 parameter as 0..100 %
@@ -40,6 +40,9 @@ enum class Fmt : std::uint8_t {
   OnOff,    // 0 / 1
   Voicing,  // 0..3 (CLOSE, OPEN, WIDE, SMOOTH: the chords' Voicing), clamped
   Source,   // TRACT's SOURCE, 0 / 1 (PADS, LIVE): what drives the tube's shape, round
+  Semi,     // FORMANT, -12..+12 semitones, written with its sign
+  Gate,     // GATE, 0..4 (OFF, 1/4, 1/8, 1/16, 1/32), round
+  Arp,      // ARP, 0..4 (OFF, UP, DOWN, UP-DOWN, RANDOM), round
 };
 
 struct KeyDef {
@@ -53,7 +56,6 @@ struct KeyDef {
 
 inline constexpr KeyDef kBlank{"", Kind::None, 0, Fmt::Int, 0, 0, 0, 0};
 inline constexpr KeyDef app_key(const char* name, Fmt fmt, int lo, int hi) noexcept { return KeyDef{name, Kind::App, 0, fmt, lo, hi, 1, 1}; }
-inline constexpr KeyDef later(const char* name) noexcept { return KeyDef{name, Kind::Later, 0, Fmt::Int, 0, 0, 0, 0}; }
 
 inline constexpr const char* kPageNames[kPages] = {"CARRIER", "SHAPE", "TUNE", "TRACT"};
 inline constexpr const char* kSizeNames[5] = {"BIG", "LARGE", "NORMAL", "SMALL", "TINY"};
@@ -80,13 +82,19 @@ inline constexpr KeyDef kTable[kPages][kKeys] = {
      {"DRY", Kind::Value, Vocoder::Dry, Fmt::Pct, 0, 100, 2, 10},
      app_key("VOICING", Fmt::Voicing, 0, 3),
      // LT1: what drives TRACT's tube, the pads and the lane or the live voice at the input. Not saved (the project keeps TRACT's first eight values).
-     {"MOUTH", Kind::Tract, TractUnit::Source, Fmt::Source, 0, 1, 1, 1}, kBlank, kBlank},
+     {"MOUTH", Kind::Tract, TractUnit::Source, Fmt::Source, 0, 1, 1, 1},
+     // UX2: the values PERFORM's SHIFT row and the strips set, so PARAMS shows (and a controller learns) all of them.
+     {"FORMANT", Kind::Value, Vocoder::Formant, Fmt::Semi, -12, 12, 1, 4},
+     {"THRU", Kind::Value, Vocoder::Thru, Fmt::Pct, 0, 100, 5, 20}},
     {{"KEY", Kind::Value, Vocoder::Key, Fmt::Key, 0, 11, 1, 1},
      {"SCALE", Kind::Value, Vocoder::Scale, Fmt::Scale, 0, static_cast<int>(kScaleTableCount) - 1, 1, 1},
      {"SPEED", Kind::Value, Vocoder::Speed, Fmt::MsLin, 0, 500, 5, 25},
      {"AMOUNT", Kind::Value, Vocoder::Amount, Fmt::Pct, 0, 100, 2, 10},
-     {"NOTES IN", Kind::Value, Vocoder::NotesIn, Fmt::OnOff, 0, 1, 1, 1}, kBlank, kBlank, kBlank},
-    // TRACT's mouth (the tract unit's own table): live in every mode, it speaks in TRACT only.
+     {"NOTES IN", Kind::Value, Vocoder::NotesIn, Fmt::OnOff, 0, 1, 1, 1},
+     {"GLIDE", Kind::Value, Vocoder::Glide, Fmt::MsLin, 0, 500, 10, 50},
+     {"GATE", Kind::Value, Vocoder::Gate, Fmt::Gate, 0, 4, 1, 1},
+     {"ARP", Kind::Value, Vocoder::Arp, Fmt::Arp, 0, 4, 1, 1}},
+    // TRACT's mouth (the tract unit's own table): settable in every mode, it speaks in TRACT only (dim elsewhere, liveness.h).
     {{"VOWEL", Kind::Tract, TractUnit::Vowel, Fmt::Pct, 0, 100, 1, 10},
      {"TONGUE", Kind::Tract, TractUnit::Tongue, Fmt::SPct, -100, 100, 2, 10},
      {"JAW", Kind::Tract, TractUnit::Jaw, Fmt::SPct, -100, 100, 2, 10},
@@ -102,18 +110,32 @@ inline constexpr const KeyDef& key_def(unsigned page, unsigned key) noexcept { r
 // PARAMS pressed again, or DOWN: the next page; UP: the one before. Round.
 inline constexpr unsigned next_page(unsigned page, int delta = 1) noexcept { return perform::step_wrapped(page % kPages, delta, kPages); }
 
-// Whether a key acts in mode `mode` (mode_index): QUALITY is TALK's LPC order and does nothing in the other modes, so PARAMS draws it dim
-// there (it stays focusable: the value is TALK's when the mode comes back); MOUTH (LT1) is TRACT's live voice and acts in TRACT only. Every other key acts in every mode.
-inline constexpr bool key_live(const KeyDef& k, unsigned mode) noexcept {
-  return !(k.kind == Kind::Value && k.param == Vocoder::Quality && mode != 1u) && !(k.fmt == Fmt::Source && mode != kModeTract);  // MOUTH: the tube listens in TRACT only
+// The modes that hear key `k` (liveness.h, the one table the strips and PERFORM's SHIFT row read too): a Value key by its parameter, a Tract key in TRACT
+// only, the app's VOICING where the carrier plays. A key that is no parameter at all (blank, MASTER's own rows) is heard everywhere.
+inline constexpr std::uint8_t key_modes(const KeyDef& k, unsigned car_src = 0) noexcept {
+  switch (k.kind) {
+    case Kind::Value:
+      return live::voice_modes(k.param, car_src);
+    case Kind::Tract:
+      return live::kTractOnly;
+    case Kind::App:
+      return live::kVoicing;
+    case Kind::None:
+      break;
+  }
+  return live::kAllModes;
 }
+
+// Whether a key is heard in mode `mode` (mode_index). A key that is not heard is drawn dim; it stays focusable and a tap still sets the value, for the
+// modes that hear it (the screen says where: live::heard_text). MASTER's rows (param 0) never come here.
+inline constexpr bool key_live(const KeyDef& k, unsigned mode, unsigned car_src = 0) noexcept { return live::heard(key_modes(k, car_src), mode); }
 
 inline constexpr bool live_kind(Kind k) noexcept { return k == Kind::Value || k == Kind::App || k == Kind::Tract; }
 
 inline constexpr bool focusable(unsigned page, unsigned key) noexcept { return key < kKeys && live_kind(key_def(page, key).kind); }
 
 // ML1, MIDI learn (SHIFT + an F key): only a unit parameter can be bound to a controller, the vocoder's (Value) or the tract unit's (Tract). An App key
-// (VOICING: PerformScreen's own setting), a Later key and a blank key cannot; their SHIFT cell reads "-". MODE and QUALITY are not live gestures either
+// (VOICING: PerformScreen's own setting) and a blank key cannot; their SHIFT cell reads "-". MODE and QUALITY are not live gestures either
 // (MODE swaps the layout and resets the engine, QUALITY reallocates TALK's LPC order: the same two the strips refuse, strip_logic's kExcludedVoice), so a
 // controller cannot move them. LEVEL may be learned: pickup stops a jump.
 inline constexpr bool live_safe_voice(std::uint16_t param) noexcept { return param != Vocoder::Mode && param != Vocoder::Quality; }
@@ -181,7 +203,7 @@ inline int step_display(const KeyDef& k, int cur, int delta, bool coarse, bool w
   }
   wrap = wrap && !tap_holds(k);
   const int n = k.hi - k.lo + 1;
-  if (k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff || k.fmt == Fmt::Source) {
+  if (k.fmt == Fmt::Key || k.fmt == Fmt::Scale || k.fmt == Fmt::OnOff || k.fmt == Fmt::Source || k.fmt == Fmt::Gate || k.fmt == Fmt::Arp) {
     int v = (cur - k.lo + delta) % n;
     return k.lo + (v < 0 ? v + n : v);
   }
@@ -276,6 +298,18 @@ inline void format_value(const KeyDef& k, int d, char (&out)[12]) noexcept {
     case Fmt::Source:
       put(kMouthSourceNames[u < 2u ? u : 1u]);
       break;
+    case Fmt::Semi:
+      (void)perform::format_uint(static_cast<unsigned>(d < 0 ? -d : d), num);
+      put(d < 0 ? "-" : (d > 0 ? "+" : ""));
+      put(num);
+      put(" ST");
+      break;
+    case Fmt::Gate:
+      put(perform::kGateNames[u < perform::kGateCount ? u : 0u]);
+      break;
+    case Fmt::Arp:
+      put(perform::kArpNames[u < perform::kArpCount ? u : 0u]);
+      break;
   }
 }
 
@@ -288,6 +322,7 @@ inline int bar_of(const KeyDef& k, int d) noexcept {
     case Fmt::MsLin:
     case Fmt::Db:
     case Fmt::Int:
+    case Fmt::Semi:
       return perform::bar_percent(static_cast<float>(d), static_cast<float>(k.lo), static_cast<float>(k.hi));
     case Fmt::MsLog: {  // the bar is the position in steps, so it moves evenly under the encoder
       int steps = 0, at = 0;

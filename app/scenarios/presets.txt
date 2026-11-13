@@ -47,7 +47,7 @@ press shift
 tap f8
 release shift
 wait 1000
-snap 08_FROZEN
+snap 08_SWELL
 press shift
 tap f2
 release shift

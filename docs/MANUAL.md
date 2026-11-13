@@ -129,15 +129,21 @@ now.
 | F5 SCALE | The scale: the chords and TUNE stay in it |
 | F6 ROW | Which pad row F7 sets: A, B or C. A tap steps and wraps; the encoder stops at the ends. The row's pads flash once |
 | F7 PLAYS | What the chosen row plays: notes, chords or a parameter strip (below). Hold a pad of A, B or C and F7 changes that pad's row at once. Its value names the row and what it plays (for example A VOWEL) |
-| F8 | By mode: BANDS SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL |
-| SHIFT + F1 | FREEZE the vowel |
+| F8 | By mode: BANDS and ROBOT SPREAD, TALK QUALITY, TUNE SPEED, TRACT VOWEL |
+| SHIFT + F1 | FREEZE the vowel. TALK only: in any other mode it says HEARD IN TALK ONLY and does nothing, and it clears when you leave TALK |
 | SHIFT + F2 | GATE: chops the sound in time (OFF, 1/4, 1/8, 1/16, 1/32) |
 | SHIFT + F3 | ARP: plays held notes one at a time (OFF, UP, DOWN, UP-DOWN, RANDOM) |
 | SHIFT + F4 | GLIDE: slides between notes |
-| SHIFT + F5 | FORMANT: moves the voice's colour up or down, as if the singer were smaller or bigger |
-| SHIFT + F6 | THRU: lets some of the voice's top through |
+| SHIFT + F5 | FORMANT: moves the voice's colour up or down, as if the singer were smaller or bigger. Heard in BANDS, TALK and ROBOT |
+| SHIFT + F6 | THRU: lets some of the voice's top through. Heard in BANDS, TALK and ROBOT |
 | SHIFT + F7 | OCTAVE: the octave of the pads, -3 to +2 (the same value the OCT- and OCT+ pads step) |
 | SHIFT + F8 | PRESET: eight factory sounds (in TRACT, TRACT's own eight) |
+
+**Dim means not heard in this mode.** A key or pad that is dim is not heard in the mode you are in. A tap on a dim key still sets its value, for the modes where it is heard, and
+shows one line saying where (for example HEARD IN TALK ONLY). This holds on PERFORM's SHIFT row, on PARAMS and on PATTERN's lanes. The
+exceptions are the pads of a strip and of row C's FORMANT, which go dark where they are not heard and refuse with the same line, and FREEZE, which latches and so
+refuses outside TALK instead of waiting for it (on PARAMS, and for a controller learned onto it, too). A lit key may be heard only with some carriers (for example, the CARRIER page and ARP are lit in TRACT, whichever carrier plays). GATE, ARP, GLIDE and the CARRIER page are not heard in TUNE (it has no carrier); FORMANT and THRU are heard in BANDS, TALK and ROBOT;
+AMOUNT and NOTES IN are TUNE's, and so is SPEED, which is also heard in any mode while the CARRIER source is VOICE (it smooths the note you sing); the TRACT page is TRACT's. DRY and LEVEL are heard everywhere. This needs more testing on the unit, for how dim reads on the LEDs and the display.
 
 ![PERFORM in TALK mode with a chord held](manual/img/perform-talk.png)
 
@@ -233,20 +239,20 @@ bindings are kept with the unit's settings, not with the project. Binding CC 1 t
 
 ![PARAMS, page SHAPE](manual/img/params-shape.png)
 
-*SHAPE: MODE, QUALITY (TALK's detail; dim in the other modes, where it does nothing), FREEZE, DRY (the voice mixed in as it is), and
-VOICING: how a chord's notes are laid out.*
+*SHAPE: MODE, QUALITY (TALK's detail; dim in the other modes, where it does nothing), FREEZE (dim outside TALK), DRY (the voice mixed in as it is), and
+VOICING: how a chord's notes are laid out. The page's last two keys are FORMANT (F7) and THRU (F8), heard in BANDS, TALK and ROBOT.*
 
 VOICING has four settings. CLOSE stacks the notes as written. OPEN lifts the third an octave. WIDE spreads the chord over two octaves.
 SMOOTH, the default, picks the arrangement nearest the chord before, within the pad's octave, so a progression moves without jumps.
 
-The SHAPE page's sixth key is MOUTH (F6): PADS, the default, or LIVE. It only matters in TRACT, where it says what moves the mouth (section 5b, "Your voice as the mouth"); outside TRACT the key is dim and a tap does nothing. It is not kept with the project and starts as PADS each time.
+The SHAPE page's sixth key is MOUTH (F6): PADS, the default, or LIVE. It only matters in TRACT, where it says what moves the mouth (section 5b, "Your voice as the mouth"); outside TRACT the key is dim; a tap still sets it and says HEARD IN TRACT ONLY. It is not kept with the project and starts as PADS each time; a controller learned onto it moves it live, and the project does not keep that value either.
 
 ![PARAMS, page TUNE](manual/img/params-tune.png)
 
-*TUNE: KEY, SCALE, SPEED (how fast a note is pulled), AMOUNT, and NOTES IN (follow the notes you play).*
+*TUNE: KEY, SCALE, SPEED (how fast a note is pulled), AMOUNT, and NOTES IN (follow the notes you play), then GLIDE (F6), GATE (F7) and ARP (F8), the same values as PERFORM's SHIFT + F4, F2 and F3. GLIDE, GATE and ARP are dim in TUNE, which has no carrier.*
 
 **TRACT**, the fourth page, is the mouth of TRACT mode (section 5b says what each value does): VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES and
-HISS. The values are live in every mode and speak in TRACT only; in the other modes the page says TRACT MODE ONLY and keeps them.
+HISS. The values are live in every mode and speak in TRACT only; in the other modes the keys are dim, a tap still sets the value, and the page says HEARD IN TRACT ONLY.
 
 ### MASTER
 
@@ -266,6 +272,8 @@ microphone, the line and the radio share one converter; USB audio is stereo.
 | F5 LEVEL | The output level |
 | F6 RETURN | The level of the sound sent back over USB |
 | F7 SEEK DOWN, F8 SEEK UP | Radio only: look for the next station |
+
+MASTER opens with no key chosen, so the encoder moves nothing and the strip says TAP AN F KEY FIRST: tap SOURCE, GAIN or the value you want, then turn; a second tap on the same key steps it on. Leaving MASTER forgets the choice. SHIFT makes the encoder coarse; the F row ignores SHIFT here, and so do the arrows and the pads. The MODE panel in the middle only shows the mode (it says SET ON PERFORM F1).
 
 ### SAMPLE, SAMPLE REC, SAMPLE EDIT, SAMPLE LOAD
 
@@ -357,7 +365,7 @@ into a pattern; it does not give you a voice you can talk through.
 | RES, 0 to 100 | How long the mouth rings. The default is 50 |
 | HISS, 0 to 100 | Noise at the narrowest point, and only while the mouth is narrow: the breath of a consonant. The default is 30 |
 
-The values are live in every mode, so you can set the mouth before you press F1. In the other modes the page says TRACT MODE ONLY and keeps them.
+The values are live in every mode, so you can set the mouth before you press F1. In the other modes the keys are dim, a tap still sets the value, and the page says HEARD IN TRACT ONLY.
 A strip pad that is held wins over the pattern's mouth line while it is held.
 
 **Your voice as the mouth.** TRACT can also take its mouth from the voice at the input. On PARAMS, SHAPE page, press F6 (MOUTH) and step it to
@@ -570,12 +578,12 @@ and writes nothing.
 | Key | What it does |
 |---|---|
 | F1 PATTERN | A to H |
-| F2 LANE | NOTE, CARRIER, LEVEL, SLICE or MOUTH |
+| F2 LANE | NOTE, CARRIER, LEVEL (ACCENT in TRACT, where the level drives the jaw), SLICE or MOUTH |
 | F3 LENGTH | 1 to 16 steps |
 | F4 TEMPO | The tempo |
-| F5 VALUE | The cursor step's value in the lane; the encoder edits it |
-| F6 ROW | NOTE lane: which of the two note rows the palette shows, A or B. The row flashes. MOUTH lane: SET, the palette VOWELS or WORDS. Dim on the other lanes |
-| F7 PLAYS | NOTE lane: what that row plays (NOTE, TRIAD, 7TH, OPEN, POWER or OFF). MOUTH lane: FILL. Dim on the other lanes |
+| F5 VALUE | The cursor step's value in the lane; the encoder edits it. LEVEL runs 1 to 100, and 1 to 127 in TRACT; the palette's last pad is the top |
+| F6 ROW | NOTE lane: which of the two note rows the palette shows, A or B. The row flashes. MOUTH lane: SET, the palette VOWELS or WORDS (outside TRACT it flips the page and says where the lane is heard). Dim on the other lanes; a tap there says ROW AND PLAYS: NOTE LANE ONLY |
+| F7 PLAYS | NOTE lane: what that row plays (NOTE, TRIAD, 7TH, OPEN, POWER or OFF). MOUTH lane: FILL (outside TRACT it fills and says HEARD IN TRACT ONLY). Dim on the other lanes |
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | SHIFT + F8 CAPTURE | MOUTH lane only: reads the slot SAMPLE shows into the lane. Pressed again while it reads, it cancels |
@@ -588,7 +596,9 @@ SHIFT + F8 CAPTURE writes the lane from a recording: see "Capturing a voice" in 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY
 copies it, SHIFT + INSERT pastes it over the current one, LENGTH too, and SHIFT + DELETE empties it after F1 confirms (any other key
-leaves it as it is). A different pattern starts when the one that plays ends.
+leaves it as it is). A different pattern starts when the one that plays ends. While a SONG chain plays, a pattern pad says SONG PLAYS THE CHAIN and changes nothing.
+
+The lane's header says where the lane is heard: CARRIER and LEVEL are not heard in TUNE, and the MOUTH lane speaks in TRACT only. The lane still edits, and its name is dim. With nothing under the cursor, the strip says F8 SAVES and that holding SHIFT shows the SHIFT row (CLR LANE, FOLLOW, CAPTURE). On the SLICE lane, VALUE and the palette say SPEAKS HAS NO SLICES when the slot SPEAKS is on has none.
 
 ### SONG
 

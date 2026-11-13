@@ -41,6 +41,8 @@ constexpr Preset make(const char* name, float mode, float carsrc, float wave, fl
 }
 }  // namespace preset_detail
 
+// UX2: no preset sets Freeze 1: FREEZE is TALK's latching gesture and a mode change clears it (apply_mode), so a preset that changed mode could not hold it,
+// and in BANDS it is not heard. SWELL (named FROZEN until UX2) is the slow-attack, slow-release pad.
 // Mode 0 BANDS, 3 ROBOT (these eight never select TRACT: in TRACT SHIFT + F8 picks from kTractPresets below). CarSrc 1 SYNTH, 2 NOISE. Gate 3 is 1/16; Arp 1 is UP.
 //                                                      mode car wave noise  atk  rel  det  q   fmt  thru glide gate arp vib frz
 inline constexpr Preset kPresets[kPresetCount] = {
@@ -51,7 +53,7 @@ inline constexpr Preset kPresets[kPresetCount] = {
     preset_detail::make("ELF",     0, 1, 0, 0.0f,   5.0f,   80.0f,  6.0f, 16, 9,  0.0f,   0.0f, 0, 0, 0.0f, 0),
     preset_detail::make("PULSE",   0, 1, 0, 0.0f,   5.0f,   60.0f,  6.0f, 16, 0,  0.0f,   0.0f, 3, 0, 0.0f, 0),
     preset_detail::make("ARP",     0, 1, 0, 0.0f,   5.0f,   30.0f,  4.0f, 16, 0,  0.0f,   0.0f, 0, 1, 0.0f, 0),
-    preset_detail::make("FROZEN",  0, 1, 0, 0.0f, 300.0f,  600.0f, 10.0f, 16, 0,  0.0f,   0.0f, 0, 0, 0.0f, 1),
+    preset_detail::make("SWELL",   0, 1, 0, 0.0f, 300.0f,  600.0f, 10.0f, 16, 0,  0.0f,   0.0f, 0, 0, 0.0f, 0),
 };
 
 // ---- TRACT's eight (SHIFT + F8 while the mode is TRACT) ----------------------------------------------------------------------------------

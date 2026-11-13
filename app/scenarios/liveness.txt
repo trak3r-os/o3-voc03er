@@ -1,0 +1,98 @@
+# UX2, the liveness table: a DIM key or pad is not heard in this mode. A tap on a dim PARAMS or SHIFT-row key still sets the value and says where it is heard;
+# the FORMANT pads and the strips go dark and refuse; FREEZE refuses outside TALK. TALK (FREEZE lit, the shift row, FORMANT and THRU heard), TUNE (the CARRIER
+# page and the TUNE page of PARAMS, a dim key tapped; the shift row with GLIDE, GATE and ARP dim), TRACT (PATTERN's LEVEL lane is ACCENT, its header cue), the
+# PERFORM title in each mode, and MASTER opening with nothing focused. The simulator shows the screens and that the engine takes the values; it cannot say how
+# dim reads on the unit's LEDs or the display.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/liveness.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+record on
+tap performance
+wait 200
+snap 01_bands_title
+# TALK: FREEZE is heard here and latches
+tap f1
+turn -8
+turn 1
+wait 400
+snap 02_talk_title
+press shift
+wait 200
+snap 03_talk_shift_row
+tap f1
+wait 200
+snap 04_talk_freeze_on
+release shift
+wait 200
+# TUNE: no carrier, no FORMANT; leaving TALK cleared FREEZE
+tap f1
+turn -8
+turn 2
+wait 400
+snap 05_tune_title
+press shift
+wait 200
+snap 06_tune_shift_row
+tap f1
+wait 200
+snap 07_tune_freeze_refused
+release shift
+wait 200
+tap params
+wait 300
+snap 08_tune_params_carrier_dim
+tap f2
+wait 200
+snap 09_tune_dim_key_says_where
+tap params
+wait 300
+snap 10_tune_params_shape
+tap params
+wait 300
+snap 11_tune_params_tune_page
+tap f8
+wait 200
+snap 12_arp_dim_in_tune
+# ROBOT and TRACT titles
+tap performance
+wait 200
+tap f1
+turn -8
+turn 3
+wait 400
+snap 13_robot_title
+turn 1
+wait 400
+snap 14_tract_title
+# PATTERN: the LEVEL lane is ACCENT in TRACT, the lane header says where it is heard
+tap pattern
+wait 200
+snap 15_pattern_tract_note
+tap vol
+wait 200
+snap 16_pattern_tract_accent
+tap f7
+wait 200
+snap 17_pattern_f7_on_level
+# the same lane in TUNE: dim, with its header cue
+tap performance
+wait 200
+tap f1
+turn -8
+turn 2
+wait 400
+tap pattern
+wait 200
+tap vol
+wait 200
+snap 18_pattern_tune_level_not_heard
+# MASTER: nothing focused until an F key is tapped
+tap master
+wait 300
+turn 5
+wait 200
+snap 19_master_nothing_focused
+tap f4
+wait 200
+snap 20_master_dry_focused
+record off

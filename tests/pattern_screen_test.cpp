@@ -86,7 +86,7 @@ TEST_CASE("pattern: the SLICE lane's palette, value and clear") {
   CHECK(get_step(p, 1).note == 60u);
   // LEVEL does not touch a slice
   CHECK(pt::slice_write(p, 4, 2, 8) == pt::SliceWrite::Written);
-  CHECK(pt::step_value(p, 4, pt::Lane::Level, 1));
+  CHECK(pt::step_value(p, 4, pt::Lane::Level, -1));  // (the default 100 is the top outside TRACT: UX2)
   CHECK(get_step(p, 4).slice == 3u);
 }
 

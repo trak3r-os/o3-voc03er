@@ -60,7 +60,8 @@ class MasterScreen final : public o3sdk::app::Screen {
   void* user_ = nullptr;
   master::Follower in_;   // the IN meter's fall and held peak (update(), main loop)
   master::Follower out_;  // the OUT meter's
-  std::uint8_t focus_ = master::Source;  // the F key the encoder drives (F1..F6)
+  static constexpr std::uint8_t kNoFocus = 0xFF;
+  std::uint8_t focus_ = kNoFocus;        // the F key the encoder drives (F1..F6); none until a key is tapped, so a stray detent moves nothing
   const char* note_ = nullptr;           // a moment's line (a static string), until note_until_
   std::uint64_t note_until_ = 0;
 };

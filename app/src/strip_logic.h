@@ -18,6 +18,7 @@
 //   CLOSE     as a number it is the closure strips;        SLIDE, MIX  the word line and apply_mode write them;
 //   the loop, region, CarSrc, ModSrc and LiveCh values belong to the pickers and SAMPLE; the project's own values (CARRIER lane) are not parameters.
 
+#include "liveness.h"
 #include "params_logic.h"
 
 #include <cmath>
@@ -44,13 +45,14 @@ inline constexpr unsigned kGroupNotes = 0;
 inline constexpr unsigned kGroupCount = 6;
 inline constexpr const char* kGroupNames[kGroupCount] = {"NOTES", "CARRIER", "SHAPE", "TUNE", "TRACT", "PLAY"};
 
-constexpr std::uint8_t mode_bit(unsigned m) noexcept { return static_cast<std::uint8_t>(1u << m); }
-inline constexpr std::uint8_t kAllModes = 0x1F;
-inline constexpr std::uint8_t kNotTune = static_cast<std::uint8_t>(kAllModes & ~mode_bit(2));
-inline constexpr std::uint8_t kBandsTalkRobot = mode_bit(0) | mode_bit(1) | mode_bit(3);
-inline constexpr std::uint8_t kTractOnly = mode_bit(kModeTract);
-inline constexpr std::uint8_t kTalkOnly = mode_bit(1);
-inline constexpr std::uint8_t kTuneOnly = mode_bit(2);
+// The mode masks are the liveness table's (liveness.h): the strips, PARAMS and PERFORM's SHIFT row read the same facts.
+using live::kAllModes;
+using live::kBandsTalkRobot;
+using live::kNotTune;
+using live::kTalkOnly;
+using live::kTractOnly;
+using live::kTuneOnly;
+using live::mode_bit;
 
 struct StripDef {
   const char* name;     // the row's name beside the strip (at most 8 characters: "A " and the name fit the margin)
@@ -78,7 +80,7 @@ inline constexpr StripDef kStrips[] = {
     // SHAPE
     {"FREEZE", Shape::Enum, 2, kTalkOnly, detail::vk("FREEZE", Vocoder::Freeze, Fmt::OnOff, 0, 1), 0},
     {"DRY", Shape::Cont, 2, kAllModes, detail::vk("DRY", Vocoder::Dry, Fmt::Pct, 0, 100), 0},
-    {"VOICING", Shape::Enum, 2, kAllModes, params::app_key("VOICING", Fmt::Voicing, 0, 3), 0},
+    {"VOICING", Shape::Enum, 2, kNotTune, params::app_key("VOICING", Fmt::Voicing, 0, 3), 0},
     // TUNE
     {"KEY", Shape::Enum, 3, kAllModes, detail::vk("KEY", Vocoder::Key, Fmt::Key, 0, 11), 0},
     {"SCALE", Shape::Enum, 3, kAllModes, detail::vk("SCALE", Vocoder::Scale, Fmt::Scale, 0, static_cast<int>(kScaleTableCount) - 1), 0},
@@ -101,9 +103,9 @@ inline constexpr StripDef kStrips[] = {
     {"CL BACK", Shape::Hold, 4, kTractOnly, detail::tk("CL BACK", TractUnit::Close, Fmt::Int, 0, 3), 3},
     // PLAY (the SHIFT row's values)
     {"THRU", Shape::Cont, 5, kBandsTalkRobot, detail::vk("THRU", Vocoder::Thru, Fmt::Pct, 0, 100), 0},
-    {"GLIDE", Shape::Cont, 5, kAllModes, detail::vk("GLIDE", Vocoder::Glide, Fmt::MsLin, 0, 500), 0},
-    {"GATE", Shape::Enum, 5, kAllModes, detail::vk("GATE", Vocoder::Gate, Fmt::Int, 0, 4), 0},
-    {"ARP", Shape::Enum, 5, kAllModes, detail::vk("ARP", Vocoder::Arp, Fmt::Int, 0, 4), 0},
+    {"GLIDE", Shape::Cont, 5, kNotTune, detail::vk("GLIDE", Vocoder::Glide, Fmt::MsLin, 0, 500), 0},
+    {"GATE", Shape::Enum, 5, kNotTune, detail::vk("GATE", Vocoder::Gate, Fmt::Gate, 0, 4), 0},
+    {"ARP", Shape::Enum, 5, kNotTune, detail::vk("ARP", Vocoder::Arp, Fmt::Arp, 0, 4), 0},
 };
 inline constexpr unsigned kStripCount = sizeof kStrips / sizeof kStrips[0];
 
@@ -220,38 +222,11 @@ inline void pad_text(const StripDef& d, unsigned col, char (&out)[12]) noexcept 
   if (!pad_used(d, col)) {
     return;
   }
-  if (d.key.fmt == Fmt::Int && d.key.kind == Kind::Value && d.key.param == Vocoder::Gate) {
-    std::size_t i = 0;
-    for (const char* s = perform::kGateNames[pad_value(d, col) % static_cast<int>(perform::kGateCount)]; *s != '\0' && i + 1u < sizeof out; ++s) {
-      out[i++] = *s;
-    }
-    out[i] = '\0';
-    return;
-  }
-  if (d.key.fmt == Fmt::Int && d.key.kind == Kind::Value && d.key.param == Vocoder::Arp) {
-    std::size_t i = 0;
-    for (const char* s = perform::kArpNames[pad_value(d, col) % static_cast<int>(perform::kArpCount)]; *s != '\0' && i + 1u < sizeof out; ++s) {
-      out[i++] = *s;
-    }
-    out[i] = '\0';
-    return;
-  }
   params::format_value(d.key, pad_value(d, col), out);
 }
 
 // The current value as text (the flash line and the row's readout).
 inline void value_text(const StripDef& d, int cur, char (&out)[12]) noexcept {
-  if (d.key.kind == Kind::Value && d.key.fmt == Fmt::Int && (d.key.param == Vocoder::Gate || d.key.param == Vocoder::Arp)) {
-    const bool gate = d.key.param == Vocoder::Gate;
-    const unsigned count = gate ? perform::kGateCount : perform::kArpCount;
-    const char* s = (gate ? perform::kGateNames : perform::kArpNames)[static_cast<unsigned>(cur < 0 ? 0 : cur) < count ? static_cast<unsigned>(cur < 0 ? 0 : cur) : 0u];
-    std::size_t i = 0;
-    for (; s[i] != '\0' && i + 1u < sizeof out; ++i) {
-      out[i] = s[i];
-    }
-    out[i] = '\0';
-    return;
-  }
   params::format_value(d.key, cur, out);
 }
 

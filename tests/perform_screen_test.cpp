@@ -183,6 +183,10 @@ TEST_CASE("perform: the SHIFT row focuses FORMANT, THRU, GATE, ARP, GLIDE and PR
   auto h = std::make_unique<sim::Harness>(::o3sdk_app());
   REQUIRE(h->start());
   h->run_ms(100);
+  tap(*h, app::Button::F1);  // MODE takes the focus; the second tap is TALK, the only mode FREEZE is heard in (UX2)
+  tap(*h, app::Button::F1);
+  h->run_ms(20);
+  REQUIRE(unit_param(*h, o3_voc03er::Vocoder::Mode) == doctest::Approx(1.0f));
   shift_tap(*h, app::Button::F1);  // FREEZE on, off
   h->run_ms(20);
   CHECK(unit_param(*h, kFreeze) == doctest::Approx(1.0f));

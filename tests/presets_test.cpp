@@ -25,7 +25,7 @@ TEST_CASE("presets: each lists the same fifteen parameters, in range, and none i
                                              Vocoder::Release, Vocoder::Detune, Vocoder::Quality, Vocoder::Formant, Vocoder::Thru,
                                              Vocoder::Glide,  Vocoder::Gate,   Vocoder::Arp,  Vocoder::Vib,     Vocoder::Freeze};
   CHECK(std::strcmp(kPresets[0].name, "ROBOT") == 0);
-  CHECK(std::strcmp(kPresets[7].name, "FROZEN") == 0);
+  CHECK(std::strcmp(kPresets[7].name, "SWELL") == 0);
   for (const Preset& p : kPresets) {
     INFO(p.name);
     CHECK(std::strlen(p.name) <= 8u);
@@ -47,7 +47,11 @@ TEST_CASE("presets: each lists the same fifteen parameters, in range, and none i
   CHECK(kPresets[5].v[11].value == 3.0f);   // PULSE gate 1/16
   CHECK(kPresets[6].v[12].value == 1.0f);   // ARP up
   CHECK(kPresets[6].v[11].value == 0.0f);   // ... gate off
-  CHECK(kPresets[7].v[14].value == 1.0f);   // FROZEN
+  CHECK(kPresets[7].v[14].value == 0.0f);   // SWELL: no preset latches FREEZE (UX2)
+  for (const Preset& p : kPresets) {
+    INFO(p.name);
+    CHECK(p.v[14].value == 0.0f);  // FREEZE is TALK's and a mode change clears it: a preset that set it would be dim in BANDS or lost on the mode change
+  }
   CHECK(kPresets[2].v[1].value == 2.0f);    // WHISPER: the NOISE carrier
 }
 

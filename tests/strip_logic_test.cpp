@@ -197,7 +197,6 @@ TEST_CASE("strip: the excluded parameters have no strip, and no strip is a param
     }
     // only a parameter the app can set live, never a placeholder
     CHECK(d.key.kind != params::Kind::None);
-    CHECK(d.key.kind != params::Kind::Later);
   }
   // the reasons, one by one: MODE swaps the layout, QUALITY reallocates the LPC, LEVEL is the VOL pads', SLIDE and MIX are written by the word line and the mode
   CHECK(st::find(st::kIdVowel) != nullptr);

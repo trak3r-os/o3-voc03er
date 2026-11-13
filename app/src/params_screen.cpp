@@ -13,6 +13,7 @@ namespace o3_voc03er {
 
 using namespace o3sdk;
 namespace pr = params;
+namespace live = o3_voc03er::live;
 using ui::Color;
 using ui::Face;
 using Button = app::Button;
@@ -150,6 +151,10 @@ void ParamsScreen::step(app::Context& ctx, unsigned key, int delta, bool coarse,
   }
   const dsp::UnitId id = unit_of(k, voice_, tract_);
   const int next = pr::step_display(k, read(e, id, k), delta, coarse, tap);
+  if (k.kind == pr::Kind::Value && k.param == Vocoder::Freeze && next != 0 && !live::voice_heard(Vocoder::Freeze, perform::mode_index(e.param(voice_, Vocoder::Mode)))) {
+    say(ctx, "FREEZE: HEARD IN TALK ONLY");  // a latching gesture: outside TALK it refuses, as PERFORM's does (UX2)
+    return;
+  }
   (void)e.set_param(id, k.param, pr::to_param(k.fmt, next));
   ctx.redraw();
 }
@@ -165,9 +170,7 @@ void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       return;
     }
     const pr::KeyDef& def = pr::key_def(page_, k);
-    if (def.kind == pr::Kind::Later) {
-      say(ctx, "COMES LATER");
-    } else if (pr::live_kind(def.kind)) {
+    if (pr::live_kind(def.kind)) {
       if (k == focus_) {  // a second tap steps the value on
         step(ctx, k, 1, true, true);
       } else {
@@ -224,7 +227,7 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Note, "PATTERN: NOTE LANE", nullptr},
       {Button::Instr, "PATTERN: CARRIER LANE", nullptr},
       {Button::Vol, "PATTERN: LEVEL LANE", nullptr},
-      {Button::Fx, "PATTERN: SLICE LANE", nullptr},
+      {Button::Fx, "PATTERN: SLICE, MOUTH LANE", nullptr},
       {Button::Shift, "COARSE STEPS; F KEYS: LEARN", nullptr},
   };
   if (perform_ != nullptr) {
@@ -238,9 +241,9 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   }
   h.summary = page_ == pr::kTractPage
                   ? "THE MOUTH OF TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS.\n"
-                    "THEY SPEAK IN TRACT MODE ONLY. SHIFT + F LEARNS A CONTROLLER ONTO A VALUE."
+                    "DIM: NOT HEARD IN THIS MODE (THEY SPEAK IN TRACT). SHIFT + F: LEARN."
                   : "FOUR PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE, TRACT. PARAMS OR UP\n"
-                    "AND DOWN TURN THE PAGE. A DIM KEY DOES NOTHING IN THIS MODE. SHIFT + F: LEARN.";
+                    "AND DOWN TURN THE PAGE. DIM: NOT HEARD IN THIS MODE. SHIFT + F: LEARN.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     // a blank key has no row; MOUTH (LT1) says what it does: the pads and the lane, or the voice at the input, shape the tube
     h.fkey[i] = !pr::focusable(page_, i) ? nullptr : (pr::key_def(page_, i).fmt == pr::Fmt::Source ? "MOUTH: PADS OR LIVE VOICE" : "TAP: FOCUS, THEN STEP");
@@ -257,6 +260,7 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const app::AudioIn& ain = ctx.audio_in();
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
   const unsigned mode = perform::mode_index(e.param(voice_, Vocoder::Mode));
+  const unsigned car_src = static_cast<unsigned>(e.param(voice_, Vocoder::CarSrc) + 0.5f);  // SPEED is heard in any mode with the VOICE source (liveness.h)
   const unsigned tempo = e.stats().tempo_mbpm;
 
   ornoir::Voiceprint vp;
@@ -281,10 +285,8 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   for (unsigned i = 0; i < pr::kKeys; ++i) {
     const pr::KeyDef& k = pr::key_def(page_, i);
     keys[i].name = k.name;
-    if (k.kind == pr::Kind::Later) {
-      keys[i].dim = true;
-    } else if (pr::live_kind(k.kind)) {
-      keys[i].dim = !pr::key_live(k, mode);  // QUALITY outside TALK
+    if (pr::live_kind(k.kind)) {
+      keys[i].dim = !pr::key_live(k, mode, car_src);  // not heard in this mode (liveness.h); a tap still sets it
       const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, unit_of(k, voice_, tract_), k);
       char txt[12];
       pr::format_value(k, v, txt);
@@ -344,8 +346,14 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     r.text(kVpX, 350, line, Color::Accent, Face::Label);
   } else if (note_ != nullptr) {
     r.text(kVpX, 350, note_, Color::TextDim, Face::Label);
-  } else if (page_ == pr::kTractPage && mode != kModeTract) {
-    r.text(kVpX, 350, "TRACT MODE ONLY", Color::TextDim, Face::Label);  // the values are kept; the mouth speaks in TRACT
+  } else if (focused != nullptr && !pr::key_live(*focused, mode, car_src)) {
+    char where[40];
+    if (focused->kind == pr::Kind::Value) {  // the focused key is dim: it still sets, and this is where it is heard
+      live::voice_heard_text(focused->param, car_src, where);
+    } else {
+      live::heard_text(pr::key_modes(*focused, car_src), where);
+    }
+    r.text(kVpX, 350, where, Color::TextDim, Face::Label);
   }
 }
 

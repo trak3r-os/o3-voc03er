@@ -72,8 +72,10 @@ void MasterScreen::init(dsp::UnitId voice, const InputMeter* meter, PerformScree
 
 const ui::Theme* MasterScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
 
+// Nothing is focused on entry: the encoder moves nothing until a key is tapped, so a stray detent never switches the live SOURCE.
 void MasterScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
+  focus_ = kNoFocus;
   ctx.redraw();
 }
 
@@ -192,6 +194,10 @@ void MasterScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     return;
   }
   if (in.turn()) {
+    if (focus_ >= ms::kKeys) {
+      say(ctx, "TAP AN F KEY FIRST");  // the encoder points at nothing yet
+      return;
+    }
     step(ctx, focus_, in.delta(), in.shift, false);
   }
 }
@@ -218,8 +224,8 @@ void MasterScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
       {Button::Shift, "COARSE STEPS ON THE ENCODER", nullptr},
   };
-  h.summary = "THE SIGNAL PATH: LIVE IN, THE MODE, OUTPUT. TAP A KEY TO POINT THE ENCODER AT\n"
-              "IT, TAP AGAIN TO STEP. A DIM KEY SAYS WHY WHEN TAPPED.";
+  h.summary = "THE SIGNAL PATH: LIVE IN, THE MODE, OUTPUT. TAP A KEY TO POINT THE ENCODER AT IT (NONE\n"
+              "AT FIRST), TAP AGAIN TO STEP. A DIM KEY SAYS WHY. THE MODE IS SET ON PERFORM F1.";
   h.fkey[ms::Source] = "LINE, MIC, RADIO OR USB";
   h.fkey[ms::Gain] = "INPUT GAIN, NOT ON USB";
   h.fkey[ms::Monitor] = "INPUT TO THE MIX";
@@ -230,7 +236,7 @@ void MasterScreen::help(const app::Context&, app::Help& h) const noexcept {
   h.fkey[ms::SeekUp] = "NEXT STATION UP: RADIO";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
-  h.encoder = "THE LIT F KEY'S VALUE";
+  h.encoder = "THE TAPPED F KEY'S VALUE";
 }
 
 // ---- draw ---------------------------------------------------------------------------------------------------------------------------
@@ -334,6 +340,8 @@ void MasterScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const int car_w = r.text_width(h.sounds, Face::Label);
   r.text(kModeX + (kModeW - car_w) / 2, 196, h.sounds, Color::SelText, Face::Label);
 
+  const char* set_on = "SET ON PERFORM F1";
+  r.text(kModeX + (kModeW - r.text_width(set_on, Face::Micro)) / 2, 222, set_on, Color::TextDim, Face::Micro);
   r.text(kLiveX, 340, "ONE LIVE SOURCE: MIC, LINE AND RADIO SHARE THE ADC; USB IS STEREO", Color::TextDim, Face::Label);
   if (a.radio_source) {
     char f[12];

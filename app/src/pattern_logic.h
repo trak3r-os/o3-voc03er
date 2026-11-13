@@ -6,6 +6,7 @@
 
 #include <o3_voc03er/stepseq.h>
 
+#include "liveness.h"
 #include "pads_logic.h"
 #include "perform_logic.h"
 
@@ -18,6 +19,25 @@ namespace o3_voc03er::pattern {
 enum class Lane : std::uint8_t { Note, Carrier, Level, Slice, Mouth };
 inline constexpr unsigned kLanes = 5;
 inline constexpr const char* kLaneNames[kLanes] = {"NOTE", "CARRIER", "LEVEL", "SLICE", "MOUTH"};
+// The lane's name: in TRACT the LEVEL lane is the tract's ACCENT (LEVEL above 100 opens the jaw), so it is labelled so.
+constexpr const char* lane_name(Lane lane, bool tract) noexcept {
+  return lane == Lane::Level && tract ? "ACCENT" : kLaneNames[static_cast<unsigned>(lane) % kLanes];
+}
+// The modes that hear a lane (liveness.h): NOTE and SLICE every mode; CARRIER and LEVEL not TUNE (the LEVEL lane is the velocity of the carrier's
+// note, and TUNE has no carrier); MOUTH TRACT only.
+constexpr std::uint8_t lane_modes(Lane lane) noexcept {
+  switch (lane) {
+    case Lane::Carrier:
+    case Lane::Level:
+      return live::kNotTune;
+    case Lane::Mouth:
+      return live::kTractOnly;
+    case Lane::Note:
+    case Lane::Slice:
+      break;
+  }
+  return live::kAllModes;
+}
 // CLEAR LANE's question (SHIFT + F6), one line per lane (the strip shows it until a key answers).
 inline constexpr const char* kClearPrompt[kLanes] = {"CLEAR NOTE LANE: F1 CONFIRMS", "CLEAR CARRIER LANE: F1 CONFIRMS", "CLEAR LEVEL LANE: F1 CONFIRMS",
                                                      "CLEAR SLICE LANE: F1 CONFIRMS", "CLEAR MOUTH LANE: F1 CONFIRMS"};
@@ -46,9 +66,13 @@ constexpr int pattern_of_pad(unsigned pad) noexcept {
 constexpr unsigned pad_of_step(unsigned step) noexcept { return o3sdk::app::pad_at(2u + step / 8u, step % 8u); }
 constexpr unsigned pad_of_pattern(unsigned p) noexcept { return o3sdk::app::pad_at(2u + p / 4u, 8u + p % 4u); }
 
-// The LEVEL palette: 24 steps, pad 0 the lowest, pad 23 the full 100 (the synth takes 100 and up as full, so nothing above is offered). The step
-// is 4.17, so no two pads give the same velocity.
-constexpr unsigned level_of_pad(unsigned pad) noexcept { return ((pad % kPalettePads) + 1u) * 100u / kPalettePads; }
+// The LEVEL range: 1..100 (the synth takes 100 and up as full), and in TRACT 1..127 (above 100 is ACCENT, accent_of). The palette and the VALUE key
+// cover the same range, so a pad and a turn reach the same values.
+inline constexpr unsigned kLevelTop = 100;
+inline constexpr unsigned kLevelTopTract = 127;
+constexpr unsigned level_top(bool tract) noexcept { return tract ? kLevelTopTract : kLevelTop; }
+// The LEVEL palette: 24 steps, pad 0 the lowest, pad 23 the top. The step is 4.17 (5.3 to 127), so no two pads give the same velocity.
+constexpr unsigned level_of_pad(unsigned pad, unsigned top = kLevelTop) noexcept { return ((pad % kPalettePads) + 1u) * top / kPalettePads; }
 
 // The NOTE palette is the layout's: palette row 0 is row A, row 1 is row B, so a pad plays what pads::pad_play says of it.
 inline constexpr pads::Row kPaletteRow[2] = {pads::Row::A, pads::Row::B};
@@ -82,7 +106,7 @@ constexpr std::uint8_t mouth_of_pad(unsigned pad, MouthPage page = MouthPage::Vo
 // Does the palette pad hold what the step stores? (LED mid on it.) On the NOTE lane the step's note and kind equal the pad's play (a rest, and a pad
 // that plays nothing, never match); the other lanes do not depend on the layout. `mouth` is the step's mouth byte (the MOUTH lane's).
 constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octave, const pads::Layout& layout, std::uint8_t mouth = 0,
-                               MouthPage page = MouthPage::Vowels) noexcept {
+                               MouthPage page = MouthPage::Vowels, unsigned level_cap = kLevelTop) noexcept {
   switch (lane) {
     case Lane::Note: {
       const pads::PadPlay p = palette_play(pad, octave, layout);
@@ -91,7 +115,7 @@ constexpr bool palette_matches(Lane lane, unsigned pad, const Step& s, int octav
     case Lane::Carrier:
       return pad < kCarrierPads && s.carrier == pad;
     case Lane::Level:
-      return level_of_pad(pad) == step_velocity(s);
+      return level_of_pad(pad, level_cap) == step_velocity(s);
     case Lane::Slice:
       return pad < kSliceMax && pad + 1u == s.slice;
     case Lane::Mouth:
@@ -167,9 +191,10 @@ inline void note_name(char (&out)[6], unsigned note) noexcept {
 // The MOUTH lane's VALUE walk: FOLLOW, A..U, LIP TIP BCK, 8 words, 6 WOBs (27 values, the last is 26).
 inline constexpr int kMouthWalkMax = static_cast<int>(kMouthWord + kMouthWords + kMouthWobRates) - 1;
 
-// The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind), CARRIER 0..7 (7 is LIVE), LEVEL 1..127. A step with
-// no change (the end of a range, the SLICE lane with no slices) returns false; SLICE steps 0..`slice_count` (0 is none).
-inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigned slice_count = 0) noexcept {
+// The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind), CARRIER 0..7 (7 is LIVE), LEVEL 1..`level_cap`
+// (100, or 127 in TRACT; a stored value above the cap comes down to it). A step with no change (the end of a range, the SLICE lane with no slices)
+// returns false; SLICE steps 0..`slice_count` (0 is none).
+inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigned slice_count = 0, unsigned level_cap = kLevelTop) noexcept {
   const Step s = get_step(p, i);
   switch (lane) {
     case Lane::Note: {
@@ -189,8 +214,10 @@ inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigne
       return c >= 0 && c <= static_cast<int>(kCarrierMax) && set_carrier(p, i, static_cast<unsigned>(c));
     }
     case Lane::Level: {
-      const int v = static_cast<int>(step_velocity(s)) + delta;
-      return v >= 1 && v <= 127 && set_level(p, i, static_cast<unsigned>(v));
+      const int cap = static_cast<int>(level_cap);
+      int v = static_cast<int>(step_velocity(s)) + delta;
+      v = v < 1 ? 1 : (v > cap ? cap : v);
+      return v != static_cast<int>(step_velocity(s)) && set_level(p, i, static_cast<unsigned>(v));
     }
     case Lane::Slice: {
       if (slice_count == 0u) {
@@ -275,6 +302,7 @@ inline constexpr const char* kFillPrompt = "FILL MOUTH LANE: F1 CONFIRMS";
 inline constexpr const char* kFilled = "MOUTH FILLED: F7 AGAIN, SHIFT + F6 CLEARS";
 inline constexpr const char* kWobPlays = "WOB PLAYS WITH THE LINE";
 inline constexpr const char* kMouthTract = "MOUTH SPEAKS IN TRACT";
+inline constexpr const char* kSongPlays = "SONG PLAYS THE CHAIN";  // a pattern pad while a SONG chain plays: the view follows, the chain keeps what sounds
 
 // A rest in one lane of a step (SHIFT + step pad, CLEAR LANE): NOTE a rest, CARRIER FOLLOW, LEVEL the default, SLICE none.
 inline bool rest_lane(PatternData& p, unsigned i, Lane lane) noexcept {

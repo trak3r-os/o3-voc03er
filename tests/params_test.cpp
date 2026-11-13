@@ -42,7 +42,7 @@ TEST_CASE("params: four pages of eight, the live keys name a parameter the unit 
   CHECK(std::strcmp(pm::key_def(1, 1).name, "QUALITY") == 0);
   CHECK(pm::key_def(1, 1).param == Vocoder::Quality);
   CHECK(pm::key_def(2, 4).param == Vocoder::NotesIn);
-  CHECK(pm::key_def(1, 7).kind == pm::Kind::None);
+  CHECK(pm::key_def(1, 7).param == Vocoder::Thru);
   for (unsigned p = 0; p < pm::kPages; ++p) {
     for (unsigned k = 0; k < pm::kKeys; ++k) {
       const pm::KeyDef& d = pm::key_def(p, k);
@@ -86,7 +86,7 @@ TEST_CASE("params: the TRACT page is the tract unit's eight keys, signed percent
     CHECK(d.lo < d.hi);
     CHECK(d.step > 0);
     CHECK(pm::focusable(3, k));
-    CHECK(pm::key_live(d, 0u));
+    CHECK_FALSE(pm::key_live(d, 0u));  // the mouth speaks in TRACT: dim elsewhere, and a tap still sets it
     CHECK(pm::key_live(d, o3_voc03er::kModeTract));
   }
   char t[12];
@@ -228,23 +228,78 @@ TEST_CASE("params: stepping clamps the linear keys and wraps the round ones") {
   CHECK(v == 500);
 }
 
-TEST_CASE("params: QUALITY is live only in TALK, MOUTH in TRACT, every other key in every mode") {
+TEST_CASE("params: a key is live in the modes liveness.h says, every key of the pages") {
   REQUIRE(std::string(o3_voc03er::kModeNames[1]) == "TALK");
-  const pm::KeyDef& quality = pm::key_def(1, 1);
-  CHECK(pm::key_live(quality, 1u));
   for (unsigned m = 0; m < o3_voc03er::kModeCount; ++m) {
-    CHECK(pm::key_live(quality, m) == (m == 1u));
     for (unsigned page = 0; page < pm::kPages; ++page) {
       for (unsigned k = 0; k < pm::kKeys; ++k) {
         const pm::KeyDef& d = pm::key_def(page, k);
-        if (d.fmt == pm::Fmt::Source) {
-          CHECK(pm::key_live(d, m) == (m == o3_voc03er::kModeTract));
-        } else if (&d != &quality) {
-          CHECK(pm::key_live(d, m));
+        if (d.kind == pm::Kind::None) {
+          continue;
+        }
+        INFO(d.name);
+        if (d.kind == pm::Kind::Tract) {
+          CHECK(pm::key_live(d, m) == (m == o3_voc03er::kModeTract));  // the tract unit's values, MOUTH among them
+        } else if (d.kind == pm::Kind::App) {
+          CHECK(pm::key_live(d, m) == (m != 2u));  // VOICING: the chords go to the carrier, TUNE has none
+        } else {
+          CHECK(pm::key_live(d, m) == o3_voc03er::live::voice_heard(d.param, m));
         }
       }
     }
   }
+  CHECK(pm::key_live(pm::key_def(1, 1), 1u));   // QUALITY: TALK
+  CHECK_FALSE(pm::key_live(pm::key_def(1, 1), 0u));
+  CHECK(pm::key_live(pm::key_def(1, 3), 4u));   // DRY: every mode, TRACT's mix too
+  CHECK(pm::key_live(pm::key_def(0, 7), 2u));   // LEVEL: every mode
+}
+
+TEST_CASE("params: UX2 keys, FORMANT and THRU after MOUTH, GLIDE, GATE and ARP after NOTES IN, read and step as PERFORM's SHIFT row does") {
+  const pm::KeyDef& formant = pm::key_def(1, 6);
+  const pm::KeyDef& thru = pm::key_def(1, 7);
+  const pm::KeyDef& glide = pm::key_def(2, 5);
+  const pm::KeyDef& gate = pm::key_def(2, 6);
+  const pm::KeyDef& arp = pm::key_def(2, 7);
+  CHECK(std::string(formant.name) == "FORMANT");
+  CHECK(std::string(thru.name) == "THRU");
+  CHECK(std::string(glide.name) == "GLIDE");
+  CHECK(std::string(gate.name) == "GATE");
+  CHECK(std::string(arp.name) == "ARP");
+  for (const pm::KeyDef* d : {&formant, &thru, &glide, &gate, &arp}) {
+    CHECK(d->kind == pm::Kind::Value);
+    CHECK(d->param < Vocoder::kParamCount);
+  }
+  CHECK(pm::learnable(1, 6));
+  CHECK(pm::learnable(1, 7));
+  CHECK(pm::learnable(2, 5));
+  CHECK(pm::learnable(2, 6));
+  CHECK(pm::learnable(2, 7));
+  char t[12];
+  pm::format_value(formant, -5, t);
+  CHECK(std::string(t) == "-5 ST");
+  pm::format_value(formant, 0, t);
+  CHECK(std::string(t) == "0 ST");
+  pm::format_value(formant, 12, t);
+  CHECK(std::string(t) == "+12 ST");
+  CHECK(pm::to_display(formant.fmt, -5.0f) == -5);
+  CHECK(pm::to_param(formant.fmt, -5) == -5.0f);
+  CHECK(pm::step_display(formant, 12, 1, false) == 12);  // clamps
+  CHECK(pm::step_display(formant, 0, -1, true) == -4);   // coarse, as pl::formant_step
+  CHECK(pm::step_display(thru, 0, 1, false) == 5);        // pl::thru_step
+  CHECK(pm::step_display(thru, 0, 1, true) == 20);
+  CHECK(pm::step_display(glide, 0, 1, false) == 10);      // pl::glide_step
+  CHECK(pm::step_display(glide, 0, 1, true) == 50);
+  CHECK(pm::step_display(glide, 500, 1, false) == 500);
+  for (int d = 0; d < 5; ++d) {
+    pm::format_value(gate, d, t);
+    CHECK(std::string(t) == o3_voc03er::perform::kGateNames[d]);
+    pm::format_value(arp, d, t);
+    CHECK(std::string(t) == o3_voc03er::perform::kArpNames[d]);
+  }
+  CHECK(pm::step_display(gate, 4, 1, false) == 0);   // an enum wraps
+  CHECK(pm::step_display(arp, 0, -1, false) == 4);
+  CHECK(pm::bar_of(gate, 2) == -1);
+  CHECK(pm::bar_of(formant, 0) == 50);
 }
 
 TEST_CASE("params: MOUTH (LT1) is TRACT's SOURCE on the second page: PADS or LIVE by name, a round key") {
@@ -267,7 +322,7 @@ TEST_CASE("params: MOUTH (LT1) is TRACT's SOURCE on the second page: PADS or LIV
   CHECK(pm::step_display(k, 1, 1, false) == 0);   // round: a detent past LIVE is PADS
   CHECK(pm::step_display(k, 0, -1, true) == 1);
   CHECK(pm::bar_of(k, 1) == -1);                  // a word: no bar
-  CHECK(pm::key_def(1, 6).kind == pm::Kind::None);
+  CHECK(pm::key_def(1, 6).param == Vocoder::Formant);  // UX2: the keys after MOUTH are the SHIFT row's FORMANT and THRU
 }
 
 TEST_CASE("params: values read as short text") {
@@ -487,16 +542,18 @@ TEST_CASE("header: a slot that speaks is named the same on every screen, not the
 
 // ---- ML1: MIDI learn (SHIFT + F) ---------------------------------------------------------------------------------------------------
 
-TEST_CASE("params: learnable is a live-safe unit parameter (Value, Tract); MODE, QUALITY, VOICING, a Later key and a blank are not") {
+TEST_CASE("params: learnable is a live-safe unit parameter (Value, Tract); MODE, QUALITY, VOICING and a blank are not") {
   CHECK_FALSE(pm::learnable(1, 0));  // MODE: swaps the layout and resets
   CHECK_FALSE(pm::learnable(1, 1));  // QUALITY: reallocates TALK's LPC order
   CHECK(pm::learnable(0, 7));        // LEVEL stays: pickup stops a jump
   CHECK(pm::learnable(0, 0));
   CHECK(pm::learnable(2, 4));  // NOTES IN
+  CHECK(pm::learnable(2, 6));  // GATE (UX2)
   CHECK(pm::learnable(pm::kTractPage, 0));
   CHECK(pm::learnable(1, 5));  // MOUTH: the tract unit's SOURCE
   CHECK_FALSE(pm::learnable(1, 4));  // VOICING: the app's own setting
-  CHECK_FALSE(pm::learnable(1, 7));  // blank
+  CHECK(pm::learnable(1, 7));  // THRU (UX2)
+  CHECK_FALSE(pm::learnable(1, 8));  // past the page
   CHECK_FALSE(pm::learnable(0, 8));
   for (unsigned p = 0; p < pm::kPages; ++p) {
     for (unsigned k = 0; k < pm::kKeys; ++k) {
@@ -553,7 +610,9 @@ TEST_CASE("params: SHIFT + F arms the kit's learn, the same keys cancel, a page 
   // VOICING (page 1, F5) is the app's: nothing arms
   shift_tap(h, app::Button::F5);
   CHECK_FALSE(km.learning());
-  // a blank key too
+  // THRU (F8, UX2: a key that used to be blank) arms like any value, and the same keys cancel
+  shift_tap(h, app::Button::F8);
+  CHECK(km.learning());
   shift_tap(h, app::Button::F8);
   CHECK_FALSE(km.learning());
   // MODE and QUALITY are not live gestures: nothing arms, and an earlier arm on another key goes (FREEZE, then MODE)
@@ -608,13 +667,64 @@ TEST_CASE("params: SHIFT + F arms the kit's learn, the same keys cancel, a page 
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
+TEST_CASE("params: FREEZE is refused outside TALK on PARAMS and through a learned CC, and works in TALK (UX2)") {
+  o3sdk::platform::host::FakeMidi midi;
+  sim::Harness h(::o3sdk_app(), nullptr, &midi);
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  tap(h, app::Button::Down);  // page 1: MODE F1, QUALITY F2, FREEZE F3
+  h.run_ms(60);
+  REQUIRE(param(h, Vocoder::Mode) == doctest::Approx(0.0f));  // BANDS
+
+  // the encoder and a tap on a focused FREEZE write nothing outside TALK
+  tap(h, app::Button::F3);
+  h.turn(1);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Freeze) == doctest::Approx(0.0f));
+  tap(h, app::Button::F3);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Freeze) == doctest::Approx(0.0f));
+
+  // a learned CC on FREEZE: the controller sweeps and nothing is left frozen in BANDS
+  shift_tap(h, app::Button::F3);
+  midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 23, 0);
+  h.run_ms(60);
+  const int sweep[] = {0, 40, 80, 127};
+  for (const int v : sweep) {
+    midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 23, static_cast<std::uint8_t>(v));
+    h.run_ms(60);
+  }
+  CHECK(param(h, Vocoder::Freeze) == doctest::Approx(0.0f));
+
+  // TALK: the same controller and the same key freeze it
+  tap(h, app::Button::F1);
+  h.turn(1);
+  h.run_ms(300);
+  REQUIRE(param(h, Vocoder::Mode) == doctest::Approx(1.0f));
+  for (const int v : {0, 127}) {
+    midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 23, static_cast<std::uint8_t>(v));
+    h.run_ms(60);
+  }
+  CHECK(param(h, Vocoder::Freeze) == doctest::Approx(1.0f));
+  midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 23, 0);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Freeze) == doctest::Approx(0.0f));
+  tap(h, app::Button::F3);
+  h.turn(1);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Freeze) == doctest::Approx(1.0f));  // and the PARAMS key works in TALK
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
 TEST_CASE("params: HELP names LEARN on the F keys that can take it") {
   sim::Harness h(::o3sdk_app());
   REQUIRE(h.start());
   h.run_ms(100);
   tap(h, app::Button::Params);
   h.run_ms(60);
-  tap(h, app::Button::Down);  // page 1: VOICING is F5, F8 is blank
+  tap(h, app::Button::Down);  // page 1: VOICING is F5, F8 is THRU
   h.run_ms(40);
   h.press(app::Button::Shift);
   h.run_ms(2);
@@ -627,7 +737,7 @@ TEST_CASE("params: HELP names LEARN on the F keys that can take it") {
   CHECK(help.fkey_shift[1] == nullptr);  // QUALITY
   CHECK(help.fkey_shift[2] != nullptr);  // FREEZE
   CHECK(help.fkey_shift[4] == nullptr);  // VOICING
-  CHECK(help.fkey_shift[7] == nullptr);
+  CHECK(help.fkey_shift[7] != nullptr);  // THRU (UX2)
   app::HelpProblem p;
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));

@@ -58,13 +58,13 @@
 //            input out of the modulator sum (no bleed; a recording still takes it); a slot plays as the modulator whatever its role, unless it
 //            is also the CarSrc. Acts from the block it lands in. 2 acts as NONE.
 //  48        LiveCh  0 L (default), 1 R: the channel CarSrc 7 reads. The app sets R with USB, the one stereo source, so SPEAKS takes USB L and SOUNDS USB R.
-//  35..39    TUNE (Autotune; they act in TUNE only, but are stored in every mode):
+//  35..39    TUNE (Autotune; they act in TUNE only, but are stored in every mode; Speed also acts in any mode with CarSrc 8 VOICE, which smooths the sung note):
 //            35 Key     C..B (default C); 36 Scale CHROM, MAJOR, MINOR, MAJ-P, MIN-P, BLUES, DORIAN (default CHROM): the notes to snap to
 //            37 Speed   ms, 0..500 (default 25): the one-pole of the correction; 0 is the hard, stepped sound
 //            38 Amount  0..1 (default 1): how much of the error is corrected (0 passes the voice, delayed 1 ms)
 //            39 NotesIn 0 OFF, 1 ON (default): the most recent held note is the target, in the octave nearest the voice; none held: the scale
 //            Unvoiced input passes unshifted. Range is the Normal detector range (70 to 919 Hz).
-//  40..41    FORMANT and THRU act in BANDS and TALK:
+//  40..41    FORMANT and THRU act in BANDS, TALK and ROBOT:
 //            40 Formant st, -12..+12 (default 0, integer steps): the spectral envelope moved against the carrier; +12 raises the formants an octave
 //                     (0.4 octave a band: st / 4.8 bands, linear between bands). 0 is the exact unshifted path; other values run two passes and
 //                     ramp each band's gain across the block. TALK: the lattice's tube is lengthened or shortened by 2^(st/12) once a hop

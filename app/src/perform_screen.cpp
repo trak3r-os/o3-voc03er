@@ -3,6 +3,7 @@
 
 #include "mouth_logic.h"
 #include "perform_logic.h"
+#include "liveness.h"
 #include "skin/ornoir.h"
 #include "voiceprint_logic.h"
 
@@ -24,10 +25,13 @@ namespace o3_voc03er {
 using namespace o3sdk;
 using app::Button;
 namespace pl = perform;
+namespace lv = o3_voc03er::live;
 
 namespace {
 
 constexpr std::uint8_t kVelocity = PerformScreen::kAuditionVelocity;
+// The vocoder parameter behind SHIFT + F1..F6 (the liveness table's key); F7 OCTAVE and F8 PRESET are the app's and heard everywhere.
+constexpr std::uint16_t kShiftParam[6] = {Vocoder::Freeze, Vocoder::Gate, Vocoder::Arp, Vocoder::Glide, Vocoder::Formant, Vocoder::Thru};
 constexpr std::uint32_t kPeakHoldFrames = 20;
 
 // PERFORM's tables, in the SDRAM (O3SDK_BIG: zero at start, main loop only; the screen keeps just a cursor in the SRAM). Plain bytes: only zero
@@ -275,7 +279,13 @@ void PerformScreen::press_pad(app::Context& ctx, unsigned pad) noexcept {
       apply_bend(ctx);
       ctx.redraw();
       return;
-    case pl::PadFn::Formant: {  // the formant strip (C = FORMANT): a tap sets Formant and it stays (no note, nothing held)
+    case pl::PadFn::Formant: {  // the formant strip (C = FORMANT): a tap sets Formant and it stays (no note, nothing held); dark and refused where FORMANT is not heard
+      if (!lv::voice_heard(Vocoder::Formant, mode_)) {
+        char where[40];
+        lv::heard_text(lv::voice_modes(Vocoder::Formant), where);
+        notice(ctx, where);
+        return;
+      }
       (void)e.set_param(voice_, Vocoder::Formant, static_cast<float>(sp.offset));
       char val[pl::kLabelChars + 1] = {};
       pl::strip_label(sp.offset, val);
@@ -1345,6 +1355,12 @@ void PerformScreen::shift_key(app::Context& ctx, unsigned key) noexcept {
   }
   switch (pl::kShiftKeys[key].fn) {
     case pl::ShiftFn::Freeze:
+      if (!lv::voice_heard(Vocoder::Freeze, mode_)) {  // a latching gesture: outside TALK it refuses and says where it works (apply_mode clears it on a mode change)
+        char where[40];
+        lv::heard_text(lv::voice_modes(Vocoder::Freeze), where);
+        notice(ctx, where);
+        break;
+      }
       (void)ctx.engine().set_param(voice_, Vocoder::Freeze, ctx.engine().param(voice_, Vocoder::Freeze) >= 0.5f ? 0.0f : 1.0f);
       ctx.redraw();
       break;
@@ -1468,9 +1484,11 @@ void PerformScreen::refresh_labels(const dsp::Engine& e) noexcept {
       pl::strip_label(pl::strip_semitone(app::pad_col(pad)), lbl);
       append(out, lbl);
     } else if (sp.fn == pl::PadFn::Formant) {
-      char lbl[pl::kLabelChars + 1] = {};
-      pl::strip_label(sp.offset, lbl);
-      append(out, lbl);
+      if (lv::voice_heard(Vocoder::Formant, mode_)) {  // no label where FORMANT is not heard: the pads are dark
+        char lbl[pl::kLabelChars + 1] = {};
+        pl::strip_label(sp.offset, lbl);
+        append(out, lbl);
+      }
     } else if (sp.fn == pl::PadFn::Vowel || sp.fn == pl::PadFn::Closure) {
       if (tract) {
         append(out, pl::kMouthLabel[app::pad_col(pad)]);
@@ -1599,6 +1617,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
   h.cpu_percent = ctx.cpu_percent();
 
   ornoir::FKey keys[ornoir::kFKeys];
+  char dim_line[40] = {};  // the hint line for a focused SHIFT-row value this mode does not hear
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
     keys[i].name = fkey_name(i, mode);
     keys[i].hot = i == focus_;
@@ -1706,6 +1725,12 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
           }
           break;
       }
+      if (i < 6u) {  // UX2: a value this mode does not hear is dim (the liveness table, as PARAMS and the strips read it); a tap still sets it
+        keys[i].dim = !lv::voice_heard(kShiftParam[i], mode);
+      }
+    }
+    if (sfocus_ < 6u && keys[sfocus_].dim) {  // the focused value is dim: the hint line says where it is heard
+      lv::heard_text(lv::voice_modes(kShiftParam[sfocus_]), dim_line);
     }
   }
 
@@ -1789,7 +1814,7 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     cat(row_text[i], sizeof row_text[i], strip::row_name(layout(), static_cast<pads::Row>(i)));
     pads.row_name[i + 1u] = row_text[i];
   }
-  pads.key_hint = flash_[0] != '\0' ? flash_ : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_));
+  pads.key_hint = flash_[0] != '\0' ? flash_ : (dim_line[0] != '\0' ? dim_line : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_)));
   if (pick_ != 0u) {
     pads.hint_left = "UP DOWN OR TURN: CURSOR   F1 OR SAME KEY: TAKE   F8: BACK";
   } else {
@@ -1822,7 +1847,9 @@ void PerformScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
         level = pl::strip_semitone(app::pad_col(pad)) == 0 ? app::kLedDim : app::kLedOff;
         break;
       case pl::PadFn::Formant:  // the pad of the value in force on, the others dim
-        level = pl::formant_lit(formant, app::pad_col(pad)) ? app::kLedOn : app::kLedDim;
+        if (lv::voice_heard(Vocoder::Formant, mode_)) {
+          level = pl::formant_lit(formant, app::pad_col(pad)) ? app::kLedOn : app::kLedDim;
+        }
         break;
       case pl::PadFn::Vowel:  // the mouth strip (TRACT only: dark elsewhere)
       case pl::PadFn::Closure:
@@ -1909,7 +1936,7 @@ const char* plays_help(const strip::StripDef* d, pads::Plays p) noexcept {
       }
       return d != nullptr && d->shape == strip::Shape::Bipolar ? "A TAP SETS THE VALUE; 0 IN THE MIDDLE" : "A TAP SETS THE VALUE: LOW LEFT, HIGH RIGHT";
     case pads::Plays::Formant:
-      return "A TAP SETS IT, -12 TO +12, AND IT STAYS";
+      return "A TAP SETS -12..+12; BANDS, TALK, ROBOT ONLY";
     case pads::Plays::Bend:
       return "0 IN THE MIDDLE, +-1 A PAD; LIT DIM AT 0";
     case pads::Plays::Mouth:
@@ -1938,7 +1965,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Note, "PATTERN: NOTE LANE", nullptr},
       {Button::Instr, "PATTERN: CARRIER LANE", nullptr},
       {Button::Vol, "PATTERN: LEVEL LANE", nullptr},
-      {Button::Fx, "PATTERN: SLICE LANE", nullptr},
+      {Button::Fx, "PATTERN: SLICE, MOUTH LANE", nullptr},
       {Button::Rec, "CAPTURE LIVE INTO A SLOT", nullptr},
       {Button::Shift, "HOLD A PAD, TAP: LATCH CHORD", nullptr},
       {Button::Delete, "RELEASE THE LATCH", nullptr},
@@ -1971,7 +1998,7 @@ void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[4] = "SCALE OF THE CHORDS";
   h.fkey[5] = "ROW: A, B OR C";
   h.fkey[6] = "WHAT THE ROW PLAYS";
-  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row (key 7 is empty: no text)
+  for (unsigned i = 0; i < 8; ++i) {  // the SHIFT row (all eight keys have a name)
     h.fkey_shift[i] = pl::kShiftKeys[i].name[0] != '\0' ? pl::kShiftKeys[i].name : nullptr;
   }
   h.fkey[7] = mode == kModeTract ? "THE MOUTH, A TO U" : (pl::mode_page(mode) == 0u ? "DETUNE, CENTS" : (mode == 1u ? "LPC ORDER" : "MS: 0 IS STEPPED"));
