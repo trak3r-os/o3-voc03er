@@ -278,6 +278,8 @@ void SongScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   if (in.turn()) {
     edit(ctx, in.delta());
+  } else if (in.press(Button::Left) || in.press(Button::Right)) {  // one encoder step: the row's pattern, or its repeats while F2 is lit; repeats arrive as presses
+    edit(ctx, in.press(Button::Left) ? -1 : 1);
   } else if (in.press(Button::Up)) {
     cursor_ = static_cast<std::uint8_t>(song::move_cursor(*chain_, cursor_, -1));
     ctx.redraw();
@@ -289,6 +291,10 @@ void SongScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   } else if (in.press(Button::Delete)) {
     remove(ctx);
   }
+}
+
+std::uint64_t SongScreen::repeat_buttons(const app::Context&) const noexcept {
+  return (std::uint64_t{1} << static_cast<unsigned>(Button::Left)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Right));
 }
 
 // ---- keys, HELP -----------------------------------------------------------------------------------------------------------------------
@@ -304,6 +310,8 @@ void SongScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "ROW BEFORE", nullptr},
       {Button::Down, "ROW AFTER", nullptr},
+      {Button::Left, "PATTERN OR REPEATS DOWN", nullptr},
+      {Button::Right, "PATTERN OR REPEATS UP", nullptr},
       {Button::Insert, "ADD AFTER THE CURSOR", nullptr},
       {Button::Delete, "REMOVE THE ROW: TAP TWICE", nullptr},
       {Button::Play, "PLAY THE CHAIN FROM HERE", nullptr},
@@ -417,7 +425,7 @@ void SongScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexc
   if (note_ != nullptr) {
     r.text(kX0, 380, note_, Color::TextDim, Face::Label);
   } else {  // two micro lines, as PATTERN's, clear of the F row at y 419: what the keys do (a note, when there is one, takes their place)
-    r.text(kX0, 391, "UP, DOWN: PICK A ROW. ENCODER: ITS PATTERN, A TO H. F2: THE ENCODER SETS ITS REPEATS (1 TO 64) UNTIL F2 AGAIN.", Color::TextDim, Face::Micro);
+    r.text(kX0, 391, "UP, DOWN: A ROW. ENCODER, LEFT, RIGHT: ITS PATTERN, A TO H. F2: THEY SET ITS REPEATS (1 TO 64) UNTIL F2 AGAIN.", Color::TextDim, Face::Micro);
     r.text(kX0, 403, "F1, INSERT: ADD A ROW AFTER THE CURSOR (SAME PATTERN, 1 REPEAT). DELETE TWICE: REMOVE IT. F3 LOOP: RESTART AT ROW 1.", Color::TextDim,
            Face::Micro);
   }

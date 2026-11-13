@@ -5,6 +5,7 @@
 // two columns of eight. The chain is the app's one Chain (project.h, in the SDRAM, so FILE can save it); the screen edits it through pointer.
 //
 //   UP / DOWN   the row (the cursor).        ENCODER   the row's pattern letter A..H; after F2, its repeats 1..64 (F2 again: the letter).
+//   LEFT / RIGHT   one encoder step of that (the letter, or the repeats while F2 is lit); a held arrow repeats.
 //   INSERT, F1 ADD   a row after the cursor's, with its pattern.          DELETE   the row under the cursor, on a second tap (a line says so).
 //   F3 LOOP CHAIN   toggles (the chain goes back to its first entry when it ends).          F8 PERFORM   (labelled so: SONG has no opener to go back to).
 //   PLAY   the app's (app.cpp hands it to start() while this screen is up and the transport is stopped): the chain plays from the cursor's row.
@@ -44,6 +45,7 @@ class SongScreen final : public o3sdk::app::Screen {
   const o3sdk::ui::Theme* theme(const o3sdk::app::Context&) const noexcept override;
   void enter(o3sdk::app::Context& ctx) noexcept override;
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
+  std::uint64_t repeat_buttons(const o3sdk::app::Context&) const noexcept override;  // LEFT / RIGHT: a held arrow repeats
   void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
   void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;
   void help(const o3sdk::app::Context& ctx, o3sdk::app::Help& help) const noexcept override;

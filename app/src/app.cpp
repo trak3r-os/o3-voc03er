@@ -784,6 +784,9 @@ class MyApp final : public app::App {
     }
     w.num("pat_playing", carriers_.playing_pattern());  // the pattern the sequencer plays now, and the one PATTERN shows (last: the line is cut at the caller's size)
     w.num("pat_shown", pattern_.shown());
+    const bool row = song_.cursor() < g_chain.count;  // the cursor's row of the chain (a test reads what SONG's arrows did; after the others: a short buffer drops them)
+    w.num("chain_pat", row ? g_chain.entry[song_.cursor()].pattern : 0u);
+    w.num("chain_reps", row ? g_chain.entry[song_.cursor()].repeats : 0u);
     return w.size();
   }
 

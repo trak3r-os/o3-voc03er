@@ -368,3 +368,92 @@ TEST_CASE("song: UX3 PLAY's note says STOP ASKED while a MIDI master is followed
   CHECK(std::string(sg::kStopAskedLine).find("STOPPED") == std::string::npos);
   CHECK(std::string(sg::kStopAskedLine).find("ASKED") != std::string::npos);
 }
+
+namespace {
+// What the console's `state` says of one number (the chain's cursor row: the pattern 0..7 and the repeats).
+unsigned state_num(sim::Harness& h, const char* key) {
+  char line[1500];
+  const std::string text(line, h.runtime().state_line(line, sizeof line));
+  const std::string k = std::string(key) + "=";
+  const std::size_t at = text.find(k);
+  return at == std::string::npos ? 9999u : static_cast<unsigned>(std::strtoul(text.c_str() + at + k.size(), nullptr, 10));
+}
+}  // namespace
+
+// RD2: LEFT / RIGHT are `edit(+-1)`, the encoder's step: the row's pattern, its repeats while F2 is lit; a held arrow repeats.
+TEST_CASE("song: LEFT / RIGHT step the row's pattern, and its repeats while F2 is lit; a held arrow repeats") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Song);
+  h.run_ms(60);
+  tap(h, app::Button::Right);  // an empty chain: nothing to edit, nothing moves
+  CHECK(state_num(h, "chain") == 0u);
+  tap(h, app::Button::Insert);
+  h.run_ms(60);
+  REQUIRE(state_num(h, "chain") == 1u);
+  const unsigned pat0 = state_num(h, "chain_pat");
+  const unsigned reps0 = state_num(h, "chain_reps");
+  REQUIRE(reps0 == 1u);
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_pat") == pat0 + 1u);
+  h.turn(1);  // the same step by the encoder
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_pat") == pat0 + 2u);
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_pat") == pat0);
+  CHECK(state_num(h, "chain_reps") == reps0);  // the repeats stay while F2 is not lit
+
+  tap(h, app::Button::F2);  // the repeats under the encoder and the arrows
+  h.run_ms(60);
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_reps") == reps0 + 1u);
+  CHECK(state_num(h, "chain_pat") == pat0);
+  h.turn(1);
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_reps") == reps0 + 2u);
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_reps") == reps0 + 1u);
+  h.press(app::Button::Right);  // held: the kit repeats it as presses
+  h.run_ms(1500);
+  h.release(app::Button::Right);
+  h.run_ms(20);
+  const unsigned held = state_num(h, "chain_reps");
+  CHECK(held >= reps0 + 5u);
+  h.run_ms(1000);
+  CHECK(state_num(h, "chain_reps") == held);
+  for (unsigned i = 0; i < 80u; ++i) {
+    tap(h, app::Button::Right);  // stops at the end of the range, as the encoder does
+  }
+  CHECK(state_num(h, "chain_reps") == o3_voc03er::kChainRepeatMax);
+  tap(h, app::Button::F2);  // back to the letter
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(state_num(h, "chain_pat") == (pat0 > 0u ? pat0 - 1u : 0u));
+
+  // HELP names the arrows
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Config);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  REQUIRE(h.runtime().help_open());
+  const app::Help& help = h.runtime().help_overlay().help();
+  bool left = false;
+  bool right = false;
+  for (std::size_t i = 0; i < help.button_count; ++i) {
+    left = left || (help.buttons[i].button == app::Button::Left && help.buttons[i].text != nullptr);
+    right = right || (help.buttons[i].button == app::Button::Right && help.buttons[i].text != nullptr);
+  }
+  CHECK(left);
+  CHECK(right);
+  app::HelpProblem p;
+  const bool ok = app::help_check(help, &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
