@@ -667,7 +667,7 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
   REQUIRE(h->start());
   h->run_ms(300);
-  // SAMPLE's lower two rows are the palette (pads 24..47); PATTERN's F4 CHORD sets row B's kind (row A stays NOTE).
+  // SAMPLE's lower two rows are the palette (pads 24..47); PATTERN's F4 CHORD sets row B's kind (row A is always NOTE; never OFF).
   // The LEDs show roots, the same for every kind, so the screen itself tells the kinds apart: its right panel names the pair.
   platform::host::ScratchDir shots("o3_voc03er-file-sp1-png");
   REQUIRE(shots.ok());
@@ -701,10 +701,12 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
   const std::string first = lower("first");  // NOTE+TRIAD
-  // Row B on POWER, from anywhere: PATTERN's F4 CHORD steps once and the encoder stops at the last kind. The palette is back at the default when this
-  // changes the screen (the pair named in its right panel), and already POWER when it does not.
+  // POWER on row B, from anywhere: PATTERN's NOTE lane, F4 CHORD steps once (a tap wraps at the end) and the encoder stops at the last kind. The palette is
+  // back at the default when this changes the screen (the pair named in its right panel), and already POWER when it does not.
   const auto set_power = [&] {
     tap(*h, app::Button::Pattern);
+    h->run_ms(60);
+    tap(*h, app::Button::Note);
     h->run_ms(60);
     tap(*h, app::Button::F4);
     h->turn(30);

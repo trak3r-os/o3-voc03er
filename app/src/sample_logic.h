@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// SAMPLE's pure logic (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"): SPEAKS against route::allowed, LOW PADS pairs, the SPEED and LEVEL steps, the
+// SAMPLE's pure logic (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"): SPEAKS against route::allowed, the SPEED and LEVEL steps, the
 // dB text, the pads' split, and the two rules that make one finger sound (a slice pad brings a note, a lower pad starts the picked slice). Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates; tract_live is the one engine read.
 
 #include "pads_logic.h"
@@ -149,50 +149,6 @@ constexpr bool lower_press_starts_slice(Side side, bool has_audio, bool slice_he
 constexpr unsigned picked_after(unsigned pick, unsigned fired, unsigned count) noexcept { return fired < count ? fired : pick; }
 // The pick held inside the slot's slices (slice 1 for a slot without them, or after its cuts changed).
 constexpr unsigned picked_valid(unsigned pick, unsigned count) noexcept { return pick < count ? pick : 0u; }
-
-// ---- F1 LOW PADS ------------------------------------------------------------------------------------------------------------------------
-// One key sets both lower rows: a pair (row A, row B). The first is the palette's own default; the others give both rows the same kind (row A sounds
-// an octave above row B in the default palette, so the two are not duplicates). There is no OFF.
-inline constexpr unsigned kLowPadsCount = 6;
-inline constexpr pads::Plays kLowA[kLowPadsCount] = {pads::Plays::Note, pads::Plays::Note, pads::Plays::Triad, pads::Plays::Seventh, pads::Plays::Open, pads::Plays::Power};
-inline constexpr pads::Plays kLowB[kLowPadsCount] = {pads::Plays::Triad, pads::Plays::Note, pads::Plays::Triad, pads::Plays::Seventh, pads::Plays::Open, pads::Plays::Power};
-inline constexpr const char* kLowPadsNames[kLowPadsCount] = {"NOTE+TRIAD", "NOTE", "TRIAD", "7TH", "OPEN", "POWER"};
-// The same for the F1 key's value: the Data face holds about eight characters in a 100 px key.
-inline constexpr const char* kLowPadsKey[kLowPadsCount] = {"NOTE+TRI", "NOTE", "TRIAD", "7TH", "OPEN", "POWER"};
-
-// The pair the palette holds when it is one of the six, else -1 (a pair PATTERN set that the key has no place for, such as A NOTE with B 7TH, or a row that is OFF
-// or a parameter strip): the key says MIXED for it.
-constexpr int low_pads_index(pads::Plays a, pads::Plays b) noexcept {
-  for (unsigned i = 0; i < kLowPadsCount; ++i) {
-    if (kLowA[i] == a && kLowB[i] == b) {
-      return static_cast<int>(i);
-    }
-  }
-  return -1;
-}
-
-// The pair after a step: a tap goes on and wraps, the encoder stops at the ends. From MIXED (-1, a pair the list has no place for) the first step lands on NOTE+TRIAD, either way.
-constexpr unsigned low_pads_step(int cur, int delta, bool wrap) noexcept {
-  if (cur < 0) {
-    return 0u;
-  }
-  const int n = static_cast<int>(kLowPadsCount);
-  const int v = cur + delta;
-  if (wrap) {
-    return static_cast<unsigned>((v % n + n) % n);
-  }
-  return v < 0 ? 0u : (v >= n ? kLowPadsCount - 1u : static_cast<unsigned>(v));
-}
-
-// The key's value: the pair's name; a pair outside the list is MIXED (never row A's kind alone: row B may play something else).
-constexpr const char* low_pads_name(pads::Plays a, pads::Plays b) noexcept {
-  const int i = low_pads_index(a, b);
-  return i >= 0 ? kLowPadsNames[i] : "MIXED";
-}
-constexpr const char* low_pads_key(pads::Plays a, pads::Plays b) noexcept {
-  const int i = low_pads_index(a, b);
-  return i >= 0 ? kLowPadsKey[i] : "MIXED";
-}
 
 // SPEED held inside 0.5X..2X by a detent; a tap wraps.
 constexpr unsigned step_speed(unsigned index, int delta, bool wrap) noexcept {

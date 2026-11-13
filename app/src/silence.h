@@ -54,6 +54,7 @@ struct Sources {
   bool input_live = false;                     // the audio input is there and the SPEAKS source is the live one
   float input_peak = 0.0f;                     // the input meter's peak, linear
   bool slot_audio = false;                     // the SPEAKS slot (when it is one) holds audio that plays
+  bool slice_speaks = false;                   // a slice plays as the voice: a region of any slot, whatever the route (SAMPLE's slices of a slot on no side speak)
 };
 
 struct Facts {
@@ -66,6 +67,9 @@ struct Facts {
 constexpr bool note_sounds(const Sources& s) noexcept { return s.sounds != route::kSoundsSynth || s.pad_note || s.midi_note || s.seq_note; }
 
 constexpr bool speech_sounds(const Sources& s) noexcept {
+  if (s.slice_speaks) {
+    return true;
+  }
   if (s.speaks == route::kSpeaksLive) {
     return s.input_live && s.input_peak >= kSpeechFloor;
   }

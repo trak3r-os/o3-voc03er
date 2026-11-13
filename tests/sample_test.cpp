@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -76,28 +77,6 @@ TEST_CASE("sample: F2 SPEAKS positions, the tap target and the encoder step over
   CHECK(sm::step_speaks(1, -1, audio) == 0u);
   CHECK(sm::step_speaks(0, -1, audio) == 0u);  // stops at LIVE
   CHECK(sm::step_speaks(0, 1, 0u) == 0u);      // nothing to speak
-}
-
-TEST_CASE("sample: the low_pads_* tables (PATTERN's lane removes them): values, steps and the name of a pair outside the list") {
-  using o3_voc03er::pads::Plays;
-  CHECK(sm::kLowPadsCount == 6u);
-  CHECK(std::strcmp(sm::kLowPadsNames[0], "NOTE+TRIAD") == 0);
-  CHECK(sm::low_pads_index(Plays::Note, Plays::Triad) == 0);
-  CHECK(sm::low_pads_index(Plays::Power, Plays::Power) == 5);
-  CHECK(sm::low_pads_index(Plays::Seventh, Plays::Note) == -1);  // not a pair of the list: MIXED
-  CHECK(sm::low_pads_index(Plays::Off, Plays::Note) == -1);
-  CHECK(sm::low_pads_step(0, 1, false) == 1u);
-  CHECK(sm::low_pads_step(5, 1, false) == 5u);  // the encoder stops
-  CHECK(sm::low_pads_step(5, 1, true) == 0u);   // a tap wraps
-  CHECK(sm::low_pads_step(0, -1, false) == 0u);
-  CHECK(sm::low_pads_step(-1, 1, false) == 0u);
-  CHECK(std::strcmp(sm::low_pads_name(Plays::Seventh, Plays::Off), "MIXED") == 0);
-  CHECK(std::strcmp(sm::low_pads_name(Plays::Note, Plays::Seventh), "MIXED") == 0);  // PATTERN's A NOTE with B 7TH: row B is not NOTE
-  CHECK(std::strcmp(sm::low_pads_key(Plays::Note, Plays::Seventh), "MIXED") == 0);
-  CHECK(sm::low_pads_step(sm::low_pads_index(Plays::Note, Plays::Seventh), 1, false) == 0u);  // the first step from MIXED: NOTE+TRIAD
-  CHECK(sm::low_pads_step(sm::low_pads_index(Plays::Note, Plays::Seventh), -1, true) == 0u);
-  CHECK(std::strcmp(sm::low_pads_name(Plays::Off, Plays::Note), "MIXED") == 0);  // the next step repairs it
-  CHECK(std::strcmp(sm::low_pads_name(Plays::Note, Plays::Triad), "NOTE+TRIAD") == 0);
 }
 
 TEST_CASE("sample: F5's value names the repeating slice") {
@@ -620,10 +599,10 @@ TEST_CASE("sample: the lower rows are lit as the notes palette and the encoder (
 
 TEST_CASE("sample: two rows of the same kind play the same notes an octave apart") {
   o3_voc03er::pads::Layout l;
-  CHECK(sm::low_pads_index(l.row[0], l.row[1]) == 0);
+  CHECK(l.row[0] == o3_voc03er::pads::Plays::Note);  // the palette's own default: A NOTE, B TRIAD
+  CHECK(l.row[1] == o3_voc03er::pads::Plays::Triad);
   l.row[0] = o3_voc03er::pads::Plays::Note;
   l.row[1] = o3_voc03er::pads::Plays::Note;
-  CHECK(sm::low_pads_index(l.row[0], l.row[1]) == 1);
   for (unsigned col = 0; col < 12; ++col) {
     const auto a = o3_voc03er::pads::pad_play(l, o3_voc03er::pads::Row::A, col, 0);
     const auto b = o3_voc03er::pads::pad_play(l, o3_voc03er::pads::Row::B, col, 0);
@@ -1185,5 +1164,61 @@ TEST_CASE("sample: F7 is blank: it takes no focus and changes nothing") {
   h.run_ms(60);
   CHECK(lp(h, 0, Vocoder::LoopField::Speed) != doctest::Approx(before));
   CHECK(lp(h, 0, Vocoder::LoopField::Dir) == doctest::Approx(0.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// ---- why nothing sounds on SAMPLE (silence.h): the line is the app's silence_ watch (state_line `silence=`: 0 none, 1 NO NOTE, 2 NOTHING SPEAKS) ------
+// SAMPLE tries to be heard with a slice pad down and the slice still sounding; the line needs half a second of it, and goes with the pad.
+
+namespace {
+int silence_answer(sim::Harness& h) {
+  char line[1500];
+  const std::string text(line, h.runtime().state_line(line, sizeof line));
+  const std::size_t at = text.find("silence=");
+  return at == std::string::npos ? -1 : std::atoi(text.c_str() + at + 8);
+}
+}  // namespace
+
+TEST_CASE("sample: why nothing sounds: a slot on SOUNDS with nothing speaking says NOTHING SPEAKS after half a second of a held slice, and clears with the pad") {
+  OneFinger r;
+  sim::Harness& h = r.h;
+  r.rig.cap.input_off();  // the take is in; now nobody talks into the input
+  for (unsigned u = 0; u < 8; ++u) {
+    if (!o3_voc03er::test::is_tract_unit(h, u)) {
+      (void)h.engine().set_param(static_cast<o3sdk::dsp::UnitId>(u), kCarSrc, 3.0f);  // slot 1 SOUNDS (SPEAKS stays LIVE)
+    }
+  }
+  h.run_ms(2500);  // the input meter lets go of the tone
+  CHECK(silence_answer(h) == 0);  // not trying: nothing is said
+  tap(h, app::Button::F5);  // LOOP ON: on a SOUNDS slot the route stays, and a slice pad repeats its slice
+  h.run_ms(300);
+  CHECK(silence_answer(h) == 0);
+  h.pad_down(2);
+  h.run_ms(300);
+  CHECK(silence_answer(h) == 0);  // under the half second
+  h.run_ms(600);
+  CHECK(silence_answer(h) == 2);
+  h.pad_up(2);
+  h.run_ms(60);
+  CHECK(silence_answer(h) == 0);  // the moment the player lets go
+  tap(h, app::Button::F5);        // OFF: back to what Rig::take expects
+  h.run_ms(100);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: why nothing sounds: a one-shot slice that ended under a held pad, on a slot on no side, says nothing") {
+  OneFinger r;
+  sim::Harness& h = r.h;
+  r.rig.cap.input_off();  // a line that would say NOTHING SPEAKS if the slice were not the voice
+  h.run_ms(2500);
+  r.slow();
+  h.pad_down(2);
+  for (unsigned i = 0; i < 30; ++i) {  // 1.5 s: through the slice (500 ms) and past its end, the pad held all the way
+    h.run_ms(50);
+    CHECK_MESSAGE(silence_answer(h) == 0, "at " << (i + 1) * 50 << " ms");
+  }
+  h.pad_up(2);
+  h.run_ms(100);
+  CHECK(silence_answer(h) == 0);
   CHECK(h.runtime().frame_failures() == 0u);
 }

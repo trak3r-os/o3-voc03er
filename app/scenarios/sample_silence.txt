@@ -1,0 +1,46 @@
+# SAMPLE says why nothing sounds, as PERFORM and PATTERN do (silence.h; shown only while the player is trying to be heard and the condition lasted about half a second): 01 the
+# transport runs on an empty pattern with the slot's take held, on no side (NO NOTE: it waits until the status note of the last key is gone), 02 gone with a lower pad that plays a note, 03 a lower pad held with no input and nothing made to speak
+# (NOTHING SPEAKS), 04 gone with the pad, 05 a slice pad on a slot on no side: the pad brings its note and the slice speaks as the voice, so nothing is said even with no input.
+# Another note of the screen (the cue line) is never covered: the line sits under it, in the place of the standing hint. The line's wording and place are read off the PNGs.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_silence.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4              # AUTOPLAY OFF: the take waits in the slot
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleplay
+wait 300
+tap f5              # AUTOPLAY started the take and made it speak: LOOP off, and F2 gives SPEAKS back to LIVE: the slot is on no side
+wait 300
+tap f2
+wait 300
+wait 3500           # the status note of F2 has gone; the take's transport still runs: the pattern is empty
+expect state playing=1
+snap 01_no_note
+paddown 29
+wait 300
+snap 02_note_pad
+padup 29
+wait 200
+tap play
+wait 200
+input off
+wait 2500
+paddown 29
+wait 900
+snap 03_nothing_speaks
+padup 29
+wait 200
+snap 04_pad_released
+# a slice pad: slot 1 neither speaks nor sounds, the slice is the voice
+paddown 2
+wait 300
+snap 05_slice_pad_no_input
+padup 2
+wait 300

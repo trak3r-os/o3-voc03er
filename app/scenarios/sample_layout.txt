@@ -1,7 +1,7 @@
-# SAMPLE's lower pad rows play the notes palette (SP1; Q7 first made them PERFORM's rows), the upper two rows stay the slot's slices. The palette is PATTERN's F6 TOP PADS,
-# one of six pairs in order: NOTE+TRIAD (A NOTE, B TRIAD: the default), NOTE, TRIAD, 7TH, OPEN, POWER; SAMPLE has no key for it (F1 is the slot), and the right panel
-# names the pair. Two rows of the same kind play the same notes an octave apart (A above B). Then PERFORM goes to TRACT (A NOTE, B TONGUE, C MOUTH) and SAMPLE still
-# plays its own notes palette (11, 12). The WAV carries the notes; the unit's feel and the keys' LEDs by hand are for the unit.
+# SAMPLE's lower pad rows play the notes palette (SP1; Q7 first made them PERFORM's rows), the upper two rows stay the slot's slices. The palette is PATTERN's: row A is always
+# NOTE and F4 CHORD on its NOTE lane sets row B's kind, in order TRIAD (the default), 7TH, OPEN, POWER; SAMPLE has no key for it (F1 is the slot), and the right panel names
+# the rows. Then PERFORM goes to TRACT (A NOTE, B TONGUE, C MOUTH) and SAMPLE still plays its own notes palette (11, 12). The WAV carries the notes; the unit's feel and
+# the keys' LEDs by hand are for the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_layout.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -14,11 +14,12 @@ wait 300
 snap 02_a_note_held
 padup 29
 wait 600
-# PATTERN's F6 TOP PADS: the first tap steps to NOTE, two detents on to 7TH
+# PATTERN's F4 CHORD (NOTE lane): every tap steps the kind on (a visit to SAMPLE and back is not relied on to keep the key's focus, so each visit taps F4 again)
 tap pattern
 wait 100
-tap f6
-turn 2
+tap note
+wait 100
+tap f4
 wait 100
 tap sampleplay
 wait 300
@@ -30,10 +31,10 @@ snap 04_7th_keys_held
 padup 29
 padup 41
 wait 600
-# one detent more: OPEN; a held pad is not touched by the other screen
+# one tap more: OPEN; a held pad is not touched by the other screen
 tap pattern
 wait 100
-turn 1
+tap f4
 wait 100
 tap sampleplay
 wait 300
@@ -45,6 +46,8 @@ padup 38
 wait 600
 # the end of the list: POWER, and the encoder stops there
 tap pattern
+wait 100
+tap f4
 wait 100
 turn 5
 wait 100
@@ -58,13 +61,16 @@ tap f1
 release shift
 wait 300
 snap 08_shift_f1_nothing
+# a tap at the end wraps to TRIAD, and the encoder stops at that end too
 tap pattern
+wait 100
+tap f4
 wait 100
 turn -30
 wait 100
 tap sampleplay
 wait 300
-snap 09_back_to_note_triad
+snap 09_back_to_triad
 # SP1: TRACT on PERFORM (its rows are strips there) changes nothing here: the lower pads still play notes and say so
 tap performance
 wait 100

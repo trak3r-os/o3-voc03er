@@ -8,6 +8,7 @@
 #include "perform_logic.h"
 #include "sample_logic.h"
 #include "sample_rec_logic.h"
+#include "silence.h"
 #include "skin/ornoir.h"
 
 #include <o3sdk/app/audio_in.h>
@@ -857,6 +858,15 @@ void SampleScreen::note_stop(app::Context& ctx) noexcept {
   note_on_ = false;
 }
 
+bool SampleScreen::slice_down() const noexcept {
+  for (const SliceVoice& v : g_sd.voice) {
+    if (v.active && v.pad < sm::kTopPads && ((top_held_ >> v.pad) & 1u) != 0u) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // service(): the note ends when no slice voice of its slot and pad sounds (the end of a ONE SHOT slice, a repeat that stopped, a voice another source took over).
 void SampleScreen::note_check(app::Context& ctx) noexcept {
   if (!note_on_) {
@@ -1265,7 +1275,12 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   if (note_ != nullptr) {
     r.text(kColX, kRowY + 4 * kRowH + 2, note_, Color::Accent, Face::Label);
   } else {
-    r.text(kColX, kRowY + 4 * kRowH + 36, "TOP PADS: SLICES. LOWER PADS: PLAY THE PICKED SLICE AT A NOTE OR A CHORD", Color::TextDim, Face::Micro);
+    const silence::Why quiet = perform_ != nullptr && perform_->silence_watch() != nullptr ? perform_->silence_watch()->shown() : silence::Why::None;
+    if (quiet != silence::Why::None) {  // why nothing sounds (silence.h): under every note of this screen's own, in the place of the standing hint
+      r.text(kColX, kRowY + 4 * kRowH + 32, silence::text(quiet), Color::Accent, Face::Label);
+    } else {
+      r.text(kColX, kRowY + 4 * kRowH + 36, "TOP PADS: SLICES. LOWER PADS: PLAY THE PICKED SLICE AT A NOTE OR A CHORD", Color::TextDim, Face::Micro);
+    }
     if (!empty) {  // the cue line: what the selected slot does now, or why it is quiet in this mode
       static char line[64];  // main loop only
       sm::cue_line(line, slot_, side, cue, ls.playing || ls.pending, rt.speaks);

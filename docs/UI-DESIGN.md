@@ -242,7 +242,7 @@ slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silen
   (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1); SHIFT + F5 is blank.
 - Arrows: LEFT / RIGHT one encoder step of the lit F key, SHIFT + LEFT / RIGHT the cursor, UP / DOWN the lane across NOTE, CARRIER, LEVEL, SLICE, MOUTH (no wrap), SHIFT + UP / DOWN the
   octave, the NOTE hand moving by 12 with it. The buttons NOTE, INSTR, VOL and FX pick lanes (FX: SLICE, then MOUTH, then SLICE). F value keys (LENGTH, TEMPO, VALUE): a tap lights, a second tap steps;
-  action keys (SAVE, CAPTURE, CLR LANE, SET, CHORD) act on the tap. F1 PATTERN, F2 LANE, F6 TOP PADS and F7 FILL are gone.
+  action keys (SAVE, CAPTURE, CLR LANE, SET, CHORD) act on the tap. F1 PATTERN, F2 LANE, F6 TOP PADS and F7 FILL are gone (the palette's rows are F4 CHORD's now).
 
 **The MOUTH lane** (V3, V3b; `stepseq.h`, `pattern_logic.h`). A step's byte is the value in bits 0 to 3 (0 FOLLOW, 1 to 9 the vowels A to U, 10 to 12 the
 closures LIPS, TIP and BACK, 13 WORD, 14 WOB, 15 refused), bits 4 to 6 the word (WOW, YEAH, YOI, WAH, OW, BA, DA, GA) or the WOB rate (1/4, 1/8, 1/16, 1/32,
@@ -274,7 +274,7 @@ The F6 label is `CLR LANE` (it does not fit the key in full); HELP spells it out
 
 **F4 CHORD** (rd-pat; `pattern_screen.cpp`, `pattern_logic.h` `chord_step`, `palette_chord`, `palette_normal`, `tests/pattern_screen_test.cpp`, `app/scenarios/pattern.txt`, `pattern_hand.txt`): replaces TOP PADS. On the NOTE lane it picks row B's kind among TRIAD, 7TH, OPEN
 and POWER and writes rows A = NOTE and B = that kind through `perform_->notes_set`; it acts on the first tap, wraps on a tap and the encoder stops at the ends. `normalise_palette()` runs on enter (and F4) so
-a pair left by SAMPLE or an old project is always a notes row and a chord row. `kLowA`, `kLowB` and `low_pads_*` stay in `sample_logic.h`: SAMPLE's F1 LOW PADS and `tests/sample_test.cpp` use them. `row_` and the ROW / PLAYS
+a pair left by SAMPLE or an old project is always a notes row and a chord row. SAMPLE has no key for the pair, and `kLowA`, `kLowB` and `low_pads_*` are gone from `sample_logic.h`. `row_` and the ROW / PLAYS
 keys are gone. PATTERN and SAMPLE play and write the same notes for rows of the same kind because both call `pads::pad_play` with the row's octave. The two hint lines under the PATTERN strip describe the hand, the steps and SHIFT.
 
 Built in U7a (`sample_edit_screen.cpp`, pure logic in `sample_edit_logic.h`, `tests/sample_edit_test.cpp`, `app/scenarios/sample_edit.txt`): the cursor and the
@@ -399,11 +399,12 @@ In BANDS, TALK and ROBOT the voice is heard only while something speaks and a sy
 (`silence.h`, the same mode bits as the liveness table). When the player is trying to be heard (a lower pad is down, a note held over MIDI, or the
 transport plays) and the half is missing for half a second, the screen says which, in its own words: `NO NOTE: HOLD A LOWER PAD OR PLAY A PATTERN`
 (the note first: it is the first thing to do) or `NOTHING SPEAKS: TALK INTO THE INPUT OR MAKE A SLOT SPEAK (SAMPLE F2)`. PERFORM shows it on its hint
-line while no picker, flash or dim note is up; PATTERN on its strip's note line. It goes at once when the sound returns or the trying stops, and a
+line while no picker, flash or dim note is up; PATTERN on its strip's note line; SAMPLE under its cue line, in the place of the standing hint, and never while its status note is up (there
+the player is trying with a lower pad, the transport, MIDI or a slice pad held whose slice still sounds; a slice plays as the voice, so a region of any slot counts as speech (`Sources::slice_speaks`)). It goes at once when the sound returns or the trying stops, and a
 carrier that is not the synth (NOISE, a slot, LIVE, VOICE) needs no note. Nothing in it is in the audio path: `App::update` feeds `silence::Watch` once
 a pass from values the screens already read (the route, the pads held, the pattern's notes, the held MIDI notes (a 128-bit set kept in the main
 loop's `midi()` hook), the input meter's peak against -50 dB, the SPEAKS slot's loop status). `tests/silence_test.cpp` holds the logic, the two
-PERFORM cases in `tests/perform_screen_test.cpp` the lines, and `app/scenarios/arrows_everywhere.txt` shows them. The unit check that remains: the
+PERFORM cases in `tests/perform_screen_test.cpp` the lines, the two SAMPLE cases in `tests/sample_test.cpp` the slice pads, and `app/scenarios/arrows_everywhere.txt` and `app/scenarios/sample_silence.txt` show them. The unit check that remains: the
 hint's wording and the half second by ear and eye, with a real input.
 
 ## 5. The skin

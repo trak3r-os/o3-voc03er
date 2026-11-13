@@ -103,6 +103,18 @@ TEST_CASE("silence: a slot speaks when it holds audio that plays, NONE speaks to
   CHECK(sl::why(sl::facts(s)) == sl::Why::NothingSpeaks);
 }
 
+TEST_CASE("silence: a slice that plays as the voice speaks, whatever the route says") {
+  sl::Sources s = src(kTalk);
+  s.pad_note = true;
+  s.input_live = false;  // SPEAKS = LIVE with no input: nobody speaks
+  s.speaks = route::kSpeaksLive;
+  CHECK(sl::why(sl::facts(s)) == sl::Why::NothingSpeaks);
+  s.slice_speaks = true;  // a region of a slot with no side (HELD) sounds as the voice
+  CHECK(sl::why(sl::facts(s)) == sl::Why::None);
+  s.pad_note = false;  // the note is still asked first
+  CHECK(sl::why(sl::facts(s)) == sl::Why::NoNote);
+}
+
 TEST_CASE("silence: the watch shows an answer after half a second of trying and clears at once") {
   sl::Watch w;
   CHECK(w.update(1000, true, sl::Why::NoNote) == sl::Why::None);  // first sight

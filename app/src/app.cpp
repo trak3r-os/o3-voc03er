@@ -850,7 +850,11 @@ class MyApp final : public app::App {
       const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(s.speaks - o3_voc03er::route::kFirstSlot);
       s.slot_audio = st.length != 0u && (st.playing || st.region);
     }
-    const bool trying = running || perform_.pad_down() || midi_held();
+    for (unsigned k = 0; k < o3_voc03er::route::kSlots; ++k) {  // a slice that plays as the voice: a region whose reader is not the carrier (the slot's side does not matter)
+      const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(k);
+      s.slice_speaks = s.slice_speaks || (st.region && !st.carrier);
+    }
+    const bool trying = running || perform_.pad_down() || sample_.slice_down() || midi_held();
     const o3_voc03er::silence::Why before = silence_.shown();
     if (silence_.update(ctx.uptime_ms(), trying, o3_voc03er::silence::why(o3_voc03er::silence::facts(s))) != before) {
       ctx.redraw();
