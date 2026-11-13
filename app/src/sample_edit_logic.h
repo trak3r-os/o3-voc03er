@@ -770,45 +770,48 @@ inline bool set_slice_start(sm::SliceTable& t, unsigned i, std::uint32_t pos) no
 
 // ---- SE2: the zoom ladder, the window, the stride build ---------------------------------------------------------------------------------
 
-// The zoom rungs, widest first: rung 0 is the whole slot (the overview picture); each rung after it halves the span, 4 s down to 344 samples (7.8 ms) across,
-// about a pixel to every second sample. A rung at least as wide as the slot is the whole slot as well (zoom_step skips it).
-inline constexpr unsigned kZoomRungs = 11;
-inline constexpr std::uint32_t kZoomRung[kZoomRungs] = {0u, 176400u, 88200u, 44100u, 22050u, 11025u, 5512u, 2756u, 1378u, 689u, 344u};
-static_assert(kZoomRung[kZoomRungs - 1u] >= kZoomCols, "the deepest zoom has a sample for every column");
+// The zoom ladder: rung 0 is the whole slot and each rung after it HALVES the span (span = len >> rung), so every step is exactly x2 whatever the slot's length, down
+// to the last rung that still has kZoomMinSpan samples across: 344 samples (7.8 ms, about two samples to a pixel) on a 16 s slot, a rung fewer for each halving of
+// the slot. The rung is the view's for every slot; a slot with fewer rungs holds it at its own deepest (zoom_step starts from that).
+inline constexpr std::uint32_t kZoomMinSpan = 344;
+static_assert(kZoomMinSpan >= kZoomCols, "the deepest zoom has a sample for every column");
 inline constexpr std::uint32_t kZoomReadCol = kZoomSpan / kZoomCols + 1u;  // the most samples a column reads: a wider one reads every `stride`-th sample
-inline constexpr std::uint32_t kSnapMinStep = 24;                          // under this many samples a detent the quiet-crossing snap would be bigger than the step
+// The most samples ONE rebuild (zoom_build) reads, whatever the span: a column of n samples reads every (n / kZoomReadCol + 1)-th, which is at most kZoomReadCol
+// (119) of them, so 119 x 186 columns = 22,134 int16 reads (44 KB of SDRAM) at the very most. The screen rebuilds once per drawn frame, and only when the window moved.
+inline constexpr std::uint32_t kZoomMaxReads = kZoomReadCol * kZoomCols;
+inline constexpr std::uint32_t kSnapMinStep = 24;  // under this many samples a detent the quiet-crossing snap would be bigger than the step
 
-// The span in samples of `rung` over a slot of `len` samples: the slot itself for rung 0 or a rung at least as wide as the slot.
-constexpr std::uint32_t zoom_span(unsigned rung, std::uint32_t len) noexcept {
-  return rung == 0u || rung >= kZoomRungs || kZoomRung[rung] >= len ? len : kZoomRung[rung];
+// The deepest rung of a slot of `len` samples: 0 (nothing to zoom to) when it is shorter than two kZoomMinSpan.
+constexpr unsigned zoom_max_rung(std::uint32_t len) noexcept {
+  unsigned n = 0;
+  while (n < 24u && (len >> (n + 1u)) >= kZoomMinSpan) {
+    ++n;
+  }
+  return n;
 }
 
-// True when `rung` shows the slot whole.
-constexpr bool zoom_whole(unsigned rung, std::uint32_t len) noexcept { return zoom_span(rung, len) >= len; }
+// `rung` held inside the slot's ladder.
+constexpr unsigned zoom_rung_for(unsigned rung, std::uint32_t len) noexcept {
+  const unsigned m = zoom_max_rung(len);
+  return rung < m ? rung : m;
+}
 
-// The rung one step in (dir > 0) or out (dir < 0): in skips the rungs that are as wide as the slot and stays where it is at the deepest (or when the slot is
-// shorter than the deepest rung); out goes back to the whole slot from the first real rung.
+// The span in samples of `rung` over a slot of `len` samples: the slot itself for rung 0, else half of the rung before it.
+constexpr std::uint32_t zoom_span(unsigned rung, std::uint32_t len) noexcept { return len >> zoom_rung_for(rung, len); }
+
+// True when `rung` shows the slot whole.
+constexpr bool zoom_whole(unsigned rung, std::uint32_t len) noexcept { return zoom_rung_for(rung, len) == 0u; }
+
+// The rung one step in (dir > 0) or out (dir < 0), from the rung the slot actually shows: in stops at the slot's deepest, out at the whole slot.
 constexpr unsigned zoom_step(unsigned rung, std::uint32_t len, int dir) noexcept {
-  if (rung >= kZoomRungs) {
-    rung = kZoomRungs - 1u;
-  }
+  const unsigned r = zoom_rung_for(rung, len);
   if (dir > 0) {
-    if (zoom_whole(rung, len)) {
-      rung = 0;
-    }
-    unsigned r = rung + 1u;
-    while (r < kZoomRungs && kZoomRung[r] >= len) {
-      ++r;
-    }
-    return r < kZoomRungs ? r : rung;
+    return r < zoom_max_rung(len) ? r + 1u : r;
   }
   if (dir < 0) {
-    if (rung <= 1u) {
-      return 0;
-    }
-    return kZoomRung[rung - 1u] >= len ? 0u : rung - 1u;
+    return r > 0u ? r - 1u : 0u;
   }
-  return rung;
+  return r;
 }
 
 // The window's first sample for a view `span` samples wide centred on `centre`: held inside the slot ([0, len - span]); 0 for the whole slot.
@@ -882,7 +885,7 @@ inline void zoom_text(unsigned rung, std::uint32_t len, char (&out)[16], unsigne
       out[n++] = d[--k];
     }
   };
-  if (rung == 0u || span >= len || rate == 0u) {
+  if (zoom_whole(rung, len) || rate == 0u) {
     put("WHOLE SLOT");
   } else {
     const std::uint32_t ms = static_cast<std::uint32_t>(static_cast<std::uint64_t>(span) * 1000u / rate);
@@ -901,6 +904,40 @@ inline void zoom_text(unsigned rung, std::uint32_t len, char (&out)[16], unsigne
     }
   }
   out[n] = '\0';
+}
+
+// F8's two faces, in ONE place so a confirm label can never meet the SPEAKS value (they used to be written one after the other: "REPLACESOFF"). SHIFT held: the
+// SHIFT row's CLR CUTS, which reads CONFIRM / REPLACES while its warning waits (`warn`). Plain: SPEAKS with what speaks now (`speaks_at` as sample::speaks_pos,
+// 0 LIVE, else SLOT n), never CONFIRM: a plain F8 never asks anything.
+struct F8Text {
+  const char* name = "";
+  char value[12] = {};
+};
+
+inline F8Text f8_text(bool shift, bool warn, unsigned speaks_at) noexcept {
+  F8Text t;
+  unsigned n = 0;
+  const auto put = [&](const char* p) {
+    while (*p != '\0' && n + 1u < sizeof t.value) {
+      t.value[n++] = *p++;
+    }
+  };
+  if (shift) {
+    t.name = warn ? "CONFIRM" : "CLR CUTS";
+    if (warn) {
+      put("REPLACES");
+    }
+  } else {
+    t.name = "SPEAKS";
+    if (speaks_at == 0u || speaks_at > 9u) {
+      put("LIVE");
+    } else {
+      put("SLOT ");
+      t.value[n++] = static_cast<char>('0' + speaks_at);
+    }
+  }
+  t.value[n] = '\0';
+  return t;
 }
 
 // The cut nearest `pos` among the table's cuts 1.. (never the one at 0) whose start is inside [lo, hi): its index, or -1 when there is none. A tie goes to

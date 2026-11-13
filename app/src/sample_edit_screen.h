@@ -26,9 +26,10 @@
 //   SHIFT: one sample a detent, no snap); slice 1's start is the trim START, the same bracket. LEFT / RIGHT pick the previous / next slice and stop at the
 //   ends. An F key lets the pick go (that key counts as a first tap). A pad past the last slice splits nothing: INSERT does. While something waits for its
 //   confirm F1 reads CONFIRM (the F key a REPLACES warning waits on reads it instead), and a trim and a NORMALISE say NO UNDO.
-// SE2, zoom: UP / DOWN step eleven rungs from WHOLE SLOT to 344 samples (about 8 ms) across, centred on the picked start (else the cursor) and held inside the
-//   slot; the picture is min / max columns of the window (at most kZoomSpan samples read, a wider window by a stride), rebuilt only when the window or the audio
-//   changes. The cuts in the window carry their numbers; the label reads ZOOM 0.5 S, ZOOM 20 MS or WHOLE SLOT.
+// SE2, zoom: UP / DOWN halve / double the window, every step x2 from WHOLE SLOT (rung 0) down to the last rung with at least 344 samples (about 8 ms) across (a 16 s slot:
+//   eleven steps), centred on the picked start (else the cursor) and held inside the slot; with F4 START or F5 END focused the window follows the bracket the encoder moves, and
+//   focusing one brings it into view. The picture is min / max columns of the window (a rebuild reads at most kZoomMaxReads, 22,134 samples), rebuilt once per frame at most and
+//   only when the window or the audio changes. The cuts in the window carry their numbers; the label reads ZOOM 2.0 S, ZOOM 250 MS, ZOOM 7 MS or WHOLE SLOT.
 // The cut tables are SAMPLE's (SampleScreen::table, in the SDRAM) and live in RAM until U9 saves them (SAMPLE LOAD, U8a, resets a slot's through slot_replaced). Main loop only; the cursor of each
 // slot, the arm, the zoom, the latch and the line are in the SDRAM (g_se in the .cpp), so this object is three pointers and the vtable.
 

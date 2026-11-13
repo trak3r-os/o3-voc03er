@@ -172,11 +172,13 @@ of the top rows auditions that slice through the vocoder, and a pad of the botto
   last slice splits nothing: INSERT adds a cut (a picked slice: in its middle, `CUT 5 ADDED: 9 SLICES`). DELETE with a pick removes its start cut and moves the pick to the slice that swallowed it
   (`CUT 5 REMOVED: 7 SLICES`; slice 1: `SLICE 1 CANNOT GO`); with none, the cut nearest the cursor inside the visible window, or `NO CUT IN VIEW`. F1 reads CONFIRM while something waits for it, and a trim and
   NORMALISE say NO UNDO.
-- Zoom (SE2): UP in, DOWN out, eleven rungs of 176400, 88200, 44100, ... 344 samples across (a rung as wide as the slot is the whole slot and is skipped), the window centred on the picked start or
-  the cursor and clamped inside the slot. The picture is 186 min / max columns of four pixels, rebuilt by `zoom_build` only when the window or the audio changes, reading at most
-  `kZoomSpan` (22,050) samples (a column wider than 119 samples reads every stride-th one); the cuts in view are drawn with their numbers, the whole slot keeps the overview bitmap. The label reads
-  `ZOOM 0.5 S`, `ZOOM 20 MS` or `WHOLE SLOT`; the encoder step is the window over 744 pixels (one sample at the deepest rung). The cut strip below always shows the whole slot, with the window as a bracket.
-- Hearing a slice (SE3): the header names the slot's route place (`SPEAKS`, `SOUNDS` or nothing). F8 (plain) toggles SPEAKS through the same route change as SAMPLE's side value (`plan_side`; an empty slot
+- Zoom (SE2): UP in, DOWN out, a halving ladder: the window is `len >> rung`, rung 0 the whole slot, every step x2, down to the last rung with at least `kZoomMinSpan` (344) samples across (a 16 s slot,
+  705,600 samples: rung 11, span 344; the rung is shared across slots and clamped per slot by `zoom_rung_for`). The window is centred on the picked start or the cursor and clamped inside the slot; with F4 START
+  or F5 END focused it follows the bracket the encoder moves (`view_lo`), and focusing one brings it into view. The picture is 186 min / max columns of four pixels, built by `zoom_build` only when the
+  window or the audio changes and only from `draw()` (the encoder only moves the window: several detents in a frame cost one rebuild), reading at most `kZoomMaxReads` (22,134: 119 per column, 44 KB) samples
+  (a wider column reads every stride-th one); the cuts in view are drawn with their numbers, the whole slot keeps the overview bitmap. The label reads
+  `ZOOM 2.0 S`, `ZOOM 250 MS`, `ZOOM 7 MS` or `WHOLE SLOT`; the encoder step is the window over 744 pixels (one sample at the deepest rung). The cut strip below always shows the whole slot, with the window as a bracket.
+- Hearing a slice (SE3): the header names the slot's route place (`SPEAKS`, `SOUNDS` or nothing). F8 (plain) is SPEAKS and reads like SAMPLE's F2 (`LIVE` or `SLOT n`, `se::f8_text`; it never reads CONFIRM) and toggles it through the same route change as SAMPLE's side value (`plan_side`; an empty slot
   refuses in one line; the live input leaves the mix while the slot speaks, and F8 again gives the voice back to LIVE); SHIFT + F8 is CLR CUTS. While SHIFT is held the F row shows the SHIFT functions. SHIFT + a lower pad latches
   that pad's note or chord (PERFORM's audition path, its physical release swallowed; the LED shows it; SHIFT + the same pad lets it go, SHIFT + another moves it, a plain press plays over it); leaving the screen, a mode change,
   a project load and init release it. The hint `SHIFT + LOW PAD LATCHES A NOTE` shows when a slice pad is pressed in BANDS, TALK or ROBOT with the SYNTH carrier and no note held (it cannot see a note the step sequencer plays).

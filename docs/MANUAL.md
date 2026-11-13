@@ -557,8 +557,9 @@ the last slice does not make a slice; INSERT does, and the line says so.
 moves to the slice that swallowed it (`CUT 5 REMOVED: 7 SLICES`). Slice 1 has no cut to remove, and the line says so. With nothing picked, DELETE
 removes the cut nearest the cursor inside the picture, or says there is none there. SHIFT + DELETE still empties the slot and asks first.
 
-**Zoom.** UP zooms in and DOWN out, in steps of two, from WHOLE SLOT down to about 8 ms across (the label reads `ZOOM 0.5 S`, `ZOOM 20 MS` or `WHOLE SLOT`). The
-picture is centred on the picked start (or on the cursor) and stays inside the slot. The cuts in view carry their numbers, and the encoder step follows the
+**Zoom.** UP zooms in and DOWN out, in steps of two, every step half (or double) the one before, from WHOLE SLOT down to about 8 ms across (the label reads `ZOOM 2.0 S`, `ZOOM 250 MS`, `ZOOM 7 MS` or `WHOLE SLOT`;
+a slot that is not a power of two long shows odd values such as `ZOOM 3.4 S`). The
+picture is centred on the picked start (or on the cursor) and stays inside the slot; with F4 START or F5 END focused it follows the bracket the encoder moves, and focusing one brings it into view. The cuts in view carry their numbers, and the encoder step follows the
 zoom: at the deepest zoom a click is one sample. SHIFT + UP and SHIFT + DOWN pick the slot before and after (the one SAMPLE shows).
 
 **Hearing a slice.** A slot's slices are the vocoder's voice, unless the slot is the SOUNDS source. In BANDS, TALK and ROBOT a slice pad is heard

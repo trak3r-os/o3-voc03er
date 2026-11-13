@@ -1,0 +1,76 @@
+# SAMPLE EDIT, the longest lines the screen can show (SE fold) and the window that follows a bracket: an 8 BARS take (the longest slot the simulator records, about 16 s at the
+# default tempo), NORMALISE (the header says EDITED), 24 even cuts, PERFORM in TRACT (the longest mode cue), the last slice picked and a note latched with SHIFT + a lower pad:
+# the right-aligned header text (NOTE LATCHED, 24 CUTS, EDITED), the info line (SLICE 24 OF 24 START LEN) and the cue must not overlap. Then F5 END is focused at the deepest zoom
+# (the window comes to the END bracket, wherever the cursor was) and the encoder moves it, and F4 START brings the start into view. The simulator shows the frames; the feel is for the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_edit_long.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f3
+tap f3
+tap f3
+tap play
+wait 500
+record on
+tap rec
+wait 17500
+tap performance
+wait 100
+tap f1
+tap f1
+tap f1
+wait 300
+tap performance
+wait 100
+tap f1
+tap f1
+tap f1
+wait 400
+tap sampleedit
+wait 300
+snap 01_long_slot
+tap f6
+wait 150
+tap f1
+wait 3000
+snap 02_normalised
+tap f1
+wait 150
+turn 2
+wait 300
+snap 03_24_cuts
+pad 23
+wait 500
+snap 04_last_picked
+press shift
+pad 28
+release shift
+wait 400
+snap 05_longest_lines
+tap up
+tap up
+tap up
+tap up
+tap up
+tap up
+tap up
+tap up
+tap up
+tap up
+tap up
+wait 300
+snap 06_deepest_on_last
+tap f5
+wait 300
+snap 07_end_focused_window_on_end
+turn -60
+wait 300
+snap 08_end_moved
+tap f4
+wait 300
+snap 09_start_focused_window_on_start
+turn 60
+wait 300
+snap 10_start_moved

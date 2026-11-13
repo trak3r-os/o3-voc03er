@@ -83,7 +83,7 @@ struct EditData {
   std::uint8_t zoom_slot;
   std::uint32_t zoom_lo, zoom_span;    // the window they were built for
   std::uint32_t zoom_len;
-  std::uint8_t zoom_rung;              // SE2: the zoom ladder's rung (se::kZoomRung), 0 the whole slot; the view's rung for every slot
+  std::uint8_t zoom_rung;              // SE2: the zoom ladder's rung (se::zoom_span halves the slot a rung at a time), 0 the whole slot; the view's rung for every slot
   std::uint8_t latch_pad;              // the latched lower pad (24..47), 0 none: SHIFT + a lower pad holds its note until released (main loop only, the audition is PERFORM's)
   std::uint32_t swallow;               // bit (pad - 24): the physical release of a pad the latch took over is held back
   std::uint32_t lower;                 // bit (pad - 24): a lower pad pressed plain whose note sounds (the hint stays quiet while one is down)
@@ -1017,7 +1017,8 @@ void SampleEditScreen::turn_slice(app::Context& ctx, int delta, bool fine) noexc
 
 // ---- SE2: the zoom ---------------------------------------------------------------------------------------------------------------------
 
-// The window of the selected slot: se::zoom_span samples wide (the whole slot at rung 0), centred on the picked start or else the cursor, held inside the slot.
+// The window of the selected slot: se::zoom_span samples wide (the whole slot at rung 0), centred on what the encoder moves (the picked start; with F4 or F5 focused
+// the bracket it moves; else the cursor), held inside the slot. It follows that point whenever it moves, and focusing F4 or F5 brings its bracket into view.
 std::uint32_t SampleEditScreen::view_span() const noexcept {
   return sample_ == nullptr ? 0u : se::zoom_span(g_se.zoom_rung, sample_->table(sample_->slot() & 3u).length);
 }
@@ -1033,7 +1034,15 @@ std::uint32_t SampleEditScreen::view_lo() const noexcept {
     return 0;
   }
   const unsigned sel = selected();
-  return se::zoom_lo_for(sel != 0u ? slice_start(t, slot, sel - 1u) : cursor(), span, t.length);
+  std::uint32_t centre = cursor();
+  if (sel != 0u) {
+    centre = slice_start(t, slot, sel - 1u);
+  } else if (g_se.focus == kFocusStart) {
+    centre = slice_start(t, slot, 0);  // the START bracket (its own slot's, else the slot's ends)
+  } else if (g_se.focus == kFocusEnd) {
+    centre = g_se.br_len[slot] == t.length ? g_se.br[slot].end : t.length;
+  }
+  return se::zoom_lo_for(centre, span, t.length);
 }
 
 // UP (dir > 0) zooms in, DOWN out, one rung of the ladder.
@@ -1044,7 +1053,7 @@ void SampleEditScreen::zoom_by(app::Context& ctx, int dir) noexcept {
     return;
   }
   const unsigned next = se::zoom_step(g_se.zoom_rung, len, dir);
-  if (next == g_se.zoom_rung) {
+  if (next == se::zoom_rung_for(g_se.zoom_rung, len)) {  // the rung this slot shows (the view's rung may be deeper than a short slot's ladder)
     say(ctx, dir > 0 ? "DEEPEST ZOOM" : "WHOLE SLOT");
     return;
   }
@@ -1052,7 +1061,9 @@ void SampleEditScreen::zoom_by(app::Context& ctx, int dir) noexcept {
   ctx.redraw();
 }
 
-// The columns of the window [lo, lo + span) of `slot`, rebuilt only when the window, the slot or its length changed (any change of the samples clears zoom_ok).
+// The columns of the window [lo, lo + span) of `slot`, rebuilt only when the window, the slot or its length changed (any change of the samples clears zoom_ok). Only
+// draw() calls it (input just moves the cursor, a bracket or the rung, and asks for a redraw), so the encoder's detents of one frame cost ONE rebuild, at the
+// frame's final window. A rebuild reads at most se::kZoomMaxReads = 22,134 samples (119 a column, 186 columns: 44 KB of SDRAM) whatever the span.
 void SampleEditScreen::zoom_refresh(unsigned slot, std::uint32_t lo, std::uint32_t span) noexcept {
   const std::uint32_t len = sample_->table(slot).length;
   if (g_se.zoom_ok && g_se.zoom_slot == slot && g_se.zoom_lo == lo && g_se.zoom_span == span && g_se.zoom_len == len) {
@@ -1397,9 +1408,10 @@ bool SampleEditScreen::trim_armed() noexcept {
   return se::trim_moved(g_se.br[slot], g_se.br_len[slot]);
 }
 
-// The key that answers what waits is labelled CONFIRM: F1 for NORMALISE, EMPTY, COPY and a trim; the F key that met a table the hand edited (REPLACES).
+// The key that answers what waits is labelled CONFIRM: F1 for NORMALISE, EMPTY, COPY and a trim; the F key that met a table the hand edited (REPLACES). Never
+// the plain F8: its warning (SHIFT + F8, CLR CUTS) is answered on the SHIFT row, and a plain F8 is SPEAKS (se::f8_text).
 static bool confirming(unsigned k, bool trim) noexcept {
-  return (k == 0u && (g_se.pending != se::Pending::None || trim)) || g_se.warn_key1 == k + 1u;
+  return (k == 0u && (g_se.pending != se::Pending::None || trim)) || (k != kKeySpeaks && g_se.warn_key1 == k + 1u);
 }
 
 void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
@@ -1407,7 +1419,7 @@ void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
       out.label[i] = "";
     }
-    out.label[kKeySpeaks] = g_se.warn_key1 == 8u ? "CONFIRM" : "CLR CUTS";
+    out.label[kKeySpeaks] = se::f8_text(true, g_se.warn_key1 == 8u, 0u).name;
     out.hot = 0;
     out.dim = 0x7Fu;
     return;
@@ -1436,6 +1448,7 @@ void SampleEditScreen::update(app::Context& ctx) noexcept {
   }
   if (perform_ != nullptr && g_se.latch_pad != 0u && perform_->layout_mode() != g_se.last_mode) {
     latch_release(ctx);  // another mode has another palette: the latched pad would hold a different note
+    g_se.lower = 0;      // and the latch state is over by a road that is no pad's release: a stale bit would keep hint_latch quiet
   }
   if (g_se.scan.on) {
     scan_tick(ctx);
@@ -1585,27 +1598,25 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     cat(keys[5].value, sizeof keys[5].value, "NO UNDO");
   }
 
-  // F8 SPEAKS: ON when the slot is the route's SPEAKS source. While SHIFT is held the F row is the SHIFT row, as on SAMPLE, PERFORM and PATTERN.
+  // F8: ONE branch writes its name and value (se::f8_text). Plain: SPEAKS and who speaks now as SAMPLE's F2 reads it, LIVE or SLOT n (the route's SPEAKS, whatever slot
+  // that is; the key is lit when it is THIS slot). While SHIFT is held the F row is the SHIFT row (as on SAMPLE, PERFORM and PATTERN): CLR CUTS, CONFIRM / REPLACES while it waits.
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   const sm::Side side = perform_ != nullptr ? sm::side_of(rt, slot) : sm::Side::None;
-  cat(keys[7].value, sizeof keys[7].value, side == sm::Side::Speaks ? "ON" : "OFF");
-  keys[7].role = side == sm::Side::Speaks ? ornoir::KeyRole::Voice : ornoir::KeyRole::Plain;
-  keys[7].dim = perform_ == nullptr;
   const bool shift = ctx.panel().shift();
   if (shift) {
-    const bool warn = g_se.warn_key1 == 8u;
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
       keys[i] = ornoir::FKey{};
       keys[i].name = "";
       keys[i].dim = true;
     }
-    keys[7].name = warn ? "CONFIRM" : "CLR CUTS";
-    keys[7].dim = false;
-    keys[7].hot = warn;
-    if (warn) {
-      cat(keys[7].value, sizeof keys[7].value, "REPLACES");
-    }
   }
+  const bool warn = g_se.warn_key1 == 8u;
+  const se::F8Text f8 = se::f8_text(shift, warn, sm::speaks_pos(rt));
+  keys[kKeySpeaks].name = f8.name;
+  std::memcpy(keys[kKeySpeaks].value, f8.value, sizeof keys[kKeySpeaks].value);
+  keys[kKeySpeaks].hot = shift && warn;
+  keys[kKeySpeaks].dim = !shift && perform_ == nullptr;
+  keys[kKeySpeaks].role = !shift && side == sm::Side::Speaks ? ornoir::KeyRole::Voice : ornoir::KeyRole::Plain;
 
   const std::uint32_t span = view_span();
   const bool zoomed = len != 0u && !se::zoom_whole(g_se.zoom_rung, len);
@@ -1683,7 +1694,10 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   }
   if (bracket_on) {  // [ START and END ] on the picture and the ruler: one map, the picture's
     const int xs = map(br.start);
-    const int xe = map(br.end);
+    int xe = map(br.end);
+    if (zoomed && xe < 0 && br.end > 0u && map(br.end - 1u) >= 0) {
+      xe = kPicX + static_cast<int>(se::kPicW);  // END is the window's own end (a window clamped to the slot's tail): the bracket sits on the picture's right edge
+    }
     for (int side_i = 0; side_i < 2; ++side_i) {
       const int x = side_i == 0 ? xs : xe - 1;
       ornoir::fill_rect(c, se::mark_x(side_i == 0 ? br.start : br.end, len) - (side_i == 0 ? 0 : 1), kBarY - 14, 3, kBarH + 28, Color::Accent);  // the ruler always shows it
