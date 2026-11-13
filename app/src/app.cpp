@@ -159,7 +159,7 @@ class MyApp final : public app::App {
     perform_.init(voice, tube, &meter_, &voc_, &pick_source_cb, this);
     sample_rec_.init(voice, &meter_, &voc_, &perform_, &pick_source_cb, this);
     params_.init(voice, tube, &perform_);
-    master_.init(voice, &meter_, &pick_source_cb, this);
+    master_.init(voice, &meter_, &pick_source_cb, this, &perform_);
     sample_.init(voice, &voc_, &perform_, &carriers_);
     sample_edit_.init(&sample_, g_loop_mem, &perform_);
     sample_load_.init(&sample_, g_loop_mem);

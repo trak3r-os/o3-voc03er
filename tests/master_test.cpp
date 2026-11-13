@@ -176,3 +176,101 @@ TEST_CASE("master: the button opens the screen, DRY moves through the unit, a di
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
   CHECK(h.runtime().frame_failures() == 0u);
 }
+
+// RD2: LEFT / RIGHT are one encoder step of the lit key, with nothing lit they say what the encoder says, the pads play PERFORM's.
+TEST_CASE("master: LEFT / RIGHT step the lit key as the encoder does, nothing lit moves nothing, SHIFT is coarse, a held arrow repeats") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Master);
+  h.run_ms(60);
+  // nothing is lit on entry: the arrows move nothing (the line TAP AN F KEY FIRST is in the scenario's frame)
+  const float dry0 = param(h, Vocoder::Dry);
+  const float level0 = param(h, Vocoder::Level);
+  tap(h, app::Button::Right);
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(dry0));
+  CHECK(param(h, Vocoder::Level) == doctest::Approx(level0));
+
+  tap(h, app::Button::F4);  // DRY: lit, changed nothing
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(dry0));
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  const float step = param(h, Vocoder::Dry) - dry0;
+  CHECK(step > 0.0f);
+  h.turn(1);  // the same step by the encoder
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(dry0 + 2.0f * step));
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(dry0));
+  CHECK(param(h, Vocoder::Level) == doctest::Approx(level0));
+
+  h.press(app::Button::Shift);  // SHIFT + arrow: the coarse step, as SHIFT + the encoder
+  h.run_ms(5);
+  tap(h, app::Button::Right);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Dry) - dry0 > step * 1.5f);
+  h.press(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, app::Button::Left);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(dry0));
+
+  h.press(app::Button::Right);  // held: the kit repeats it as presses
+  h.run_ms(1500);
+  h.release(app::Button::Right);
+  h.run_ms(20);
+  const float held = param(h, Vocoder::Dry);
+  CHECK(held - dry0 >= 4.0f * step);
+  h.run_ms(1000);
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(held));
+
+  tap(h, app::Button::F5);  // LEVEL takes the arrows now, DRY keeps its value
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Level) < level0);
+  CHECK(param(h, Vocoder::Dry) == doctest::Approx(held));
+
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Config);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  REQUIRE(h.runtime().help_open());
+  const app::Help& help = h.runtime().help_overlay().help();
+  bool left = false;
+  bool right = false;
+  for (std::size_t i = 0; i < help.button_count; ++i) {
+    left = left || (help.buttons[i].button == app::Button::Left && help.buttons[i].text != nullptr);
+    right = right || (help.buttons[i].button == app::Button::Right && help.buttons[i].text != nullptr);
+  }
+  CHECK(left);
+  CHECK(right);
+  app::HelpProblem p;
+  const bool ok = app::help_check(help, &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("master: the pads play PERFORM's pads (a held pad is lit), and leaving the screen lets them go") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Master);
+  h.run_ms(60);
+  h.pad_down(12);
+  h.run_ms(60);
+  CHECK(h.runtime().context().panel().pad_held(12));
+  CHECK(h.leds().level(12) == 255);
+  tap(h, app::Button::Params);  // another screen: the held pad is released by the screen that held it
+  h.run_ms(60);
+  CHECK(h.leds().level(12) != 255);
+  h.pad_up(12);
+  h.run_ms(60);
+  CHECK(h.runtime().frame_failures() == 0u);
+}

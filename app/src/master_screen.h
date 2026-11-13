@@ -6,7 +6,8 @@
 //
 //   F1 SOURCE  F2 GAIN  F3 MONITOR  F4 DRY  F5 LEVEL  F6 RETURN  F7 SEEK DOWN  F8 SEEK UP (the seek keys are dim unless the source is RADIO).
 //   A tap on F1..F6 points the encoder at it (it stays lit); a second tap steps it on (MONITOR: off / on). SHIFT + the encoder: coarse steps.
-//   A dim key says why when it is tapped. UP and DOWN are not used: MASTER has no pages.
+//   LEFT / RIGHT: one encoder step of the lit key (SHIFT as the encoder takes it, a held arrow repeats); with no key lit they say TAP AN F KEY FIRST,
+//   as the encoder does. A dim key says why when it is tapped. UP and DOWN are not used: MASTER has no pages. The pads play PERFORM's chords, as on PARAMS.
 //
 // The source goes through the app's one source path (the callback app.cpp gives PERFORM: AudioIn::select, the meter's reset, the USB channel), so
 // the kit's settling gate holds the input silent while it switches. GAIN, MONITOR and the radio are the kit's (AudioIn, Radio), RETURN is
@@ -28,14 +29,17 @@ namespace o3_voc03er {
 
 class MasterScreen final : public o3sdk::app::Screen {
  public:
-  // `meter` is the app's input meter, `pick` its source path (PERFORM's callback).
-  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, PerformScreen::SourceStep pick, void* user) noexcept;
+  // `meter` is the app's input meter, `pick` its source path (PERFORM's callback); `perform` is the app's PERFORM, whose pads and chords play here.
+  void init(o3sdk::dsp::UnitId voice, const InputMeter* meter, PerformScreen::SourceStep pick, void* user, PerformScreen* perform) noexcept;
 
   const char* title() const noexcept override { return "MASTER"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
   const o3sdk::ui::Theme* theme(const o3sdk::app::Context&) const noexcept override;
   void enter(o3sdk::app::Context& ctx) noexcept override;
+  void leave(o3sdk::app::Context& ctx) noexcept override;
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
+  std::uint64_t repeat_buttons(const o3sdk::app::Context&) const noexcept override;  // LEFT / RIGHT: a held arrow repeats
+  void leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept override;
   void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
   void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;
   void help(const o3sdk::app::Context& ctx, o3sdk::app::Help& help) const noexcept override;
@@ -58,6 +62,7 @@ class MasterScreen final : public o3sdk::app::Screen {
   const InputMeter* meter_ = nullptr;
   PerformScreen::SourceStep step_source_ = nullptr;
   void* user_ = nullptr;
+  PerformScreen* perform_ = nullptr;
   master::Follower in_;   // the IN meter's fall and held peak (update(), main loop)
   master::Follower out_;  // the OUT meter's
   static constexpr std::uint8_t kNoFocus = 0xFF;

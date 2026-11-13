@@ -63,8 +63,9 @@ void panel_shapes(ui::plot::Canvas& c, int x, int w) noexcept {
 
 }  // namespace
 
-void MasterScreen::init(dsp::UnitId voice, const InputMeter* meter, PerformScreen::SourceStep pick, void* user) noexcept {
+void MasterScreen::init(dsp::UnitId voice, const InputMeter* meter, PerformScreen::SourceStep pick, void* user, PerformScreen* perform) noexcept {
   voice_ = voice;
+  perform_ = perform;
   meter_ = meter;
   step_source_ = pick;
   user_ = user;
@@ -77,6 +78,22 @@ void MasterScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
   focus_ = kNoFocus;
   ctx.redraw();
+}
+
+void MasterScreen::leave(app::Context& ctx) noexcept {
+  if (perform_ != nullptr) {
+    perform_->leave(ctx);  // releases the held pads
+  }
+}
+
+std::uint64_t MasterScreen::repeat_buttons(const app::Context&) const noexcept {
+  return (std::uint64_t{1} << static_cast<unsigned>(Button::Left)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Right));
+}
+
+void MasterScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
+  if (perform_ != nullptr) {
+    perform_->leds(ctx, leds);
+  }
 }
 
 void MasterScreen::say(app::Context& ctx, const char* text) noexcept {
@@ -193,12 +210,16 @@ void MasterScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     }
     return;
   }
-  if (in.turn()) {
+  if (in.turn() || in.press(Button::Left) || in.press(Button::Right)) {
     if (focus_ >= ms::kKeys) {
-      say(ctx, "TAP AN F KEY FIRST");  // the encoder points at nothing yet
+      say(ctx, "TAP AN F KEY FIRST");  // the encoder and the arrows point at nothing yet
       return;
     }
-    step(ctx, focus_, in.delta(), in.shift, false);
+    // LEFT / RIGHT are one encoder step of the lit key (SHIFT as the encoder takes it); repeats arrive as presses (repeat_buttons)
+    const int delta = in.turn() ? in.delta() : (in.press(Button::Left) ? -1 : 1);
+    step(ctx, focus_, delta, in.shift, false);
+  } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr) {
+    perform_->pad_event(ctx, in);  // the pads play PERFORM's chords, as on PARAMS
   }
 }
 
@@ -211,6 +232,8 @@ void MasterScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
 // HELP: the buttons the app opens screens with (MASTER answers none itself); each soft key line is short.
 void MasterScreen::help(const app::Context&, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
+      {Button::Left, "LIT KEY DOWN, HOLD REPEATS", nullptr},
+      {Button::Right, "LIT KEY UP, HOLD REPEATS", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Params, "PARAMS: THE VALUES", nullptr},
       {Button::Master, "MASTER: THIS SCREEN", nullptr},
