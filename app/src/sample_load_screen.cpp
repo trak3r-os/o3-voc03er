@@ -510,10 +510,10 @@ void SampleLoadScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
 }
 
 void SampleLoadScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
-  out.label[0] = "OPEN";
+  out.label[0] = g_sl.asking ? "CONFIRM" : "OPEN";  // the ask ("REPLACES SLOT n: F1 CONFIRMS") is answered on F1, so F1 stays lit and says so
   out.label[7] = g_sl.stage == kReading ? "CANCEL" : "BACK";
   out.hot = 0;
-  out.dim = static_cast<std::uint8_t>(0x7Eu | (g_sl.stage != kBrowse || g_sl.asking ? 0x01u : 0u) | (g_sl.stage != kBrowse && g_sl.stage != kReading ? 0x80u : 0u));
+  out.dim = static_cast<std::uint8_t>(0x7Eu | (g_sl.stage != kBrowse ? 0x01u : 0u) | (g_sl.stage != kBrowse && g_sl.stage != kReading ? 0x80u : 0u));
 }
 
 void SampleLoadScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
@@ -522,7 +522,7 @@ void SampleLoadScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "PAGE UP THE LIST", nullptr},
       {Button::Right, "PAGE DOWN THE LIST", nullptr},
-      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
+      {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::SampleLoad, "THIS SCREEN", nullptr},
@@ -651,7 +651,7 @@ void SampleLoadScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
       r.text(kX, ny + 14, g_sl.tail, Color::Accent, Face::Label);
     }
   } else {
-    r.text(kX, kNoteY + 4, "UP AND DOWN PICK THE SLOT, F1 LOADS THE FILE UNDER THE CURSOR", Color::TextDim, Face::Micro);
+    r.text(kX, kNoteY + 4, "UP AND DOWN PICK THE SLOT, F1 OPENS THE FILE UNDER THE CURSOR INTO IT", Color::TextDim, Face::Micro);
   }
 }
 

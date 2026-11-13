@@ -123,7 +123,7 @@ class SampleEditScreen final : public o3sdk::app::Screen {
   void zoom_refresh(unsigned slot, std::uint32_t lo, std::uint32_t span) noexcept;
   std::uint32_t view_span() const noexcept;
   std::uint32_t view_lo() const noexcept;
-  // F8: the slot speaks (the vocoder's modulator) or goes back to LIVE; an empty slot refuses.
+  // F8: the slot speaks (the vocoder's modulator) or goes back to LIVE; an empty slot refuses. SAMPLE's F2 tap, called (SampleScreen::speaks_tap).
   void toggle_speaks(o3sdk::app::Context& ctx) noexcept;
   // The latch: SHIFT + a lower pad holds its note or chord (pads 24..47); the plain presses and the releases of the others pass to SAMPLE's pads.
   bool latch_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;

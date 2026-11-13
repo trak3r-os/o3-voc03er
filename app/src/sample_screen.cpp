@@ -528,9 +528,18 @@ void SampleScreen::set_speaks(app::Context& ctx, int delta, bool tap) noexcept {
   }
 }
 
-void SampleScreen::speaks_tap(app::Context& ctx) noexcept {
+const char* SampleScreen::speaks_tap(app::Context& ctx) noexcept {
+  const char* const before = note_;
+  const std::uint64_t until = note_until_;
+  note_ = nullptr;
   set_speaks(ctx, 1, true);
+  const char* const said = note_;
+  if (said == nullptr) {  // nothing said: the line that was up stays
+    note_ = before;
+    note_until_ = until;
+  }
   ctx.redraw();
+  return said;
 }
 
 // `delta` is the encoder's detents, or +-1 for a tap; a tap wraps where a detent stops at the end.
@@ -795,7 +804,7 @@ void SampleScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Left, "F VALUE DOWN, HOLD REPEATS", nullptr},
       {Button::Right, "F VALUE UP, HOLD REPEATS", nullptr},
       {Button::Shift, "F2 SLICE CH, F3 OCTAVE", nullptr},
-      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
+      {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

@@ -1079,53 +1079,14 @@ void SampleEditScreen::zoom_refresh(unsigned slot, std::uint32_t lo, std::uint32
 
 // ---- F8: the slot speaks ---------------------------------------------------------------------------------------------------------------
 
-// The slot becomes the route's SPEAKS source, or (when it is already) the route goes back to LIVE. The same route change as SAMPLE's SIDE key (set_side): the
-// side the slot leaves is freed first, so it is never on both.
+// The slot becomes the route's SPEAKS source, or (when it is already) the route goes back to LIVE: SAMPLE's F2 tap itself (SampleScreen::speaks_tap), so the
+// two keys cannot route differently (an empty slot refuses, a slot that SOUNDS is freed to the synth first, a mode that cannot hear SPEAKS says so). The
+// note it says is shown on this screen's line too.
 void SampleEditScreen::toggle_speaks(app::Context& ctx) noexcept {
-  if (perform_ == nullptr) {
-    return;
+  const char* const said = sample_->speaks_tap(ctx);
+  if (said != nullptr) {
+    say(ctx, said);
   }
-  const unsigned slot = sample_->slot() & 3u;
-  const route::Route cur = perform_->route_now(ctx);
-  const bool off = sm::side_of(cur, slot) == sm::Side::Speaks;
-  const sm::SidePlan p = sm::plan_side(cur, off ? sm::Side::None : sm::Side::Speaks, slot, sample_->status(slot).length == 0u);
-  if (p.refused) {
-    say(ctx, p.why);
-    return;
-  }
-  if (!p.change) {
-    return;
-  }
-  const std::uint8_t v = sm::slot_value(slot);
-  route::Route mid = cur;
-  if (cur.speaks == v && p.to.speaks != v) {
-    mid.speaks = p.to.speaks;
-    perform_->apply_route(ctx, route::Side::Speaks, cur, mid);
-  }
-  if (cur.sounds == v && p.to.sounds != v) {
-    const route::Route from = mid;
-    mid.sounds = p.to.sounds;
-    perform_->apply_route(ctx, route::Side::Sounds, from, mid);
-  }
-  if (p.to.speaks == v && mid.speaks != v) {
-    const route::Route from = mid;
-    mid.speaks = v;
-    perform_->apply_route(ctx, route::Side::Speaks, from, mid);
-  }
-  if (p.to.sounds == v && mid.sounds != v) {
-    const route::Route from = mid;
-    mid.sounds = v;
-    perform_->apply_route(ctx, route::Side::Sounds, from, mid);
-  }
-  g_se.note_buf[0] = '\0';
-  if (off) {
-    cat(g_se.note_buf, sizeof g_se.note_buf, "LIVE SPEAKS AGAIN");
-  } else {
-    cat(g_se.note_buf, sizeof g_se.note_buf, "SLOT ");
-    cat_uint(g_se.note_buf, sizeof g_se.note_buf, slot + 1u);
-    cat(g_se.note_buf, sizeof g_se.note_buf, " SPEAKS");
-  }
-  say(ctx, g_se.note_buf);
 }
 
 // ---- the latch: SHIFT + a lower pad holds its note --------------------------------------------------------------------------------------
@@ -1489,7 +1450,7 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
       {Button::Delete, "REMOVES THE PICKED CUT", nullptr},
       {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
       {Button::Shift, "COARSE; + UP/DOWN: SLOT", nullptr},
-      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
+      {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

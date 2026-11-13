@@ -2114,6 +2114,46 @@ TEST_CASE("sample edit: F8 makes the slot speak and a second F8 gives LIVE back;
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
+TEST_CASE("sample edit: F8 is SAMPLE's F2 tap: from the same route both keys leave the same SPEAKS and SOUNDS, and a slot that SOUNDS is freed first") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  const dsp::UnitId voc = voc_unit(h);
+  const float slot = static_cast<float>(sm::slot_value(0));
+  const auto car_src = [&] { return h.engine().param(voc, Vocoder::CarSrc); };
+  // The same start for both keys: LIVE speaks and SLOT 1 sounds (the route is what the unit holds).
+  const auto start = [&] {
+    (void)h.engine().set_param(voc, Vocoder::ModSrc, 0.0f);
+    (void)h.engine().set_param(voc, Vocoder::CarSrc, slot);
+    h.run_ms(60);
+    REQUIRE(mod_src(h) == 0.0f);
+    REQUIRE(car_src() == slot);
+  };
+  float mod[2][2] = {};
+  float car[2][2] = {};
+  const app::Button screen[2] = {app::Button::SampleEdit, app::Button::SamplePlay};
+  const app::Button key[2] = {app::Button::F8, app::Button::F2};
+  for (unsigned k = 0; k < 2; ++k) {
+    tap(h, screen[k]);
+    h.run_ms(60);
+    start();
+    for (unsigned t = 0; t < 2; ++t) {  // the first tap makes the slot speak, the second gives LIVE back
+      tap(h, key[k]);
+      h.run_ms(60);
+      mod[k][t] = mod_src(h);
+      car[k][t] = car_src();
+    }
+  }
+  CHECK(mod[0][0] == slot);  // SAMPLE EDIT's F8: the slot speaks ...
+  CHECK(car[0][0] != slot);  // ... and no longer sounds (never on both)
+  CHECK(mod[0][1] == 0.0f);  // again: LIVE speaks
+  for (unsigned t = 0; t < 2; ++t) {
+    CHECK(mod[0][t] == mod[1][t]);
+    CHECK(car[0][t] == car[1][t]);
+  }
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
 TEST_CASE("sample edit: SHIFT + a lower pad latches its note: the LED shows it, the same pad lets go, another moves it, leaving releases it") {
   Rig rig;
   sim::Harness& h = *rig.h;

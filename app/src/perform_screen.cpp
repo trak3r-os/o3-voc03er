@@ -2035,7 +2035,7 @@ const char* plays_help(const strip::StripDef* d, pads::Plays p) noexcept {
 // on this screen has a row, and tests/perform_screen_test.cpp holds that. The legend carries the groups of the page in force only.
 void PerformScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
-      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
+      {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "AGAIN: FREES THE ENCODER", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},

@@ -481,7 +481,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
       {Button::Down, "SLOT AFTER", nullptr},
       {Button::Left, "SHORTER LENGTH, HOLD REPEATS", nullptr},
       {Button::Right, "LONGER LENGTH, HOLD REPEATS", nullptr},
-      {Button::Params, "PARAMS: FOUR PAGES", nullptr},
+      {Button::Params, "PARAMS: THE MODE'S PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::Master, "MASTER", nullptr},
@@ -641,7 +641,10 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   cat(buf, sizeof buf, ".");
   cat_uint(buf, sizeof buf, bb.beat);
   r.text(560, 84, buf, e.playing() ? Color::Play : Color::TextDim, Face::Display);
-  r.text(560, 124, e.playing() ? "TRANSPORT RUNS" : "TRANSPORT STOPPED: A TAKE STARTS AT ONCE", Color::TextDim, Face::Micro);
+  r.text(560, 124, e.playing() ? "TRANSPORT RUNS" : "TRANSPORT STOPPED", Color::TextDim, Face::Micro);
+  if (!e.playing()) {  // on a line of its own: as one line it ran to the display's right edge
+    r.text(560, 136, "A TAKE STARTS AT ONCE", Color::TextDim, Face::Micro);
+  }
 
   const char* word = "EMPTY";
   Color ink = Color::TextDim;

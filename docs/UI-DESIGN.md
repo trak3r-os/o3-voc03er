@@ -160,7 +160,7 @@ of the top rows auditions that slice through the vocoder, and a pad of the botto
 
 - F1 CUT EVEN (OFF, 8, 16, 24 equal parts; turning re-cuts) · F2 CUT BEATS (OFF, 4, 8, 16 a bar, on the bars the take was recorded on; dimmed for
   a loaded WAV) · F3 CUT HITS (0 to 100: the sensitivity of the onset detector, 0 off; the cuts follow it as it turns; the first tap from 0 lands at 50, then by 10, and 100 wraps to 0) · F4 START and F5 END (the
-  trim) · F6 NORMALISE (action, F1 confirms) · F7 SAVE WAV (`Samples/slotN_NNN.wav` by the kit's `save_wav`, the strip shows the progress) · F8 SPEAKS (the slot speaks, or back to LIVE) · SHIFT + F8
+  trim) · F6 NORMALISE (action, F1 confirms) · F7 SAVE WAV (`Samples/slotN_NNN.wav` by the kit's `save_wav`, the strip shows the progress) · F8 SPEAKS (the slot speaks, or back to LIVE: SAMPLE's F2 tap itself, `SampleScreen::speaks_tap`, with its note) · SHIFT + F8
   CLR CUTS. COPY copies the slot to the next empty one (F1 confirms).
 - F1 to F3 and SHIFT + F8 replace the table and say so before the value is taken ("REPLACES 5 CUTS"; the key waiting for its second press reads CONFIRM); INSERT and DELETE edit it. A cut lands on a zero crossing
   within 64 samples when one is there.
@@ -191,7 +191,7 @@ at the top, UP / DOWN change it), F8 BACK. PCM of 8 to 32 bits or 32-bit float, 
 the converted sound (a longer file gives its first 16 s and the strip says "FIRST 16.000 S LOADED, FILE HAS 20.000 S, 48K 24B TO 44.1K 16B"; a converted
 file ends its note with what was done). The listing is `Apps/o3_voc03er/`, because the kit loads from the app's folder only (section 9);
 the card as a USB disk (Config, CARD AS DISK) is how files get there from a computer. A slot that records or sounds refuses ("STOP THE SLOT FIRST"); a slot
-that holds a sample asks "REPLACES SLOT n: F1 CONFIRMS" and any other key cancels ("NOT REPLACED"). Another coding, more than two channels, a rate outside 22.05 to 96 kHz or a broken
+that holds a sample asks "REPLACES SLOT n: F1 CONFIRMS" (F1 reads CONFIRM while it asks) and any other key cancels ("NOT REPLACED"). Another coding, more than two channels, a rate outside 22.05 to 96 kHz or a broken
 one is refused on the strip with its reason ("NEEDS 22 TO 96 KHZ", ...), with the slot as it was. The conversion (`wav_convert.h`: a Kaiser-windowed sinc, 16 zero crossings
 a side, 64 phases, cut at 0.86 of the lower Nyquist; `sample_load_logic.h`: the header parser and the sink) is streamed with a budget of 80,000 taps per screen
 tick, into a 1.41 MB int16 stage in the SDRAM; the 16-bit 44.1 kHz case skips the resampler.

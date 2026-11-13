@@ -95,8 +95,10 @@ class SampleScreen final : public o3sdk::app::Screen {
   void fire_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void release_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept { release_pad(ctx, pad); }
 
-  // What a tap on F2 does for the selected slot (it speaks; again: SPEAKS back to LIVE), through the same function. SAMPLE EDIT's F8 calls it.
-  void speaks_tap(o3sdk::app::Context& ctx) noexcept;
+  // What a tap on F2 does for the selected slot (it speaks; again: SPEAKS back to LIVE), through the same function. SAMPLE EDIT's F8 calls it, so the two
+  // keys cannot route differently. Returns the note the tap said (a string that outlives the call: SAMPLE EDIT shows it on its own line), or nullptr
+  // when it said nothing.
+  const char* speaks_tap(o3sdk::app::Context& ctx) noexcept;
 
   // The side's ink of a slot (SPEAKS, SOUNDS, or the neutral rule colour): the tint of its overview picture.
   o3sdk::ui::Rgb slot_ink(o3sdk::app::Context& ctx, unsigned slot) const noexcept;
