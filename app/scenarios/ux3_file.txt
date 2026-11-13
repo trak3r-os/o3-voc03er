@@ -1,0 +1,42 @@
+# UX3-3 on FILE: the pads are unlit, F6 and F7 are blank, F5 SAVE WAVS without a name says "NAME THE PROJECT FIRST", SAVE warns "AUDIO NOT SAVED: F5" while a slot holds a take
+# the project does not carry, and NEW asks before it clears and says the slots keep their audio. Start from an empty card directory:
+#   mkdir <dir> <card> && <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_file.txt --card <card> --out <dir>
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap file
+wait 200
+snap 01_file_pads_unlit
+tap f5
+wait 100
+snap 02_name_first
+tap f3
+wait 20
+snap 03_name
+tap f7
+wait 100
+tap f2
+wait 200
+snap 04_saved_audio_not_saved
+tap f5
+wait 4000
+snap 05_wavs_saved
+tap f2
+wait 200
+snap 06_saved_clean
+tap f4
+wait 100
+snap 07_new_ask
+tap f1
+wait 300
+snap 08_new_done

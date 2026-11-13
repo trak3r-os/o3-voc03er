@@ -1,0 +1,34 @@
+# UX3-5 on SAMPLE LOAD: a load into a slot that loops says what to stop (the slice-busy and take-busy texts are unit-tested in tests/sample_load_test.cpp: the simulator cannot hold a slice sounding across the screen switch); the NO SIDE note after a load into a slot on no side; the 64-file cap line (it needs a folder of more than 64 WAVs: `for i in $(seq 70); do cp <card>/Apps/o3_voc03er/a_mono.wav <card>/Apps/o3_voc03er/z$i.wav; done` first, and the list snapshot shows it). The card needs
+# the WAVs of sample_load_wavs.py (and, for the cap, more than 64 files in the folder; the scenario shows the line only on a card that has them):
+#   mkdir -p <card> <dir> && python3 -I app/scenarios/sample_load_wavs.py <card>/Apps/o3_voc03er
+#   build-host/app/o3_voc03er_sim --scenario app/scenarios/ux3_load.txt --card <card> --out <dir>
+wait 300
+expect state card=ready
+tap sampleload
+wait 600
+snap 00_list
+tap f1
+wait 800
+snap 01_loaded_no_side
+# the slot now loops on SPEAKS: a load into it says what to stop (a take armed on SAMPLE REC is cancelled by leaving that screen, so the loop is the busy state a load meets)
+tap f8
+wait 100
+tap sampleplay
+wait 300
+tap f2
+wait 100
+tap f2
+wait 100
+tap f5
+tap f5
+wait 100
+tap play
+wait 1500
+snap 02_looping
+tap sampleload
+wait 300
+tap f1
+wait 200
+tap f1
+wait 300
+snap 03_loop_refused

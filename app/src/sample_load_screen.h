@@ -67,7 +67,8 @@ class SampleLoadScreen final : public o3sdk::app::Screen {
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void open_picker(o3sdk::app::Context& ctx) noexcept;
   void chosen(o3sdk::app::Context& ctx) noexcept;
-  bool slot_stopped(unsigned slot) const noexcept;
+  // What keeps the slot from taking a load (None: it may); the refusal line names it (sample_load::busy_text).
+  sample_load::Busy busy(unsigned slot) const noexcept;
   void begin(o3sdk::app::Context& ctx) noexcept;
   void end_job(o3sdk::app::Context& ctx) noexcept;
   void tick(o3sdk::app::Context& ctx) noexcept;

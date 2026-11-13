@@ -20,6 +20,7 @@ using Button = app::Button;
 namespace {
 
 constexpr std::uint64_t kNoteMs = 2000;
+constexpr std::uint64_t kConfirmMs = 2000;  // the second DELETE tap must come within this
 // Two columns of eight rows.
 constexpr unsigned kRowsPerColumn = kChainMax / 2u;
 constexpr int kX0 = 16, kColStride = 392, kRowW = 376, kY0 = 78, kRowStep = 36, kRowH = 32;
@@ -123,7 +124,14 @@ void SongScreen::chain_replaced() noexcept {
 
 bool SongScreen::start(app::Context& ctx) noexcept {
   dsp::Engine& e = ctx.engine();
-  if (chain_ == nullptr || seq_ == nullptr || e.playing() || !song::start(*chain_, cursor_, player_)) {
+  if (chain_ == nullptr || seq_ == nullptr || chain_->count == 0u) {
+    return false;
+  }
+  if (e.playing()) {  // PLAY stops the transport (the app's, below this call); never in silence
+    say(ctx, song::play_note(player_.active, e.following()));
+    return false;
+  }
+  if (!song::start(*chain_, cursor_, player_)) {
     return false;
   }
   stop_pending_ = false;
@@ -198,7 +206,22 @@ void SongScreen::add(app::Context& ctx) noexcept {
   ctx.redraw();
 }
 
+void SongScreen::disarm() noexcept {
+  if (confirm_.armed) {
+    confirm_.clear();
+    note_ = nullptr;
+  }
+}
+
 void SongScreen::remove(app::Context& ctx) noexcept {
+  if (chain_->count == 0u) {
+    return;
+  }
+  if (!confirm_.tap(cursor_, ctx.uptime_ms(), kConfirmMs)) {
+    say(ctx, "DELETE AGAIN TO REMOVE THE ROW");
+    return;
+  }
+  note_ = nullptr;
   unsigned c = cursor_;
   const unsigned at = cursor_;
   if (!song::remove_at(*chain_, at, c)) {
@@ -228,6 +251,9 @@ void SongScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     return;
   }
   unsigned k = 0;
+  if (in.type != app::Input::Type::Release && !in.press(Button::Delete)) {  // a release of DELETE itself must not undo its ask
+    disarm();
+  }
   if (in.fkey_press(k)) {
     if (in.shift) {
       return;
@@ -268,7 +294,7 @@ void SongScreen::input(app::Context& ctx, const app::Input& in) noexcept {
 // ---- keys, HELP -----------------------------------------------------------------------------------------------------------------------
 
 void SongScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
-  static constexpr const char* kNames[8] = {"ADD", "REPEATS", "LOOP", "", "", "", "", "BACK"};
+  static constexpr const char* kNames[8] = {"ADD", "REPEATS", "LOOP", "", "", "", "", "PERFORM"};
   for (unsigned i = 0; i < 8u; ++i) {
     out.label[i] = kNames[i];
   }
@@ -279,7 +305,7 @@ void SongScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Up, "ROW BEFORE", nullptr},
       {Button::Down, "ROW AFTER", nullptr},
       {Button::Insert, "ADD AFTER THE CURSOR", nullptr},
-      {Button::Delete, "REMOVE THE ROW", nullptr},
+      {Button::Delete, "REMOVE THE ROW: TAP TWICE", nullptr},
       {Button::Play, "PLAY THE CHAIN FROM HERE", nullptr},
       {Button::Song, "SONG: THIS SCREEN", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
@@ -293,11 +319,11 @@ void SongScreen::help(const app::Context&, app::Help& h) const noexcept {
       {Button::Pattern, "PATTERN: THE 16 STEPS", nullptr},
   };
   h.summary = "THE CHAIN: UP TO 16 ROWS OF A PATTERN AND ITS REPEATS. PLAY RUNS IT FROM THE\n"
-              "CURSOR AND IT PLAYS ON WHEN YOU LEAVE; PLAY STOPS IT. A CHANGE LANDS AT THE PATTERN'S END.";
+              "CURSOR AND IT PLAYS ON WHEN YOU LEAVE; PLAY AGAIN STOPS IT. A CHANGE LANDS AT THE PATTERN'S END.";
   h.fkey[0] = "ADD AFTER THE CURSOR";
   h.fkey[1] = "ENCODER: THE REPEATS";
-  h.fkey[2] = "PLAY THE CHAIN AGAIN";
-  h.fkey[7] = "BACK TO PERFORM";
+  h.fkey[2] = "LOOP THE CHAIN AT ITS END";
+  h.fkey[7] = "GO TO PERFORM";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "THE ROW'S PATTERN";
@@ -336,7 +362,7 @@ void SongScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexc
   keys[2].name = "LOOP";
   copy_text(keys[2].value, ch.loop != 0u ? "ON" : "OFF");
   keys[2].hot = ch.loop != 0u;
-  keys[7].name = "BACK";
+  keys[7].name = "PERFORM";
 
   const unsigned lit = playing_row();
   ui::plot::Canvas c(r);

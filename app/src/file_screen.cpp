@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "file_screen.h"
 
+#include "audio_dirty.h"
 #include "file_logic.h"
 #include "sample_edit_screen.h"
 #include "song_screen.h"
@@ -67,6 +68,7 @@ struct FileData {
   unsigned wav_saved_mask;            // slots whose WAV is on the card in this run
   unsigned wl_loaded, wl_skipped, wl_first;  // a load: WAVs landed, slots skipped, the first skipped slot
   bool wav_end;                       // the project save in hand ends a SAVE WAVS run
+  unsigned unsaved;                   // slots with audio the save in hand does not carry (file_logic.h unsaved_audio_mask)
   bool wl_settle;                     // the WAV has landed: waiting for the slot's table to show its length
   std::uint64_t wl_deadline;
   char wavname[fl::kWavSlots][kWavNameMax + 1];
@@ -293,7 +295,6 @@ void FileScreen::capture(app::Context& ctx) noexcept {
   const std::uint32_t t = ctx.engine().own_tempo();
   p.stat = 1;
   p.tempo_mbpm = t < kStatTempoMin ? kStatTempoMin : (t > kStatTempoMax ? kStatTempoMax : t);
-  p.swing = 0;
   p.pattern = static_cast<std::uint8_t>(pattern_->shown() & 7u);
   p.octave = static_cast<std::int8_t>(perform_->octave());
   // The three 1.0 fields (chord kind, pads mode, bend row) are derived from the layout, which is what a 1.1 file loads through.
@@ -357,6 +358,12 @@ void FileScreen::start_save(app::Context& ctx, const char* folder, bool as_new) 
     say(ctx, "NOT SAVED: A VALUE IS OUT OF RANGE");
     return;
   }
+  std::uint32_t live[fl::kWavSlots] = {};
+  for (unsigned s = 0; s < fl::kWavSlots && sample_ != nullptr; ++s) {
+    live[s] = sample_->table(s).length != 0u ? sample_->table(s).length : sample_->status(s).length;
+    live[s] = live[s] > Loop::kMaxSamples ? static_cast<std::uint32_t>(Loop::kMaxSamples) : live[s];
+  }
+  g_fd.unsaved = fl::unsaved_audio_mask(g_proj, live, audio_dirty().bits);
   const app::Files::Mode mode = as_new ? app::Files::Mode::NewOnly : app::Files::Mode::Replace;
   if (!ctx.files().save(folder, kProjectFile, g_fbuf, n, mode)) {
     say(ctx, ctx.files().status().text);
@@ -447,7 +454,7 @@ void FileScreen::service(app::Context& ctx) noexcept {
         fl::wavs_saved_note(g_fd.note_buf, sizeof g_fd.note_buf, n);
         say(ctx, g_fd.note_buf);
       } else {
-        say(ctx, "SAVED");
+        say(ctx, g_fd.unsaved != 0u ? fl::kSavedUnsavedAudio : "SAVED");  // a note that still says SAVED while a slot's take is only in RAM would mislead
       }
       return;
     }
@@ -595,7 +602,7 @@ void FileScreen::apply(app::Context& ctx, bool wavs) noexcept {
     return;
   }
   if (g_fd.reset_slots) {
-    say(ctx, "NEW PROJECT. THE SLOTS' AUDIO STAYS");
+    say(ctx, fl::kNewDone);
   } else {
     fl::loaded_note(g_fd.note_buf, sizeof g_fd.note_buf, g_fd.restored, g_fd.kept);
     say(ctx, g_fd.note_buf);
@@ -609,7 +616,7 @@ bool FileScreen::wav_stage() const noexcept { return g_fd.stage >= kWavList; }
 // first because the kit does not tell the name it chose), then the project file is saved again so that its records name them. A project that was never saved has no folder.
 void FileScreen::start_wavs(app::Context& ctx) noexcept {
   if (!g_fd.has_name) {
-    say(ctx, "SAVE THE PROJECT FIRST: F2");
+    say(ctx, fl::kNameFirstLine);
     return;
   }
   if (mem_ == nullptr || sample_ == nullptr) {
@@ -697,6 +704,7 @@ void FileScreen::tick_wav_save(app::Context& ctx) noexcept {
     return;
   }
   g_fd.wav_saved_mask |= 1u << g_fd.wav_cur;
+  audio_dirty().clear(g_fd.wav_cur);  // the card now holds this take
   ++g_fd.wav_done;
   const unsigned next = fl::next_save_slot(g_fd.lens, g_fd.wav_cur + 1u);
   if (next < fl::kWavSlots) {
@@ -816,6 +824,7 @@ void FileScreen::tick_wav_load(app::Context& ctx) noexcept {
   if (seen) {
     restore_values(ctx, s, len);  // after the landing: the load puts the slot's own speed, direction, level and trim, and these go over them
   }
+  audio_dirty().clear(s);  // the slot holds the project's own WAV again
   set_waiting(g_fd.waiting & ~(1u << (s & 3u)));
   ++g_fd.wl_loaded;
   ++g_fd.wav_done;
@@ -845,11 +854,8 @@ void FileScreen::abort_wavs(app::Context& ctx) noexcept {
   say(ctx, "CANCELLED");
 }
 
-void FileScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
-  if (sample_ != nullptr) {
-    sample_->pad_leds(ctx, leds);
-  }
-}
+// UX3-3: the pads do nothing on FILE (the help says so), so none is lit (the runtime clears the LEDs before every screen's leds()).
+void FileScreen::leds(app::Context&, app::PadLeds&) noexcept {}
 
 void FileScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   if (g_fd.stage == kNaming) {
@@ -864,7 +870,7 @@ void FileScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
   out.label[7] = wav_stage() || kit_job_stage(g_fd.stage) ? "CANCEL" : "BACK";
   out.hot = 0;
   const bool locked = g_fd.stage >= kSaving || g_fd.ask != kNone;
-  out.dim = static_cast<std::uint8_t>(0x60u | (locked ? 0x9Fu : 0u) | (g_fd.stage == kPicking ? 0x1Eu : 0u) | (!g_fd.has_name ? 0x10u : 0u));
+  out.dim = static_cast<std::uint8_t>((locked ? 0x9Fu : 0u) | (g_fd.stage == kPicking ? 0x1Eu : 0u) | (!g_fd.has_name ? 0x10u : 0u));
   if (g_fd.stage == kPicking) {
     out.dim = static_cast<std::uint8_t>(out.dim & ~0x01u);
   }
@@ -954,7 +960,7 @@ void FileScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect& area) 
     r.text(kX, 88, "PROJECT", Color::TextDim, Face::Label);
     const char* name = !g_fd.has_name ? "NONE YET" : (g_fd.name[0] == '\0' ? "THE APP'S FOLDER" : g_fd.name);
     r.text(kX, 112, name, Color::Text, Face::Display);
-    r.text(kX, 190, "F1 LOADS A PROJECT, F2 SAVES IT, F3 SAVES IT UNDER A NEW NAME, F4 STARTS A NEW ONE", Color::TextDim, Face::Micro);
+    r.text(kX, 190, "F1 LOADS A PROJECT, F2 SAVES IT, F3 SAVES IT UNDER A NEW NAME, F4 STARTS A NEW ONE (THE SLOTS KEEP THEIR AUDIO)", Color::TextDim, Face::Micro);
     r.text(kX, 210, "THE FILE HOLDS THE PATTERNS, THE CHAIN, THE ROUTE, THE CUTS, THE UNIT'S VALUES, TEMPO AND OCTAVE", Color::TextDim, Face::Micro);
     r.text(kX, 230, "F5 SAVES THE SLOTS' WAVS INTO THE FOLDER: A LOAD READS THEM BACK, THEN THE CUTS, TRIM, SPEED, DIRECTION AND LEVEL GO ON THEM", Color::TextDim, Face::Micro);
     r.text(kX, 276, "SLOTS", Color::TextDim, Face::Label);
@@ -975,7 +981,7 @@ void FileScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect& area) 
   } else if (g_fd.ask == kLoad) {
     strip = "LOAD REPLACES THE PROJECT: F1 CONFIRMS";
   } else if (g_fd.ask == kNew) {
-    strip = "NEW CLEARS THE PROJECT: F1 CONFIRMS";
+    strip = fl::kNewAsk;
   } else if (g_fd.note != nullptr) {
     strip = g_fd.note;
   }

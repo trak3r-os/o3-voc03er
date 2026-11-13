@@ -469,8 +469,13 @@ count, and a copy of a slot with the same length keeps it too. At a tempo that i
 bar line can fall a few samples off: a slip of 8 half-samples or less is absorbed without a crossfade, a larger one crossfades. Stopping a loop
 fades it over a few milliseconds instead of cutting it.
 
-DELETE while a take waits for the bar line cancels it, as REC does, and the slot keeps its sound. DELETE while it records ends it at the
+DELETE while a take waits for the bar line cancels it, as REC does, and the slot keeps its sound; the strip says CANCELLED. DELETE while it records ends it at the
 bar and throws it away. DELETE with no take running empties the slot.
+
+AFTER is checked when REC arms, not after the take. A slot is one reader: if it already sits on SPEAKS and AFTER says SOUNDS (or the other way round), the take plays where
+the slot already is and AFTER is ignored; REC says "SLOT IS ON SPEAKS: AFTER IGNORED" (or SOUNDS) as it arms, and the take ends with "PLAYING ON SPEAKS: AFTER IGNORED". To move the
+slot, change its SIDE on SAMPLE first. In TUNE the AFTER key reads dim when its side is SOUNDS, and in TRACT when it is SPEAKS or NONE: see the mode cue in section 10.
+SHIFT on the GAIN key gives coarser gain steps, not finer.
 
 ### SAMPLE
 
@@ -501,6 +506,10 @@ the same.
 | F6 TRIG | ONE SHOT (the default): the slice plays to its end cut. GATE: it also stops when you let go of the pad |
 | F7 CHOKE | ON (the default): a hit fades out the slot's sounding slice and starts the new one. OFF: up to four slices overlap |
 | F8 LEVEL | -24 to +12 dB |
+
+A slice pad past the slot's count says how many slices there are ("5 SLICES", "NO SLICES: SLOT IS EMPTY" on an empty slot). A slot on NONE has its loop stopped and only its slices
+speak ("NO SIDE: ONLY SLICES SPEAK. F2 SIDE" says so under the badge); if you start its loop with F5 LOOP it speaks too, and the line then says "NO SIDE: LOOP AND SLICES SPEAK". While the slot itself records, a slice pad says "SLOT IS RECORDING: NO SLICE", and while it is armed to record "SLOT IS ARMED TO RECORD: NO SLICE". When a change of the slot's length
+puts hand-edited cuts back to even ones, the strip says "LENGTH CHANGED: CUTS EVEN AGAIN". In TUNE a SOUNDS slot, and in TRACT a SPEAKS or NONE slot with MOUTH on PADS, shows dim with a line saying why (section 10, "The mode cue"); with MOUTH on LIVE the slot is not dim and the line says it moves the mouth.
 
 UP and DOWN pick the slot. F1 LOW PADS and SHIFT + F1 ROW change the shared pair of note rows (PATTERN's NOTE lane uses it too); PERFORM's F6 and F7 are separate. SAMPLE EDIT, FILE and SAMPLE LOAD play the same two rows.
 
@@ -542,7 +551,10 @@ so it does not click. COPY copies the slot, cuts and all, to the next empty slot
 
 SAMPLE LOAD lists the WAV files in `Apps/o3_voc03er/` on the card. To put files there, use Config's CARD AS DISK to see the card from a
 computer, or put the card in a computer. UP and DOWN pick a file, F1 loads it into the selected slot, F8 goes back. A slot that already
-holds a sample asks first: F1 confirms, any other key cancels.
+holds a sample asks first: F1 confirms, any other key cancels. A slot that cannot take a load says what to stop: "SLOT IS RECORDING: STOP THE TAKE FIRST", "SLOT LOOP IS ON: STOP THE LOOP FIRST"
+(the loop playing or queued) or "A SLICE IS SOUNDING: WAIT FOR IT" (a slice of any slot borrows the slot's memory while it sounds). The list shows at most 64 files; a folder with more says
+"LIST CUT AT 64 FILES: THE FIRST 64 SHOW" (keep the files you want in the first 64 by name, or move the rest into another folder). A file loaded into a slot that is on NONE says the slot has
+no side: only its slices speak, and F2 on SAMPLE sets the side.
 
 What loads: PCM WAV files of 8, 16, 24 or 32 bits, and 32-bit float files, mono or stereo (stereo is mixed to mono), at any rate from 22.05 to 96 kHz
 (so 48 kHz, 24-bit files from a computer load as they are). A slot is always mono, 16-bit, 44.1 kHz, so a file that is not that is converted while
@@ -614,8 +626,10 @@ The lane's header says where the lane is heard: CARRIER and LEVEL are not heard 
 *SONG playing: the bar at the left of a row says it is the lap in progress.*
 
 SONG chains patterns: up to sixteen rows, each a pattern letter and a number of repeats. UP and DOWN move the cursor; the encoder changes the
-row's letter, and after F2 its repeats (1 to 64). F1 ADD or INSERT adds a row after the cursor, DELETE removes one. PLAY with SONG open
-starts from the cursor's row. The chain plays on when you leave SONG, so you can play over it from PERFORM; PLAY stops it. A change lands
+row's letter, and after F2 its repeats (1 to 64). F1 ADD or INSERT adds a row after the cursor, DELETE removes one, on a second tap: the first tap says
+"DELETE AGAIN TO REMOVE THE ROW" and any other key, moving the cursor or two seconds of waiting cancels it (a chain row has no undo). F8 is labelled PERFORM: SONG has no screen to go back to. PLAY with SONG open
+starts from the cursor's row; with the transport already running PLAY is the transport's, as everywhere: it stops the chain and the screen says "CHAIN STOPPED" (while a MIDI master is followed, PLAY is only a request to the master: the screen says "STOP ASKED OF THE MIDI MASTER" and the chain goes on until the master stops), and the next PLAY starts it from the cursor
+(it never restarts in the middle of a lap, which would cut the lap). The chain plays on when you leave SONG, so you can play over it from PERFORM; PLAY stops it. A change lands
 at the end of the pattern that plays. While the chain plays it owns what plays: a pattern you pick in PATTERN only changes what that screen shows and edits. Opening a project while it plays starts the new project's chain at its first row after the lap in progress. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
 ## 8. MIDI
 
@@ -651,7 +665,7 @@ vocoder's settings (PERFORM's and PARAMS' values), the tempo, the current patter
 the pads layout of each of the five modes (the three rows' plays, a strip being kept by the parameter it sets), the preset's name, PATTERN's FOLLOW, the MOUTH lane, TRACT's
 PARAMS page (section 5b says what is not kept), and each slot's cuts,
 trim, speed, direction, level, TRIG, CHOKE and the name of the WAV it came from. It does not keep the WAV sound itself: F5 SAVE WAVS
-writes the sounds into the project folder. ACCENT and SOURCE set from a strip are not saved with the project. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
+writes the sounds into the project folder. TRACT's CLOSE, SLIDE, ACCENT and MIX, and SOURCE set from a strip, are not saved with the project. A project saved by v0.2.0 opens with its KEYS or CHORDS mapping as it was (the chord kind
 becomes the layout's chord pads), VOICING SMOOTH, FOLLOW off, no preset, TRIG ONE SHOT and CHOKE ON. The preset is kept by name: a
 name this build does not know opens as no preset. A project saved before the layouts were per mode opens with its one layout on BANDS, TALK, TUNE
 and ROBOT and the TRACT default (A NOTE, B TONGUE, C MOUTH); a saved piano value opens as the plain note, chord or OFF of the same kind. An older
@@ -666,8 +680,8 @@ image that opens a new project reads the BANDS layout and ignores the rest (need
 | F1 OPEN | Opens the project under the cursor, then its WAV files one by one; a slot is grey until its sound has landed |
 | F2 SAVE | Saves the current project. The first time it asks for a name |
 | F3 SAVE AS | Saves under a new name |
-| F4 NEW | Starts an empty project |
-| F5 SAVE WAVS | Writes each slot's sound next to the project file. A slot can take a while on a slow card |
+| F4 NEW | Starts an empty project: the pattern, song, route and settings go back to their defaults, **the slots keep their audio** (the screen says "SLOTS KEEP THEIR AUDIO"); it asks first, F1 confirms |
+| F5 SAVE WAVS | Writes each slot's sound next to the project file. A slot can take a while on a slow card. Without a project name it says "NAME THE PROJECT FIRST" (F2 SAVE names it) |
 | F8 BACK | Leaves FILE. While a save, an open, SAVE WAVS or an open's WAVs runs it reads CANCEL and gives the job up: a cancelled save leaves the old file whole, a cancelled open changes nothing, a half-written WAV is removed and the rest are not written. The last moment of an open (RESTORING) cannot be stopped: it ends on its own |
 
 ![SAVE AS: a name typed with the pads' keyboard on screen](manual/img/file-name.png)
@@ -676,6 +690,11 @@ image that opens a new project reads the BANDS layout and ignores the rest (need
 
 A save or an open goes on when another button leaves FILE, and what it said is on the strip at your next visit. SAMPLE LOAD does not
 open while FILE's job runs, and the screen you are on says FILE IS BUSY. A slot grey in PERFORM is LOADING in SAMPLE, SAMPLE EDIT and SAMPLE REC, and REC and DELETE leave it alone, and SAMPLE EDIT edits nothing, until its sound has landed.
+
+F6 and F7 are blank on the list (they do nothing there) and the pads are unlit on FILE. A save that finds a slot holding audio the project does not carry says
+"SAVED. AUDIO NOT SAVED: F5": the project file holds the cuts and the WAVs' names, not the sound. Press F5 to write the sounds. The check compares lengths and also remembers which slots a take or a load has replaced since the last F5, so a new take of exactly the length of a saved
+WAV is noticed too (the flag lives until the app restarts: a project opened from the card has its slots saved, and F5 clears them). Saving with the project file alone (F2) keeps the old WAV's name for such a slot, with the warning: press F5 after any take you want to keep. Each F5 writes new numbered WAVs (slot1_001.wav, slot1_002.wav, ...) and the old ones stay on the card (the app has no
+way to delete a file there): clear them by hand with CARD AS DISK when the folder gets long.
 
 Nothing is saved by itself: FILE saves only when you tell it. The app also keeps two small files of its own in `Apps/o3_voc03er/`, `pattern.o3a` (the working patterns) and
 `config.o3a` (settings); the previous copy of the patterns is kept beside it as `pattern.o3a.bak`. A damaged project file is refused
@@ -686,6 +705,9 @@ whole.
 This is a first public pre-release. The firmware has been measured on a unit for the load it puts on the processor, and the screens have
 been read there, but several things need more testing, most of all by ear. In particular:
 
+- **The mode cue.** A slot's side means nothing to the ear in two modes. TUNE plays no synth, so a slot on SOUNDS (its loop, its slices) is not heard there. TRACT with MOUTH on PADS listens to nothing,
+  so a SPEAKS slot, and the slices of a slot on NONE, are heard only through DRY. With MOUTH on LIVE the same sides also move the mouth (the TRACT analyses what the modulator carries, a SPEAKS slot included), so they are not dim and the line says "MOVES THE MOUTH (LIVE) AND DRY". SAMPLE, SAMPLE REC AFTER and the side badge show such a side dim with a line saying why; the slot and its
+  route are untouched and come back as they were in the other modes. This is a hint on screen: the ear on the unit decides, and it needs more testing there.
 - **The sound.** How the modes sound with a real voice, how the synth sounds at the top of its range, the level of TALK, and the
   eight presets are for your ears. Nothing here says a sound is right.
 - **TRACT.** The words, the closures, WOB, the accent and the strip by hand need more testing by ear; the pop of a closure too. Entering TRACT may

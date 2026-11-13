@@ -1,0 +1,35 @@
+# UX3-6 on SAMPLE REC: AFTER is checked when REC arms. Slot 1 sits on SPEAKS first (a take plays there), then AFTER SOUNDS is armed: the line says "SLOT IS ON SPEAKS: AFTER IGNORED"
+# before the take. DELETE while armed says CANCELLED. (The dim AFTER key in TUNE and TRACT is in ux3_sample_cue.txt.)
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_rec_after.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleplay
+wait 300
+tap f2
+tap f2
+wait 100
+snap 01_slot_side
+tap samplerec
+wait 200
+snap 02_rec_screen
+tap f4
+tap f4
+wait 100
+snap 03_after_key
+tap rec
+wait 100
+snap 04_armed_after_ignored
+tap delete
+wait 200
+snap 05_cancelled

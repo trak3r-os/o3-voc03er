@@ -849,3 +849,45 @@ TEST_CASE("sample_load: a same-length replacement is told apart from a first loa
   CHECK_FALSE(sl::same_length(0, 0));  // an empty slot: nothing to mark stale
   CHECK_FALSE(sl::same_length(0, 44100));
 }
+
+TEST_CASE("sample load: UX3 the refusal names what to stop, and the cap says so") {
+  CHECK(sl::busy_of(false, false, false) == sl::Busy::None);
+  CHECK(sl::busy_of(true, true, true) == sl::Busy::Recording);  // the first thing to stop wins
+  CHECK(sl::busy_of(false, true, true) == sl::Busy::Loop);
+  CHECK(sl::busy_of(false, false, true) == sl::Busy::Slice);
+  for (const auto b : {sl::Busy::Recording, sl::Busy::Loop, sl::Busy::Slice}) {
+    CHECK(std::strlen(sl::busy_text(b)) > 0u);
+    CHECK(std::strlen(sl::busy_text(b)) <= 44u);
+  }
+  CHECK(std::string(sl::busy_text(sl::Busy::None)).empty());
+  CHECK(std::string(sl::capped_text(false)).empty());
+  CHECK(std::string(sl::capped_text(true)).find("64") != std::string::npos);
+}
+
+TEST_CASE("sample load: UX3 the note after a load fits the line in the worst case, the NO SIDE hint on a line of its own") {
+  sl::Info i;
+  i.verdict = sl::Verdict::Ok;
+  i.frames = sl::kMaxFrames;
+  i.clipped = true;
+  i.rate = 22050;  // the worst conversion text: 22.05K 32B TO 44.1K 16B
+  i.bits = 32;
+  i.is_float = true;
+  i.file_frames = 0xFFFFFFFFu / 2u;  // a very long file at a low rate: the biggest "FILE HAS" figure
+  char b[112];
+  const std::size_t n = sl::loaded_note(i, b, sizeof b);
+  CHECK(n == std::strlen(b));
+  CHECK(n <= sl::kNoteCols);
+  CHECK(std::strlen(sl::kLoadedNoSideTail) <= sl::kNoteCols);
+  // and with the tail glued on, as one line, it would not have fitted: that is why it has its own
+  CHECK(n + 2u + std::strlen(sl::kLoadedNoSideTail) > sl::kNoteCols);
+  // the other shapes are shorter
+  i.file_frames = 0;  // size not known
+  CHECK(sl::loaded_note(i, b, sizeof b) <= sl::kNoteCols);
+  i.clipped = false;
+  CHECK(sl::loaded_note(i, b, sizeof b) <= sl::kNoteCols);
+  CHECK(std::strncmp(b, "LOADED ", 7) == 0);
+  // a small buffer is cut, never overrun
+  char tiny[8];
+  CHECK(sl::loaded_note(i, tiny, sizeof tiny) < sizeof tiny);
+  CHECK(sl::loaded_note(i, tiny, 0) == 0u);
+}

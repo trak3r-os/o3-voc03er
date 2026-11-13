@@ -626,3 +626,75 @@ TEST_CASE("sample: in TRACT the lower pads still play notes, F1 is a note kind, 
   r.h.pad_up(35);
   CHECK(r.h.runtime().frame_failures() == 0u);
 }
+
+// ---- UX3: the mode cue, the slices line, the reader refusal -------------------------------------------------------------------------------
+
+TEST_CASE("sample: UX3 mode cue: TUNE does not hear SOUNDS, TRACT hears SPEAKS and NONE through DRY, and moves the mouth with MOUTH LIVE") {
+  CHECK(std::strcmp(o3_voc03er::kModeNames[sm::kModeTune], "TUNE") == 0);
+  for (unsigned mode = 0; mode < o3_voc03er::kModeCount; ++mode) {
+    for (const bool live : {false, true}) {
+      CHECK(sm::mode_cue(mode, sm::Side::Sounds, live) == (mode == sm::kModeTune ? sm::Cue::TuneSilent : sm::Cue::Heard));
+      const sm::Cue speaks = mode == o3_voc03er::kModeTract ? (live ? sm::Cue::TractLive : sm::Cue::TractDry) : sm::Cue::Heard;
+      CHECK(sm::mode_cue(mode, sm::Side::Speaks, live) == speaks);
+      CHECK(sm::mode_cue(mode, sm::Side::None, live) == speaks);
+    }
+  }
+  CHECK(sm::cue_reason(sm::Cue::Heard) == nullptr);
+  CHECK(std::strlen(sm::cue_reason(sm::Cue::TuneSilent)) <= 40u);
+  CHECK(std::strlen(sm::cue_reason(sm::Cue::TractDry)) <= 40u);
+  CHECK(std::strlen(sm::cue_reason(sm::Cue::TractLive)) <= 40u);
+  // The two TRACT lines differ and neither is the other's claim: with the mouth LIVE a SPEAKS slot is not "only through DRY", and it is not dimmed (it is heard).
+  CHECK(std::strcmp(sm::cue_reason(sm::Cue::TractDry), sm::cue_reason(sm::Cue::TractLive)) != 0);
+  CHECK(std::strstr(sm::cue_reason(sm::Cue::TractLive), "ONLY") == nullptr);
+  CHECK(sm::cue_dim(sm::Cue::TuneSilent));
+  CHECK(sm::cue_dim(sm::Cue::TractDry));
+  CHECK_FALSE(sm::cue_dim(sm::Cue::TractLive));
+  CHECK_FALSE(sm::cue_dim(sm::Cue::Heard));
+  // The two NONE lines: the slices alone, or the loop as well when F5 LOOP has started it; both short enough for the Micro line.
+  CHECK(sm::none_line(false) == sm::kNoneLine);
+  CHECK(sm::none_line(true) == sm::kNoneLoopLine);
+  CHECK(std::strlen(sm::kNoneLine) <= 40u);
+  CHECK(std::strlen(sm::kNoneLoopLine) <= 40u);
+  CHECK(std::strstr(sm::kNoneLine, "ONLY SLICES") != nullptr);
+  CHECK(std::strstr(sm::kNoneLoopLine, "LOOP") != nullptr);
+  // The reader refusal says Recording or Armed, as it is.
+  CHECK(sm::no_reader_line(false) == sm::kNoReaderRecLine);
+  CHECK(sm::no_reader_line(true) == sm::kNoReaderArmedLine);
+  CHECK(std::strstr(sm::kNoReaderRecLine, "RECORDING") != nullptr);
+  CHECK(std::strstr(sm::kNoReaderArmedLine, "ARMED") != nullptr);
+  CHECK(std::strlen(sm::kNoReaderRecLine) <= 40u);
+  CHECK(std::strlen(sm::kNoReaderArmedLine) <= 40u);
+  CHECK(std::strlen(sm::kCutsResetLine) <= 40u);
+}
+
+TEST_CASE("sample: UX3 tract_live follows the TRACT unit's Source on the engine") {
+  using o3_voc03er::TractUnit;
+  Rig rig;
+  CHECK_FALSE(sm::tract_live(rig.h->engine()));  // PADS by default
+  bool found = false;
+  for (unsigned u = 0; u < 8; ++u) {
+    if (o3_voc03er::test::is_tract_unit(*rig.h, u)) {
+      found = true;
+      (void)rig.h->engine().set_param(static_cast<o3sdk::dsp::UnitId>(u), TractUnit::Source, 1.0f);
+      rig.h->run_ms(60);
+      CHECK(sm::tract_live(rig.h->engine()));
+      (void)rig.h->engine().set_param(static_cast<o3sdk::dsp::UnitId>(u), TractUnit::Source, 0.0f);
+      rig.h->run_ms(60);
+      CHECK_FALSE(sm::tract_live(rig.h->engine()));
+      break;
+    }
+  }
+  CHECK(found);
+}
+
+TEST_CASE("sample: UX3 slices_line says how many slices there are") {
+  char b[32];
+  sm::slices_line(0, b);
+  CHECK(std::string(b) == "NO SLICES: SLOT IS EMPTY");
+  sm::slices_line(1, b);
+  CHECK(std::string(b) == "1 SLICE");
+  sm::slices_line(5, b);
+  CHECK(std::string(b) == "5 SLICES");
+  sm::slices_line(24, b);
+  CHECK(std::string(b) == "24 SLICES");
+}

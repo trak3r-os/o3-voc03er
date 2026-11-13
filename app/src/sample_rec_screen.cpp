@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sample_rec_screen.h"
 
+#include "audio_dirty.h"
 #include "overview.h"
 #include "perform_logic.h"
+#include "sample_logic.h"
 #include "skin/ornoir.h"
 
 #include <o3sdk/app/audio_in.h>
@@ -16,6 +18,7 @@ namespace o3_voc03er {
 using namespace o3sdk;
 namespace pl = perform;
 namespace sr = sample_rec;
+namespace sm = sample;
 using ui::Color;
 using ui::Face;
 using Button = app::Button;
@@ -161,6 +164,12 @@ void SampleRecScreen::rec_press(app::Context& ctx) noexcept {
   phase_ = Phase::Starting;
   write_rec(ctx, false);  // the Rec parameter's stored value stays 1 after a stop: 0 then 1 records again
   write_rec(ctx, true);
+  if (autoplay_) {  // UX3-6: an AFTER the slot cannot follow is said now, with the take armed (it is not a reason to refuse)
+    const char* why = sr::after_note_text(sr::after_note(perform_ != nullptr ? perform_->route_now(ctx) : route::Route{}, after_, slot_));
+    if (why != nullptr) {
+      say(ctx, why);
+    }
+  }
   ctx.redraw();
 }
 
@@ -228,6 +237,7 @@ void SampleRecScreen::finish(app::Context& ctx) noexcept {
     say(ctx, "DELETED");
     return;
   }
+  audio_dirty().mark(slot);  // a take that no saved WAV holds, whatever its length (FILE's AUDIO NOT SAVED)
   // The exact length of a take that stopped with the transport stopped: only down, only by what a frame can overshoot, only while the transport
   // is still stopped. Load, then back to 0: a saved project must not hold it (as for CLEAR above); the unit adopts it while the slot is idle.
   if (trim != 0u && !ctx.engine().playing()) {
@@ -241,9 +251,9 @@ void SampleRecScreen::finish(app::Context& ctx) noexcept {
     say(ctx, "TAKEN, NOT PLAYING");
     return;
   }
-  if (cur.speaks == v || cur.sounds == v) {  // the slot is on a side already: it plays there again
+  if (cur.speaks == v || cur.sounds == v) {  // the slot is on a side already: it plays there again, and the line names the side
     (void)ctx.engine().set_param(voice_, Vocoder::loop_param(slot, Vocoder::LoopField::Play), 1.0f);
-    say(ctx, "PLAYING");
+    say(ctx, sr::playing_on_text(cur.speaks == v, sr::after_note(cur, after_, slot)));
     return;
   }
   const sr::AfterPlan plan = sr::plan_after(cur, after_, slot);
@@ -486,7 +496,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
       {Button::Instr, "PATTERN: CARRIER LANE", nullptr},
       {Button::Vol, "PATTERN: LEVEL LANE", nullptr},
       {Button::Fx, "PATTERN: SLICE LANE", nullptr},
-      {Button::Shift, "FINER GAIN STEPS ON F2", nullptr},
+      {Button::Shift, "COARSER GAIN STEPS ON F2", nullptr},
   };
   if (perform_ != nullptr) {
     perform_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
@@ -499,7 +509,7 @@ void SampleRecScreen::help(const app::Context& ctx, app::Help& h) const noexcept
               "THE TAKE LOOPS WHERE AFTER SAYS. THE PADS PLAY PERFORM'S LAYOUT.";
   h.fkey[0] = "THE INPUT SOURCE";
   h.fkey[1] = "INPUT GAIN";
-  h.fkey[2] = "FREE, 1 TO 8 BARS";
+  h.fkey[2] = "FREE, 1, 2, 4 OR 8 BARS";
   h.fkey[3] = "SPEAKS, SOUNDS, NONE";
   h.fkey[4] = "PLAY THE TAKE AT ONCE";
   h.fkey[5] = "INPUT TO THE MASTER";
@@ -577,6 +587,10 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   cat(keys[4].value, sizeof keys[4].value, autoplay_ ? "ON" : "OFF");
   cat_uint(keys[6].value, sizeof keys[6].value, slot_ + 1u);
   keys[6].role = ornoir::KeyRole::Carrier;
+  {  // UX3-1: AFTER on a side this mode does not play is drawn dim
+    const sm::Side after_side = after_ == sr::After::Speaks ? sm::Side::Speaks : (after_ == sr::After::Sounds ? sm::Side::Sounds : sm::Side::None);
+    keys[3].dim = after_side != sm::Side::None && sm::cue_dim(sm::mode_cue(mode, after_side, sm::tract_live(e)));
+  }
 
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   const auto sv = static_cast<std::uint8_t>(route::kFirstSlot + shown);
@@ -683,7 +697,14 @@ void SampleRecScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) 
   if (view == View::Take) {
     cat(buf, sizeof buf, ls.playing ? "  PLAYING" : (ls.pending ? "  WAITING FOR THE BAR" : "  STOPPED"));
   }
-  r.text(centred(r, buf, Face::Label, 316), 226, buf, view == View::Take && ls.playing ? Color::Play : Color::TextDim, Face::Label);
+  // UX3-1: the side the take plays on (the slot's own, else the one AFTER will give it) may not be heard in this mode: dim, and the reason below.
+  const sm::Side now = sm::side_of(rt, shown);
+  const sm::Side going = now != sm::Side::None || !autoplay_ ? now : (after_ == sr::After::Speaks ? sm::Side::Speaks : (after_ == sr::After::Sounds ? sm::Side::Sounds : sm::Side::None));
+  const sm::Cue cue = going == sm::Side::None ? sm::Cue::Heard : sm::mode_cue(mode, going, sm::tract_live(ctx.engine()));
+  r.text(centred(r, buf, Face::Label, 316), 226, buf, view == View::Take && ls.playing && !sm::cue_dim(cue) ? Color::Play : Color::TextDim, Face::Label);
+  if (sm::cue_reason(cue) != nullptr) {
+    r.text(centred(r, sm::cue_reason(cue), Face::Micro, 316), 250, sm::cue_reason(cue), Color::Accent, Face::Micro);
+  }
 
   for (unsigned i = 0; i < 4; ++i) {
     const int x = 96 + static_cast<int>(i) * 112;

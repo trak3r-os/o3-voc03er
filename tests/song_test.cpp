@@ -342,3 +342,29 @@ TEST_CASE("song: a pattern picked by hand in PATTERN while the chain plays chang
   CHECK(num("pat_shown") == 5u);
   CHECK(h.runtime().frame_failures() == 0u);
 }
+
+TEST_CASE("song: UX3 DELETE takes a second tap on the same row inside the window") {
+  sg::Confirm c;
+  CHECK_FALSE(c.tap(2, 1000, 3000));  // arms
+  CHECK(c.live(1500));
+  CHECK(c.tap(2, 1500, 3000));        // the second tap
+  CHECK_FALSE(c.armed);
+  CHECK_FALSE(c.tap(2, 2000, 3000));  // armed again
+  CHECK_FALSE(c.tap(3, 2100, 3000));  // another row: arms that one, removes nothing
+  CHECK(c.tap(3, 2200, 3000));
+  CHECK_FALSE(c.tap(1, 0, 3000));
+  CHECK_FALSE(c.live(3000));          // the time ran out
+  CHECK_FALSE(c.tap(1, 3000, 3000));  // a late second tap arms again, removes nothing
+  c.clear();
+  CHECK_FALSE(c.live(3001));
+}
+
+TEST_CASE("song: UX3 PLAY's note says STOP ASKED while a MIDI master is followed, CHAIN STOPPED only when it is") {
+  // following: Engine::stop is only a request to the master, so the note must not claim the chain stopped
+  CHECK(std::string(sg::play_note(true, true)) == sg::kStopAskedLine);
+  CHECK(std::string(sg::play_note(false, true)) == sg::kStopAskedLine);
+  CHECK(std::string(sg::play_note(true, false)).find("CHAIN STOPPED") == 0u);
+  CHECK(std::string(sg::play_note(false, false)).find("CHAIN STOPPED") == std::string::npos);
+  CHECK(std::string(sg::kStopAskedLine).find("STOPPED") == std::string::npos);
+  CHECK(std::string(sg::kStopAskedLine).find("ASKED") != std::string::npos);
+}

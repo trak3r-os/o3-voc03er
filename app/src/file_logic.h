@@ -48,6 +48,23 @@ inline void merge_slot(ProjectSlot& out, const ProjectSlot& kept, const sample::
   out.cuts.length = live_length;
 }
 
+// UX3-3: the slots whose audio a save does not carry: live audio (`live[s]` != 0) that the project's record does not name a WAV for, at this length (the record
+// after merge_slot: it keeps a WAV name only for audio it still fits), or that a take or a load has replaced since the last WAV save (`dirty` bit s, audio_dirty.h:
+// that catches a re-record of the same length). Bit s set per slot.
+inline unsigned unsaved_audio_mask(const Project& p, const std::uint32_t (&live)[kWavSlots], unsigned dirty = 0) noexcept {
+  unsigned mask = 0;
+  for (unsigned s = 0; s < kWavSlots; ++s) {
+    if (live[s] != 0u && (((dirty >> s) & 1u) != 0u || !(p.slot[s].name_len != 0u && slot_fits(p.slot[s], live[s])))) {
+      mask |= 1u << s;
+    }
+  }
+  return mask;
+}
+inline constexpr const char* kSavedUnsavedAudio = "SAVED. AUDIO NOT SAVED: F5";
+inline constexpr const char* kNameFirstLine = "NAME THE PROJECT FIRST: F2 SAVES IT";
+inline constexpr const char* kNewAsk = "NEW CLEARS THE PROJECT, SLOTS KEEP THEIR AUDIO: F1 CONFIRMS";
+inline constexpr const char* kNewDone = "NEW PROJECT. SLOTS KEEP THEIR AUDIO";
+
 // What a slot holds live that a project keeps beyond the cuts: the SAMPLE screen's SPEED (0 0.5X, 1 1X, 2 2X), DIR and LEVEL (dB), and SAMPLE EDIT's trim brackets
 // (both 0: not moved).
 struct SlotValues {

@@ -52,6 +52,41 @@ constexpr AfterPlan plan_after(route::Route cur, After after, unsigned slot) noe
   return p;
 }
 
+// UX3-6: what AFTER cannot do for a slot, known when REC arms (not after the take). The slot already sits on a side that is not AFTER's: the take
+// plays there and AFTER is ignored (a slot is one reader, route.h). `Refused`: the route would not take it. AFTER NONE and an AFTER that agrees say nothing.
+enum class AfterNote : std::uint8_t { None, SlotOnSpeaks, SlotOnSounds, Refused };
+
+constexpr AfterNote after_note(route::Route cur, After after, unsigned slot) noexcept {
+  if (after == After::None || slot >= route::kSlots) {
+    return AfterNote::None;
+  }
+  const auto v = static_cast<std::uint8_t>(route::kFirstSlot + slot);
+  if (cur.speaks == v) {
+    return after == After::Speaks ? AfterNote::None : AfterNote::SlotOnSpeaks;
+  }
+  if (cur.sounds == v) {
+    return after == After::Sounds ? AfterNote::None : AfterNote::SlotOnSounds;
+  }
+  return plan_after(cur, after, slot).refused ? AfterNote::Refused : AfterNote::None;
+}
+
+// The line for a note (nullptr for None): said when REC arms, so the player knows before the take.
+constexpr const char* after_note_text(AfterNote n) noexcept {
+  switch (n) {
+    case AfterNote::SlotOnSpeaks: return "SLOT IS ON SPEAKS: AFTER IGNORED";
+    case AfterNote::SlotOnSounds: return "SLOT IS ON SOUNDS: AFTER IGNORED";
+    case AfterNote::Refused: return "AFTER CANNOT PLACE THE SLOT";
+    case AfterNote::None: break;
+  }
+  return nullptr;
+}
+
+// The line when a take ends on a slot that already sits on a side: it names the side it plays on, and says so when AFTER asked for another.
+constexpr const char* playing_on_text(bool speaks, AfterNote n) noexcept {
+  const bool ignored = n == AfterNote::SlotOnSpeaks || n == AfterNote::SlotOnSounds;
+  return speaks ? (ignored ? "PLAYING ON SPEAKS: AFTER IGNORED" : "PLAYING ON SPEAKS") : (ignored ? "PLAYING ON SOUNDS: AFTER IGNORED" : "PLAYING ON SOUNDS");
+}
+
 // The length at which Rec 0 goes out is perform::capture_stop_at(); this is whether a take of `bars` stops by itself (0 is FREE).
 constexpr bool auto_stops(unsigned length_index) noexcept { return length_index != 0u && length_index < kLengthCount; }
 

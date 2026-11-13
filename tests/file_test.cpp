@@ -2,6 +2,7 @@
 // FILE (U9c2): the pure part (app/src/file_logic.h) and one screen test on a card in a scratch directory: a damaged project is refused and changes nothing.
 #include <doctest/doctest.h>
 
+#include "../app/src/audio_dirty.h"
 #include "../app/src/file_logic.h"
 
 #include <o3_voc03er/modes.h>
@@ -964,4 +965,44 @@ TEST_CASE("file: PR1 NEW puts the tract's CLOSE, SLIDE, ACCENT and MIX back to t
   h->run_ms(400);
   check_tract_unsaved(*h, 0.0f);  // NEW's mode is the default one (BANDS): the tube is off
   CHECK(h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("file: UX3 unsaved_audio_mask names the slots whose audio a save does not carry") {
+  Project p;
+  std::uint32_t live[fl::kWavSlots] = {};
+  CHECK(fl::unsaved_audio_mask(p, live) == 0u);  // no audio, nothing to lose
+  live[1] = 1000;
+  live[3] = 500;
+  CHECK(fl::unsaved_audio_mask(p, live) == ((1u << 1) | (1u << 3)));
+  // slot 1 has a WAV saved from audio of this length
+  p.slot[1].name_len = 5;
+  sample::even_cuts(p.slot[1].cuts, 1000);
+  CHECK(fl::unsaved_audio_mask(p, live) == (1u << 3));
+  live[1] = 1001;  // a take of another length: the saved WAV is not this audio
+  CHECK(fl::unsaved_audio_mask(p, live) == ((1u << 1) | (1u << 3)));
+}
+
+TEST_CASE("file: UX3 a re-record of the same length is unsaved until a WAV save clears it") {
+  Project p;
+  std::uint32_t live[fl::kWavSlots] = {};
+  live[2] = 2000;
+  p.slot[2].name_len = 5;  // a WAV saved from audio of this length
+  sample::even_cuts(p.slot[2].cuts, 2000);
+  CHECK(fl::unsaved_audio_mask(p, live, 0u) == 0u);
+  // a take of the same length lands (SAMPLE REC finish marks the slot): the length check alone would call it saved
+  o3_voc03er::AudioDirty d;
+  CHECK_FALSE(d.test(2));
+  d.mark(2);
+  CHECK(d.test(2));
+  CHECK_FALSE(d.test(1));
+  CHECK(fl::unsaved_audio_mask(p, live, d.bits) == (1u << 2));
+  // a dirty bit of a slot with no audio names nothing
+  d.mark(0);
+  CHECK(fl::unsaved_audio_mask(p, live, d.bits) == (1u << 2));
+  // the WAV save (or the project load's own WAV) clears it
+  d.clear(2);
+  CHECK(fl::unsaved_audio_mask(p, live, d.bits) == 0u);
+  CHECK(d.test(0));  // clear is per slot
+  // the shared instance is one object
+  CHECK(&o3_voc03er::audio_dirty() == &o3_voc03er::audio_dirty());
 }

@@ -10,6 +10,7 @@
 
 #include <o3sdk/core/byte_io.h>
 
+#include "sample_edit_logic.h"
 #include "wav_convert.h"
 
 #include <cstddef>
@@ -148,6 +149,48 @@ inline std::size_t conversion_text(const Info& i, char* dst, std::size_t cap) no
     if (fmt) {
       n = detail::put(dst, cap, n, rate ? " 16B" : "16B");
     }
+  }
+  dst[n] = '\0';
+  return n;
+}
+
+// ---- the line after a load ---------------------------------------------------------------------------------------------------------------
+
+// The screen's note line is kNoteCols characters of the Label face (8 px each, 748 px wide); a longer note goes on a second line. The first line is the load itself,
+// worst case "FIRST 16.000 S LOADED, FILE HAS 97391.123 S, 22.05K 32B TO 44.1K 16B" (79); the second is the NO SIDE hint alone (a slot on NONE has no loop to show it).
+inline constexpr std::size_t kNoteCols = 93;
+inline constexpr const char* kLoadedNoSideTail = "NO SIDE: F2 SIDE ON SAMPLE";
+
+inline std::size_t loaded_note(const Info& i, char* dst, std::size_t cap) noexcept {
+  if (cap == 0u) {
+    return 0;
+  }
+  std::size_t n = 0;
+  dst[0] = '\0';
+  const auto secs = [&](std::uint32_t frames) {
+    char tm[12];
+    sample_edit::time_text(frames, tm);
+    n = detail::put(dst, cap, n, tm);
+    n = detail::put(dst, cap, n, " S");
+  };
+  const std::uint32_t total = i.total_frames();
+  if (i.clipped && total != 0u) {
+    n = detail::put(dst, cap, n, "FIRST ");
+    secs(i.frames);
+    n = detail::put(dst, cap, n, " LOADED, FILE HAS ");
+    secs(total);
+  } else if (i.clipped) {  // the size was not known: only that it went on
+    n = detail::put(dst, cap, n, "FIRST ");
+    secs(i.frames);
+    n = detail::put(dst, cap, n, " LOADED");
+  } else {
+    n = detail::put(dst, cap, n, "LOADED ");
+    secs(i.frames);
+  }
+  char conv[40];
+  if (conversion_text(i, conv, sizeof conv) != 0u) {
+    n = detail::put(dst, cap, n, ", ");
+    n = detail::put(dst, cap, n, conv);
   }
   dst[n] = '\0';
   return n;
@@ -522,5 +565,29 @@ class LoadSink final : public o3sdk::core::ByteSink {
   bool have_fmt_ = false, direct_ = true, bounded_ = false, cut_ = false, finished_ = false;
   Info info_;
 };
+
+// ---- why a load is refused (UX3-5) ---------------------------------------------------------------------------------------------------------
+
+// What keeps a slot from taking a load: its own take, its loop (playing or queued), or a slice of some slot borrowing its memory. The checks run in this
+// order, so the line names the first thing the player has to stop.
+enum class Busy : std::uint8_t { None, Recording, Loop, Slice };
+
+constexpr Busy busy_of(bool recording, bool loop_on, bool slice_on) noexcept {
+  return recording ? Busy::Recording : (loop_on ? Busy::Loop : (slice_on ? Busy::Slice : Busy::None));
+}
+
+constexpr const char* busy_text(Busy b) noexcept {
+  switch (b) {
+    case Busy::Recording: return "SLOT IS RECORDING: STOP THE TAKE FIRST";
+    case Busy::Loop:      return "SLOT LOOP IS ON: STOP THE LOOP FIRST";
+    case Busy::Slice:     return "A SLICE IS SOUNDING: WAIT FOR IT";
+    case Busy::None:      break;
+  }
+  return "";
+}
+
+// The list shows at most `cap` files of a folder that holds more: the line that says so, empty when the list is whole.
+constexpr const char* capped_text(bool truncated) noexcept { return truncated ? "LIST CUT AT 64 FILES: THE FIRST 64 SHOW" : ""; }
+
 
 }  // namespace o3_voc03er::sample_load

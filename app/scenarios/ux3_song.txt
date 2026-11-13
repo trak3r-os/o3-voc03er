@@ -1,0 +1,39 @@
+# UX3-7 on SONG: DELETE takes a second tap (the first arms and a line says so; any other key disarms), and PLAY while the transport already runs stops it and says so (one rule:
+# the transport toggle, never a silent no-op). The simulator shows the lines; it cannot say how the timing feels.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_song.txt --out <dir>   (the dir must exist)
+wait 300
+tap song
+wait 300
+tap insert
+tap insert
+tap insert
+wait 100
+expect state chain=3
+tap delete
+wait 100
+snap 01_delete_ask
+expect state chain=3
+tap up
+wait 100
+snap 02_disarmed
+expect state chain=3
+tap delete
+tap delete
+wait 100
+snap 03_removed
+expect state chain=2
+tap up
+tap up
+tap play
+wait 1000
+expect state playing=1
+snap 04_playing
+tap play
+wait 200
+snap 05_play_while_running
+expect state playing=0
+tap play
+wait 600
+expect state playing=1
+tap play
+wait 200

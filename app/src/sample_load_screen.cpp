@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sample_load_screen.h"
 
+#include "audio_dirty.h"
 #include "overview.h"
 #include "sample_edit_logic.h"
 #include "sample_edit_screen.h"
@@ -57,6 +58,7 @@ struct LoadData {
   const char* note;             // a moment's line (a static string or note_buf), until note_until
   std::uint64_t note_until;
   char note_buf[112];
+  const char* tail;             // a second line under `note` (a static string), or nullptr
 };
 O3SDK_BIG LoadData g_sl = {};
 O3SDK_BIG app::Files::Entry g_entries[kEntries] = {};
@@ -151,6 +153,9 @@ void SampleLoadScreen::say(app::Context& ctx, const char* text) noexcept {
     return;
   }
   g_sl.note = text;
+  if (text != g_sl.note_buf) {
+    g_sl.tail = nullptr;
+  }
   g_sl.note_until = ctx.uptime_ms() + kNoteMs;
   ctx.redraw();
 }
@@ -192,17 +197,13 @@ void SampleLoadScreen::leave(app::Context& ctx) noexcept {
   picker_.close();
 }
 
-bool SampleLoadScreen::slot_stopped(unsigned slot) const noexcept {
+sl::Busy SampleLoadScreen::busy(unsigned slot) const noexcept {
   const Vocoder::LoopStatus st = sample_->status(slot);
-  if (st.rec != Vocoder::LoopStatus::Rec::Idle || st.playing || st.pending) {
-    return false;
-  }
+  bool slice = false;
   for (unsigned k = 0; k < 4u; ++k) {
-    if (sample_->status(k).region) {
-      return false;  // a slice may borrow the slot
-    }
+    slice = slice || sample_->status(k).region;  // a slice may borrow the slot
   }
-  return true;
+  return sl::busy_of(st.rec != Vocoder::LoopStatus::Rec::Idle, st.playing || st.pending, slice);
 }
 
 void SampleLoadScreen::input(app::Context& ctx, const app::Input& in) noexcept {
@@ -254,9 +255,9 @@ void SampleLoadScreen::chosen(app::Context& ctx) noexcept {
     say(ctx, "NO LOOP MEMORY");
     return;
   }
-  if (!slot_stopped(slot)) {
+  if (busy(slot) != sl::Busy::None) {
     open_picker(ctx);
-    say(ctx, "STOP THE SLOT FIRST");
+    say(ctx, sl::busy_text(busy(slot)));
     return;
   }
   if (sample_->status(slot).length != 0u || sample_->table(slot).length != 0u) {
@@ -304,8 +305,8 @@ bool SampleLoadScreen::begin_external(app::Context& ctx, unsigned slot, const ch
     g_sl.ext_text = "NO LOOP MEMORY";
     return false;
   }
-  if (!slot_stopped(slot)) {
-    g_sl.ext_text = "STOP THE SLOT FIRST";
+  if (busy(slot) != sl::Busy::None) {
+    g_sl.ext_text = sl::busy_text(busy(slot));
     return false;
   }
   std::strcpy(g_sl.folder, folder);
@@ -409,9 +410,9 @@ void SampleLoadScreen::tick_read(app::Context& ctx) noexcept {
   }
   g_sl.info = info;
   const unsigned slot = g_sl.slot & 3u;
-  if (!slot_stopped(slot)) {  // the slot started under the read
+  if (busy(slot) != sl::Busy::None) {  // the slot started under the read
     end_job(ctx);
-    say(ctx, "STOP THE SLOT FIRST");
+    say(ctx, sl::busy_text(busy(slot)));
     return;
   }
   if (sample_->status(slot).length != 0u || sample_->table(slot).length != 0u) {
@@ -443,7 +444,7 @@ void SampleLoadScreen::tick_copy(app::Context& ctx) noexcept {
   const unsigned slot = g_sl.slot & 3u;
   if (sample_->status(slot).rec != Vocoder::LoopStatus::Rec::Idle || sample_->status(slot).playing) {  // a take started on the slot under the load
     end_job(ctx);
-    say(ctx, "STOP THE SLOT FIRST");
+    say(ctx, sl::busy_text(sample_->status(slot).rec != Vocoder::LoopStatus::Rec::Idle ? sl::Busy::Recording : sl::Busy::Loop));
     return;
   }
   std::int16_t* to = mem_ + static_cast<std::size_t>(slot) * Loop::kMaxSamples;
@@ -482,27 +483,12 @@ void SampleLoadScreen::tick_wait(app::Context& ctx) noexcept {
   const Vocoder::LoopStatus st = sample_->status(slot);
   const std::uint64_t now = ctx.uptime_ms();
   if (st.rec == Vocoder::LoopStatus::Rec::Idle && st.length == g_sl.info.frames) {
-    g_sl.note_buf[0] = '\0';
-    const std::uint32_t total = g_sl.info.total_frames();
-    if (g_sl.info.clipped && total != 0u) {
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, "FIRST ");
-      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, " LOADED, FILE HAS ");
-      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, total);
-    } else if (g_sl.info.clipped) {  // the size was not known: only that it went on
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, "FIRST ");
-      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, " LOADED");
-    } else {
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, "LOADED ");
-      cat_seconds(g_sl.note_buf, sizeof g_sl.note_buf, g_sl.info.frames);
-    }
-    char conv[40];
-    if (sl::conversion_text(g_sl.info, conv, sizeof conv) != 0u) {
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, ", ");
-      cat(g_sl.note_buf, sizeof g_sl.note_buf, conv);
-    }
+    (void)sl::loaded_note(g_sl.info, g_sl.note_buf, sizeof g_sl.note_buf);
+    g_sl.tail = !g_sl.ext && sample_->on_no_side(ctx, slot) ? sl::kLoadedNoSideTail : nullptr;  // UX3-5: a slot on NONE has no loop, so a load would otherwise look like nothing happened
     g_sl.ext_ok = true;
+    if (!g_sl.ext) {
+      audio_dirty().mark(slot);  // a WAV the hand loaded: no saved WAV of the project holds it (FILE's own project load clears it again)
+    }
     end_job(ctx);
     say(ctx, g_sl.note_buf);
   } else if (now >= g_sl.deadline) {
@@ -638,6 +624,9 @@ void SampleLoadScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     r.text(centred(r, sz, Face::Label, kX + kW / 2), kListY + 80, sz, Color::TextDim, Face::Label);
   } else if (picker_.active()) {
     picker_.draw(r, ui::Rect{kX, kListY, kW, kListH});
+    if (picker_.truncated()) {
+      r.text(kX, kListY + kListH + 2, sl::capped_text(true), Color::TextDim, Face::Micro);
+    }
   }
 
   char strip[64];
@@ -655,7 +644,12 @@ void SampleLoadScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     cat(strip, sizeof strip, ": F1 CONFIRMS");
     r.text(kX, kNoteY, strip, Color::Accent, Face::Label);
   } else if (g_sl.note != nullptr) {
-    r.text(kX, kNoteY, g_sl.note, Color::Accent, Face::Label);
+    // two lines (note, tail) are packed up under the list so the second clears the soft-key bar
+    const int ny = g_sl.tail != nullptr ? kNoteY - 10 : kNoteY;
+    r.text(kX, ny, g_sl.note, Color::Accent, Face::Label);
+    if (g_sl.tail != nullptr) {
+      r.text(kX, ny + 14, g_sl.tail, Color::Accent, Face::Label);
+    }
   } else {
     r.text(kX, kNoteY + 4, "UP AND DOWN PICK THE SLOT, F1 LOADS THE FILE UNDER THE CURSOR", Color::TextDim, Face::Micro);
   }

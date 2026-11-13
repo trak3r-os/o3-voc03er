@@ -2,10 +2,15 @@
 #pragma once
 
 // SAMPLE's pure logic (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"): SIDE against route::allowed, the SPEED and LEVEL steps, the
-// dB text, the pads' split. Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates or reads the engine.
+// dB text, the pads' split. Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates; tract_live is the one engine read.
 
+#include "strip_logic.h"
+
+#include <o3_voc03er/modes.h>
 #include <o3_voc03er/route.h>
 #include <o3_voc03er/stepseq.h>
+#include <o3_voc03er/units/tract/tract.h>
+#include <o3sdk/dsp/engine.h>
 
 #include <cstdint>
 
@@ -195,6 +200,85 @@ inline bool publish_slices(StepSeq& seq, SlicePublished& st, unsigned slot, cons
 
 // A slice sounds on the side of its slot; a slot on no side speaks (design section 1). true: the reader's Role is CAR.
 constexpr bool slice_is_carrier(Side s) noexcept { return s == Side::Sounds; }
+
+// UX3-1: a slot's side means nothing to the ear in two modes. TUNE plays no synth, so a SOUNDS slot (the carrier: its loop, its slices) is not heard; TRACT
+// listens to nothing, so what SPEAKS (a SPEAKS slot, and the slices of a slot on NO side, which speak) is heard through DRY, and with the MOUTH source on
+// LIVE it also moves the mouth (the vocoder feeds the modulator, a SPEAKS slot included, to the live voice's analysis: vocoder.cpp, `mouth_live_`). The screens
+// draw a silent side dim with the reason below; the slot itself is untouched.
+using o3_voc03er::strip::kModeTune;  // the unit's Mode value of TUNE (strip_logic.h), not a copy
+enum class Cue : std::uint8_t { Heard, TuneSilent, TractDry, TractLive };
+constexpr Cue mode_cue(unsigned mode, Side side, bool mouth_live = false) noexcept {
+  if (mode == kModeTune && side == Side::Sounds) {
+    return Cue::TuneSilent;
+  }
+  if (mode == o3_voc03er::kModeTract && side != Side::Sounds) {
+    return mouth_live ? Cue::TractLive : Cue::TractDry;
+  }
+  return Cue::Heard;
+}
+// A side the ear does not get in this mode: drawn dim. TractLive is heard (through DRY and as the mouth), so it is not dim, but it still has a line.
+constexpr bool cue_dim(Cue c) noexcept { return c == Cue::TuneSilent || c == Cue::TractDry; }
+// The reason line for a cue (at most 40 characters: the Micro face in SAMPLE's middle pane); nullptr for Heard.
+constexpr const char* cue_reason(Cue c) noexcept {
+  switch (c) {
+    case Cue::TuneSilent:
+      return "TUNE PLAYS NO SYNTH: NOT HEARD";
+    case Cue::TractDry:
+      return "TRACT HEARS IT ONLY THROUGH DRY";
+    case Cue::TractLive:
+      return "MOVES THE MOUTH (LIVE) AND DRY";
+    case Cue::Heard:
+      break;
+  }
+  return nullptr;
+}
+// MOUTH = LIVE on the engine's TRACT unit (found by its name: the screens do not hold its id); false with no TRACT unit.
+inline bool tract_live(const o3sdk::dsp::Engine& e) noexcept {
+  for (unsigned i = 0; i < e.unit_count(); ++i) {
+    const o3sdk::dsp::UnitInfo* in = e.unit_info(static_cast<o3sdk::dsp::UnitId>(i));
+    if (in != nullptr && in->name != nullptr && in->name[0] == 'T' && in->name[1] == 'R' && in->name[2] == 'A' && in->name[3] == 'C' && in->name[4] == 'T' && in->name[5] == '\0') {
+      return e.param(static_cast<o3sdk::dsp::UnitId>(i), o3_voc03er::TractUnit::Source) >= 0.5f;
+    }
+  }
+  return false;
+}
+// UX3-5: what a slot on NO side does, for the line under the badge. Verified in PerformScreen::set_route: a slot that leaves a side has its Play turned
+// off, so its whole loop is stopped; its slices (role MOD) still speak when they are played. F5 LOOP can start the loop of a NO side slot, and then it
+// speaks as a modulator too (vocoder.cpp run_loops: a loop that is not on the carrier plays into the modulator), so the line follows the loop.
+inline constexpr const char* kNoneLine = "NO SIDE: ONLY SLICES SPEAK. F2 SIDE";
+inline constexpr const char* kNoneLoopLine = "NO SIDE: LOOP AND SLICES SPEAK";
+constexpr const char* none_line(bool loop_on) noexcept { return loop_on ? kNoneLoopLine : kNoneLine; }
+
+// UX3-8: a slice pad past the slot's count says how many slices there are ("5 SLICES", "1 SLICE", "NO SLICES: SLOT IS EMPTY" for an empty slot); `out` holds 32.
+inline void slices_line(unsigned count, char (&out)[32]) noexcept {
+  if (count == 0u) {
+    const char* t = "NO SLICES: SLOT IS EMPTY";
+    unsigned i = 0;
+    for (; t[i] != '\0'; ++i) {
+      out[i] = t[i];
+    }
+    out[i] = '\0';
+    return;
+  }
+  unsigned n = 0;
+  if (count >= 10u) {
+    out[n++] = static_cast<char>('0' + (count / 10u) % 10u);
+  }
+  out[n++] = static_cast<char>('0' + count % 10u);
+  const char* w = count == 1u ? " SLICE" : " SLICES";
+  for (unsigned i = 0; w[i] != '\0'; ++i) {
+    out[n++] = w[i];
+  }
+  out[n] = '\0';
+}
+
+// UX3-8: pick_reader gives -1 for one cause only (the slot's own reader has a take on it: armed, waiting for its start, or recording), so the line names
+// the state: an armed take has not started to record yet.
+inline constexpr const char* kNoReaderRecLine = "SLOT IS RECORDING: NO SLICE";
+inline constexpr const char* kNoReaderArmedLine = "SLOT IS ARMED TO RECORD: NO SLICE";
+constexpr const char* no_reader_line(bool armed) noexcept { return armed ? kNoReaderArmedLine : kNoReaderRecLine; }
+// UX3-8: a slot's length changed under cuts that were edited by hand: they are even again.
+inline constexpr const char* kCutsResetLine = "LENGTH CHANGED: CUTS EVEN AGAIN";
 
 // What pick_reader needs of each reader (= the slot of the same number).
 struct ReaderState {

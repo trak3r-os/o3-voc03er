@@ -1,0 +1,86 @@
+# UX3-1, UX3-5, UX3-8 on SAMPLE: the side a mode does not play shows dim with its reason below. A 1 BAR take in slot 1, F2 walks its SIDE (SPEAKS, SOUNDS, NONE, a snap
+# each); PERFORM's mode key goes to TUNE (a SOUNDS slot is not heard), then to TRACT (a SPEAKS slot, and a slot on NO side, are heard only through DRY). A slice pad past the count
+# says "n SLICES". At the end the TRACT mouth goes LIVE (PARAMS page 1, F6): the same sides are then heard as the mouth's source too, not dim, and the line says "MOVES THE MOUTH (LIVE) AND DRY". The simulator shows the lines; whether a slot is heard in the mode is the unit's and the ear's.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_sample_cue.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleplay
+wait 300
+snap 01_take_side
+tap f2
+wait 100
+snap 02_side_b
+tap f2
+wait 100
+snap 03_side_c
+tap f2
+wait 100
+snap 04_side_d
+# a slice pad past the count: the line says how many slices there are
+paddown 20
+wait 100
+snap 05_pad_past_count
+padup 20
+tap performance
+wait 100
+tap f1
+tap f1
+tap f1
+wait 400
+tap sampleplay
+wait 300
+snap 06_mode_a
+tap f2
+wait 100
+snap 07_mode_b
+tap f2
+wait 100
+snap 08_mode_c
+tap performance
+wait 100
+tap f1
+tap f1
+wait 400
+tap sampleplay
+wait 300
+snap 09_tract_a
+tap f2
+wait 100
+snap 10_tract_b
+tap f2
+wait 100
+snap 11_tract_c
+tap samplerec
+wait 200
+snap 12_rec_tract
+# MOUTH = LIVE: PARAMS page 1 key 6 steps PADS to LIVE; the SPEAKS and NONE sides move the mouth, so SAMPLE and SAMPLE REC do not dim them
+tap params
+wait 300
+tap down
+wait 300
+tap f6
+turn 1
+wait 800
+tap sampleplay
+wait 300
+snap 13_tract_live_c
+tap f2
+wait 100
+snap 14_tract_live_d
+tap f2
+wait 100
+snap 15_tract_live_a
+tap samplerec
+wait 200
+snap 16_rec_tract_live

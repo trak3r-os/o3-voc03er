@@ -91,6 +91,34 @@ inline void step_repeats(Chain& c, unsigned at, int delta) noexcept {
   c.entry[at].repeats = static_cast<std::uint8_t>(v);
 }
 
+// DELETE takes two taps on the same row inside `window` ms (no undo for a chain entry): the first arms and the screen says so, the second removes.
+// Any other key, a move of the cursor or the time running out disarms it.
+struct Confirm {
+  bool armed = false;
+  std::uint8_t row = 0;
+  std::uint64_t until = 0;
+  // A tap on `at`: true when it is the second one (and disarms), false when it armed.
+  bool tap(unsigned at, std::uint64_t now, std::uint64_t window) noexcept {
+    if (armed && row == at && now < until) {
+      armed = false;
+      return true;
+    }
+    armed = true;
+    row = static_cast<std::uint8_t>(at);
+    until = now + window;
+    return false;
+  }
+  bool live(std::uint64_t now) const noexcept { return armed && now < until; }
+  void clear() noexcept { armed = false; }
+};
+
+// What SONG's PLAY says when the transport runs (the press stops it, it does not start the chain). Following a MIDI master, the stop is only a request to the
+// device (Engine::stop, kit engine.cpp: `request_`), so the chain keeps playing until the master stops: the line says "asked", never "stopped".
+inline constexpr const char* kStopAskedLine = "STOP ASKED OF THE MIDI MASTER";
+constexpr const char* play_note(bool chain_active, bool following) noexcept {
+  return following ? kStopAskedLine : (chain_active ? "CHAIN STOPPED. PLAY RUNS IT FROM THE CURSOR" : "STOPPED. PLAY AGAIN RUNS THE CHAIN FROM THE CURSOR");
+}
+
 // ---- playback ------------------------------------------------------------------------------------------------------------------------
 
 // The lap in progress: entry `entry`, its `lap`th pass (0-based). `gone`: the entry was deleted while it played, so the lap in progress finishes

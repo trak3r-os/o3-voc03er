@@ -18,6 +18,7 @@
 #include "../app/src/sample_rec_logic.h"
 
 #include <cmath>
+#include <cstring>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -415,4 +416,27 @@ TEST_CASE("sample_rec: a tempo change under a recording take that no longer fits
   CHECK(len > 88200u / 2u);
   CHECK(len < 2u * 88200u + 88200u / 2u);  // a bar and a half of audio, nowhere near four bars or the full buffer
   CHECK(h.runtime().frame_failures() == 0u);
+}
+
+// UX3-6: what AFTER cannot do is known when REC arms.
+TEST_CASE("sample rec: UX3 after_note names an ignored AFTER before the take") {
+  route::Route r;
+  const auto slot0 = static_cast<std::uint8_t>(route::kFirstSlot);
+  CHECK(sr::after_note(r, sr::After::None, 0) == sr::AfterNote::None);
+  CHECK(sr::after_note(r, sr::After::Speaks, 0) == sr::AfterNote::None);  // a free slot: AFTER takes it
+  CHECK(sr::after_note(r, sr::After::Sounds, 99) == sr::AfterNote::None);
+  r.speaks = slot0;
+  CHECK(sr::after_note(r, sr::After::Speaks, 0) == sr::AfterNote::None);
+  CHECK(sr::after_note(r, sr::After::Sounds, 0) == sr::AfterNote::SlotOnSpeaks);
+  r.speaks = route::kSpeaksLive;
+  r.sounds = slot0;
+  CHECK(sr::after_note(r, sr::After::Sounds, 0) == sr::AfterNote::None);
+  CHECK(sr::after_note(r, sr::After::Speaks, 0) == sr::AfterNote::SlotOnSounds);
+  CHECK(sr::after_note_text(sr::AfterNote::None) == nullptr);
+  for (const auto n : {sr::AfterNote::SlotOnSpeaks, sr::AfterNote::SlotOnSounds, sr::AfterNote::Refused}) {
+    REQUIRE(sr::after_note_text(n) != nullptr);
+    CHECK(std::strlen(sr::after_note_text(n)) <= 40u);
+  }
+  CHECK(std::string(sr::playing_on_text(true, sr::AfterNote::None)) == "PLAYING ON SPEAKS");
+  CHECK(std::string(sr::playing_on_text(false, sr::AfterNote::SlotOnSounds)) == "PLAYING ON SOUNDS: AFTER IGNORED");
 }

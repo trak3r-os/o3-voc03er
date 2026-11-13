@@ -5,9 +5,11 @@
 // two columns of eight. The chain is the app's one Chain (project.h, in the SDRAM, so FILE can save it); the screen edits it through pointer.
 //
 //   UP / DOWN   the row (the cursor).        ENCODER   the row's pattern letter A..H; after F2, its repeats 1..64 (F2 again: the letter).
-//   INSERT, F1 ADD   a row after the cursor's, with its pattern.          DELETE   the row under the cursor.
-//   F3 LOOP CHAIN   toggles (the chain goes back to its first entry when it ends).          F8 BACK   PERFORM.
+//   INSERT, F1 ADD   a row after the cursor's, with its pattern.          DELETE   the row under the cursor, on a second tap (a line says so).
+//   F3 LOOP CHAIN   toggles (the chain goes back to its first entry when it ends).          F8 PERFORM   (labelled so: SONG has no opener to go back to).
 //   PLAY   the app's (app.cpp hands it to start() while this screen is up and the transport is stopped): the chain plays from the cursor's row.
+//          While the transport already runs PLAY is the transport's, as everywhere: it stops (the chain with it) and the screen says so; the next PLAY
+//          starts the chain from the cursor. (UX3-7: one rule, never a silent no-op; no restart from the cursor in mid-lap, that would cut the lap.)
 //
 // How a chain change lands: the step sequencer counts every pattern it takes (StepSeq::laps()); service() walks song_logic.h's player on that
 // count and, each time a lap begins, asks StepSeq::request_pattern for the pattern of the lap after it. That is the PATTERN screen's own request,
@@ -72,6 +74,7 @@ class SongScreen final : public o3sdk::app::Screen {
   void edit(o3sdk::app::Context& ctx, int delta) noexcept;
   void add(o3sdk::app::Context& ctx) noexcept;
   void remove(o3sdk::app::Context& ctx) noexcept;
+  void disarm() noexcept;  // the DELETE ask goes (another key, the cursor moved) with its line
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   Chain* chain_ = nullptr;
@@ -82,6 +85,7 @@ class SongScreen final : public o3sdk::app::Screen {
   std::uint8_t last_laps_ = 0;  // StepSeq::laps() as the last pass read it
   bool first_ = false;          // the lap begin of the Play itself is still to come (it moves nothing)
   bool repeats_focus_ = false;  // the encoder drives the repeats (F2) instead of the letter
+  song::Confirm confirm_;       // DELETE's ask
   bool stop_pending_ = false;   // the chain ended: the transport stops at stop_at_
   const char* note_ = nullptr;
   std::uint64_t stop_at_ = 0;

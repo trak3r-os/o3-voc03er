@@ -239,7 +239,13 @@ Vocoder::LoopStatus SampleScreen::view(unsigned loop) const noexcept {
 // (kMaxParamsPerBlock) and the ring holds 512, and the 24 slice pads give at most 24 * 7 in a frame, which the frame cadence does not allow.
 void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad) noexcept {
   slot &= 3u;
-  if (voc_ == nullptr || perform_ == nullptr || pad >= g_sd.table[slot].count) {
+  if (voc_ == nullptr || perform_ == nullptr) {
+    return;
+  }
+  if (pad >= g_sd.table[slot].count) {  // UX3-8: a pad past the count says how many slices there are
+    static char line[32];                // main loop only; note_ points at it for kNoteMs
+    sm::slices_line(g_sd.table[slot].count, line);
+    say(ctx, line);
     return;
   }
   dsp::Engine& e = ctx.engine();
@@ -256,7 +262,7 @@ void SampleScreen::trigger(app::Context& ctx, unsigned slot, unsigned pad) noexc
   }
   const int pick = sm::pick_reader(rs, slot, g_sd.choke_off[slot] == 0u);
   if (pick < 0) {
-    say(ctx, "NO FREE READER");
+    say(ctx, sm::no_reader_line(voc_->loop_status(slot).rec == Vocoder::LoopStatus::Rec::Armed));
     return;
   }
   const unsigned k = static_cast<unsigned>(pick);
@@ -386,6 +392,9 @@ void SampleScreen::service(app::Context& ctx) noexcept {
     const Vocoder::LoopStatus st = voc_->loop_status(j);
     const std::uint32_t len = st.rec == Vocoder::LoopStatus::Rec::Idle ? st.length : 0u;
     if (g_sd.table[j].length != len) {  // a new take (its length is 0 while it records) starts from 8 even cuts; hand cuts at the same length stay
+      if (g_sd.edited[j] != 0u) {
+        say(ctx, sm::kCutsResetLine);  // UX3-8: hand-edited cuts do not go silently
+      }
       sm::even_cuts(g_sd.table[j], len);
       g_sd.edited[j] = 0;
       g_sd.even_code[j] = 0;
@@ -784,6 +793,11 @@ constexpr int kRightX = 592;
 
 // The play line of the selected slot: a bar, a tick at each cut (lit while its slice sounds), a head for every reader whose position is in the slot
 // (the slot's own loop or a slice on another reader), and under the bar what is left of each slice that sounds. Rects only, so the display list grows by 2 + the cuts + the heads + a remaining bar for each slice that sounds.
+bool SampleScreen::on_no_side(app::Context& ctx, unsigned slot) const noexcept {
+  const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
+  return sm::side_of(rt, slot & 3u) == sm::Side::None;
+}
+
 o3sdk::ui::Rgb SampleScreen::slot_ink(app::Context& ctx, unsigned slot) const noexcept {
   const route::Route rt = perform_ != nullptr ? perform_->route_now(ctx) : route::Route{};
   return ornoir::theme().rgb(side_ink(sm::side_of(rt, slot & 3u)));
@@ -862,6 +876,11 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   const Vocoder::LoopStatus& ls = st[slot_ & 3u];
   const bool empty = ls.length == 0u;
   const sm::Side side = sm::side_of(rt, slot_);
+  // UX3-1: in TUNE a SOUNDS slot is not heard, in TRACT a SPEAKS or NONE slot only through DRY: that side is drawn dim, with the reason below.
+  const unsigned mode = pl::mode_index(ctx.engine().param(voice_, Vocoder::Mode));
+  const bool mouth_live = sm::tract_live(ctx.engine());
+  const auto ink = [mode, mouth_live](sm::Side sd) { return sm::cue_dim(sm::mode_cue(mode, sd, mouth_live)) ? Color::TextDim : side_ink(sd); };
+  const sm::Cue cue = sm::mode_cue(mode, side, mouth_live);
 
   ornoir::HeaderState h;
   fill_header(ctx, h);
@@ -875,7 +894,8 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
   cat(keys[0].value, sizeof keys[0].value, " ");
   cat(keys[0].value, sizeof keys[0].value, pads::kPlaysNames[pads::idx(layout.row[row])]);
   cat(keys[1].value, sizeof keys[1].value, sm::kSideNames[static_cast<unsigned>(side)]);
-  keys[1].role = side == sm::Side::Speaks ? ornoir::KeyRole::Voice : (side == sm::Side::Sounds ? ornoir::KeyRole::Carrier : ornoir::KeyRole::Plain);
+  keys[1].role = sm::cue_dim(cue) ? ornoir::KeyRole::Plain
+                                  : (side == sm::Side::Speaks ? ornoir::KeyRole::Voice : (side == sm::Side::Sounds ? ornoir::KeyRole::Carrier : ornoir::KeyRole::Plain));
   cat(keys[2].value, sizeof keys[2].value, sm::kSpeedNames[ls.speed < sm::kSpeedCount ? ls.speed : 1u]);
   cat(keys[3].value, sizeof keys[3].value, sm::kDirNames[ls.reverse ? 1 : 0]);
   cat(keys[4].value, sizeof keys[4].value, ls.playing || ls.pending ? "ON" : "OFF");
@@ -954,7 +974,7 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
       cat(buf, sizeof buf, sm::kDirNames[s.reverse ? 1 : 0]);
       r.text(kColX + 10, y + 38, buf, Color::Text, Face::Label);
       r.text(kColX + kColW - 10 - r.text_width(sm::kSideNames[static_cast<unsigned>(sd)], Face::Label), y + 38, sm::kSideNames[static_cast<unsigned>(sd)],
-             side_ink(sd), Face::Label);
+             ink(sd), Face::Label);
     }
   }
 
@@ -976,7 +996,14 @@ void SampleScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     const char* word = ls.playing ? "PLAYING" : (ls.pending ? "WAITING FOR THE BAR" : "STOPPED");
     r.text(centred(r, word, Face::Label, mid), kRowY + 134, word, ls.playing ? Color::Play : Color::TextDim, Face::Label);
     const char* on = side == sm::Side::Speaks ? "ON SPEAKS" : (side == sm::Side::Sounds ? "ON SOUNDS" : "ON NO SIDE");
-    r.text(centred(r, on, Face::Label, mid), kRowY + 168, on, side_ink(side), Face::Label);
+    r.text(centred(r, on, Face::Label, mid), kRowY + 168, on, ink(side), Face::Label);
+    const char* why = sm::cue_reason(cue);  // UX3-1 and UX3-5: the reason this side is quiet, or what NONE does
+    if (why == nullptr && side == sm::Side::None) {
+      why = sm::none_line(ls.playing || ls.pending);
+    }
+    if (why != nullptr) {
+      r.text(centred(r, why, Face::Micro, mid), kRowY + 192, why, Color::Accent, Face::Micro);
+    }
     draw_line(ctx, r, slot_, ls.length, kMidX + 14, kRowY + 214, kMidW - 28);
   }
 
