@@ -208,7 +208,7 @@ B SHAPE, C FORMANT; TRACT is A NOTE, B TONGUE, C MOUTH (the pads' notes are the 
 
 **Strips live on PERFORM only.** A strip is a PERFORM thing: PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD never show one. They share
 one pair of note rows of their own, A and B, with NOTE, TRIAD, 7TH, OPEN, POWER or OFF (A NOTE and B TRIAD at first), the same in every mode.
-Setting a row on PERFORM does not change that pair, and changing the pair (F7 on PATTERN, F1 LOW PADS on SAMPLE) does not touch PERFORM's
+Setting a row on PERFORM does not change that pair, and changing the pair (F6 TOP PADS on PATTERN, F1 LOW PADS on SAMPLE) does not touch PERFORM's
 layouts. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load (needs more testing). Recording a
 strip into a PATTERN lane is not built: a strip sets the value live, on PERFORM.
 
@@ -629,8 +629,8 @@ pad writes into the step under the cursor and moves the cursor on; with one or m
 On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
 fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
 
-On the NOTE lane the palette is the shared pair of note rows, A and B (the notes palette of section 4, the same one SAMPLE plays; PERFORM's layout does not change it; F6 chooses A or B here, F7 what it plays: a note kind or OFF, never a strip).
-A pad writes what that row plays: a note, a chord of the row's kind, or nothing when the row is OFF. **For a bass line of
+On the NOTE lane the palette is the shared pair of note rows, A and B (the notes palette of section 4, the same one SAMPLE plays; PERFORM's layout does not change it). F6 TOP PADS sets both rows at once to one of six kinds, the same six as F1 LOW PADS on SAMPLE: NOTE+TRIAD (A plays notes, B triads), NOTE, TRIAD, 7TH, OPEN and POWER. A tap steps to the next and wraps from POWER to NOTE+TRIAD, the encoder stops at the ends, both rows flash once, and there is no OFF. If the pair is none of the six, the key reads MIXED and the first tap sets NOTE+TRIAD. A row of the same kind plays and writes the same notes here and on SAMPLE.
+A pad writes what its row plays: a note or a chord of the row's kind. **For a bass line of
 single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held, and keeps sounding when the pattern plays the same note
 (its gate off, a repeat or Stop does not cut it; needs more testing); SHIFT + a palette pad sounds
 and writes nothing.
@@ -642,8 +642,8 @@ and writes nothing.
 | F3 LENGTH | 1 to 16 steps |
 | F4 TEMPO | The tempo |
 | F5 VALUE | The cursor step's value in the lane; the encoder edits it. LEVEL runs 1 to 100, and 1 to 127 in TRACT; the palette's last pad is the top |
-| F6 ROW | NOTE lane: which of the two note rows the palette shows, A or B. The row flashes. MOUTH lane: SET, the palette VOWELS or WORDS (outside TRACT it flips the page and says where the lane is heard). Dim on the other lanes; a tap there says ROW AND PLAYS: NOTE LANE ONLY |
-| F7 PLAYS | NOTE lane: what that row plays (NOTE, TRIAD, 7TH, OPEN, POWER or OFF). MOUTH lane: FILL (outside TRACT it fills and says HEARD IN TRACT ONLY). Dim on the other lanes |
+| F6 TOP PADS | NOTE lane: both palette rows at once, NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN or POWER (a tap steps and wraps, the encoder stops at the ends, both rows flash, never OFF). MOUTH lane: SET, the palette VOWELS or WORDS (outside TRACT it flips the page and says where the lane is heard). Dim on the other lanes; a tap there says NOTE LANE ONLY |
+| F7 | Blank, except FILL on the MOUTH lane (outside TRACT it fills and says HEARD IN TRACT ONLY) |
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | SHIFT + F8 CAPTURE | MOUTH lane only: reads the slot SAMPLE shows into the lane. Pressed again while it reads, it cancels |
@@ -657,6 +657,8 @@ PLAY starts and stops the transport. COPY copies the step under the cursor; INSE
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY
 copies it, SHIFT + INSERT pastes it over the current one, LENGTH too, and SHIFT + DELETE empties it after F1 confirms (any other key
 leaves it as it is). A different pattern starts when the one that plays ends. While a SONG chain plays, a pattern pad says SONG PLAYS THE CHAIN and changes nothing.
+
+Under the strip two lines tell where the pads are: rows A and B above (F6 TOP PADS), steps and patterns below, SHIFT + a step for a rest.
 
 The lane's header says where the lane is heard: CARRIER and LEVEL are not heard in TUNE, and the MOUTH lane speaks in TRACT only. The lane still edits, and its name is dim. With nothing under the cursor, the strip says F8 SAVES and that holding SHIFT shows the SHIFT row (CLR LANE, FOLLOW, CAPTURE). On the SLICE lane, VALUE and the palette say SPEAKS HAS NO SLICES when the slot SPEAKS is on has none.
 
@@ -672,6 +674,9 @@ row's letter, and after F2 its repeats (1 to 64). F1 ADD or INSERT adds a row af
 starts from the cursor's row; with the transport already running PLAY is the transport's, as everywhere: it stops the chain and the screen says "CHAIN STOPPED" (while a MIDI master is followed, PLAY is only a request to the master: the screen says "STOP ASKED OF THE MIDI MASTER" and the chain goes on until the master stops), and the next PLAY starts it from the cursor
 (it never restarts in the middle of a lap, which would cut the lap). The chain plays on when you leave SONG, so you can play over it from PERFORM; PLAY stops it. A change lands
 at the end of the pattern that plays. While the chain plays it owns what plays: a pattern you pick in PATTERN only changes what that screen shows and edits. Opening a project while it plays starts the new project's chain at its first row after the lap in progress. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
+
+Two lines at the foot of the screen say the keys (they give way to a status message while one shows): UP and DOWN pick a row; the encoder sets its pattern, A to H; F2 points the encoder at the row's repeats (1 to 64) until F2 again; F1 or INSERT adds a row after the cursor with the same pattern and one repeat; DELETE twice removes it; F3 LOOP restarts the chain at row 1 when it ends. LEFT, RIGHT, SHIFT with an F key and F4 to F7 do nothing here.
+
 ## 8. MIDI
 
 MIDI notes play the synth beside the pads and share its voices. They also feed TUNE when NOTES IN is on. Pitch bend moves the synth and the sounding slots; the

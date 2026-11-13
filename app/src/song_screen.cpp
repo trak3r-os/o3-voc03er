@@ -385,7 +385,7 @@ void SongScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexc
   ornoir::frow_text(r, keys);
 
   if (ch.count == 0u) {
-    r.text(kX0, kY0 + 20, "NO ENTRIES. F1 OR INSERT ADDS ONE.", Color::TextDim, Face::Label);
+    r.text(kX0, kY0 + 20, "NO ENTRIES. F1 OR INSERT ADDS ONE, WITH THE PATTERN PLAYING NOW.", Color::TextDim, Face::Label);
   }
   for (unsigned i = 0; i < ch.count; ++i) {
     const int x = kX0 + static_cast<int>(i / kRowsPerColumn) * kColStride;
@@ -416,6 +416,10 @@ void SongScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexc
   }
   if (note_ != nullptr) {
     r.text(kX0, 380, note_, Color::TextDim, Face::Label);
+  } else {  // two micro lines, as PATTERN's, clear of the F row at y 419: what the keys do (a note, when there is one, takes their place)
+    r.text(kX0, 391, "UP, DOWN: PICK A ROW. ENCODER: ITS PATTERN, A TO H. F2: THE ENCODER SETS ITS REPEATS (1 TO 64) UNTIL F2 AGAIN.", Color::TextDim, Face::Micro);
+    r.text(kX0, 403, "F1, INSERT: ADD A ROW AFTER THE CURSOR (SAME PATTERN, 1 REPEAT). DELETE TWICE: REMOVE IT. F3 LOOP: RESTART AT ROW 1.", Color::TextDim,
+           Face::Micro);
   }
 }
 

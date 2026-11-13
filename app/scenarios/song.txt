@@ -2,6 +2,7 @@
 # before's pattern, so the encoder gives them B and C), run the chain from the first row with PLAY: the lit row follows the laps, and the chain,
 # which does not loop, ends with the transport stopped. Then LOOP CHAIN on and the chain runs round. `expect state` reads chain_row (the lit row,
 # 16 = none) and playing. The simulator shows the screen and the sequencer's laps; it cannot say that the change lands on the step on the unit.
+# Two micro lines above the F row (frames 01..08, the frames with no note) say what the keys do; a note takes their place.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/song.txt --out <dir>   (the dir must exist)
 wait 300
 tap song

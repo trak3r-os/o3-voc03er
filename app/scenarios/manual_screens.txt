@@ -261,13 +261,11 @@ paddown 32
 wait 60
 padup 32
 wait 100
-tap f7
 tap play
 wait 1700
 snap m_pattern
 tap play
 wait 600
-tap f7
 # ---- SONG: three entries, the first row playing
 tap song
 wait 300

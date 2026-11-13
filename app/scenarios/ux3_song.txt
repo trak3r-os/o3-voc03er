@@ -1,5 +1,6 @@
 # UX3-7 on SONG: DELETE takes a second tap (the first arms and a line says so; any other key disarms), and PLAY while the transport already runs stops it and says so (one rule:
 # the transport toggle, never a silent no-op). The simulator shows the lines; it cannot say how the timing feels.
+# A note (frames 01, 05) takes the place of SONG's two hint lines (frames 02..04).
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_song.txt --out <dir>   (the dir must exist)
 wait 300
 tap song

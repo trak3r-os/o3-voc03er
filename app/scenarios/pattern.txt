@@ -1,5 +1,5 @@
-# PATTERN (U6b, Q2): a pattern built by hand with the pads (notes, carriers, levels, a rest), the NOTE palette set with F6 ROW and F7 PLAYS (B to 7TH,
-# then POWER), the SHIFT row (CLR LANE, FOLLOW), played with FOLLOW, then pattern B and a rest, F2 LANE and F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
+# PATTERN (U6b, Q2): a pattern built by hand with the pads (notes, carriers, levels, a rest), the NOTE palette set with F6 TOP PADS (both rows: NOTE, TRIAD, 7TH,
+# then POWER; F7 is blank), the SHIFT row (CLR LANE, FOLLOW), played with FOLLOW, then pattern B and a rest, F2 LANE and F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -42,25 +42,26 @@ padup 5
 release shift
 wait 100
 snap 02b_shift_pad_writes_nothing
-# F6 ROW to B, F7 PLAYS to 7TH: the second tap on a key steps it, the first only focuses; row B goes dark for a moment when it changes
-tap f6
+# F6 TOP PADS: one key sets both palette rows (NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER); the first tap already steps (to NOTE), both rows go dark for a moment
 tap f6
 wait 60
-snap 02c_row_b_flash
+snap 02c_top_pads_flash
 wait 300
-tap f7
-tap f7
-wait 100
-snap 02d_b_is_7th
+snap 02c2_top_pads_note
+# two more taps: TRIAD, then 7TH on both rows
+tap f6
+tap f6
+wait 400
+snap 02d_top_pads_7th
 paddown 14
 wait 40
 padup 14
 wait 40
 snap 02e_b_7th_written
-# F7 on to POWER (two steps on from 7TH)
-tap f7
-tap f7
-wait 100
+# F6 on to POWER (two steps on from 7TH: OPEN, POWER)
+tap f6
+tap f6
+wait 400
 snap 02f_power
 paddown 1
 wait 40

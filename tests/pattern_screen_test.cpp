@@ -13,6 +13,7 @@
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include "../app/src/pattern_logic.h"
+#include "../app/src/sample_logic.h"
 #include "tract_skip.h"
 
 #include <cstddef>
@@ -277,81 +278,137 @@ TEST_CASE("pattern: the palette writes the layout: a note on A, a triad on B, th
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("pattern: F6 ROW picks A or B and F7 PLAYS steps that row through the notes and then the mode's parameters") {
-  Rig rig;
-  tap(*rig.h, app::Button::F6);  // focus ROW
-  tap(*rig.h, app::Button::F6);  // a second tap: B
-  tap(*rig.h, app::Button::F7);  // focus PLAYS
-  tap(*rig.h, app::Button::F7);  // B: TRIAD to 7TH
-  pad(*rig.h, 15);               // step 1: B's 7TH
-  pad(*rig.h, step_pad(0));
-  CHECK(rig.led(15) == app::kLedMid);
-  tap(*rig.h, app::Button::F6);  // focus ROW again
-  tap(*rig.h, app::Button::F6);  // a second tap: back to A
-  tap(*rig.h, app::Button::F7);
-  tap(*rig.h, app::Button::F7);  // A: NOTE to TRIAD
-  pad(*rig.h, step_pad(1));
-  pad(*rig.h, 3);  // step 2: A's triad now (a kind-1 step on A's pad 3)
-  pad(*rig.h, step_pad(1));
-  CHECK(rig.led(3) == app::kLedMid);
-  CHECK(rig.led(15) != app::kLedMid);  // B plays 7TH: the step's kind 1 is not its pad's
-  // The encoder on PLAYS steps and stops at the ends: the last parameter strip at the top (it writes nothing here, so the row is dark), NOTE at the bottom.
-  rig.h->turn(30);
-  rig.h->run_ms(60);
-  CHECK(rig.count(0, 11, app::kLedOff) == 12u);  // A plays a strip: its row is dark
-  tap(*rig.h, app::Button::F6);
-  tap(*rig.h, app::Button::F6);  // ROW to B
-  rig.h->turn(30);
-  rig.h->run_ms(60);
-  CHECK(rig.count(12, 23, app::kLedOff) == 12u);  // B plays a strip too
-  rig.h->turn(-30);
-  rig.h->run_ms(60);
-  CHECK(rig.count(12, 23, app::kLedOff) < 12u);  // and NOTE at the bottom: lit again
-  CHECK(rig.h->runtime().frame_failures() == 0u);
+// F6 TOP PADS: both palette rows from the six pairs of SAMPLE's F1 LOW PADS (NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER). The probe: step 1 holds A's note and step 2
+// B's triad, written under NOTE+TRIAD; after k taps a step's pad is mid only if the pair in force plays the same note and kind there (A: NOTE+TRIAD and NOTE, B: NOTE+TRIAD
+// and TRIAD), so the pattern of mids names the pair and a full lap names the cycle.
+namespace {
+void settle_flash(Rig& rig) { rig.h->run_ms(250); }  // a change of the pair blanks both rows for pads::kRowFlashMs
+void probe_write(Rig& rig) {
+  pad(*rig.h, 3);   // A, step 1
+  pad(*rig.h, 15);  // B, step 2
 }
-
-TEST_CASE("pattern: a parameter strip or an OFF row writes nothing and its pads are dark") {
-  Rig rig;
-  tap(*rig.h, app::Button::F6);
-  tap(*rig.h, app::Button::F6);  // ROW B
-  tap(*rig.h, app::Button::F7);  // focus PLAYS
-  rig.h->turn(30);               // B to the last parameter strip
-  rig.h->run_ms(60);
-  CHECK(rig.count(12, 23, app::kLedOff) == 12u);
-  CHECK(rig.led(24) == app::kLedMid);
-  pad(*rig.h, 14);  // a strip row's pad writes nothing: the cursor stays on step 1
-  CHECK(rig.led(24) == app::kLedMid);
-  CHECK(rig.led(25) == app::kLedOff);
-  pad(*rig.h, 3);  // A is still NOTE: it writes step 1 and the cursor moves on
+unsigned probe_mids(Rig& rig) {  // bit 0: A's step matches, bit 1: B's
+  settle_flash(rig);
   pad(*rig.h, step_pad(0));
-  CHECK(rig.led(3) == app::kLedMid);
-  // B to OFF (the sixth entry): the same, dark and silent.
-  rig.h->turn(-30);
-  rig.h->run_ms(60);
-  for (unsigned i = 0; i < 5; ++i) {
-    rig.h->turn(1);
+  const unsigned a = rig.led(3) == app::kLedMid ? 1u : 0u;
+  pad(*rig.h, step_pad(1));
+  const unsigned b = rig.led(15) == app::kLedMid ? 2u : 0u;
+  return a | b;
+}
+}  // namespace
+
+TEST_CASE("pattern: F6 TOP PADS steps both rows through the six pairs on the first tap, a tap wraps") {
+  Rig rig;
+  probe_write(rig);
+  CHECK(probe_mids(rig) == 3u);          // NOTE+TRIAD, the default
+  tap(*rig.h, app::Button::F6);          // the first tap steps (no tap just to focus): NOTE
+  CHECK(probe_mids(rig) == 1u);
+  tap(*rig.h, app::Button::F6);          // TRIAD
+  CHECK(probe_mids(rig) == 2u);
+  for (unsigned i = 0; i < 3; ++i) {     // 7TH, OPEN, POWER: neither step matches
+    tap(*rig.h, app::Button::F6);
+    CHECK(probe_mids(rig) == 0u);
   }
-  rig.h->run_ms(60);
-  CHECK(rig.count(12, 23, app::kLedOff) == 12u);
-  pad(*rig.h, step_pad(5));
-  pad(*rig.h, 14);
-  CHECK(rig.led(step_pad(5)) == app::kLedMid);
-  CHECK(rig.led(step_pad(6)) == app::kLedOff);
+  tap(*rig.h, app::Button::F6);          // the sixth tap wraps to NOTE+TRIAD
+  CHECK(probe_mids(rig) == 3u);
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("pattern: SHIFT + a palette pad writes nothing yet; a step pad still writes a rest") {
+TEST_CASE("pattern: the encoder on F6 steps and stops at both ends") {
   Rig rig;
-  pad(*rig.h, 3, true);
-  CHECK(rig.led(24) == app::kLedMid);  // the cursor did not move
-  CHECK(rig.led(25) == app::kLedOff);
-  pad(*rig.h, step_pad(4));
-  CHECK(rig.led(24) == app::kLedOff);  // step 1 is still empty
-  pad(*rig.h, 3);                      // a note at step 5
-  pad(*rig.h, step_pad(4), true);      // SHIFT + step: a rest
-  CHECK(rig.led(step_pad(4)) == app::kLedMid);
-  pad(*rig.h, step_pad(0));
-  CHECK(rig.led(step_pad(4)) == app::kLedOff);
+  probe_write(rig);
+  tap(*rig.h, app::Button::F6);  // NOTE, and the encoder points at F6
+  rig.h->turn(-30);
+  rig.h->run_ms(60);
+  CHECK(probe_mids(rig) == 3u);  // stopped at NOTE+TRIAD (a wrap would have landed on NOTE)
+  rig.h->turn(30);
+  rig.h->run_ms(60);
+  rig.h->turn(1);
+  rig.h->run_ms(60);
+  CHECK(probe_mids(rig) == 0u);  // POWER, and one more detent does not wrap
+  tap(*rig.h, app::Button::F6);  // a tap does
+  CHECK(probe_mids(rig) == 3u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: a pad of each row writes what the pair says, whatever the pair, and neither row is ever OFF") {
+  Rig rig;
+  const pd::Plays a_of[6] = {pd::Plays::Note, pd::Plays::Note, pd::Plays::Triad, pd::Plays::Seventh, pd::Plays::Open, pd::Plays::Power};
+  const pd::Plays b_of[6] = {pd::Plays::Triad, pd::Plays::Note, pd::Plays::Triad, pd::Plays::Seventh, pd::Plays::Open, pd::Plays::Power};
+  auto layout = [&](unsigned k) {
+    pd::Layout l;
+    REQUIRE(pd::set_plays(l, pd::Row::A, a_of[k]));
+    REQUIRE(pd::set_plays(l, pd::Row::B, b_of[k]));
+    return l;
+  };
+  for (unsigned k = 0; k < 6; ++k) {
+    // Written under pair k: A's pad 3 into step 2k+1, B's pad 15 into step 2k+2 (a pad that played nothing would leave the cursor where it was).
+    const unsigned s0 = 2u * k;
+    pad(*rig.h, step_pad(s0));
+    pad(*rig.h, 3);
+    CHECK(rig.led(step_pad(s0)) == app::kLedDim);
+    CHECK(rig.led(step_pad(s0 + 1)) == app::kLedMid);  // the cursor moved on: A wrote
+    pad(*rig.h, 15);
+    CHECK(rig.led(step_pad(s0 + 1)) == app::kLedDim);  // B wrote
+    // Under the next pair each step is mid exactly when the next pair plays the same note and kind on that pad.
+    const pd::Layout now = layout(k);
+    const pd::Layout next = layout((k + 1u) % 6u);
+    tap(*rig.h, app::Button::F6);
+    settle_flash(rig);
+    pad(*rig.h, step_pad(s0));
+    const bool a_same = pt::palette_play(3, 0, now).note == pt::palette_play(3, 0, next).note && pt::palette_play(3, 0, now).kind == pt::palette_play(3, 0, next).kind;
+    CHECK((rig.led(3) == app::kLedMid) == a_same);
+    pad(*rig.h, step_pad(s0 + 1));
+    const bool b_same = pt::palette_play(15, 0, now).note == pt::palette_play(15, 0, next).note && pt::palette_play(15, 0, now).kind == pt::palette_play(15, 0, next).kind;
+    CHECK((rig.led(15) == app::kLedMid) == b_same);
+  }
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: changing the pair with F6 flashes both rows once") {
+  Rig rig;
+  CHECK(rig.count(0, 23, app::kLedOff) < 24u);
+  tap(*rig.h, app::Button::F6);
+  CHECK(rig.count(0, 23, app::kLedOff) == 24u);  // both rows go dark for a moment
+  rig.h->run_ms(300);
+  CHECK(rig.count(0, 11, app::kLedOff) < 12u);
+  CHECK(rig.count(12, 23, app::kLedOff) < 12u);
+}
+
+TEST_CASE("pattern: F6 TOP PADS as logic: a pair outside the six steps to NOTE+TRIAD, no step ever yields OFF") {
+  namespace smp = o3_voc03er::sample;
+  // A pair the list has no place for (row A is OFF) is -1; the next step, tap or encoder, lands on the first pair (NOTE+TRIAD).
+  const int mixed = smp::low_pads_index(pd::Plays::Off, pd::Plays::Note);
+  CHECK(mixed == -1);
+  CHECK(smp::low_pads_step(mixed, 1, true) == 0u);
+  CHECK(smp::low_pads_step(mixed, 1, false) == 0u);
+  CHECK(smp::low_pads_step(mixed, -1, false) == 0u);
+  // The ends: the encoder stops, a tap wraps.
+  CHECK(smp::low_pads_step(5, 1, false) == 5u);
+  CHECK(smp::low_pads_step(0, -1, false) == 0u);
+  CHECK(smp::low_pads_step(5, 1, true) == 0u);
+  for (int cur = -1; cur < 6; ++cur) {
+    for (int d = -2; d <= 2; ++d) {
+      for (int wrap = 0; wrap < 2; ++wrap) {
+        const unsigned i = smp::low_pads_step(cur, d, wrap != 0);
+        REQUIRE(i < smp::kLowPadsCount);
+        CHECK(smp::kLowA[i] != pd::Plays::Off);
+        CHECK(smp::kLowB[i] != pd::Plays::Off);
+      }
+    }
+  }
+}
+
+TEST_CASE("pattern: F7 is blank on the NOTE lane: it takes no focus and changes nothing") {
+  Rig rig;
+  probe_write(rig);
+  settle_flash(rig);
+  tap(*rig.h, app::Button::F7);
+  tap(*rig.h, app::Button::F7);
+  rig.h->turn(1);  // the encoder is still on F5 VALUE (F7 took no focus): it writes the cursor's step, not a pair
+  rig.h->run_ms(300);
+  CHECK(probe_mids(rig) == 3u);  // the pair is as it was
+  CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
 TEST_CASE("pattern: F6 and F7 do nothing on LEVEL, CARRIER and SLICE") {
@@ -362,7 +419,7 @@ TEST_CASE("pattern: F6 and F7 do nothing on LEVEL, CARRIER and SLICE") {
   tap(*rig.h, app::Button::F7);
   tap(*rig.h, app::Button::F7);
   tap(*rig.h, app::Button::Note);
-  // the layout was not touched: A NOTE (an octave up), B TRIAD: a write from A and from B still matches A's and B's default pads
+  // the pair was not touched: A NOTE (an octave up), B TRIAD: a write from A and from B still matches A's and B's default pads
   pad(*rig.h, 3);
   pad(*rig.h, 15);
   pad(*rig.h, step_pad(0));
@@ -382,17 +439,6 @@ TEST_CASE("pattern: F6 and F7 do nothing on LEVEL, CARRIER and SLICE") {
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("pattern: changing F6's row flashes that row's LEDs once") {
-  Rig rig;
-  tap(*rig.h, app::Button::F6);  // focus
-  CHECK(rig.count(12, 23, app::kLedOff) < 12u);
-  tap(*rig.h, app::Button::F6);  // B: its row goes dark for a moment
-  CHECK(rig.count(12, 23, app::kLedOff) == 12u);
-  rig.h->run_ms(300);
-  CHECK(rig.count(12, 23, app::kLedOff) < 12u);
-  CHECK(rig.count(0, 11, app::kLedOff) < 12u);
-}
-
 TEST_CASE("pattern: SHIFT + F6 asks to clear the lane and F1 confirms; SHIFT + F7 is FOLLOW") {
   Rig rig;
   pad(*rig.h, 3);
@@ -402,7 +448,7 @@ TEST_CASE("pattern: SHIFT + F6 asks to clear the lane and F1 confirms; SHIFT + F
   tap(*rig.h, app::Button::F1);
   CHECK(rig.led(24) == app::kLedOff);
   CHECK(rig.led(25) == app::kLedOff);
-  // F6 alone only focuses ROW, it clears nothing.
+  // F6 alone steps TOP PADS, it clears nothing.
   pad(*rig.h, step_pad(0));
   pad(*rig.h, 3);
   tap(*rig.h, app::Button::F6);
@@ -623,7 +669,11 @@ TEST_CASE("pattern: HELP gives a row to every button the screen answers") {
     CHECK(has_row(help, b));
   }
   for (unsigned k = 0; k < 8; ++k) {
-    CHECK(help.fkey[k] != nullptr);
+    if (k == 6u) {
+      CHECK(help.fkey[k] == nullptr);  // F7 is blank on the NOTE lane
+    } else {
+      CHECK(help.fkey[k] != nullptr);
+    }
   }
   CHECK(help.fkey_shift[5] != nullptr);  // CLEAR LANE
   CHECK(help.fkey_shift[6] != nullptr);  // FOLLOW
@@ -785,22 +835,23 @@ TEST_CASE("pattern: FX goes SLICE, MOUTH, SLICE; F2 taps through the five lanes"
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-// SP1: the palette is the notes palette, not PERFORM's layout. F7 offers note kinds only and changes nothing on PERFORM; a change of PERFORM's layout (a
-// mode with other rows) leaves the palette as it is.
-TEST_CASE("pattern: F7 offers note kinds only, and PERFORM's layout and the palette do not touch each other") {
+// SP1: the palette is the notes palette, not PERFORM's layout. F6 changes nothing on PERFORM; a change of PERFORM's layout (a mode with other rows) leaves the
+// palette as it is.
+TEST_CASE("pattern: F6 offers note kinds only, and PERFORM's layout and the palette do not touch each other") {
   Rig rig;
-  tap(*rig.h, app::Button::F7);  // focus PLAYS (row A)
-  rig.h->turn(30);               // the last entry the palette offers
-  rig.h->run_ms(60);
-  CHECK(rig.count(0, 11, app::kLedOff) == 12u);  // OFF: dark, not a strip
+  tap(*rig.h, app::Button::F6);  // NOTE on both rows
+  rig.h->turn(30);               // the last pair the palette offers: POWER
+  rig.h->run_ms(300);
+  CHECK(rig.count(0, 11, app::kLedOff) < 12u);  // never OFF, never a strip
+  CHECK(rig.count(12, 23, app::kLedOff) < 12u);
   rig.h->turn(-30);
-  rig.h->run_ms(60);
-  CHECK(rig.count(0, 11, app::kLedOff) < 12u);  // NOTE again
+  rig.h->run_ms(300);
   const unsigned lit_a = rig.count(0, 11, app::kLedOff);
   const unsigned lit_b = rig.count(12, 23, app::kLedOff);
+  CHECK(lit_a < 12u);
   set_mode(*rig.h, 4.0f);  // TRACT: PERFORM's rows are NOTE, TONGUE, MOUTH
   CHECK(rig.count(0, 11, app::kLedOff) == lit_a);
-  CHECK(rig.count(12, 23, app::kLedOff) == lit_b);  // B is TRIAD here, not TONGUE
+  CHECK(rig.count(12, 23, app::kLedOff) == lit_b);  // B is a note row here, not TONGUE
   tap(*rig.h, app::Button::Performance);
   rig.h->run_ms(300);
   CHECK(rig.led(24 + 0) != app::kLedOff);  // TRACT's B on PERFORM: the TONGUE strip, lit

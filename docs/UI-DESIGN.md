@@ -209,8 +209,9 @@ slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silen
 
 - F1 PATTERN (A to H) · F2 LANE (NOTE, CARRIER, LEVEL, SLICE, MOUTH; also the buttons NOTE, INSTR, VOL and FX, which picks SLICE, then MOUTH on a second press,
   then SLICE again; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's value in the lane, the encoder edits it) ·
-  F6 ROW (NOTE lane: the palette's row, A or B) or SET (MOUTH lane: the palette page, VOWELS or WORDS), dim on the others · F7 PLAYS (NOTE lane: what that row
-  plays) or FILL (MOUTH lane), dim on the others · SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
+  F6 TOP PADS (NOTE lane: both palette rows at once, one of six kinds: NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER; a tap steps and wraps, the encoder stops at the
+  ends, both rows flash; never OFF) or SET (MOUTH lane: the palette page, VOWELS or WORDS), dim on the others · F7 blank, except FILL on the MOUTH lane ·
+  SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
   (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1) · F8 SAVE (FILE's save, here).
 
 **The MOUTH lane** (V3, V3b; `stepseq.h`, `pattern_logic.h`). A step's byte is the value in bits 0 to 3 (0 FOLLOW, 1 to 9 the vowels A to U, 10 to 12 the
@@ -241,6 +242,8 @@ lane per row (NOTE name and chord kind, CARRIER, LEVEL, SLICE drawn empty), the 
 the cursor, SHIFT + step pad rests the lane in force, a pattern pad shows that pattern and asks the sequencer for it at the end of the one playing.
 F1..F5 point the encoder at a key (a second tap steps it, wrapping), F6 asks "CLEAR <LANE> LANE: F1 CONFIRMS" (F1 clears; any other key cancels and says NOT CLEARED), F7 is FOLLOW, F8 saves through the app's FILE job.
 The F6 label is `CLR LANE` (it does not fit the key in full); HELP spells it out. SLICE is read-only (U6c). No new unit parameter.
+
+**TOP PADS** (lane5; `pattern_screen.cpp`, `sample_logic.h`, `tests/pattern_screen_test.cpp`, `app/scenarios/pattern.txt`): F6 on the NOTE lane is one key for both palette rows, the same six values as SAMPLE's F1 LOW PADS (`kLowA`, `kLowB`, `low_pads_step`: NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER), never OFF. The first tap steps, a tap wraps, the encoder stops at the ends, both rows flash once; a pair outside the six (it can only come from the pair's saved state, no screen sets it) reads MIXED and steps to NOTE+TRIAD. F7 has no name, value, action or HELP row, except FILL on the MOUTH lane, where F6 stays SET. `row_` and the ROW / PLAYS keys are gone. PATTERN and SAMPLE play and write the same notes for rows of the same kind because both call `pads::pad_play` with the row's octave. The two hint lines under the PATTERN strip name F6 TOP PADS.
 
 Built in U7a (`sample_edit_screen.cpp`, pure logic in `sample_edit_logic.h`, `tests/sample_edit_test.cpp`, `app/scenarios/sample_edit.txt`): the cursor and the
 cut table of the selected slot. The encoder moves the cursor a sample at a time, SHIFT + encoder a 64th of the slot; INSERT cuts at the cursor (it snaps to
@@ -351,6 +354,8 @@ Not in the file: the WAV data, the octave, tempo and swing, the current pattern 
 
 The chain: up to 16 entries of a pattern letter and a repeat count, a row each; F1 ADD, F2 REPEATS, F3 LOOP CHAIN, F8 BACK; PLAY plays the chain
 from the cursor while this screen is up. Before U9 the one-line screen of section 3.
+
+SONG's two hint lines (lane5, `song_screen.cpp`, small type at the foot of the screen, replaced by a status note while one shows) say what the code does: UP and DOWN pick a row, the encoder its pattern A to H, F2 sets the encoder to the row's repeats (1 to 64) until F2 again, F1 or INSERT adds a row after the cursor (same pattern, 1 repeat), DELETE twice removes it, F3 LOOP restarts at row 1. Keys with no action: LEFT, RIGHT, SHIFT + F1..F8, and F4..F7 (blank).
 
 **Built in U9d** (`app/src/song_screen.{h,cpp}`, `song_logic.h`, `tests/song_test.cpp`, `app/scenarios/song.txt`). Two columns of eight rows; UP and DOWN move the cursor, the encoder the row's letter (after F2, its repeats 1 to 64), INSERT or F1 adds after the cursor with its pattern, DELETE removes. The one `g_chain` (SDRAM, all-zero at boot) is the app's, so FILE can save it. PLAY with SONG up and the transport stopped starts the cursor's row (an empty chain: PLAY as everywhere). Playback adds no timing path: the step sequencer counts the patterns it takes (`StepSeq::laps()`, one byte store at a pattern's end) and the screen, on the main loop, asks `request_pattern` for the pattern of the lap after the one in progress, so every change, an edit included, lands where a PATTERN change does, at the pattern's last step. The lit row is the lap in progress (it leads the audio by one step); the cursor is free. At the end of a chain that does not loop the screen stops the transport 7/8 of a step after the last lap's end is seen; leaving SONG ends the walking and leaves the transport playing the pattern it plays. Owed on the unit: the landing step of a chain change, the stop at the chain's end (the timer is the main loop's, a step can jitter), and a length-1 pattern at a boundary. The LOOP CHAIN label is a few pixels wider than its F key. The old stub row for SONG in `app.cpp` is dead data.
 

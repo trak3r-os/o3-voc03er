@@ -4,10 +4,12 @@
 // PATTERN (docs/UI-DESIGN.md "PATTERN"), in the OR NOIR skin: the pattern letter A..H large at the left, sixteen step cells with four lanes under each
 // (NOTE, CARRIER, LEVEL, SLICE, MOUTH: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
 //
-//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 ROW  F7 PLAYS  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
-//   A tap on F1..F7 points the encoder at that key (it stays lit); a second tap steps it on. F6 ROW picks which of the notes palette's two pad rows (A or B)
-//   F7 changes, F7 PLAYS is that row's note kind (NOTE, TRIAD, 7TH, OPEN, POWER, OFF: the palette PATTERN, SAMPLE and SAMPLE EDIT share, SP1; PERFORM's layout is
-//   a different thing and no strip is reachable here); both are dim off the NOTE lane. SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
+//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 TOP PADS  F7 (blank)  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
+//   A tap on F1..F5 points the encoder at that key (it stays lit); a second tap steps it on. F6 TOP PADS sets both note rows of the palette (pad rows 0 and 1, A and B) at once,
+//   from the same six values as SAMPLE's F1 LOW PADS (NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER: sample_logic.h; never OFF): the first tap steps, a tap wraps, a detent stops
+//   at the ends, and both rows go dark for a moment. The palette is the one PATTERN, SAMPLE and SAMPLE EDIT share (SP1; PERFORM's layout is a different thing and no strip is
+//   reachable here). F6 is dim off the NOTE lane; F7 is blank (no name, no value, no action) except on the MOUTH lane, where F6 is SET and F7 is FILL. SHIFT + F6 clears the lane
+//   of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
 //   The encoder starts on F5, the cursor step's value in the lane. SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected
 //   and writes the nearest of TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press
 //   cancels, leaving the screen cancels, and nothing is written before the analysis ends.
@@ -131,8 +133,7 @@ class PatternScreen final : public o3sdk::app::Screen {
   const SongScreen* song_ = nullptr;  // read on the main loop only
   std::uint8_t shown_ = 0;   // the pattern on the screen, 0..7
   bool follow_ = false;
-  std::uint8_t row_ = 0;     // F6: the row F7 changes, pads::Row A (0) or B (1) (the palette's two rows)
-  std::uint64_t flash_until_ = 0;  // the chosen row's LEDs are off until then, a short off-on when F6 changes it (leds() checks it; main loop only)
+  std::uint64_t flash_until_ = 0;  // the palette's LEDs (both rows) are off until then, a short off-on when F6 changes the pair (leds() checks it; main loop only)
   std::uint16_t steps_held_ = 0;  // the step pads held (bit step 0..15): a palette pad writes all of them and the cursor stays; main loop only
   char oct_say_[12] = {};         // "OCTAVE +1", the strip's line for UP and DOWN (say() keeps the pointer)
   std::uint32_t mouth_aud_ = 0;  // the MOUTH palette's closure pads held and sounding (bit pad; a subset of aud_); main loop only

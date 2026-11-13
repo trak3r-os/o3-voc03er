@@ -11,6 +11,8 @@
 //          While the transport already runs PLAY is the transport's, as everywhere: it stops (the chain with it) and the screen says so; the next PLAY
 //          starts the chain from the cursor. (UX3-7: one rule, never a silent no-op; no restart from the cursor in mid-lap, that would cut the lap.)
 //
+// Two micro lines above the F row (as PATTERN's) say what the keys do; a note (DELETE's ask, the chain is full, ...) takes their place for two seconds.
+//
 // How a chain change lands: the step sequencer counts every pattern it takes (StepSeq::laps()); service() walks song_logic.h's player on that
 // count and, each time a lap begins, asks StepSeq::request_pattern for the pattern of the lap after it. That is the PATTERN screen's own request,
 // so the change lands on the pattern's last step as a manual one does: no timing path of its own, nothing added to the render but one byte
