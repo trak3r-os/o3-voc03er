@@ -238,11 +238,25 @@ slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silen
 
 - F1 LENGTH (1 to 16 steps) · F2 TEMPO · F3 VALUE (the cursor step's value in the lane, the encoder edits it; lit on entry) · F4 CHORD (NOTE lane: row B's kind TRIAD, 7TH, OPEN or POWER, row A on NOTE,
   acting on the first tap, wrapping on a tap, the encoder stopping at the ends; MOUTH lane: SET, the palette page VOWELS or WORDS, dim outside TRACT; blank on CARRIER, LEVEL and SLICE) ·
-  F5, F6, F7 blank (free for the randomisation lane) · F8 SAVE (FILE's save, here) · SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
-  (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1); SHIFT + F5 is blank.
+  F5 RANDOM (action that also takes the light: a tap rolls the lane with a new seed, then the encoder and LEFT / RIGHT scroll the seeds, the window showing the seed number or ORIGINAL) ·
+  F6 STYLE (value key, H2: NOTE BASS, LEAD, CHORDS, LONG; SLICE CHOP, ORDER; MOUTH VOWELS, WORDS; CARRIER and LEVEL have one style, so the key shows it dim, takes no light and says ONE STYLE ON THIS LANE) ·
+  F7 DENSITY (value key, 1 to 8, default 4, one for the screen) · F8 SAVE (FILE's save, here) · SHIFT + F1 UNDO (REDO after an undo; dim with nothing to undo) · SHIFT + F5 RANDOM ALL ·
+  SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
+  (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1).
+- **RANDOM** (rd-pb; `pattern_gen.h` called from `PatternScreen::roll_lane`, main loop only, through the bank's atomic setters like every other edit, steps 0..LENGTH-1 only): a run is the rolls
+  from one F5 tap until another of F1 to F4 takes the light, the lane or the pattern changes, the screen is left, or a hand edit happens. Seed position 0 is ORIGINAL (`pt::restore_lane`: the lane as it was
+  before the run); a detent moves one position, the arrows and the encoder stop at ORIGINAL and at 999, a tap on F5 starts a new seed. F6 and F7 taking the light keep the run live and re-roll it with the
+  same seed (the generator's subset rule: a higher density only adds steps; a style change re-rolls). NOTE rolls with the engine's key and scale, the palette's root, row B's chord kind and the voicing; LEVEL
+  with the lane's top (100, 127 in TRACT); SLICE with the SPEAKS slot's cuts (none: `NO SLICES: CUT THE SLOT ON SAMPLE EDIT`, nothing written); a lane the mode does not hear says where it is heard.
+  SHIFT + F5 rolls the five lanes with one new seed, NOTE first, each lane its own style and the shared density, takes no light and ends any run.
+- **UNDO** (one level, `PatternScreen::Scope`): before an act that changes the pattern, the whole `PatternData` (84 bytes) is copied (`copy_pattern`: atomic stores into a local the sequencer never sees);
+  the copy is kept only if the act changed the pattern. A step cleared, overwritten or tied, CLR LANE, a RANDOM run (one copy for the whole run), RANDOM ALL, the first write of a REC pass, INSERT, DELETE, paste, LENGTH, and a VALUE change that
+  starts on a new step (the next detents on the same step and lane take none) each take one. SHIFT + F1 swaps the copy and the pattern (UNDONE, then REDONE; NOTHING TO UNDO), a pattern change or leaving the screen drops it.
+  The console's `capture_now` is not scoped.
+- The SLICE lane's palette pad alone is heard: in BANDS, TALK and ROBOT it starts "the note" as SAMPLE's slice pads do (`slice_press_brings_note`, `side_of`, PERFORM's audition entry) and stops on the release and on leaving the screen.
 - Arrows: LEFT / RIGHT one encoder step of the lit F key, SHIFT + LEFT / RIGHT the cursor, UP / DOWN the lane across NOTE, CARRIER, LEVEL, SLICE, MOUTH (no wrap), SHIFT + UP / DOWN the
-  octave, the NOTE hand moving by 12 with it. The buttons NOTE, INSTR, VOL and FX pick lanes (FX: SLICE, then MOUTH, then SLICE). F value keys (LENGTH, TEMPO, VALUE): a tap lights, a second tap steps;
-  action keys (SAVE, CAPTURE, CLR LANE, SET, CHORD) act on the tap. F1 PATTERN, F2 LANE, F6 TOP PADS and F7 FILL are gone (the palette's rows are F4 CHORD's now).
+  octave, the NOTE hand moving by 12 with it. The buttons NOTE, INSTR, VOL and FX pick lanes (FX: SLICE, then MOUTH, then SLICE). F value keys (LENGTH, TEMPO, VALUE, STYLE, DENSITY): a tap lights, a second tap steps;
+  action keys (SAVE, CAPTURE, CLR LANE, SET, CHORD, RANDOM) act on the tap (RANDOM also takes the light). F1 PATTERN, F2 LANE, F6 TOP PADS and F7 FILL are gone (the palette's rows are F4 CHORD's now).
 
 **The MOUTH lane** (V3, V3b; `stepseq.h`, `pattern_logic.h`). A step's byte is the value in bits 0 to 3 (0 FOLLOW, 1 to 9 the vowels A to U, 10 to 12 the
 closures LIPS, TIP and BACK, 13 WORD, 14 WOB, 15 refused), bits 4 to 6 the word (WOW, YEAH, YOI, WAH, OW, BA, DA, GA) or the WOB rate (1/4, 1/8, 1/16, 1/32,

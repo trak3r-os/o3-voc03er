@@ -13,15 +13,24 @@
 // transport stopped a pad writes the cursor's step and the cursor moves on, while it plays the step that plays (midi_pattern_logic.h, the rule MIDI notes
 // use); REC goes off when the screen is left. Each lane keeps its own hand (hand_[]); the NOTE hand moves with the octave.
 //
-//   F1 LENGTH  F2 TEMPO  F3 VALUE  F4 CHORD (MOUTH: SET)  F5 F6 F7 (blank)  F8 SAVE      (SHIFT: F5 blank, F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
+//   F1 LENGTH  F2 TEMPO  F3 VALUE  F4 CHORD (MOUTH: SET)  F5 RANDOM  F6 STYLE  F7 DENSITY  F8 SAVE
+//   (SHIFT: F1 UNDO, F5 RANDOM ALL, F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
 //   A tap on F1..F3 points the encoder at that key (it stays lit); a second tap steps it on. F3 is lit when the screen is entered. F4 CHORD (NOTE lane) is the
 //   palette's lower row: TRIAD, 7TH, OPEN, POWER (a tap steps and wraps, a detent stops at the ends); the upper row is always the notes, so the palette is
 //   rows A NOTES and B CHORDS whatever PERFORM left (enter() and F4 write it). On the MOUTH lane F4 is SET, the palette's page (VOWELS or WORDS: an action,
-//   no focus). On the other lanes F4 is blank. F5, F6 and F7 are blank in every lane and take no focus (the RANDOM keys will use them). SHIFT + F6 clears
-//   the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does. F3 changes the cursor step's value in
-//   the lane (a TIE is left alone). SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected and writes the nearest of
-//   TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press cancels, leaving the screen
-//   cancels, and nothing is written before the analysis ends.
+//   no focus). On the other lanes F4 is blank.
+//   F5 RANDOM rolls the lane (pattern_gen.h: NOTE roll_notes with the engine's key and scale, the palette's root at the pads' octave, F4's chord and PERFORM's
+//   voicing; CARRIER; LEVEL; SLICE with the SPEAKS slot's cut count; MOUTH) over steps 0..LENGTH-1 and takes the light. While it is lit the encoder and
+//   LEFT / RIGHT scroll the seed (one detent, one new pattern; 0 is ORIGINAL, the lane as it was before the run's first roll; a tap wraps). A run ends when F1..F4
+//   take the light, the lane or the pattern changes, the screen is left, or any other edit happens. F6 STYLE (a value key: NOTE BASS LEAD CHORDS LONG, SLICE CHOP
+//   ORDER, MOUTH VOWELS WORDS; dim and without a light on CARRIER and LEVEL) and F7 DENSITY (1..8, one for the screen) re-roll a live run with the same seed.
+//   SHIFT + F5 RANDOM ALL rolls every lane with one new seed (NOTE first, each lane its own style, the shared density) and takes no light. SHIFT + F1 UNDO swaps
+//   the screen's one copy of the pattern with the pattern (a second press redoes): the copy is taken before a step is written or cleared, CLR LANE, a RANDOM run,
+//   RANDOM ALL, a REC pass, INSERT, DELETE, a paste, a LENGTH or VALUE change that starts on a new step, a CAPTURE; changing pattern or leaving the screen drops it.
+//   SHIFT + F6 clears the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does. F3 changes the
+//   cursor step's value in the lane (a TIE is left alone). SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected and writes
+//   the nearest of TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press cancels, leaving the
+//   screen cancels, and nothing is written before the analysis ends.
 //   Arrows: LEFT / RIGHT one encoder step of the lit F key (they repeat when held); SHIFT + LEFT / RIGHT the cursor; UP / DOWN the lane (NOTE, CARRIER, LEVEL,
 //   SLICE, MOUTH, no wrap); SHIFT + UP / DOWN the octave (PERFORM's and SAMPLE's, one press one step, the palette's notes move by 12). NOTE, INSTR, VOL and FX
 //   also choose the lane (FX: SLICE, then MOUTH, then SLICE).
@@ -30,7 +39,8 @@
 //   FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE; LEVEL: 24 steps up to 100 (127 in TRACT); SLICE: the SPEAKS slot's cuts 1..24, lit up to its count; MOUTH: row 0
 //   PERFORM's mouth strip, the nine vowels then LIPS, TIP, BACK, row 1 the vowels with GLD, the slide into them; the lane speaks in TRACT only, dim elsewhere, and
 //   a pad sounds the mouth live there). A pad that plays nothing is not picked. A pad sounds while it is held (PERFORM's local-note path, so the bar's note-offs
-//   do not cut it); SHIFT + a palette pad sounds it and picks nothing. The palette is addressed by its index 0..23 (pt::palette_of_pad).
+//   do not cut it); SHIFT + a palette pad sounds it and picks nothing. The palette is addressed by its index 0..23 (pt::palette_of_pad). A SLICE pad alone fires the
+// slice and, where SAMPLE's slice pads bring the note (smp::slice_press_brings_note), sounds the key's root with it until the pad is released.
 //
 // Main loop only. The screen keeps a cursor and a few flags; HELP's labels are in the SDRAM (g_pd in the .cpp).
 
@@ -88,6 +98,14 @@ class PatternScreen final : public o3sdk::app::Screen {
   // lands on the quantised step of the pattern that plays; stopped it is the cursor's step and the cursor moves on (midi_pattern_logic.h).
   void record_midi(o3sdk::app::Context& ctx, const Vocoder::NoteIn& n) noexcept;
 
+  // Test and HELP views of RANDOM and UNDO (main loop).
+  bool run_live() const noexcept { return run_; }
+  unsigned run_pos() const noexcept { return run_pos_; }  // 0 is ORIGINAL
+  unsigned density() const noexcept { return density_; }
+  unsigned style() const noexcept { return style_[lane_ % pattern::kLanes]; }
+  bool undo_ready() const noexcept { return undo_have_; }
+  unsigned focus() const noexcept { return focus_; }
+
   // A refusal App::input makes for a key it handled itself (SAMPLE LOAD while FILE runs a job): said on this screen's own line.
   void notice(o3sdk::app::Context& ctx, const char* text) noexcept { say(ctx, text); }
 
@@ -133,6 +151,36 @@ class PatternScreen final : public o3sdk::app::Screen {
   pattern::MouthPage mouth_page() const noexcept { return static_cast<pattern::MouthPage>(page_); }
   const pads::Layout& layout_now() const noexcept;  // the notes palette (PERFORM::notes(); the default one when no PERFORM is wired)
   PatternData& pattern_now() const noexcept { return bank_->pattern[shown_ & 7u]; }
+  // RANDOM, STYLE, DENSITY and UNDO. A roll runs in the main loop and writes the bank through the atomic setters, as every other edit here.
+  void random_tap(o3sdk::app::Context& ctx) noexcept;                          // F5: a new run (or, lit with a run live, the next seed)
+  void random_move(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;    // the seed position of the run (a run starts at ORIGINAL when none is live)
+  void random_all(o3sdk::app::Context& ctx) noexcept;                          // SHIFT + F5
+  void roll_apply(o3sdk::app::Context& ctx) noexcept;                          // writes the run's seed position (0: ORIGINAL)
+  bool roll_lane(o3sdk::app::Context& ctx, PatternData& p, pattern::Lane lane, std::uint32_t seed) noexcept;  // false: nothing written (NO SLICES)
+  std::uint32_t run_seed() const noexcept;
+  void end_run() noexcept;
+  void undo(o3sdk::app::Context& ctx) noexcept;  // SHIFT + F1
+  void undo_drop() noexcept { undo_have_ = false; undone_ = false; cont_key_ = 0; }
+  unsigned lane_style_count() const noexcept { return pattern::lane_styles(static_cast<pattern::Lane>(lane_ % pattern::kLanes)); }
+  void slice_note_start(o3sdk::app::Context& ctx, unsigned pad) noexcept;  // SLICE lane: the root note SAMPLE's slice pads bring
+  void slice_note_stop(o3sdk::app::Context& ctx) noexcept;
+  // The undo copy of one act: the pattern as it was before, kept when the act changed it. `key` (not 0) joins acts of one gesture (one VALUE detent after
+  // another on a step, one REC pass, one RANDOM run) into one copy; 0 is an act of its own.
+  class Scope {
+   public:
+    Scope(PatternScreen& s, unsigned pattern, std::uint32_t key) noexcept;
+    ~Scope();
+    Scope(const Scope&) = delete;
+    Scope& operator=(const Scope&) = delete;
+
+   private:
+    PatternScreen& s_;
+    PatternData& p_;
+    PatternData before_{};
+    std::uint32_t key_;
+    unsigned pat_;
+    bool skip_;
+  };
 
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   Bank* bank_ = nullptr;
@@ -171,6 +219,25 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint64_t word_t0_ = 0;
   bool wob_said_ = false;  // the strip said "WOB PLAYS WITH THE LINE" since the screen was entered
   bool key_tap_ = false;     // turn() came from a second tap on an F key, not from the encoder
+  // F5 RANDOM's run (main loop only): the lane and pattern it rolls, the seed position (0 ORIGINAL, 1..kSeedMax), the run's base (seed n is
+  // fill_seed(run_base_ + n, pattern)) and the pattern as it was before the first roll.
+  bool run_ = false;
+  std::uint8_t run_lane_ = 0;
+  std::uint8_t run_pat_ = 0;
+  std::uint16_t run_pos_ = 0;
+  std::uint32_t run_serial_ = 0;
+  std::uint32_t run_base_ = 0;
+  PatternData run_orig_{};
+  std::uint8_t style_[pattern::kLanes] = {};  // F6 STYLE per lane (NOTE, SLICE and MOUTH use theirs)
+  std::uint8_t density_ = 4;                  // F7 DENSITY 1..8, one for the screen
+  // UNDO (one level): the pattern before the last destructive act (or, after an UNDO, before it: REDO), the pattern it belongs to, and the gesture it was
+  // taken for (Scope's key). Main loop only.
+  PatternData undo_{};
+  std::uint8_t undo_pat_ = 0;
+  bool undo_have_ = false;
+  bool undone_ = false;
+  std::uint32_t cont_key_ = 0;
+  bool slice_note_ = false;  // the SLICE palette pad held brings the root note (audition id PerformScreen::kAuditionNoteId)
 };
 
 }  // namespace o3_voc03er

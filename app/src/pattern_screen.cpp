@@ -4,6 +4,7 @@
 #include "liveness.h"
 #include "midi_pattern_logic.h"
 #include "mouth_capture.h"
+#include "pattern_gen.h"
 #include "perform_logic.h"
 #include "sample_logic.h"
 #include "sample_rec_logic.h"
@@ -25,6 +26,7 @@ namespace o3_voc03er {
 using namespace o3sdk;
 namespace pl = perform;
 namespace pt = pattern;
+namespace pg = pattern_gen;
 namespace smp = o3_voc03er::sample;
 namespace lv = o3_voc03er::live;
 using ui::Color;
@@ -34,15 +36,20 @@ using Button = app::Button;
 namespace {
 
 constexpr std::uint64_t kNoteMs = 2500;
-// F1 LENGTH, F2 TEMPO, F3 VALUE, F4 CHORD (SET on the MOUTH lane, blank on CARRIER, LEVEL and SLICE), F5 to F7 blank (the RANDOM keys), F8 SAVE.
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"LENGTH", "TEMPO", "VALUE", "CHORD", "", "", "", "SAVE"};
-// The SHIFT row: F6, F7 and F8 (the others are blank and dim), labelled the way PERFORM's is. F8 CAPTURE is the MOUTH lane's (dim elsewhere).
-constexpr const char* kShiftNames[ornoir::kFKeys] = {"", "", "", "", "", "CLR LANE", "FOLLOW", "CAPTURE"};
+// F1 LENGTH, F2 TEMPO, F3 VALUE, F4 CHORD (SET on the MOUTH lane, blank on CARRIER, LEVEL and SLICE), F5 RANDOM, F6 STYLE, F7 DENSITY, F8 SAVE.
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"LENGTH", "TEMPO", "VALUE", "CHORD", "RANDOM", "STYLE", "DENSITY", "SAVE"};
+// The SHIFT row: F1 UNDO, F5 RANDOM ALL, F6 CLR LANE, F7 FOLLOW, F8 CAPTURE (the MOUTH lane's, dim elsewhere); F2..F4 are blank and dim.
+constexpr const char* kShiftNames[ornoir::kFKeys] = {"UNDO", "", "", "", "RANDOM ALL", "CLR LANE", "FOLLOW", "CAPTURE"};
 constexpr unsigned kKeyLength = 0;  // F1 (also the confirmation of CLEAR LANE and SHIFT + DELETE)
 constexpr unsigned kKeyTempo = 1;   // F2
 constexpr unsigned kKeyValue = 2;   // F3
 constexpr unsigned kKeyChord = 3;   // F4: CHORD on the NOTE lane, SET on the MOUTH lane
+constexpr unsigned kKeyRandom = 4;  // F5: an action that also takes the light while a run of seeds is live
+constexpr unsigned kKeyStyle = 5;   // F6: the lane's style (NOTE, SLICE, MOUTH)
+constexpr unsigned kKeyDensity = 6; // F7
 constexpr unsigned kKeySave = 7;    // F8
+constexpr unsigned kShiftUndo = 0;       // SHIFT + F1
+constexpr unsigned kShiftRandomAll = 4;  // SHIFT + F5
 constexpr unsigned kShiftClear = 5;   // SHIFT + F6
 constexpr unsigned kShiftFollow = 6;  // SHIFT + F7
 constexpr unsigned kKeyCapture = 7; // F8 (SHIFT)
@@ -50,6 +57,12 @@ inline constexpr pads::Layout kDefaultLayout{};  // when no PERFORM is wired (a 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
 constexpr char kLetters[kBankPatterns + 1] = "ABCDEFGH";
 constexpr unsigned kTempoStep = 1000;  // one BPM, in milli-BPM
+// What a Scope's key is made of (a gesture that one undo copy covers): the kind in the top byte.
+constexpr std::uint32_t kKeyKindValue = 1u << 24;   // VALUE on one step of one lane of one pattern
+constexpr std::uint32_t kKeyKindRec = 2u << 24;     // one REC pass over one pattern
+constexpr std::uint32_t kKeyKindRun = 3u << 24;     // one RANDOM run
+constexpr std::uint32_t kKeyKindLength = 4u << 24;  // LENGTH of one pattern
+constexpr const char* kStyleOne = "ONE STYLE ON THIS LANE";
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
   std::size_t n = std::strlen(dst);
@@ -174,6 +187,13 @@ void PatternScreen::init(dsp::UnitId voice, Bank* bank, StepSeq* seq, PerformScr
   page_ = 0;
   rec_ = false;
   hands_ready_ = false;
+  run_ = false;
+  density_ = static_cast<std::uint8_t>(pg::kDensityDefault);
+  for (std::uint8_t& st : style_) {
+    st = 0;
+  }
+  undo_drop();
+  slice_note_ = false;
 }
 
 const ui::Theme* PatternScreen::theme(const app::Context&) const noexcept { return &ornoir::theme(); }
@@ -186,6 +206,9 @@ void PatternScreen::enter(app::Context& ctx) noexcept {
   step_aud_ = 0;
   rec_ = false;
   focus_ = kKeyValue;  // F3 VALUE is lit on entry: LEFT / RIGHT change the step under the cursor
+  end_run();
+  undo_drop();
+  slice_note_ = false;
   init_hands(ctx);
   normalise_palette();  // a project or an older pick may have left NOTE + NOTE or two chord rows: the palette is rows A NOTES and B CHORDS
   ctx.redraw();
@@ -210,6 +233,9 @@ void PatternScreen::leave(app::Context& ctx) noexcept {
   steps_held_ = 0;
   step_aud_ = 0;
   rec_ = false;  // REC goes off with the screen
+  slice_note_stop(ctx);
+  end_run();
+  undo_drop();  // one copy for the screen: leaving it drops it
 }
 
 void PatternScreen::audition(app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity, unsigned voicing) noexcept {
@@ -233,7 +259,55 @@ void PatternScreen::audition_slice(app::Context& ctx, unsigned pad) noexcept {
   if (sample_ != nullptr && pad < pt::kPalettePads) {
     sample_->fire_slice(ctx, pad);
     aud_ |= std::uint32_t{1} << pad;
+    slice_note_start(ctx, pad);
   }
+}
+
+// In BANDS, TALK and ROBOT a slice is heard through the voice's note: SAMPLE's slice pads bring one (smp::slice_press_brings_note: the mode needs a note, the
+// slot is on the SPEAKS side, no lower pad is held, and the sequencer is not already playing notes). SAMPLE keeps the note's start private, so the screen
+// asks the same rule through the public pieces and starts the note the way PERFORM's audition does (kAuditionNoteId, ended on the pad's release and on leave).
+void PatternScreen::slice_note_start(app::Context& ctx, unsigned) noexcept {
+  if (perform_ == nullptr || slice_note_) {
+    return;
+  }
+  const StepSeq::Position pos = seq_ != nullptr ? seq_->position() : StepSeq::Position{};
+  const bool seq_notes = seq_ != nullptr && pos.playing && (bank_ == nullptr || pos.pattern >= kBankPatterns || notes_used(bank_->pattern[pos.pattern]) != 0u);
+  const route::Route rt = perform_->route_now(ctx);
+  if (!route::is_slot(rt.speaks)) {
+    return;  // LIVE speaks: fire_slice started nothing
+  }
+  const unsigned slot = static_cast<unsigned>(rt.speaks) - route::kFirstSlot;
+  if (!smp::slice_press_brings_note(mode_of(ctx), smp::side_of(rt, slot), false, seq_notes)) {
+    return;
+  }
+  // The note: the NOTE lane's hand when it holds one, else the key's root nearest the pads' octave (row B, then row A, as SAMPLE's slice note does).
+  unsigned note = hand_[0].s.note;
+  unsigned kind = hand_[0].s.kind;
+  if (note < 1u) {
+    const unsigned key = round_param(ctx.engine(), voice_, Vocoder::Key) % 12u;
+    const int oct = perform_->octave();
+    bool found = false;
+    for (unsigned i = 0; i < 24u && !found; ++i) {
+      const pads::PadPlay pp = pt::palette_play((12u + i) % 24u, oct, layout_now());  // row B (12..23), then row A (0..11)
+      if (pp.note >= 1 && static_cast<unsigned>(pp.note) % 12u == key) {
+        note = static_cast<unsigned>(pp.note);
+        kind = pp.kind;
+        found = true;
+      }
+    }
+    if (!found) {
+      return;  // the palette plays nothing: the slice sounds as it can
+    }
+  }
+  perform_->audition_press(ctx, PerformScreen::kAuditionNoteId, note, kind);
+  slice_note_ = true;
+}
+
+void PatternScreen::slice_note_stop(app::Context& ctx) noexcept {
+  if (slice_note_ && perform_ != nullptr) {
+    perform_->audition_release(ctx, PerformScreen::kAuditionNoteId);
+  }
+  slice_note_ = false;
 }
 
 std::uint64_t PatternScreen::repeat_buttons(const app::Context&) const noexcept {
@@ -253,8 +327,9 @@ void PatternScreen::set_lane(app::Context& ctx, pt::Lane lane) noexcept {
 
 // The MOUTH lane speaks in TRACT only: outside it the lane is shown dim, still edits, and the strip says so once, when the lane is chosen.
 void PatternScreen::lane_chosen(app::Context& ctx) noexcept {
-  if (focus_ == kKeyChord) {
-    focus_ = kKeyValue;  // CHORD is the NOTE lane's key (SET on the MOUTH lane is an action, the others are blank)
+  end_run();  // a run rolls one lane of one pattern
+  if (focus_ == kKeyChord || (focus_ == kKeyStyle && lane_style_count() == 0u)) {
+    focus_ = kKeyValue;  // CHORD is the NOTE lane's key (SET on the MOUTH lane is an action, the others are blank); CARRIER and LEVEL have no STYLE to point at
   }
   if (lane() == pt::Lane::Mouth && !tract_on(ctx)) {
     say(ctx, perform::kMouthElsewhere);
@@ -280,6 +355,10 @@ void PatternScreen::show_pattern(app::Context& ctx, unsigned p, bool by_hand) no
   if (g_cap.running() && (p & 7u) != cap_pattern_) {  // a capture writes the pattern it started on: a pattern change ends it, nothing written
     g_cap.cancel();
     say(ctx, "CAPTURE CANCELLED: THE PATTERN CHANGED");
+  }
+  if ((p & 7u) != shown_) {
+    end_run();
+    undo_drop();  // one copy for the screen: another pattern drops it
   }
   shown_ = static_cast<std::uint8_t>(p & 7u);
   // A SONG chain that plays owns the request: it re-asks for each lap's pattern only when a lap ends, so a hand request here would play for one
@@ -325,12 +404,194 @@ void PatternScreen::rec_moved(const RecTarget& t) noexcept {
   }
 }
 
+// ---- UNDO: one copy of the pattern, taken before an act that changes it ------------------------------------------------------------------
+// The copy is made with copy_pattern (atomic stores into a local: the sequencer never sees it) and kept when the act changed the pattern. A Scope with a key
+// the last kept copy was taken for (the same gesture: one RANDOM run, one REC pass, one step's VALUE) takes no new copy.
+PatternScreen::Scope::Scope(PatternScreen& s, unsigned pattern, std::uint32_t key) noexcept
+    : s_(s),
+      p_(s.bank_->pattern[pattern & 7u]),
+      key_(key),
+      pat_(pattern & 7u),
+      skip_(key != 0u && s.undo_have_ && s.cont_key_ == key && s.undo_pat_ == (pattern & 7u)) {
+  if (!skip_) {
+    copy_pattern(before_, p_);
+  }
+}
+
+PatternScreen::Scope::~Scope() {
+  if (skip_ || same_pattern(before_, p_)) {
+    return;
+  }
+  copy_pattern(s_.undo_, before_);
+  s_.undo_pat_ = static_cast<std::uint8_t>(pat_);
+  s_.undo_have_ = true;
+  s_.undone_ = false;
+  s_.cont_key_ = key_;
+  if ((key_ & 0xFF000000u) != kKeyKindRun) {
+    s_.end_run();  // a hand edit between two rolls: ORIGINAL would no longer be what the lane was
+  }
+}
+
+// SHIFT + F1: the copy and the pattern swap, so a second press redoes. A run of seeds ends (the pattern is what the copy says now).
+void PatternScreen::undo(app::Context& ctx) noexcept {
+  end_run();
+  cont_key_ = 0;
+  if (!undo_have_ || bank_ == nullptr) {
+    say(ctx, "NOTHING TO UNDO");
+    return;
+  }
+  PatternData& p = bank_->pattern[undo_pat_ & 7u];
+  PatternData tmp{};
+  copy_pattern(tmp, p);
+  copy_pattern(p, undo_);
+  copy_pattern(undo_, tmp);
+  undone_ = !undone_;
+  if (undo_pat_ == shown_ && cursor_ >= length_of(p)) {
+    cursor_ = 0;
+  }
+  say(ctx, undone_ ? "UNDONE" : "REDONE");
+}
+
+// ---- RANDOM (F5), STYLE (F6), DENSITY (F7) -----------------------------------------------------------------------------------------------
+std::uint32_t PatternScreen::run_seed() const noexcept { return pt::fill_seed(run_base_ + run_pos_, run_pat_); }
+
+// A run ends when another key takes the light, the lane or the pattern changes, the screen is left, or anything else edits. F5 is lit only while a run is live.
+void PatternScreen::end_run() noexcept {
+  run_ = false;
+  if (focus_ == kKeyRandom) {
+    focus_ = kKeyValue;
+  }
+}
+
+// One roll of `lane` over steps 0..LENGTH-1 of `p`, with this screen's style, density and the engine's key and scale. False: nothing was written (SLICE with no
+// slices on the SPEAKS slot).
+bool PatternScreen::roll_lane(app::Context& ctx, PatternData& p, pt::Lane lane, std::uint32_t seed) noexcept {
+  const unsigned len = length_of(p);
+  const unsigned dens = density_;
+  const unsigned st = style_[static_cast<unsigned>(lane) % pt::kLanes];
+  switch (lane) {
+    case pt::Lane::Note: {
+      const pads::Layout& lay = layout_now();
+      const pads::PadPlay root = pt::palette_play(0, perform_ != nullptr ? perform_->octave() : 0, lay);
+      const unsigned voicing = perform_ != nullptr ? perform_->voicing() : 0u;
+      pg::NoteArgs a{};
+      a.len = len;
+      a.style = static_cast<pg::NoteStyle>(st % pg::kNoteStyles);
+      a.density = dens;
+      a.seed = seed;
+      a.key = round_param(ctx.engine(), voice_, Vocoder::Key) % 12u;
+      a.scale = round_param(ctx.engine(), voice_, Vocoder::Scale);
+      a.root_note = root.note >= 1 ? static_cast<unsigned>(root.note) : 48u;
+      a.chord = static_cast<ChordKind>(pt::palette_chord(lay) & 3u);
+      a.voicing = static_cast<Voicing>(voicing > 3u ? 0u : voicing);
+      pg::roll_notes(p, a);
+      return true;
+    }
+    case pt::Lane::Carrier:
+      pg::roll_carrier(p, len, dens, seed);
+      return true;
+    case pt::Lane::Level:
+      pg::roll_level(p, len, dens, seed, pt::level_top(tract_on(ctx)));
+      return true;
+    case pt::Lane::Slice:
+      return pg::roll_slices(p, len, static_cast<pg::SliceStyle>(st % pg::kSliceStyles), dens, seed, seq_ != nullptr ? seq_->slice_count() : 0u);
+    case pt::Lane::Mouth:
+      pg::roll_mouth(p, len, static_cast<pg::MouthStyle>(st % pg::kMouthStyles), dens, seed);
+      return true;
+  }
+  return false;
+}
+
+// Writes the run's seed position over its lane: ORIGINAL (0) puts the lane back as it was before the first roll. One undo copy covers the whole run.
+void PatternScreen::roll_apply(app::Context& ctx) noexcept {
+  if (bank_ == nullptr || !run_) {
+    return;
+  }
+  const pt::Lane lane = static_cast<pt::Lane>(run_lane_);
+  PatternData& p = bank_->pattern[run_pat_ & 7u];
+  Scope sc(*this, run_pat_, kKeyKindRun | (run_serial_ & 0xFFFFFFu));
+  if (run_pos_ == 0u) {
+    pt::restore_lane(p, run_orig_, lane, length_of(p));
+  } else {
+    (void)roll_lane(ctx, p, lane, run_seed());
+  }
+  ctx.redraw();
+}
+
+// F5 (the tap, or a second tap): a run that is live goes to the next seed and F5 takes the light; otherwise a new run starts at seed 1 on this lane.
+void PatternScreen::random_tap(app::Context& ctx) noexcept {
+  if (bank_ == nullptr) {
+    return;
+  }
+  if (run_) {
+    focus_ = kKeyRandom;
+    random_move(ctx, 1, true);
+    return;
+  }
+  if (lane() == pt::Lane::Slice && (seq_ == nullptr || seq_->slice_count() == 0u)) {
+    say(ctx, pt::kNoSlices);  // nothing is written and no run starts
+    return;
+  }
+  random_move(ctx, 1, true);
+}
+
+// The seed position of the run, one step (a tap wraps through ORIGINAL, an encoder detent or an arrow clamps at ORIGINAL and at the last seed). With no run
+// live one starts here: it remembers the lane as it is (ORIGINAL), then takes the step.
+void PatternScreen::random_move(app::Context& ctx, int delta, bool tap) noexcept {
+  if (bank_ == nullptr) {
+    return;
+  }
+  if (!run_) {
+    if (lane() == pt::Lane::Slice && (seq_ == nullptr || seq_->slice_count() == 0u)) {
+      say(ctx, pt::kNoSlices);
+      return;
+    }
+    run_ = true;
+    run_lane_ = lane_;
+    run_pat_ = shown_;
+    run_pos_ = 0;
+    run_base_ = (++run_serial_) * 1000u;
+    copy_pattern(run_orig_, pattern_now());
+    cont_key_ = 0;  // the run's first roll takes its own undo copy
+  }
+  focus_ = kKeyRandom;
+  run_pos_ = static_cast<std::uint16_t>(pt::step_in(run_pos_, delta, tap, pt::kSeedMax + 1u));
+  roll_apply(ctx);
+  if (!lv::heard(pt::lane_modes(lane()), mode_of(ctx))) {
+    say_heard(ctx, pt::lane_modes(lane()));  // it wrote, and the line says where it is heard
+  }
+}
+
+// SHIFT + F5: every lane rolls with one new seed, NOTE first, each with its own style and the shared density. One undo copy; no run, no light.
+void PatternScreen::random_all(app::Context& ctx) noexcept {
+  if (bank_ == nullptr) {
+    return;
+  }
+  end_run();
+  const std::uint32_t seed = pt::fill_seed((++run_serial_) * 1000u, shown_);
+  PatternData& p = pattern_now();
+  bool slices = true;
+  {
+    Scope sc(*this, shown_, 0u);
+    for (unsigned i = 0; i < pt::kLanes; ++i) {
+      if (!roll_lane(ctx, p, static_cast<pt::Lane>(i), seed + i)) {
+        slices = false;
+      }
+    }
+  }
+  say(ctx, slices ? "RANDOM ALL: SHIFT + F1 UNDOES" : pt::kNoSlices);
+}
+
 void PatternScreen::record_midi(app::Context& ctx, const Vocoder::NoteIn& n) noexcept {
   if (bank_ == nullptr || n.note < 1u || n.note > 127u) {
     return;
   }
   const RecTarget t = rec_target(n.playing, n.sixteenth);
-  if (t.p == nullptr || !set_note(*t.p, t.at, n.note) || !set_level(*t.p, t.at, midipat::level_of_velocity(n.velocity))) {
+  if (t.p == nullptr) {
+    return;
+  }
+  Scope sc(*this, t.pattern, kKeyKindRec | t.pattern);
+  if (!set_note(*t.p, t.at, n.note) || !set_level(*t.p, t.at, midipat::level_of_velocity(n.velocity))) {
     return;
   }
   rec_moved(t);
@@ -416,9 +677,13 @@ void PatternScreen::pick(app::Context& ctx, unsigned pad, bool shift) noexcept {
     return;
   }
   hand_[lane_] = h;
-  for (unsigned i = 0; i < length_of(*wp); ++i) {
-    if (((targets >> i) & 1u) != 0u) {
-      (void)pt::write_hand(*wp, i, lane(), h);
+  {
+    const unsigned wpat = rec_write && rt.p != nullptr ? rt.pattern : shown_;
+    Scope sc(*this, wpat, rec_write ? kKeyKindRec | wpat : 0u);
+    for (unsigned i = 0; i < length_of(*wp); ++i) {
+      if (((targets >> i) & 1u) != 0u) {
+        (void)pt::write_hand(*wp, i, lane(), h);
+      }
     }
   }
   if (rec_write) {
@@ -439,6 +704,7 @@ void PatternScreen::step_press(app::Context& ctx, unsigned step, bool shift) noe
   const unsigned before = cursor_;
   cursor_ = static_cast<std::uint8_t>(step);
   steps_held_ |= static_cast<std::uint16_t>(1u << step);
+  Scope sc(*this, shown_, 0u);  // a step cleared, overwritten or tied: one undo copy (kept only when the pattern changed)
   if (shift) {
     if (lane() == pt::Lane::Note) {
       (void)pt::tie_toggle(p, step);
@@ -556,6 +822,7 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
   PatternData& p = pattern_now();
   switch (key) {
     case kKeyLength: {
+      Scope sc(*this, shown_, kKeyKindLength | shown_);
       const int n = static_cast<int>(length_of(p)) + delta;
       (void)set_length(p, tap && n > static_cast<int>(kPatternSteps) ? 1u : static_cast<unsigned>(n < 1 ? 1 : (n > 16 ? 16 : n)));
       if (cursor_ >= length_of(p)) {
@@ -573,7 +840,10 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
         say(ctx, "SPEAKS HAS NO SLICES");
         return;
       }
-      (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u, pt::level_top(tract_on(ctx)));
+      {
+        Scope sc(*this, shown_, kKeyKindValue | (std::uint32_t{shown_} << 16) | (std::uint32_t{cursor_} << 8) | lane_);  // one copy per step and lane
+        (void)pt::step_value(p, cursor_, lane(), delta, seq_ != nullptr ? seq_->slice_count() : 0u, pt::level_top(tract_on(ctx)));
+      }
       break;
     case kKeyChord: {  // CHORD (NOTE lane): what the palette's lower row plays; the first tap steps, a tap wraps, a detent stops at the ends
       if (lane() != pt::Lane::Note || perform_ == nullptr) {
@@ -586,6 +856,25 @@ void PatternScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept {
       step_aud_ = 0;
       (void)perform_->notes_set(pads::Row::A, pads::Plays::Note);
       (void)perform_->notes_set(pads::Row::B, pt::kChordPlays[next]);
+      break;
+    }
+    case kKeyRandom:  // the seed of the run: the encoder and the arrows
+      random_move(ctx, delta, tap);
+      return;
+    case kKeyStyle: {
+      const unsigned n = lane_style_count();
+      if (n == 0u) {
+        say(ctx, kStyleOne);
+        return;
+      }
+      style_[lane_ % pt::kLanes] = static_cast<std::uint8_t>(pt::step_in(style_[lane_ % pt::kLanes], delta, tap, n));
+      roll_apply(ctx);  // a live run re-rolls with the same seed
+      break;
+    }
+    case kKeyDensity: {
+      const unsigned now = density_ - pg::kDensityMin;
+      density_ = static_cast<std::uint8_t>(pg::kDensityMin + pt::step_in(now, delta, tap, pg::kDensityMax - pg::kDensityMin + 1u));
+      roll_apply(ctx);
       break;
     }
     default:
@@ -601,6 +890,7 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     armed_ = 0;
     if (in.fkey_press(k) && k == kKeyLength && !in.shift) {
       PatternData& p = pattern_now();
+      Scope sc(*this, shown_, 0u);
       if (what == kArmPattern) {
         pt::clear_steps(p);
         say(ctx, "PATTERN EMPTIED");
@@ -617,7 +907,11 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   if (in.fkey_press(k)) {
     if (in.shift) {
-      if (k == kShiftClear) {  // SHIFT + F6, CLEAR LANE: asks first (F1 confirms, any other key cancels), on the pattern shown
+      if (k == kShiftUndo) {  // SHIFT + F1, UNDO (again: REDO)
+        undo(ctx);
+      } else if (k == kShiftRandomAll) {  // SHIFT + F5, RANDOM ALL
+        random_all(ctx);
+      } else if (k == kShiftClear) {  // SHIFT + F6, CLEAR LANE: asks first (F1 confirms, any other key cancels), on the pattern shown
         armed_ = kArmLane;
         ctx.redraw();
       } else if (k == kShiftFollow) {  // SHIFT + F7, FOLLOW
@@ -632,8 +926,13 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       say(ctx, save_ != nullptr && save_(save_user_, ctx) ? "SAVING" : "CARD BUSY");
       return;
     }
-    if (k > kKeyChord) {
-      return;  // F5, F6 and F7 are blank in every lane: no name, no value, no focus (the RANDOM keys will take them)
+    if (k == kKeyRandom) {  // RANDOM: a tap rolls the lane with a new seed and takes the light (with a run live, the next seed)
+      random_tap(ctx);
+      return;
+    }
+    if (k == kKeyStyle && lane_style_count() == 0u) {
+      say(ctx, kStyleOne);  // CARRIER and LEVEL have one style: no light, nothing to step
+      return;
     }
     if (k == kKeyChord) {
       if (lane() == pt::Lane::Mouth) {  // SET: an action of the key, no focus for the encoder
@@ -652,6 +951,9 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       key_tap_ = true;
       turn(ctx, k, 1);
       key_tap_ = false;
+    }
+    if (k <= kKeyChord && k != focus_) {
+      end_run();  // STYLE and DENSITY keep a run live (they re-roll it); another key taking the light ends it
     }
     focus_ = static_cast<std::uint8_t>(k);
     ctx.redraw();
@@ -702,6 +1004,7 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     say(ctx, in.shift ? "PATTERN COPIED" : "STEP COPIED");
   } else if (in.press(Button::Insert)) {  // the copied step at the cursor, the rest one step right (SHIFT: the copied pattern over this one)
     PatternData& p = pattern_now();
+    Scope sc(*this, shown_, 0u);
     const bool ok = in.shift ? pt::paste_whole(p, g_clip) : pt::insert_step(p, cursor_, g_clip);
     const unsigned len = length_of(p);
     cursor_ = static_cast<std::uint8_t>(cursor_ < len ? cursor_ : len - 1u);  // a pasted pattern can be shorter
@@ -710,6 +1013,7 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     if (in.shift) {
       armed_ = kArmPattern;
     } else {
+      Scope sc(*this, shown_, 0u);
       (void)pt::clear_step(pattern_now(), cursor_);
     }
     ctx.redraw();
@@ -737,6 +1041,7 @@ void PatternScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     if (sample_ != nullptr) {
       sample_->release_slice(ctx, idx);
     }
+    slice_note_stop(ctx);
     ctx.redraw();
   }
 }
@@ -888,7 +1193,7 @@ void PatternScreen::capture_finish(app::Context& ctx) noexcept {
   }
   if (g_cap.silent()) {
     say(ctx, "SLOT IS SILENT: NOTHING WRITTEN");
-  } else if (mouthcap::apply(g_cap, bank_->pattern[cap_pattern_ & 7u])) {
+  } else if (Scope sc(*this, cap_pattern_, 0u); mouthcap::apply(g_cap, bank_->pattern[cap_pattern_ & 7u])) {
     say(ctx, "MOUTH LANE CAPTURED FROM THE SLOT");
   } else {
     say(ctx, "NOTHING WRITTEN");
@@ -979,6 +1284,9 @@ void PatternScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
   } else if (lane() != pt::Lane::Note) {  // CHORD is the NOTE lane's: blank elsewhere
     out.label[kKeyChord] = "";
   }
+  if (lane_style_count() == 0u) {  // CARRIER and LEVEL have one style: STYLE is shown dim
+    out.dim = static_cast<std::uint8_t>(out.dim | (1u << kKeyStyle));
+  }
 }
 
 // HELP: every button input() answers has a row (tests/pattern_screen_test.cpp holds it), the pads in three groups.
@@ -1022,8 +1330,8 @@ void PatternScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   };
   const int oct = perform_ != nullptr ? perform_->octave() : 0;
   const pads::Layout& layout = layout_now();
-  h.summary = "THE STEPS OF A PATTERN AND THEIR LANES: STEPS ON THE UPPER PADS, THE LANE'S PALETTE BELOW.\n"
-              "SHIFT + F6: CLEAR LANE (F1 CONFIRMS). SHIFT + F7: FOLLOW. SHIFT + F8: CAPTURE (MOUTH).";
+  h.summary = "STEPS ON THE UPPER PADS, THE PALETTE BELOW. F5 RANDOM FILLS THE LANE, LEFT / RIGHT: SEEDS.\n"
+              "SHIFT + F1: UNDO. F5: ALL LANES. F6: CLEAR LANE (F1 CONFIRMS). F7: FOLLOW. F8: CAPTURE (MOUTH).";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -1033,7 +1341,12 @@ void PatternScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   h.fkey[2] = "THE CURSOR STEP'S VALUE";
   const bool mouth_lane = lane() == pt::Lane::Mouth;
   h.fkey[3] = lane() == pt::Lane::Note ? "ROW B'S CHORD KIND" : (mouth_lane ? "VOWELS OR WORDS" : nullptr);
+  h.fkey[4] = "ROLL THE LANE ARROWS: SEEDS";
+  h.fkey[5] = lane_style_count() != 0u ? "THE LANE'S STYLE" : nullptr;
+  h.fkey[6] = "HOW MANY STEPS, 1 TO 8";
   h.fkey[7] = "SAVES THE PATTERNS";
+  h.fkey_shift[0] = "UNDO";
+  h.fkey_shift[4] = "ALL LANES";
   h.fkey_shift[5] = kShiftNames[5];
   h.fkey_shift[6] = kShiftNames[6];
   h.fkey_shift[7] = kShiftNames[7];
@@ -1149,20 +1462,54 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
       f4.name = "";
     }
   }
-  for (unsigned i = kKeyChord + 1u; i < kKeySave; ++i) {  // F5 to F7: blank, no focus
-    keys[i].name = "";
-    keys[i].hot = false;
+  {  // F5 RANDOM: the seed of the live run (ORIGINAL at 0); it takes the light with the run
+    ornoir::FKey& f5 = keys[kKeyRandom];
+    f5.hot = f5.hot && run_;
+    if (run_) {
+      if (run_pos_ == 0u) {
+        cat(f5.value, sizeof f5.value, "ORIGINAL");
+      } else {
+        cat_uint(f5.value, sizeof f5.value, run_pos_);
+      }
+    }
   }
+  {  // F6 STYLE: the lane's, dim on CARRIER (NOISE) and LEVEL (ACCENT) where there is one
+    ornoir::FKey& f6 = keys[kKeyStyle];
+    const unsigned st = style_[lane_ % pt::kLanes];
+    switch (lane()) {
+      case pt::Lane::Note:
+        cat(f6.value, sizeof f6.value, pg::kNoteStyleNames[st % pg::kNoteStyles]);
+        break;
+      case pt::Lane::Slice:
+        cat(f6.value, sizeof f6.value, pg::kSliceStyleNames[st % pg::kSliceStyles]);
+        break;
+      case pt::Lane::Mouth:
+        cat(f6.value, sizeof f6.value, pg::kMouthStyleNames[st % pg::kMouthStyles]);
+        break;
+      case pt::Lane::Carrier:
+        cat(f6.value, sizeof f6.value, "NOISE");
+        break;
+      case pt::Lane::Level:
+        cat(f6.value, sizeof f6.value, "ACCENT");
+        break;
+    }
+    f6.dim = lane_style_count() == 0u;
+    f6.hot = f6.hot && !f6.dim;
+  }
+  cat_uint(keys[kKeyDensity].value, sizeof keys[kKeyDensity].value, density_);
   if (ctx.panel().shift()) {  // the SHIFT row replaces the plain one (names and values)
     for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
       keys[i] = ornoir::FKey{};
       keys[i].name = kShiftNames[i];
-      keys[i].dim = i != kShiftClear && i != kShiftFollow && (i != kKeyCapture || lane() != pt::Lane::Mouth);
+      keys[i].dim = i != kShiftRandomAll && i != kShiftClear && i != kShiftFollow && (i != kShiftUndo || !undo_have_) && (i != kKeyCapture || lane() != pt::Lane::Mouth);
     }
     if (g_cap.running()) {
       keys[kKeyCapture].name = "CANCEL";
     }
     cat(keys[kShiftFollow].value, sizeof keys[kShiftFollow].value, follow_ ? "ON" : "OFF");
+    if (undo_have_) {
+      keys[kShiftUndo].name = undone_ ? "REDO" : "UNDO";
+    }
   }
 
   ui::plot::Canvas c(r);
@@ -1288,7 +1635,7 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
            lane() == pt::Lane::Note ? "LOWER PADS PICK. A STEP PAD: PUT, CHOOSE, AGAIN TO CLEAR. SHIFT + STEP: TIE (VALUE LEAVES IT)"
                                     : "LOWER PADS PICK. A STEP PAD: PUT, CHOOSE, AGAIN TO CLEAR. SHIFT + STEP: CLEAR",
            Color::TextDim, Face::Micro);
-    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 18, "LEFT / RIGHT: THE LIT F KEY. UP / DOWN: LANE. REC: THE PADS WRITE AS YOU PLAY", Color::TextDim, Face::Micro);
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 18, "F5 RANDOM, LEFT / RIGHT: SEEDS. SHIFT + F1: UNDO. UP / DOWN: LANE. REC: PADS WRITE", Color::TextDim, Face::Micro);
   }
 }
 

@@ -1,0 +1,59 @@
+# PATTERN, RANDOM (rd-pb, 2026-11-13): F5 rolls the lane with a seed and takes the light, the encoder and LEFT / RIGHT scroll the seeds (0 is ORIGINAL), F6 is the
+# lane's STYLE, F7 the DENSITY (both re-roll the live run with the same seed), SHIFT + F5 rolls every lane, SHIFT + F1 is UNDO (again: REDO).
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern_random.txt --out <dir>
+record on
+input tone 220 -8
+wait 300
+tap performance
+wait 100
+tap pattern
+wait 150
+snap 01_empty
+tap play
+wait 200
+# RANDOM on the NOTE lane (BASS): seed 1, F5 lit
+tap f5
+wait 1500
+snap 02_seed1_bass
+# two more seeds with the arrows, one with the encoder
+tap right
+wait 1500
+snap 03_seed2
+turn 1
+wait 1500
+snap 04_seed3
+# back to ORIGINAL (the empty lane)
+turn -3
+wait 600
+snap 05_original
+# a new run, then STYLE (LEAD): the same seed, another style
+tap f5
+wait 800
+tap f6
+turn 1
+wait 1500
+snap 06_lead
+# DENSITY 7: only adds steps
+tap f7
+turn 3
+wait 1500
+snap 07_density7
+# RANDOM ALL, then UNDO and REDO
+press shift
+tap f5
+release shift
+wait 1500
+snap 08_random_all
+press shift
+tap f1
+release shift
+wait 600
+snap 09_undone
+press shift
+tap f1
+release shift
+wait 600
+snap 10_redone
+tap play
+wait 200
+wav pattern_random

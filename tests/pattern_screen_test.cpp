@@ -13,13 +13,18 @@
 #include <o3_voc03er/units/vocoder/vocoder.h>
 
 #include "../app/src/pattern_logic.h"
+#include "rec_take.h"
 #include "tract_skip.h"
 
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace app = o3sdk::app;
 namespace sim = o3sdk::sim;
@@ -1109,13 +1114,9 @@ TEST_CASE("pattern: F4 offers note kinds only, and PERFORM's layout and the pale
   CHECK(rig.h->runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("pattern: F5, F6, F7 and SHIFT + F5 are blank: they take no focus; F4 is blank off the NOTE and MOUTH lanes") {
+TEST_CASE("pattern: F4 is blank off the NOTE and MOUTH lanes: it takes no focus there") {
   Rig rig;
   pad(*rig.h, sp(0));
-  tap(*rig.h, app::Button::F5);
-  tap(*rig.h, app::Button::F6);
-  tap(*rig.h, app::Button::F7);
-  shift_tap(*rig.h, app::Button::F5);
   rig.h->turn(1);  // still VALUE
   rig.h->run_ms(60);
   pad(*rig.h, sp(1));
@@ -1429,9 +1430,8 @@ TEST_CASE("pattern: HELP gives a row to every button the screen answers and name
     CHECK(has_row(help, b));
   }
   for (unsigned k = 0; k < 8; ++k) {
-    const bool named = k <= 3u || k == 7u;  // F1 .. F4 and F8; F5 .. F7 are blank
-    CHECK((help.fkey[k] != nullptr) == named);
-    CHECK((help.fkey_shift[k] != nullptr) == (k >= 5u));  // CLR LANE, FOLLOW, CAPTURE
+    CHECK(help.fkey[k] != nullptr);  // on the NOTE lane every F key has a text (F6 STYLE too)
+    CHECK((help.fkey_shift[k] != nullptr) == (k == 0u || k >= 4u));  // UNDO, ALL LANES, CLR LANE, FOLLOW, CAPTURE
   }
   CHECK(help.pad_group[pp(0)] != 0u);  // the palette
   CHECK(help.pad_group[sp(0)] != 0u);  // the steps
@@ -1453,4 +1453,530 @@ TEST_CASE("pattern: HELP gives a row to every button the screen answers and name
   open_help(*mouth.h);
   REQUIRE(mouth.h->runtime().help_open());
   CHECK(mouth.h->runtime().help_overlay().help().fkey[3] != nullptr);
+}
+
+// ---- RANDOM (F5), STYLE (F6), DENSITY (F7), RANDOM ALL and UNDO ------------------------------------------------------------------------------
+// The tests cannot read the bank, so the oracle is the console's `pat` text (the bank as the sequencer reads it): one line per pattern, a token per step.
+
+namespace {
+// The console's command with up to four words after its name; what it printed.
+std::string console_words(std::initializer_list<const char*> words) {
+  const app::DiagCommand* rows = nullptr;
+  const std::size_t n = ::o3sdk_app().diag_commands(rows);
+  const char* argv[8] = {};
+  unsigned argc = 0;
+  for (const char* w : words) {
+    if (argc < 8u) argv[argc++] = w;
+  }
+  std::string text;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (std::string(rows[i].name) != argv[0]) continue;
+    const app::DiagArgs args{argc, argv};
+    app::DiagOut out(app::DiagSink{[](void* c, const char* d, std::size_t k) { static_cast<std::string*>(c)->append(d, k); }, &text});
+    rows[i].run(args, out);
+    return text;
+  }
+  text = "(no such command)";
+  return text;
+}
+
+// One step of a `pat` line.
+struct SV {
+  std::string note = "-";  // "-" a rest, "T" a tie, else the MIDI number (a trailing c: a chord)
+  unsigned car = 0, lvl = 0, slc = 0, mou = 0;
+  bool playing() const { return note != "-"; }
+  bool operator==(const SV& o) const { return note == o.note && car == o.car && lvl == o.lvl && slc == o.slc && mou == o.mou; }
+  bool operator!=(const SV& o) const { return !(*this == o); }
+};
+
+// Pattern `c` (A..H) as the console prints it: the steps up to its LENGTH.
+std::vector<SV> pat_of(char c) {
+  const char name[2] = {c, 0};
+  const std::string text = console_words({"pat", name});
+  std::vector<SV> out;
+  const std::size_t colon = text.find(':');
+  if (colon == std::string::npos) return out;
+  std::size_t i = colon + 1;
+  while (i < text.size()) {
+    while (i < text.size() && text[i] == ' ') ++i;
+    std::size_t e = i;
+    while (e < text.size() && text[e] != ' ' && text[e] != '\n' && text[e] != '\r') ++e;
+    if (e == i) break;
+    const std::string tok = text.substr(i, e - i);
+    SV sv;
+    std::size_t k = 0;
+    while (k < tok.size() && std::strchr("/vsm", tok[k]) == nullptr) ++k;
+    sv.note = tok.substr(0, k);
+    while (k < tok.size()) {
+      const char f = tok[k++];
+      unsigned v = 0;
+      while (k < tok.size() && tok[k] >= '0' && tok[k] <= '9') v = v * 10u + static_cast<unsigned>(tok[k++] - '0');
+      (f == '/' ? sv.car : f == 'v' ? sv.lvl : f == 's' ? sv.slc : sv.mou) = v;
+    }
+    out.push_back(sv);
+    i = e;
+  }
+  return out;
+}
+
+// The part of a step that belongs to lane 0 NOTE, 1 CARRIER, 2 LEVEL, 3 SLICE, 4 MOUTH.
+std::string lane_part(const SV& s, unsigned lane) {
+  switch (lane) {
+    case 0: return s.note;
+    case 1: return std::to_string(s.car);
+    case 2: return std::to_string(s.lvl);
+    case 3: return std::to_string(s.slc);
+    default: return std::to_string(s.mou);
+  }
+}
+// The steps [from, to) of `p`, all lanes but `skip` (5: all lanes), as one string.
+std::string sig(const std::vector<SV>& p, std::size_t from, std::size_t to, unsigned skip) {
+  std::string out;
+  for (std::size_t i = from; i < to && i < p.size(); ++i) {
+    for (unsigned l = 0; l < 5; ++l) {
+      if (l != skip) out += lane_part(p[i], l) + ",";
+    }
+    out += ";";
+  }
+  return out;
+}
+std::string lane_sig(const std::vector<SV>& p, unsigned lane) {
+  std::string out;
+  for (const SV& s : p) out += lane_part(s, lane) + ",";
+  return out;
+}
+bool any_playing(const std::vector<SV>& p) {
+  for (const SV& s : p) {
+    if (s.playing() || s.car != 0u || s.lvl != 0u || s.slc != 0u || s.mou != 0u) return true;
+  }
+  return false;
+}
+
+void to_lane(Rig& rig, unsigned lane) {
+  switch (lane) {
+    case 0: tap(*rig.h, app::Button::Note); break;
+    case 1: tap(*rig.h, app::Button::Instr); break;
+    case 2: tap(*rig.h, app::Button::Vol); break;
+    case 3:
+      tap(*rig.h, app::Button::Note);
+      tap(*rig.h, app::Button::Fx);
+      break;
+    default:
+      tap(*rig.h, app::Button::Note);
+      tap(*rig.h, app::Button::Fx);
+      tap(*rig.h, app::Button::Fx);
+      break;
+  }
+}
+
+// Every lane of steps 1..16 of pattern A holds a mark, so a roll's reach shows.
+void mark_pattern_a() {
+  for (unsigned st = 1; st <= 16; ++st) {
+    const std::string s = std::to_string(st);
+    const std::string note = std::to_string(40u + st);
+    const std::string lvl = std::to_string(50u + st);
+    (void)console_words({"pat", "A", s.c_str(), "note", note.c_str()});
+    (void)console_words({"pat", "A", s.c_str(), "car", (st % 2u) != 0u ? "noise" : "synth"});
+    (void)console_words({"pat", "A", s.c_str(), "lvl", lvl.c_str()});
+    (void)console_words({"pat", "A", s.c_str(), "mou", "2"});
+  }
+}
+void f5(Rig& r) { tap(*r.h, app::Button::F5); }
+void f6(Rig& r) { tap(*r.h, app::Button::F6); }
+void f7(Rig& r) { tap(*r.h, app::Button::F7); }
+void undo(Rig& r) { shift_tap(*r.h, app::Button::F1); }
+}  // namespace
+
+TEST_CASE("pattern: RANDOM on each lane writes that lane over steps 1..LENGTH and nothing else") {
+  for (unsigned lane = 0; lane < 5; ++lane) {
+    if (lane == 3) continue;  // SLICE has its own test (it needs a take)
+    INFO("lane " << lane);
+    Rig rig;
+    mark_pattern_a();
+    const std::vector<SV> full = pat_of('A');
+    REQUIRE(full.size() == 16u);
+    (void)console_words({"pat", "A", "len", "8"});
+    to_lane(rig, lane);
+    const std::vector<SV> before = pat_of('A');
+    REQUIRE(before.size() == 8u);
+    f5(rig);
+    const std::vector<SV> after = pat_of('A');
+    REQUIRE(after.size() == 8u);
+    CHECK(lane_sig(after, lane) != lane_sig(before, lane));      // the lane was written
+    CHECK(sig(after, 0, 8, lane) == sig(before, 0, 8, lane));    // the other lanes of those steps stayed
+    (void)console_words({"pat", "A", "len", "16"});
+    const std::vector<SV> wide = pat_of('A');
+    REQUIRE(wide.size() == 16u);
+    CHECK(sig(wide, 8, 16, 9) == sig(full, 8, 16, 9));  // steps 9..16 were not touched in any lane
+    CHECK(rig.h->runtime().frame_failures() == 0u);
+  }
+}
+
+TEST_CASE("pattern: ORIGINAL is the lane as it was before the first roll, and the seeds scroll with the arrows and the encoder") {
+  Rig rig;
+  mark_pattern_a();
+  const std::vector<SV> s0 = pat_of('A');
+  f5(rig);  // seed 1, F5 lit
+  const std::vector<SV> p1 = pat_of('A');
+  CHECK(lane_sig(p1, 0) != lane_sig(s0, 0));
+  tap(*rig.h, app::Button::Right);  // seed 2
+  const std::vector<SV> p2 = pat_of('A');
+  CHECK(lane_sig(p2, 0) != lane_sig(p1, 0));
+  tap(*rig.h, app::Button::Left);  // seed 1 again: the same pattern
+  CHECK(pat_of('A') == p1);
+  tap(*rig.h, app::Button::Left);  // ORIGINAL
+  CHECK(pat_of('A') == s0);
+  tap(*rig.h, app::Button::Left);  // the arrows stop at ORIGINAL
+  CHECK(pat_of('A') == s0);
+  rig.h->turn(1);  // the encoder is the same scroll
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == p1);
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == p2);  // arrow and encoder reach the same seed 2
+  rig.h->turn(-2);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == s0);
+  // a roll does not touch the other lanes
+  CHECK(sig(p2, 0, 16, 0) == sig(s0, 0, 16, 0));
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: STYLE and DENSITY re-roll a live run with the same seed, and do nothing once the run is over") {
+  Rig rig;
+  const std::vector<SV> s0 = pat_of('A');
+  f5(rig);
+  const std::vector<SV> p1 = pat_of('A');  // seed 1, BASS, DENSITY 4
+  REQUIRE(any_playing(p1));
+  f6(rig);  // STYLE takes the light and the run stays live
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  const std::vector<SV> lead = pat_of('A');
+  CHECK(lane_sig(lead, 0) != lane_sig(p1, 0));
+  rig.h->turn(-1);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == p1);  // back to BASS: the same seed gives the same pattern
+  f7(rig);                   // DENSITY
+  rig.h->turn(2);
+  rig.h->run_ms(40);
+  const std::vector<SV> dense = pat_of('A');
+  CHECK(dense != p1);
+  for (std::size_t i = 0; i < p1.size(); ++i) {
+    CHECK((!p1[i].playing() || dense[i].playing()));  // a higher density only adds steps
+  }
+  rig.h->turn(-2);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == p1);
+  // F5 is still the run: its seed scrolls again after a tap, and ORIGINAL is the lane before the run
+  f5(rig);  // F5 takes the light back and goes to seed 2
+  const std::vector<SV> p2 = pat_of('A');
+  CHECK(p2 != p1);
+  rig.h->turn(-2);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == s0);
+  // the run ends when another of the first four keys takes the light: STYLE and DENSITY then write nothing
+  f5(rig);
+  const std::vector<SV> q1 = pat_of('A');
+  tap(*rig.h, app::Button::F3);  // VALUE takes the light: the run is over
+  f6(rig);
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == q1);
+  f7(rig);
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == q1);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: CARRIER and LEVEL have one style: F6 takes no light, so a live run keeps F5") {
+  for (unsigned lane = 1; lane <= 2; ++lane) {
+    INFO("lane " << lane);
+    Rig rig;
+    to_lane(rig, lane);
+    const std::vector<SV> s0 = pat_of('A');
+    f5(rig);
+    const std::vector<SV> p1 = pat_of('A');
+    CHECK(lane_sig(p1, lane) != lane_sig(s0, lane));
+    f6(rig);  // nothing to step, no light
+    rig.h->turn(-1);  // F5 is still lit: the seed goes to ORIGINAL
+    rig.h->run_ms(40);
+    CHECK(pat_of('A') == s0);
+  }
+}
+
+TEST_CASE("pattern: RANDOM on SLICE with SPEAKS on LIVE writes nothing and starts no run") {
+  Rig rig;
+  to_lane(rig, 3);
+  const std::string before = console_words({"pat"});
+  f5(rig);
+  CHECK(console_words({"pat"}) == before);
+  rig.h->turn(1);  // F5 is not lit: the encoder is VALUE, which has no slice to write either
+  rig.h->run_ms(40);
+  CHECK(console_words({"pat"}) == before);
+  // RANDOM ALL rolls the other lanes and leaves SLICE alone
+  shift_tap(*rig.h, app::Button::F5);
+  const std::vector<SV> all = pat_of('A');
+  CHECK(any_playing(all));
+  CHECK(lane_sig(all, 3) == lane_sig(pat_of('B'), 3));  // (no slice anywhere: both are all zeros)
+  for (const SV& s : all) CHECK(s.slc == 0u);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: RANDOM ALL rolls every lane with one seed and one UNDO puts all of them back; a second one redoes") {
+  Rig rig;
+  const std::vector<SV> s0 = pat_of('A');
+  REQUIRE_FALSE(any_playing(s0));
+  shift_tap(*rig.h, app::Button::F5);
+  const std::vector<SV> all = pat_of('A');
+  CHECK(lane_sig(all, 0) != lane_sig(s0, 0));  // NOTE
+  CHECK(lane_sig(all, 1) != lane_sig(s0, 1));  // CARRIER
+  CHECK(lane_sig(all, 2) != lane_sig(s0, 2));  // LEVEL
+  CHECK(lane_sig(all, 4) != lane_sig(s0, 4));  // MOUTH
+  undo(rig);
+  CHECK(pat_of('A') == s0);
+  undo(rig);  // REDO
+  CHECK(pat_of('A') == all);
+  undo(rig);
+  CHECK(pat_of('A') == s0);
+  // it is the same pattern again for the same seed: a second RANDOM ALL takes a new seed
+  shift_tap(*rig.h, app::Button::F5);
+  CHECK(pat_of('A') != all);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: UNDO after a pad write, a cleared step, SHIFT + step and a held-step overwrite; a second UNDO redoes") {
+  Rig rig;
+  const std::vector<SV> s0 = pat_of('A');
+  undo(rig);  // nothing to undo: nothing changes
+  CHECK(pat_of('A') == s0);
+  pad(*rig.h, sp(0));  // the hand's note on step 1
+  const std::vector<SV> s1 = pat_of('A');
+  CHECK(s1 != s0);
+  undo(rig);
+  CHECK(pat_of('A') == s0);
+  undo(rig);
+  CHECK(pat_of('A') == s1);  // REDONE
+  pad(*rig.h, sp(0));        // a full step under the cursor: cleared
+  CHECK(pat_of('A') == s0);
+  undo(rig);
+  CHECK(pat_of('A') == s1);
+  pad(*rig.h, sp(0), true);  // SHIFT + step: a TIE
+  const std::vector<SV> s2 = pat_of('A');
+  CHECK(s2 != s1);
+  undo(rig);
+  CHECK(pat_of('A') == s1);
+  // a held step overwritten by a palette pad: the cursor is elsewhere, so the held full step is only chosen, and the pad's write is the one act
+  pad(*rig.h, sp(3));
+  const std::vector<SV> s2b = pat_of('A');
+  rig.h->pad_down(sp(0));
+  rig.h->run_ms(20);
+  rig.h->pad_down(pp(5));
+  rig.h->run_ms(20);
+  rig.h->pad_up(pp(5));
+  rig.h->pad_up(sp(0));
+  rig.h->run_ms(40);
+  const std::vector<SV> s3 = pat_of('A');
+  CHECK(s3 != s2b);
+  undo(rig);
+  CHECK(pat_of('A') == s2b);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: UNDO after CLEAR LANE, a RANDOM run (one copy for the whole run), a REC pass and VALUE") {
+  Rig rig;
+  fill(rig, 3);
+  const std::vector<SV> filled = pat_of('A');
+  // CLEAR LANE (SHIFT + F6, F1 confirms)
+  shift_tap(*rig.h, app::Button::F6);
+  tap(*rig.h, app::Button::F1);
+  const std::vector<SV> cleared = pat_of('A');
+  CHECK(cleared != filled);
+  undo(rig);
+  CHECK(pat_of('A') == filled);
+  // a RANDOM run: four seeds, one UNDO back to the lane before the run, a second redoes the last one
+  f5(rig);
+  rig.h->turn(1);
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  const std::vector<SV> last = pat_of('A');
+  CHECK(last != filled);
+  undo(rig);
+  CHECK(pat_of('A') == filled);
+  undo(rig);
+  CHECK(pat_of('A') == last);
+  undo(rig);  // back to the lane before the run
+  CHECK(pat_of('A') == filled);
+  // VALUE: a first change on a step takes a copy, the next ones on the same step do not
+  tap(*rig.h, app::Button::F3);  // VALUE lit (the run is over)
+  tap(*rig.h, app::Button::Right);
+  const std::vector<SV> v1 = pat_of('A');
+  CHECK(v1 != filled);
+  tap(*rig.h, app::Button::Right);
+  CHECK(pat_of('A') != v1);
+  undo(rig);
+  CHECK(pat_of('A') == filled);  // both steps of the value went at once
+  // a REC pass: the first write takes the copy, the next ones of the pass do not
+  tap(*rig.h, app::Button::Rec);
+  pad(*rig.h, pp(3));
+  pad(*rig.h, pp(5));
+  const std::vector<SV> rec = pat_of('A');
+  CHECK(rec != filled);
+  undo(rig);
+  CHECK(pat_of('A') == filled);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("pattern: UNDO after INSERT, DELETE and a pasted pattern; the copy goes with a change of pattern") {
+  Rig rig;
+  fill(rig, 3);
+  const std::vector<SV> filled = pat_of('A');
+  tap(*rig.h, app::Button::Copy);  // the cursor's step
+  tap(*rig.h, app::Button::Insert);
+  const std::vector<SV> inserted = pat_of('A');
+  CHECK(inserted != filled);
+  undo(rig);
+  CHECK(pat_of('A') == filled);
+  tap(*rig.h, app::Button::Delete);  // the cursor's step emptied
+  const std::vector<SV> deleted = pat_of('A');
+  CHECK(deleted != filled);
+  undo(rig);
+  CHECK(pat_of('A') == filled);
+  // the whole pattern pasted over B
+  shift_tap(*rig.h, app::Button::Copy);
+  pad(*rig.h, 9);  // pattern B
+  const std::vector<SV> b0 = pat_of('B');
+  shift_tap(*rig.h, app::Button::Insert);
+  const std::vector<SV> b1 = pat_of('B');
+  CHECK(b1 != b0);
+  undo(rig);
+  CHECK(pat_of('B') == b0);
+  // the copy is dropped by a change of pattern: A's last edit stays when B is shown
+  pad(*rig.h, 8);
+  pad(*rig.h, sp(5));  // A: a note on step 6
+  const std::vector<SV> a_edit = pat_of('A');
+  CHECK(a_edit != filled);
+  pad(*rig.h, 9);  // B shown: the copy goes
+  undo(rig);
+  CHECK(pat_of('A') == a_edit);
+  CHECK(pat_of('B') == b0);
+  // leaving the screen drops it too
+  pad(*rig.h, 8);
+  pad(*rig.h, sp(6));
+  const std::vector<SV> a_edit2 = pat_of('A');
+  tap(*rig.h, app::Button::Performance);
+  tap(*rig.h, app::Button::Pattern);
+  undo(rig);
+  CHECK(pat_of('A') == a_edit2);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+namespace {
+// A 1 BAR take into slot 1 (even cuts) that SPEAKS, as tests/pattern_audition_test.cpp: back on PATTERN with the SLICE lane chosen. AUTOPLAY is off, so
+// SPEAKS is set by SAMPLE's F2.
+void speaks_take(Rig& rig) {
+  sim::Harness& h = *rig.h;
+  tap(h, app::Button::SampleRec);
+  h.run_ms(60);
+  o3_voc03er::test::rec_length_one_bar(h);
+  o3_voc03er::test::rec_autoplay(h, false);
+  o3_voc03er::test::rec_slot(h, 0);
+  tap(h, app::Button::Rec);
+  h.run_ms(9000);
+  tap(h, app::Button::SamplePlay);
+  h.run_ms(60);
+  tap(h, app::Button::F2);  // SPEAKS: this slot
+  h.run_ms(60);
+  tap(h, app::Button::Pattern);
+  h.run_ms(60);
+  tap(h, app::Button::Note);
+  tap(h, app::Button::Fx);  // the SLICE lane
+}
+}  // namespace
+
+TEST_CASE("pattern: RANDOM on SLICE rolls the SPEAKS slot's cuts: CHOP on the playing steps, ORDER in order, UNDO and ORIGINAL back") {
+  Rig rig;
+  speaks_take(rig);
+  (void)console_words({"pat", "A", "len", "8"});
+  const std::vector<SV> s0 = pat_of('A');
+  REQUIRE_FALSE(any_playing(s0));
+  f5(rig);
+  const std::vector<SV> chop = pat_of('A');
+  REQUIRE(chop.size() == 8u);
+  CHECK(chop[0].slc >= 1u);  // CHOP always plays the first step
+  unsigned playing = 0, top = 0;
+  for (const SV& s : chop) {
+    playing += s.slc != 0u ? 1u : 0u;
+    top = s.slc > top ? s.slc : top;
+  }
+  CHECK(playing >= 1u);
+  CHECK(top <= 24u);
+  (void)console_words({"pat", "A", "len", "16"});
+  const std::vector<SV> wide = pat_of('A');
+  for (std::size_t i = 8; i < wide.size(); ++i) CHECK(wide[i].slc == 0u);  // only 1..LENGTH
+  (void)console_words({"pat", "A", "len", "8"});
+  f6(rig);  // STYLE: CHOP, ORDER
+  rig.h->turn(1);
+  rig.h->run_ms(40);
+  const std::vector<SV> order = pat_of('A');
+  unsigned last = 0;
+  bool ascending = true;
+  for (const SV& s : order) {
+    if (s.slc == 0u) continue;
+    ascending = ascending && s.slc > last;
+    last = s.slc;
+  }
+  CHECK(ascending);  // slice k + 1 on step floor(k * len / N), in order
+  CHECK(order[0].slc == 1u);
+  f5(rig);
+  rig.h->turn(-5);  // ORIGINAL (the arrows and the encoder stop there)
+  rig.h->run_ms(40);
+  CHECK(pat_of('A') == s0);
+  CHECK(rig.h->runtime().frame_failures() == 0u);
+}
+
+namespace {
+double listen_rms(sim::Harness& h, unsigned ms) {
+  const std::size_t from = h.audio().size();
+  h.run_ms(ms);
+  const std::vector<std::int16_t>& a = h.audio();
+  double sum = 0.0;
+  std::size_t n = 0;
+  for (std::size_t i = from; i < a.size(); i += 2) {
+    sum += static_cast<double>(a[i]) * static_cast<double>(a[i]);
+    ++n;
+  }
+  return n != 0 ? std::sqrt(sum / static_cast<double>(n)) / 32768.0 : 0.0;
+}
+}  // namespace
+
+TEST_CASE("pattern: the SLICE lane's palette pad alone brings the note: it sounds while held and stops on the release and on leave") {
+  constexpr double kSound = 1e-4;
+  // The observable is the output energy: BANDS speaks while it hears the tone on the fake capture and a carrier note is held, so a slice with no note is silence.
+  {
+    Rig rig;
+    rig.h->record(true);
+    speaks_take(rig);
+    CHECK(listen_rms(*rig.h, 300) < kSound);  // nothing held: the tone alone does not speak
+    rig.h->pad_down(pp(2));
+    CHECK(listen_rms(*rig.h, 120) > kSound);  // the slice and its note
+    rig.h->pad_up(pp(2));
+    rig.h->run_ms(3000);  // the slice ends by itself (ONE SHOT): the note is gone
+    CHECK(listen_rms(*rig.h, 300) < kSound);
+  }
+  {
+    Rig rig;
+    rig.h->record(true);
+    speaks_take(rig);
+    rig.h->pad_down(pp(2));
+    CHECK(listen_rms(*rig.h, 120) > kSound);
+    tap(*rig.h, app::Button::Performance);  // leave with the pad held: the note ends with the screen
+    rig.h->run_ms(3000);
+    CHECK(listen_rms(*rig.h, 300) < kSound);
+    rig.h->pad_up(pp(2));  // the late release is harmless
+    rig.h->run_ms(100);
+    CHECK(rig.h->runtime().frame_failures() == 0u);
+  }
 }

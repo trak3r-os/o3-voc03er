@@ -589,4 +589,62 @@ inline void clear_steps(PatternData& p) noexcept {
 }
 inline constexpr const char* kClearPatternPrompt = "EMPTY THE PATTERN: F1 CONFIRMS";
 
+// ---- RANDOM (F5), STYLE (F6), DENSITY (F7) and UNDO (SHIFT + F1) ------------------------------------------------------------------------
+// The seeds of a run scroll 1..kSeedMax; position 0 is ORIGINAL (the lane as it was before the run's first roll).
+inline constexpr unsigned kSeedMax = 999;
+// How many styles a lane has (F6 STYLE): NOTE BASS LEAD CHORDS LONG, SLICE CHOP ORDER, MOUTH VOWELS WORDS; CARRIER and LEVEL have one each.
+constexpr unsigned lane_styles(Lane lane) noexcept {
+  return lane == Lane::Note ? 4u : (lane == Lane::Slice || lane == Lane::Mouth ? 2u : 0u);
+}
+// One step of a value in 0..count-1 (H2): a tap wraps, an encoder detent or an arrow clamps.
+constexpr unsigned step_in(unsigned now, int delta, bool tap, unsigned count) noexcept {
+  if (count == 0u) {
+    return 0u;
+  }
+  const int last = static_cast<int>(count) - 1;
+  int v = static_cast<int>(now) + delta;
+  if (v < 0) {
+    v = tap ? last : 0;
+  } else if (v > last) {
+    v = tap ? 0 : last;
+  }
+  return static_cast<unsigned>(v);
+}
+// Steps 0..len-1 of one lane of `src` over `dst`, the other lanes of each step left as they are (NOTE is note, kind and voicing together).
+inline void restore_lane(PatternData& dst, const PatternData& src, Lane lane, unsigned len) noexcept {
+  for (unsigned i = 0; i < len && i < kPatternSteps; ++i) {
+    const Step s = get_step(src, i);
+    switch (lane) {
+      case Lane::Note: {
+        Step d = get_step(dst, i);
+        d.note = s.note;
+        d.kind = s.kind;
+        d.voicing = s.voicing;
+        (void)set_step(dst, i, d);
+        break;
+      }
+      case Lane::Carrier:
+        (void)set_carrier(dst, i, s.carrier);
+        break;
+      case Lane::Level:
+        (void)set_level(dst, i, s.level);
+        break;
+      case Lane::Slice:
+        (void)set_slice(dst, i, s.slice);
+        break;
+      case Lane::Mouth:
+        (void)set_mouth(dst, i, get_mouth(src, i));
+        break;
+    }
+  }
+}
+// Steps 0..len-1 of `src` over `dst` whole, the MOUTH lane with them (RANDOM ALL's ORIGINAL).
+inline void restore_steps(PatternData& dst, const PatternData& src, unsigned len) noexcept {
+  for (unsigned i = 0; i < len && i < kPatternSteps; ++i) {
+    (void)set_step(dst, i, get_step(src, i));
+    (void)set_mouth(dst, i, get_mouth(src, i));
+  }
+}
+inline constexpr const char* kNoSlices = "NO SLICES: CUT THE SLOT ON SAMPLE EDIT";
+
 }  // namespace o3_voc03er::pattern

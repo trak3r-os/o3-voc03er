@@ -672,14 +672,27 @@ A pad writes what its row plays: a note or a chord of the row's kind. A palette 
 | F2 TEMPO | The tempo |
 | F3 VALUE | The cursor step's value in the lane; the encoder edits it. LEVEL runs 1 to 100, and 1 to 127 in TRACT (ACCENT, where the level drives the jaw); the palette's last pad is the top. Lit on entry |
 | F4 CHORD | NOTE lane: row B's chord kind (see above). MOUTH lane: SET, the palette VOWELS or WORDS (outside TRACT it flips the page and says where the lane is heard). Blank on CARRIER, LEVEL and SLICE |
-| F5, F6, F7 | Blank |
+| F5 RANDOM | Rolls the lane with a new seed and lights F5; then the encoder and LEFT / RIGHT scroll the seeds (the window shows the seed number, or ORIGINAL). See "Make a pattern fast" |
+| F6 STYLE | The lane's style for RANDOM: BASS, LEAD, CHORDS or LONG on NOTE; CHOP or ORDER on SLICE; VOWELS or WORDS on MOUTH. CARRIER and LEVEL have one style: the key stays dim |
+| F7 DENSITY | How many steps RANDOM fills, 1 to 8 (4 at start), one for the whole screen |
 | F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
+| SHIFT + F1 UNDO | Takes back the last change; pressed again it puts it back (REDO) |
+| SHIFT + F5 RANDOM ALL | Rolls every lane at once with one new seed (SLICE only if SPEAKS has cuts). One UNDO takes all lanes back |
 | SHIFT + F6 CLR LANE | Clears the lane. F1 confirms; any other key says NOT CLEARED |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | SHIFT + F8 CAPTURE | MOUTH lane only: reads the slot SAMPLE shows into the lane. Pressed again while it reads, it cancels |
 
-The F keys with a value (LENGTH, TEMPO, VALUE) light on a first tap and step on a second; LEFT and RIGHT are one encoder step of the lit key. SHIFT + LEFT and RIGHT move the cursor.
-SAVE, CLR LANE, FOLLOW, CAPTURE, CHORD and SET act on the tap.
+The F keys with a value (LENGTH, TEMPO, VALUE, STYLE, DENSITY) light on a first tap and step on a second; LEFT and RIGHT are one encoder step of the lit key. SHIFT + LEFT and RIGHT move the cursor.
+SAVE, CLR LANE, FOLLOW, CAPTURE, CHORD, SET and RANDOM act on the tap.
+
+**Make a pattern fast.** You do not have to place every step. Pick a lane (start with NOTE) and tap **F5 RANDOM**: the lane fills with a new idea, and if the pattern is playing you hear it at once.
+F5 stays lit: turn the encoder, or press LEFT and RIGHT, and every click is another pattern from the same family, one after the other. Go back past number 1 and you reach ORIGINAL, the lane
+exactly as it was before you started. When one is close, change how it is made: **F6 STYLE** (BASS, LEAD, CHORDS, LONG for notes; CHOP or ORDER for slices; VOWELS or WORDS for the mouth) and
+**F7 DENSITY** (1 sparse, 8 busy) re-make the same seed in another style or with more steps, and the steps it had stay. Tap F5 again for new seeds. To fill every lane in one go, hold SHIFT and
+tap F5 (RANDOM ALL). It never writes past LENGTH. Slices need a slot that SPEAKS and has cuts, or the screen says `NO SLICES: CUT THE SLOT ON SAMPLE EDIT`.
+Then make it yours by hand: pressing a step pad or any other edit ends the run, and the lane is what you see. A roll you do not like is not a loss: **SHIFT + F1 UNDO** puts back everything before the
+last change (a whole run of seeds is one change, so is RANDOM ALL), and pressing it again puts the change back. There is one level, for the pattern on the screen; another pattern or leaving the
+screen forgets it. On the SLICE lane a palette pad alone now plays the slice with its note in BANDS, TALK and ROBOT. Rolling on the unit needs more testing.
 
 **The MOUTH lane** writes TRACT's mouth, one value a step. Its palette has two pages, VOWELS and WORDS (F4 SET flips them).
 Section 5b says what each value does and how the pads write it. SHIFT + F6 empties the lane, as on the others.
