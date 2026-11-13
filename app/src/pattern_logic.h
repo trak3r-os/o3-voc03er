@@ -42,29 +42,35 @@ constexpr std::uint8_t lane_modes(Lane lane) noexcept {
 inline constexpr const char* kClearPrompt[kLanes] = {"CLEAR NOTE LANE: F1 CONFIRMS", "CLEAR CARRIER LANE: F1 CONFIRMS", "CLEAR LEVEL LANE: F1 CONFIRMS",
                                                      "CLEAR SLICE LANE: F1 CONFIRMS", "CLEAR MOUTH LANE: F1 CONFIRMS"};
 
-inline constexpr unsigned kPalettePads = 24;  // pads 0..23: rows 0 and 1 (row 0 is the top)
-inline constexpr unsigned kFirstStepPad = 24;  // rows 2 and 3
+// The pads (the house rule: the lower two rows are the keyboard, as SAMPLE's are; the top two rows are the screen's own things). The palette is addressed by
+// its own index 0..23 (palette row 0 is row A, row 1 is row B; index = row * 12 + column), which is the pad minus kPaletteBase.
+inline constexpr unsigned kPalettePads = 24;
+inline constexpr unsigned kPaletteBase = 24;  // pads 24..47: rows 2 and 3, the same pads as SAMPLE's notes
 inline constexpr unsigned kCarrierPads = kCarrierMax + 1u;  // FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE
 
-// A pad of rows 2 and 3: columns 0..7 are steps 1..16 (row 2 the first eight), columns 8..11 are patterns A..H (row 2 A..D). -1: not that kind.
+// The palette index of a pad of the lower two rows; -1: not a palette pad.
+constexpr int palette_of_pad(unsigned pad) noexcept { return pad >= kPaletteBase && pad < kPaletteBase + kPalettePads ? static_cast<int>(pad - kPaletteBase) : -1; }
+constexpr unsigned pad_of_palette(unsigned idx) noexcept { return kPaletteBase + idx; }
+
+// A pad of rows 0 and 1: columns 0..7 are steps 1..16 (row 0 the first eight), columns 8..11 are patterns A..H (row 0 A..D). -1: not that kind.
 constexpr int step_of_pad(unsigned pad) noexcept {
-  if (pad < kFirstStepPad || pad >= o3sdk::app::kPadCount) {
+  if (pad >= kPalettePads) {
     return -1;
   }
-  const unsigned row = o3sdk::app::pad_row(pad) - 2u;
+  const unsigned row = o3sdk::app::pad_row(pad);
   const unsigned col = o3sdk::app::pad_col(pad);
   return col < 8u ? static_cast<int>(row * 8u + col) : -1;
 }
 constexpr int pattern_of_pad(unsigned pad) noexcept {
-  if (pad < kFirstStepPad || pad >= o3sdk::app::kPadCount) {
+  if (pad >= kPalettePads) {
     return -1;
   }
-  const unsigned row = o3sdk::app::pad_row(pad) - 2u;
+  const unsigned row = o3sdk::app::pad_row(pad);
   const unsigned col = o3sdk::app::pad_col(pad);
   return col >= 8u ? static_cast<int>(row * 4u + (col - 8u)) : -1;
 }
-constexpr unsigned pad_of_step(unsigned step) noexcept { return o3sdk::app::pad_at(2u + step / 8u, step % 8u); }
-constexpr unsigned pad_of_pattern(unsigned p) noexcept { return o3sdk::app::pad_at(2u + p / 4u, 8u + p % 4u); }
+constexpr unsigned pad_of_step(unsigned step) noexcept { return o3sdk::app::pad_at(step / 8u, step % 8u); }
+constexpr unsigned pad_of_pattern(unsigned p) noexcept { return o3sdk::app::pad_at(p / 4u, 8u + p % 4u); }
 
 // The LEVEL range: 1..100 (the synth takes 100 and up as full), and in TRACT 1..127 (above 100 is ACCENT, accent_of). The palette and the VALUE key
 // cover the same range, so a pad and a turn reach the same values.
@@ -191,13 +197,16 @@ inline void note_name(char (&out)[6], unsigned note) noexcept {
 // The MOUTH lane's VALUE walk: FOLLOW, A..U, LIP TIP BCK, 8 words, 6 WOBs (27 values, the last is 26).
 inline constexpr int kMouthWalkMax = static_cast<int>(kMouthWord + kMouthWords + kMouthWobRates) - 1;
 
-// The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind), CARRIER 0..7 (7 is LIVE), LEVEL 1..`level_cap`
+// The value the VALUE key steps, by lane: NOTE a semitone (a rest starts at 48, a chord keeps its kind, a TIE stays), CARRIER 0..7 (7 is LIVE), LEVEL 1..`level_cap`
 // (100, or 127 in TRACT; a stored value above the cap comes down to it). A step with no change (the end of a range, the SLICE lane with no slices)
 // returns false; SLICE steps 0..`slice_count` (0 is none).
 inline bool step_value(PatternData& p, unsigned i, Lane lane, int delta, unsigned slice_count = 0, unsigned level_cap = kLevelTop) noexcept {
   const Step s = get_step(p, i);
   switch (lane) {
     case Lane::Note: {
+      if (is_tie(s)) {
+        return false;  // a TIE is left alone (SHIFT + the step pad again ends it, a step pad drops a note over it)
+      }
       if (s.note == 0u) {
         return delta > 0 && set_note(p, i, 48u);
       }
@@ -319,6 +328,209 @@ inline bool rest_lane(PatternData& p, unsigned i, Lane lane) noexcept {
       return set_mouth(p, i, 0u);
   }
   return false;
+}
+
+// ---- The hand: what a palette pad picked, and what a step pad does with it (docs/UI-DESIGN.md "PATTERN") ------------------------------------
+// Each lane keeps its own hand. NOTE: `s` holds the note, kind and voicing (a chord is its root, its kind and the voicing); CARRIER: `s.carrier`; LEVEL:
+// `s.level` (1..127, raw, so 100 is a value of its own and not the empty default); SLICE: `s.slice` (1..); MOUTH: `mouth`.
+struct Hand {
+  Step s{};
+  std::uint8_t mouth = 0;
+};
+
+// The hand a palette pad (index 0..23) gives in `lane`: false for a dark pad or a pad that plays nothing (OFF, out of range, a slice past `slice_count`). `voicing` is the
+// chord voicing, `level_cap` the LEVEL palette's top.
+inline bool hand_of_pad(Hand& out, Lane lane, unsigned pad, int octave, const pads::Layout& layout, unsigned voicing, MouthPage page, unsigned level_cap,
+                        unsigned slice_count) noexcept {
+  out = Hand{};
+  if (pad >= kPalettePads) {
+    return false;
+  }
+  switch (lane) {
+    case Lane::Note: {
+      const pads::PadPlay pl = palette_play(pad, octave, layout);
+      if (pl.note < 1) {
+        return false;
+      }
+      out.s.note = static_cast<std::uint8_t>(pl.note);
+      out.s.kind = pl.kind;
+      out.s.voicing = pl.kind == 0u ? std::uint8_t{0} : static_cast<std::uint8_t>(voicing & 3u);
+      return true;
+    }
+    case Lane::Carrier:
+      out.s.carrier = static_cast<std::uint8_t>(pad);
+      return pad < kCarrierPads;
+    case Lane::Level:
+      out.s.level = static_cast<std::uint8_t>(level_of_pad(pad, level_cap));
+      return true;
+    case Lane::Slice:
+      out.s.slice = static_cast<std::uint8_t>(pad + 1u);
+      return pad < slice_count && pad < kSliceMax;
+    case Lane::Mouth:
+      out.mouth = mouth_of_pad(pad, page);
+      return out.mouth != 0u;
+  }
+  return false;
+}
+
+// The hand a lane starts with: NOTE `root_note` (the key's root at the pads' octave: the palette's first pad), the others their first palette value.
+constexpr Hand first_hand(Lane lane, unsigned root_note, unsigned level_cap) noexcept {
+  Hand h{};
+  switch (lane) {
+    case Lane::Note:
+      h.s.note = static_cast<std::uint8_t>(root_note < 1u ? 1u : (root_note > 127u ? 127u : root_note));
+      break;
+    case Lane::Carrier:
+      break;
+    case Lane::Level:
+      h.s.level = static_cast<std::uint8_t>(level_of_pad(0, level_cap));
+      break;
+    case Lane::Slice:
+      h.s.slice = 1;
+      break;
+    case Lane::Mouth:
+      h.mouth = 1;
+      break;
+  }
+  return h;
+}
+
+// Does step `i` of `lane` hold exactly the hand? (A TIE holds no note, so never.) CARRIER FOLLOW is the empty value, so every step holds it.
+inline bool holds_hand(const PatternData& p, unsigned i, Lane lane, const Hand& h) noexcept {
+  const Step s = get_step(p, i);
+  switch (lane) {
+    case Lane::Note:
+      return s.note != 0u && s.note == h.s.note && s.kind == h.s.kind && (s.kind == 0u || s.voicing == h.s.voicing);
+    case Lane::Carrier:
+      return s.carrier == h.s.carrier;
+    case Lane::Level:
+      return s.level == h.s.level;
+    case Lane::Slice:
+      return s.slice == h.s.slice;
+    case Lane::Mouth:
+      return get_mouth(p, i) == h.mouth;
+  }
+  return false;
+}
+
+// Write the hand into step `i` of `lane` (always; a TIE becomes the note). False: nothing written (an empty hand, a step past the table).
+inline bool write_hand(PatternData& p, unsigned i, Lane lane, const Hand& h) noexcept {
+  switch (lane) {
+    case Lane::Note:
+      if (h.s.note == 0u) {
+        return false;
+      }
+      return h.s.kind == 0u ? set_note(p, i, h.s.note)
+                            : set_chord(p, i, h.s.note, static_cast<ChordKind>(h.s.kind - 1u), static_cast<Voicing>(h.s.voicing));
+    case Lane::Carrier:
+      return set_carrier(p, i, h.s.carrier);
+    case Lane::Level:
+      return h.s.level != 0u && set_level(p, i, h.s.level);
+    case Lane::Slice:
+      return h.s.slice != 0u && set_slice(p, i, h.s.slice);
+    case Lane::Mouth:
+      return h.mouth != 0u && set_mouth(p, i, h.mouth);
+  }
+  return false;
+}
+
+// Does step `i` hold something in `lane`? NOTE: a note, a chord or a TIE; the others: anything but their empty value (FOLLOW, the default level, no slice, no mouth).
+inline bool lane_full(const PatternData& p, unsigned i, Lane lane) noexcept {
+  const Step s = get_step(p, i);
+  switch (lane) {
+    case Lane::Note:
+      return s.note != 0u || is_tie(s);
+    case Lane::Carrier:
+      return s.carrier != 0u;
+    case Lane::Level:
+      return s.level != 0u;
+    case Lane::Slice:
+      return s.slice != 0u;
+    case Lane::Mouth:
+      return get_mouth(p, i) != 0u;
+  }
+  return false;
+}
+
+// The hand a full step gives (a step pad chooses it): false for an empty step and for a TIE (it holds no note, so the hand stays).
+inline bool hand_of_step(Hand& out, const PatternData& p, unsigned i, Lane lane) noexcept {
+  const Step s = get_step(p, i);
+  if (!lane_full(p, i, lane) || is_tie(s)) {
+    return false;
+  }
+  out = Hand{};
+  switch (lane) {
+    case Lane::Note:
+      out.s.note = s.note;
+      out.s.kind = s.kind;
+      out.s.voicing = s.voicing;
+      break;
+    case Lane::Carrier:
+      out.s.carrier = s.carrier;
+      break;
+    case Lane::Level:
+      out.s.level = s.level;
+      break;
+    case Lane::Slice:
+      out.s.slice = s.slice;
+      break;
+    case Lane::Mouth:
+      out.mouth = get_mouth(p, i);
+      break;
+  }
+  return true;
+}
+
+// A step pad's press (no SHIFT): on an empty step the hand is put there; on a full step that is not under the cursor nothing is written and the step
+// becomes the hand (`hand` is replaced; a TIE leaves it); on a full step under the cursor its lane is cleared (as rest_lane leaves it). The caller moves the cursor.
+enum class Press : std::uint8_t { Nothing, Put, Chose, Cleared };
+inline Press press_step(PatternData& p, unsigned i, unsigned cursor, Lane lane, Hand& hand) noexcept {
+  if (i >= length_of(p)) {
+    return Press::Nothing;
+  }
+  if (!lane_full(p, i, lane)) {
+    return write_hand(p, i, lane, hand) ? Press::Put : Press::Nothing;
+  }
+  if (i != cursor) {
+    (void)hand_of_step(hand, p, i, lane);
+    return Press::Chose;
+  }
+  return rest_lane(p, i, lane) ? Press::Cleared : Press::Nothing;
+}
+
+// SHIFT + a step pad on the NOTE lane: a TIE (the step holds the notes before it), or, on a step that already is one, a rest.
+inline Press tie_toggle(PatternData& p, unsigned i) noexcept {
+  if (i >= length_of(p)) {
+    return Press::Nothing;
+  }
+  if (is_tie(get_step(p, i))) {
+    return set_rest(p, i) ? Press::Cleared : Press::Nothing;
+  }
+  return set_tie(p, i) ? Press::Put : Press::Nothing;
+}
+
+// F4 CHORD: what the palette's lower row (row B) plays. The upper row (A) is always the notes. A tap steps and wraps, an encoder detent stops at the ends.
+inline constexpr unsigned kChordKinds = 4;
+inline constexpr pads::Plays kChordPlays[kChordKinds] = {pads::Plays::Triad, pads::Plays::Seventh, pads::Plays::Open, pads::Plays::Power};
+inline constexpr const char* kChordNames[kChordKinds] = {"TRIAD", "7TH", "OPEN", "POWER"};
+constexpr bool is_chord_plays(pads::Plays p) noexcept { return p == pads::Plays::Triad || p == pads::Plays::Seventh || p == pads::Plays::Open || p == pads::Plays::Power; }
+constexpr unsigned chord_index(pads::Plays p) noexcept { return is_chord_plays(p) ? static_cast<unsigned>(p) - 1u : 0u; }
+// The chord kind the palette keeps: row B's, else row A's, else the triad.
+constexpr unsigned palette_chord(const pads::Layout& l) noexcept {
+  return is_chord_plays(l.row[1]) ? chord_index(l.row[1]) : (is_chord_plays(l.row[0]) ? chord_index(l.row[0]) : 0u);
+}
+// Is the palette row A the notes and row B a chord kind?
+constexpr bool palette_normal(const pads::Layout& l) noexcept { return l.row[0] == pads::Plays::Note && is_chord_plays(l.row[1]); }
+constexpr unsigned chord_step(unsigned index, int delta, bool tap) noexcept {
+  const int n = static_cast<int>(index) + delta;
+  const int last = static_cast<int>(kChordKinds) - 1;
+  return tap ? static_cast<unsigned>((n % static_cast<int>(kChordKinds) + static_cast<int>(kChordKinds)) % static_cast<int>(kChordKinds))
+             : static_cast<unsigned>(n < 0 ? 0 : (n > last ? last : n));
+}
+
+// UP and DOWN across the lanes, NOTE at the top, no wrap: `up` goes towards NOTE.
+constexpr unsigned lane_step(unsigned lane, bool up) noexcept {
+  return up ? (lane == 0u ? 0u : lane - 1u) : (lane + 1u >= kLanes ? kLanes - 1u : lane + 1u);
 }
 
 // ---- COPY, INSERT, DELETE (docs/UI-DESIGN.md section 3): the step under the cursor, or with SHIFT the whole pattern ----------------------

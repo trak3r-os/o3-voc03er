@@ -1,27 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// PATTERN (docs/UI-DESIGN.md "PATTERN"), in the OR NOIR skin: the pattern letter A..H large at the left, sixteen step cells with four lanes under each
+// PATTERN (docs/UI-DESIGN.md "PATTERN"), in the OR NOIR skin: the pattern letter A..H large at the left, sixteen step cells with five lanes under each
 // (NOTE, CARRIER, LEVEL, SLICE, MOUTH: what each step stores), the playhead in the voice ink, the cursor framed, the lane in force lit.
 //
-//   F1 PATTERN  F2 LANE  F3 LENGTH  F4 TEMPO  F5 VALUE  F6 TOP PADS  F7 (blank)  F8 SAVE      (SHIFT: F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
-//   A tap on F1..F5 points the encoder at that key (it stays lit); a second tap steps it on. F6 TOP PADS sets both note rows of the palette (pad rows 0 and 1, A and B) at once,
-//   from the same six values as SAMPLE's F1 LOW PADS (NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER: sample_logic.h; never OFF): the first tap steps, a tap wraps, a detent stops
-//   at the ends, and both rows go dark for a moment. The palette is the one PATTERN, SAMPLE and SAMPLE EDIT share (SP1; PERFORM's layout is a different thing and no strip is
-//   reachable here). F6 is dim off the NOTE lane; F7 is blank (no name, no value, no action) except on the MOUTH lane, where F6 is SET and F7 is FILL. SHIFT + F6 clears the lane
-//   of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does.
-//   The encoder starts on F5, the cursor step's value in the lane. SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected
-//   and writes the nearest of TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press
-//   cancels, leaving the screen cancels, and nothing is written before the analysis ends.
-//   UP / DOWN: the octave (PERFORM's and SAMPLE's, one press one step, the palette's notes move by 12). LEFT / RIGHT: the cursor (they repeat when
-//   held). NOTE, INSTR, VOL, FX and F2: the lane (app.cpp opens the screen on it; FX: SLICE, then MOUTH, then SLICE).
-//   Pads: rows 2 and 3, columns 0..7: steps 1..16 (a press moves the cursor; SHIFT + press writes a rest in the lane); columns 8..11: patterns A..H (the
-//   one shown, and the next to play: it starts when the playing one ends). Rows 0 and 1: the lane's palette (NOTE: the notes palette's rows A and B, what
-//   they play there, at PERFORM's octave, lit like PERFORM's; CARRIER: FOLLOW, SYNTH, NOISE, SLOT 1..4; LEVEL: 24 steps up to 100; SLICE: the SPEAKS
-//   slot's cuts 1..24, lit up to its count; MOUTH: row 0 PERFORM's mouth strip, the nine vowels then LIPS, TIP, BACK, row 1 the vowels with GLD, the
-//   slide into them; the lane speaks in TRACT only, dim elsewhere, and a pad sounds the mouth live there). A palette pad writes into the cursor's step and moves the cursor on; a pad that plays nothing writes nothing.
-//   On the NOTE lane a palette pad also sounds while it is held (PERFORM's local-note path, so the bar's note-offs do not cut it) and is lit; SHIFT +
-//   a palette pad sounds and writes nothing. With one or more step pads held a palette pad writes every held step and the cursor stays.
+// The model: pick below, put above (the house rule: the lower two pad rows are the keyboard, as SAMPLE's are; the top two rows are the screen's own things).
+// A palette pad (pads 24..47, the lane's palette) sounds what it is while it is held and becomes the lane's HAND; it writes nothing by itself. A step pad
+// (rows 0 and 1, columns 0..7) on an empty step puts the hand there and moves the cursor; on a full step that is not under the cursor it chooses it (the
+// cursor goes there, it sounds, its value becomes the hand, nothing is written; a TIE leaves the hand alone); on a full step under the cursor it clears it
+// (pattern_logic.h press_step). SHIFT + a step pad on the NOTE lane is a TIE (the step holds the notes before it; again ends it), on the other lanes it clears the
+// step. With a step pad held a palette pad writes every held step at once (and is picked). REC (the button) arms writing from the palette pads: with the
+// transport stopped a pad writes the cursor's step and the cursor moves on, while it plays the step that plays (midi_pattern_logic.h, the rule MIDI notes
+// use); REC goes off when the screen is left. Each lane keeps its own hand (hand_[]); the NOTE hand moves with the octave.
+//
+//   F1 LENGTH  F2 TEMPO  F3 VALUE  F4 CHORD (MOUTH: SET)  F5 F6 F7 (blank)  F8 SAVE      (SHIFT: F5 blank, F6 CLR LANE, F7 FOLLOW, F8 CAPTURE)
+//   A tap on F1..F3 points the encoder at that key (it stays lit); a second tap steps it on. F3 is lit when the screen is entered. F4 CHORD (NOTE lane) is the
+//   palette's lower row: TRIAD, 7TH, OPEN, POWER (a tap steps and wraps, a detent stops at the ends); the upper row is always the notes, so the palette is
+//   rows A NOTES and B CHORDS whatever PERFORM left (enter() and F4 write it). On the MOUTH lane F4 is SET, the palette's page (VOWELS or WORDS: an action,
+//   no focus). On the other lanes F4 is blank. F5, F6 and F7 are blank in every lane and take no focus (the RANDOM keys will use them). SHIFT + F6 clears
+//   the lane of the pattern (F1 confirms), SHIFT + F7 toggles the cursor riding the playhead, F8 saves the bank like FILE does. F3 changes the cursor step's value in
+//   the lane (a TIE is left alone). SHIFT + F8 CAPTURE (MOUTH lane only, mouth_capture.h): reads the slot SAMPLE has selected and writes the nearest of
+//   TRACT's nine vowels (a closure where the level dips) into the MOUTH lane, a step at a time from update(); a second press cancels, leaving the screen
+//   cancels, and nothing is written before the analysis ends.
+//   Arrows: LEFT / RIGHT one encoder step of the lit F key (they repeat when held); SHIFT + LEFT / RIGHT the cursor; UP / DOWN the lane (NOTE, CARRIER, LEVEL,
+//   SLICE, MOUTH, no wrap); SHIFT + UP / DOWN the octave (PERFORM's and SAMPLE's, one press one step, the palette's notes move by 12). NOTE, INSTR, VOL and FX
+//   also choose the lane (FX: SLICE, then MOUTH, then SLICE).
+//   Pads: rows 0 and 1, columns 0..7 steps 1..16 (past LENGTH dark), columns 8..11 patterns A..H (the one shown, and the next to play: it starts when the playing
+//   one ends). Rows 2 and 3: the lane's palette (NOTE: rows A and B of the notes palette, at PERFORM's octave, pad for pad what SAMPLE's lower rows play; CARRIER:
+//   FOLLOW, SYNTH, NOISE, SLOT 1..4, LIVE; LEVEL: 24 steps up to 100 (127 in TRACT); SLICE: the SPEAKS slot's cuts 1..24, lit up to its count; MOUTH: row 0
+//   PERFORM's mouth strip, the nine vowels then LIPS, TIP, BACK, row 1 the vowels with GLD, the slide into them; the lane speaks in TRACT only, dim elsewhere, and
+//   a pad sounds the mouth live there). A pad that plays nothing is not picked. A pad sounds while it is held (PERFORM's local-note path, so the bar's note-offs
+//   do not cut it); SHIFT + a palette pad sounds it and picks nothing. The palette is addressed by its index 0..23 (pt::palette_of_pad).
 //
 // Main loop only. The screen keeps a cursor and a few flags; HELP's labels are in the SDRAM (g_pd in the .cpp).
 
@@ -91,14 +100,26 @@ class PatternScreen final : public o3sdk::app::Screen {
   void say_heard(o3sdk::app::Context& ctx, std::uint8_t modes) noexcept;  // the line that says where `modes` hear a value ("HEARD IN TRACT ONLY")
   void show_pattern(o3sdk::app::Context& ctx, unsigned p, bool by_hand) noexcept;  // by_hand: a chain that plays keeps its own request
   void pad(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
-  void write_palette(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;
+  void pick(o3sdk::app::Context& ctx, unsigned pad, bool shift) noexcept;  // a palette pad (the lower rows, by index): sounds, becomes the hand, writes held steps (and with REC the step it targets)
+  void audition_chosen(o3sdk::app::Context& ctx, unsigned step) noexcept;
+  void step_press(o3sdk::app::Context& ctx, unsigned step, bool shift) noexcept;  // a step pad: puts the hand, chooses a full step, clears the cursor's, or with SHIFT a TIE
+  void normalise_palette() noexcept;  // rows A NOTES and B CHORDS (kept kind)
+  void init_hands(const o3sdk::app::Context& ctx) noexcept;
+  void step_octave_hand(o3sdk::app::Context& ctx, int delta) noexcept;
+  // Where a recording write lands (REC pads, MIDI notes): the step that plays, or with the transport stopped the cursor's; rec_moved then moves the cursor.
+  struct RecTarget {
+    PatternData* p = nullptr;
+    unsigned at = 0;
+    bool at_cursor = true;
+    unsigned pattern = 0;
+  };
+  RecTarget rec_target(bool playing, std::uint16_t edge) noexcept;
+  void rec_moved(const RecTarget& t) noexcept;
   void audition(o3sdk::app::Context& ctx, unsigned pad, unsigned note, unsigned kind, std::uint8_t velocity = PerformScreen::kAuditionVelocity,
                 unsigned voicing = PerformScreen::kCurrentVoicing) noexcept;
-  void audition_step(o3sdk::app::Context& ctx, unsigned pad, unsigned step) noexcept;  // LEVEL: the step's note or chord at the step's level
+  void audition_step(o3sdk::app::Context& ctx, unsigned pad, unsigned step, std::uint8_t velocity) noexcept;  // LEVEL: the step's note or chord at `velocity`
   void audition_slice(o3sdk::app::Context& ctx, unsigned pad) noexcept;                // SLICE: fires the slice on the SPEAKS slot
-  // V3b, the MOUTH lane (F6 SET flips the palette page, F7 FILL writes a random walk; main loop only).
-  void fill_press(o3sdk::app::Context& ctx) noexcept;  // F7: fills, or asks first when the lane holds something that is not the last fill's own output
-  void fill_now(o3sdk::app::Context& ctx) noexcept;
+  // V3b, the MOUTH lane (F4 SET flips the palette page; main loop only).
   void word_start(o3sdk::app::Context& ctx, unsigned word) noexcept;  // a WORD pad sounds: its points are played from update() (word_pump)
   void word_pump(o3sdk::app::Context& ctx) noexcept;
   void word_end(o3sdk::app::Context& ctx) noexcept;
@@ -129,22 +150,21 @@ class PatternScreen final : public o3sdk::app::Screen {
   std::uint64_t note_until_ = 0;
   std::uint8_t cursor_ = 0;  // 0..15
   std::uint8_t lane_ = 0;    // pattern::Lane
-  std::uint8_t focus_ = 4;   // the F key the encoder drives (F5, VALUE)
+  std::uint8_t focus_ = 2;   // the F key the encoder drives (F3, VALUE)
   const SongScreen* song_ = nullptr;  // read on the main loop only
   std::uint8_t shown_ = 0;   // the pattern on the screen, 0..7
   bool follow_ = false;
-  std::uint64_t flash_until_ = 0;  // the palette's LEDs (both rows) are off until then, a short off-on when F6 changes the pair (leds() checks it; main loop only)
+  // The hands, one per lane (pattern::Hand), and whether they have their first values yet (the first enter()). Main loop only.
+  pattern::Hand hand_[pattern::kLanes] = {};
+  bool hands_ready_ = false;
+  bool rec_ = false;  // REC: the lower pads also write (off on leave); main loop only
   std::uint16_t steps_held_ = 0;  // the step pads held (bit step 0..15): a palette pad writes all of them and the cursor stays; main loop only
+  std::uint16_t step_aud_ = 0;    // the chosen steps sounding under a held step pad (bit step, PerformScreen audition id = the step); main loop only
   char oct_say_[12] = {};         // "OCTAVE +1", the strip's line for UP and DOWN (say() keeps the pointer)
   std::uint32_t mouth_aud_ = 0;  // the MOUTH palette's closure pads held and sounding (bit pad; a subset of aud_); main loop only
   std::uint32_t aud_ = 0;    // the palette pads held and sounding (bit pad 0..23, PerformScreen::audition_press); main loop only
-  std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE, kArmFill FILL over a lane that holds something
-  std::uint8_t page_ = 0;    // F6 SET on the MOUTH lane: the palette's page, pattern::MouthPage (VOWELS 0, WORDS 1)
-  // FILL (F7): the screen's count of fills (it seeds them with the pattern's index, so every press differs) and, per pattern, the 16 bytes the last fill left,
-  // which is how a second press tells its own output (no question asked) from a lane the hands wrote (F1 confirms). Main loop only.
-  std::uint32_t fill_count_ = 0;
-  std::uint8_t fill_has_ = 0;  // bit pattern: fill_out_[pattern] holds a fill's output
-  std::uint8_t fill_out_[kBankPatterns][kPatternSteps] = {};
+  std::uint8_t armed_ = 0;   // waiting for F1 (main loop only): 0 nothing, kArmLane CLEAR LANE, kArmPattern SHIFT + DELETE
+  std::uint8_t page_ = 0;    // F4 SET on the MOUTH lane: the palette's page, pattern::MouthPage (VOWELS 0, WORDS 1)
   // The WORD audition (a WORD pad pressed in TRACT): the word, the next point to play and the uptime the pad was pressed; main loop only (update() plays it).
   std::uint8_t word_ = 0xFF;  // 0xFF: none
   std::uint8_t word_next_ = 0;

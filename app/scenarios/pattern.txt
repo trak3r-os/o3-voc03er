@@ -1,5 +1,8 @@
-# PATTERN (U6b, Q2): a pattern built by hand with the pads (notes, carriers, levels, a rest), the NOTE palette set with F6 TOP PADS (both rows: NOTE, TRIAD, 7TH,
-# then POWER; F7 is blank), the SHIFT row (CLR LANE, FOLLOW), played with FOLLOW, then pattern B and a rest, F2 LANE and F3 LENGTH. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
+# PATTERN (U6b, Q2, rd-pat): a pattern built with REC on (the lower pads write at the cursor and the cursor moves on while the transport is stopped), the NOTE
+# palette's lower row set with F4 CHORD (TRIAD, 7TH, POWER; F5 to F7 are blank), a TIE on SHIFT + a step pad, the SHIFT row (CLR LANE, FOLLOW), played with
+# FOLLOW, then pattern B, LENGTH on F1, CLR LANE asking. The simulator shows the screen and that the unit plays; it cannot say what the frame costs on the unit.
+# pattern_hand.txt holds the hand (put, choose, clear). Pads: the top two rows are the steps (1..8 on row 0, 9..16 on row 1) and the patterns (A..D, E..H); the
+# lower two rows are the palette (row A notes, row B chords).
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -8,110 +11,129 @@ wait 100
 tap pattern
 wait 150
 snap 01_empty
-# NOTE lane: row A is a note per pad, row B a triad (the layout's defaults), the cursor steps on by itself
-paddown 0
+# REC on: the tag by the letter, then NOTE lane: row A is a note per pad, row B a triad (the layout's defaults), the cursor steps on by itself
+tap rec
+wait 60
+snap 01b_rec_on
+paddown 24
 wait 40
-padup 0
+padup 24
 wait 40
-paddown 3
+paddown 27
 wait 40
-padup 3
+padup 27
 wait 40
-paddown 7
+paddown 31
 wait 40
-padup 7
+padup 31
 wait 40
-paddown 12
+paddown 36
 wait 40
-padup 12
+padup 36
 wait 40
-paddown 15
+paddown 39
 wait 40
-padup 15
+padup 39
 wait 40
-paddown 19
+paddown 43
 wait 40
-padup 19
+padup 43
 wait 40
 snap 02_notes
 # SHIFT + a palette pad writes nothing (it sounds, Q3: see pattern_audition.txt): the cursor stays
 press shift
-paddown 5
+paddown 29
 wait 40
-padup 5
+padup 29
 release shift
 wait 100
 snap 02b_shift_pad_writes_nothing
-# F6 TOP PADS: one key sets both palette rows (NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER); the first tap already steps (to NOTE), both rows go dark for a moment
-tap f6
-wait 60
-snap 02c_top_pads_flash
-wait 300
-snap 02c2_top_pads_note
-# two more taps: TRIAD, then 7TH on both rows
-tap f6
-tap f6
-wait 400
-snap 02d_top_pads_7th
-paddown 14
+# F4 CHORD: row B's kind (TRIAD, 7TH, OPEN, POWER); the first tap already steps (to 7TH), row A stays the notes
+tap f4
+wait 200
+snap 02c_chord_7th
+paddown 38
 wait 40
-padup 14
+padup 38
 wait 40
 snap 02e_b_7th_written
-# F6 on to POWER (two steps on from 7TH: OPEN, POWER)
-tap f6
-tap f6
-wait 400
+# F4 on to POWER (two steps on from 7TH: OPEN, POWER)
+tap f4
+tap f4
+wait 300
 snap 02f_power
-paddown 1
+paddown 25
 wait 40
-padup 1
+padup 25
 wait 40
-paddown 14
+paddown 38
 wait 40
-padup 14
+padup 38
 wait 40
+# F5 to F7 are blank and take no focus: the lit key stays F4's (CHORD acts on the tap, no focus change)
+tap f6
+wait 60
+snap 02f2_f6_blank
 # the SHIFT row: CLR LANE on F6, FOLLOW on F7
 press shift
 wait 150
 snap 02g_shift_row
 release shift
 wait 60
-# a rest on step 3 (SHIFT + the step pad)
+# a TIE on step 3 (SHIFT + the step pad, pad 2 on the top row)
 press shift
-paddown 26
-wait 40
-padup 26
-release shift
-wait 100
-# CARRIER lane
-tap instr
-paddown 1
-wait 40
-padup 1
-wait 40
 paddown 2
 wait 40
 padup 2
+release shift
+wait 100
+snap 02h_tie
+# CARRIER lane (UP / DOWN walk the lanes too); the cursor goes back to step 1 with SHIFT + LEFT
+tap instr
+press shift
+tap left
+tap left
+tap left
+tap left
+tap left
+tap left
+tap left
+release shift
+wait 60
+paddown 25
 wait 40
-paddown 4
+padup 25
 wait 40
-padup 4
+paddown 26
+wait 40
+padup 26
+wait 40
+paddown 28
+wait 40
+padup 28
+wait 40
 wait 100
 snap 03_carrier
 # LEVEL lane
 tap vol
+press shift
+tap right
+tap right
+tap right
+tap right
+release shift
 paddown 24
 wait 40
 padup 24
 wait 40
-paddown 10
+paddown 34
 wait 40
-padup 10
+padup 34
 wait 40
-paddown 23
+paddown 47
 wait 40
-padup 23
+padup 47
+wait 40
 wait 100
 snap 04_level
 # SLICE lane: drawn, read only
@@ -130,20 +152,16 @@ snap 06_follow
 press shift
 tap f7
 release shift
-# pattern B: next to play, then LENGTH and the LANE key
-paddown 33
+# pattern B: next to play (pad 9 on the top row), then LENGTH on F1
+paddown 9
 wait 40
-padup 33
+padup 9
 wait 1500
 snap 07_pattern_b
-tap f3
+tap f1
 turn -6
 wait 100
 snap 08_length
-tap f2
-tap f2
-wait 100
-snap 09_lane_key
 press shift
 tap f6
 release shift
@@ -161,30 +179,30 @@ wait 100
 snap 10c_cleared
 # COPY, INSERT and DELETE (Fable's finding 5): two notes, step 1 copied and inserted at step 1, step 2 emptied, then SHIFT + DELETE asks and F1 empties
 tap note
-paddown 24
+paddown 0
 wait 40
-padup 24
+padup 0
 wait 40
-paddown 14
+paddown 38
 wait 40
-padup 14
+padup 38
 wait 40
-paddown 16
+paddown 40
 wait 40
-padup 16
+padup 40
 wait 40
-paddown 24
+paddown 0
 wait 40
-padup 24
+padup 0
 wait 40
 tap copy
 wait 40
 tap insert
 wait 100
 snap 11a_inserted
-paddown 25
+paddown 1
 wait 40
-padup 25
+padup 1
 wait 40
 tap delete
 wait 100

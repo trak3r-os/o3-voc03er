@@ -6,7 +6,7 @@ input tone 220 -8
 wait 300
 tap pattern
 wait 200
-tap f4
+tap f2
 turn -20
 wait 200
 snap 01_tempo_100

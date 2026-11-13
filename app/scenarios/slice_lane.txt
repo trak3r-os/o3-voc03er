@@ -1,5 +1,5 @@
 # SLICE LANE (U6c): a 1 BAR take with the even cuts (8), (AUTOPLAY ON: the slot ends on SPEAKS), then PATTERN's SLICE lane written from the palette (slices 1, 3, 5, 8),
-# a dark pad that does nothing, VALUE stepping a step, SHIFT + step and CLEAR LANE, then played and stopped. The simulator shows the screen, the LEDs and
+# a dark pad that does nothing, VALUE stepping a step, SHIFT + step and CLR LANE, then played and stopped. The simulator shows the screen, the LEDs and
 # that the unit plays; it cannot say how the cuts sound or what the frame costs.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/slice_lane.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -35,78 +35,80 @@ wait 150
 # a chord on each of steps 1 to 8 (NOTE lane) so the SYNTH carrier sounds under the slices
 tap note
 wait 100
-paddown 0
+tap rec
+paddown 24
 wait 40
-padup 0
+padup 24
 wait 40
-paddown 3
+paddown 27
 wait 40
-padup 3
+padup 27
 wait 40
-paddown 7
+paddown 31
 wait 40
-padup 7
+padup 31
 wait 40
-paddown 12
+paddown 36
 wait 40
-padup 12
+padup 36
 wait 40
-paddown 15
+paddown 39
 wait 40
-padup 15
+padup 39
 wait 40
-paddown 19
+paddown 43
 wait 40
-padup 19
+padup 43
 wait 40
-paddown 0
+paddown 24
 wait 40
-padup 0
+padup 24
 wait 40
-paddown 3
+paddown 27
 wait 40
-padup 3
+padup 27
 wait 40
 tap fx
 wait 150
-paddown 24
-wait 40
-padup 24
-wait 100
-snap 02_lane_dim
-# slices 1, 3, 5 and 8 on steps 1 to 4 (the cursor steps on by itself); the palette's pad 12 is dark
 paddown 0
 wait 40
 padup 0
-wait 40
-paddown 2
-wait 40
-padup 2
-wait 40
-paddown 4
-wait 40
-padup 4
-wait 40
-paddown 12
-wait 40
-padup 12
-wait 40
-paddown 7
-wait 40
-padup 7
-wait 40
-snap 03_written
-# a step back with the pad: VALUE (F5, the encoder's key) steps its slice on; SHIFT + step 2 writes a rest
+wait 100
+snap 02_lane_dim
+# slices 1, 3, 5 and 8 on steps 1 to 4 (REC is on: the palette writes and the cursor steps on by itself); the palette's pad 36 is dark
 paddown 24
 wait 40
 padup 24
+wait 40
+paddown 26
+wait 40
+padup 26
+wait 40
+paddown 28
+wait 40
+padup 28
+wait 40
+paddown 36
+wait 40
+padup 36
+wait 40
+paddown 31
+wait 40
+padup 31
+wait 40
+snap 03_written
+# a step back with the pad (a full step not under the cursor is chosen): VALUE (F3, lit on entry) steps its slice on; SHIFT + step 2 clears it
+paddown 0
+wait 40
+padup 0
 wait 40
 turn 1
 wait 100
 press shift
-paddown 25
+paddown 1
 wait 40
-padup 25
+padup 1
+wait 40
 release shift
 wait 100
 snap 04_value_rest
@@ -118,7 +120,11 @@ wav slice_lane
 tap play
 wait 400
 snap 06_stopped
-# CLEAR LANE
+# CLR LANE (SHIFT + F6 asks, F1 clears)
+press shift
 tap f6
+release shift
+wait 150
+tap f1
 wait 150
 snap 07_cleared

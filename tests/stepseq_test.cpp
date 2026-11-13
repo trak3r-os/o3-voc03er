@@ -1751,14 +1751,13 @@ TEST_CASE("tie: pattern, bank file and clipboard carry a TIE as it is") {
   REQUIRE(pt::clear_step(r, 0));
   CHECK_FALSE(is_tie(get_step(r, 0)));
   CHECK(get_step(r, 0).kind == 0);
-  // the VALUE key on a TIE: the NOTE lane starts a note (48) and the tie is gone; the other lanes keep it
+  // the VALUE key on a TIE leaves it on every lane (PATTERN's step pads and SHIFT + step end it)
   REQUIRE(pt::step_value(q, 0, pt::Lane::Level, -1));
   CHECK(is_tie(get_step(q, 0)));
   REQUIRE(pt::step_value(q, 0, pt::Lane::Carrier, 1));
   CHECK(is_tie(get_step(q, 0)));
-  REQUIRE(pt::step_value(q, 0, pt::Lane::Note, 1));
-  CHECK_FALSE(is_tie(get_step(q, 0)));
-  CHECK(get_step(q, 0).note == 48);
+  CHECK_FALSE(pt::step_value(q, 0, pt::Lane::Note, 1));
+  CHECK(is_tie(get_step(q, 0)));
 }
 
 TEST_CASE("tie hook: [C, TIE, TIE, rest] is one note-on and one note-off, at the gate of the last tie") {

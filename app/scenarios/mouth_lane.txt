@@ -1,7 +1,7 @@
-# MOUTH LANE (TRACT V3, docs/REVIEW-2026-11-11.md section 4): PATTERN's fifth lane, F2 / the Fx key. In TRACT a chord on steps 1 to 8 (NOTE lane), then the
-# MOUTH palette: row 0 is the strip (the nine vowels A to U on pads 0..8, LIPS, TIP, BACK on 9..11), row 1 columns 0..8 are the same vowels with GLD (pads
-# 12..20, a ">" before the cell), 21..23 dark. A palette press writes the cursor step and moves on; a step held plus a palette pad writes that step;
-# SHIFT + a palette pad only sounds; SHIFT + a step clears it. Played, the tube changes vowel at the steps (the WAV), a closure shuts it for the gate,
+# MOUTH LANE (TRACT V3, docs/REVIEW-2026-11-11.md section 4): PATTERN's fifth lane, the FX key (or UP / DOWN). In TRACT a chord on steps 1 to 8 (NOTE lane), then the
+# MOUTH palette (the lower two rows): row A is the strip (the nine vowels A to U on pads 24..32, LIPS, TIP, BACK on 33..35), row B columns 0..8 are the same vowels with GLD (pads
+# 36..44, a ">" before the cell), 45..47 dark. With REC on a palette press writes the cursor step and moves on (without REC it only sounds and becomes the hand); a step
+# held plus a palette pad writes that step; SHIFT + a palette pad only sounds; SHIFT + a step clears it. The steps are the top two rows (pads 0..7 and 12..19). Played, the tube changes vowel at the steps (the WAV), a closure shuts it for the gate,
 # and Stop opens it. Outside TRACT the lane is dim, still edits, and the strip says MOUTH SPEAKS IN TRACT once (snap 08). The simulator shows the screen,
 # the LEDs and that the unit plays; the phrase by ear, the click at a slid step and the closures' sound are for the unit.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/mouth_lane.txt --out <dir>   (the dir must exist)
@@ -20,121 +20,123 @@ tap pattern
 wait 150
 tap note
 wait 100
-# a note on each of steps 1 to 8 (row A, one pad a note; the cursor steps on by itself)
-paddown 0
+tap rec
+wait 60
+# REC on: the palette writes. A note on each of steps 1 to 8 (row A, one pad a note; the cursor steps on by itself)
+paddown 24
 wait 40
-padup 0
+padup 24
 wait 40
-paddown 2
+paddown 26
 wait 40
-padup 2
+padup 26
 wait 40
-paddown 4
+paddown 28
 wait 40
-padup 4
+padup 28
 wait 40
-paddown 5
+paddown 29
 wait 40
-padup 5
+padup 29
 wait 40
-paddown 7
+paddown 31
 wait 40
-padup 7
+padup 31
 wait 40
-paddown 9
+paddown 33
 wait 40
-padup 9
+padup 33
 wait 40
-paddown 11
+paddown 35
 wait 40
-padup 11
+padup 35
 wait 40
-paddown 12
+paddown 36
 wait 40
-padup 12
+padup 36
 wait 40
 snap 01_notes
-# the cursor stands on step 9 (eight steps written): the lane, SLICE first, then MOUTH, and a step pad puts the cursor back on step 1
+# the cursor stands on step 9 (eight steps written): the lane, SLICE first, then MOUTH, and a full step pad (step 1) chooses it and puts the cursor back there
 tap fx
 wait 100
 tap fx
 wait 200
 snap 02_mouth_empty
-paddown 24
-wait 40
-padup 24
-wait 100
-# A, E, I, O, U on steps 1..5 (palette row 0 pads 0, 2, 4, 6, 8), LIPS on step 6 (pad 9)
 paddown 0
 wait 40
 padup 0
+wait 100
+# A, E, I, O, U on steps 1..5 (palette row A pads 24, 26, 28, 30, 32), LIPS on step 6 (pad 33)
+paddown 24
 wait 40
-paddown 2
+padup 24
 wait 40
-padup 2
+paddown 26
 wait 40
-paddown 4
+padup 26
 wait 40
-padup 4
+paddown 28
 wait 40
-paddown 6
+padup 28
 wait 40
-padup 6
+paddown 30
 wait 40
-paddown 8
+padup 30
 wait 40
-padup 8
+paddown 32
 wait 40
-paddown 9
+padup 32
 wait 40
-padup 9
+paddown 33
 wait 40
-# a slid A (row 1, pad 12) on step 7 and a slid U (pad 20) on step 8
-paddown 12
+padup 33
 wait 40
-padup 12
+# a slid A (row B, pad 36) on step 7 and a slid U (pad 44) on step 8
+paddown 36
 wait 40
-paddown 20
+padup 36
 wait 40
-padup 20
+paddown 44
+wait 40
+padup 44
 wait 40
 # TIP and BACK on steps 9 and 10, which have no note: the closure lasts to the step's end
-paddown 10
+paddown 34
 wait 40
-padup 10
+padup 34
 wait 40
-paddown 11
+paddown 35
 wait 40
-padup 11
+padup 35
 wait 40
-# a dark pad (row 1, pad 21) writes nothing and the cursor goes to step 12
-paddown 21
+# a dark pad (row B, pad 45) writes nothing and the cursor goes to step 12
+paddown 45
 wait 40
-padup 21
+padup 45
 wait 100
 snap 03_written
-# a step held plus a palette pad writes that step: step 12 (pad 39) takes a slid E (row 1 pad 14) and the cursor goes to step 12
-paddown 39
+# a step held plus a palette pad writes that step: step 12 (pad 15) takes a slid E (row B pad 38) and the cursor goes to step 12
+paddown 15
 wait 40
-paddown 14
+paddown 38
 wait 40
-padup 14
-padup 39
+padup 38
+padup 15
 wait 100
 snap 04_step_held_write
 # SHIFT + a palette pad sounds only: the cursor and the line do not change
 press shift
-paddown 4
+paddown 28
 wait 200
-padup 4
+padup 28
 release shift
 wait 100
 snap 05_shift_sounds
-# SHIFT + a step clears it: step 2 (pad 25) goes back to FOLLOW
+# SHIFT + a step clears it: step 2 (pad 1) goes back to FOLLOW
 press shift
-paddown 25
+paddown 1
 wait 40
-padup 25
+padup 1
 release shift
 wait 100
 snap 06_step_cleared
@@ -158,9 +160,10 @@ wait 100
 tap fx
 wait 200
 snap 08_outside_tract
-paddown 4
+tap rec
+paddown 28
 wait 40
-padup 4
+padup 28
 wait 150
 snap 09_still_edits
 # back in TRACT, CLEAR LANE

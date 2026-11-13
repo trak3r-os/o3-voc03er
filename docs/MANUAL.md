@@ -193,7 +193,7 @@ OCT- and OCT+ pads and SHIFT + F7 move the octave of all of them. VOICING SMOOTH
 moves smoothly, and a row higher sounds higher.
 
 **The arrow keys.** LEFT and RIGHT step the value of the F key that has the focus, one click of the encoder each; UP and DOWN do the same (RIGHT and
-UP raise, LEFT and DOWN lower). F6 ROW is the exception: UP is the row above and DOWN the row below, as the rows are drawn. On PATTERN the arrows keep their own jobs (LEFT and RIGHT the cursor, UP and DOWN the octave); on SAMPLE and SAMPLE REC LEFT and
+UP raise, LEFT and DOWN lower). F6 ROW is the exception: UP is the row above and DOWN the row below, as the rows are drawn. On PATTERN LEFT and RIGHT step the lit F key (SHIFT + them move the cursor) and UP and DOWN walk the lanes (SHIFT + them are the octave); on SAMPLE and SAMPLE REC LEFT and
 RIGHT step the F value and UP and DOWN pick the slot. The arrows leave three values to a tap of their key or the encoder, since a stray press there
 changes the sound's character: F1 MODE, F8 QUALITY on TALK and SHIFT + F8 PRESET.
 
@@ -208,7 +208,7 @@ B SHAPE, C FORMANT; TRACT is A NOTE, B TONGUE, C MOUTH (the pads' notes are the 
 
 **Strips live on PERFORM only.** A strip is a PERFORM thing: PATTERN, SAMPLE, SAMPLE EDIT, FILE and SAMPLE LOAD never show one. They share
 one pair of note rows of their own, A and B, with NOTE, TRIAD, 7TH, OPEN, POWER or OFF (A NOTE and B TRIAD at first), the same in every mode.
-Setting a row on PERFORM does not change that pair, and changing the pair (F6 TOP PADS on PATTERN, F1 LOW PADS on SAMPLE) does not touch PERFORM's
+Setting a row on PERFORM does not change that pair, and changing the pair (F4 CHORD on PATTERN, F1 LOW PADS on SAMPLE) does not touch PERFORM's
 layouts. The pair is not saved in the project: it is A NOTE, B TRIAD again after a restart or a project load (needs more testing). Recording a
 strip into a PATTERN lane is not built: a strip sets the value live, on PERFORM.
 
@@ -397,9 +397,9 @@ toward the high end. A flat or very bright source, or a noisy room, reads the mo
 104 % too high and F2 and F3 up to 57 % and 34 % off); a close microphone in a quiet room reads best, and low vowels (U) have the biggest error. A synthetic voice reads within about
 13 % on the first formant and 4 % on the second and third. SOURCE LIVE needs more testing with a real voice and room on the unit.
 
-**Writing it: the MOUTH lane.** In PATTERN, F2 (or FX, a second press after SLICE) picks the fifth lane, MOUTH. Each step holds one mouth:
-FOLLOW (empty: the step leaves the mouth as it is), one of the nine vowels, a closure, a word, or a wobble. The palette is the top two rows of
-pads, and F6 SET flips it between two pages.
+**Writing it: the MOUTH lane.** In PATTERN, FX (a second press after SLICE) or DOWN picks the fifth lane, MOUTH. Each step holds one mouth:
+FOLLOW (empty: the step leaves the mouth as it is), one of the nine vowels, a closure, a word, or a wobble. The palette is the lower two rows of
+pads, and F4 SET flips it between two pages.
 
 - **VOWELS.** Row 0 is the strip: the nine vowels, then LIPS, TIP and BACK. Row 1, columns 1 to 9, is the same vowels with **GLD**, a glide: the
   mouth slides to that vowel and arrives by the end of the step instead of jumping there (the cell shows a `>` before the vowel). A slide is
@@ -411,11 +411,10 @@ pads, and F6 SET flips it between two pages.
 - **Closures.** A closure shuts the mouth at the step and opens it when the note's gate ends (on a step with no note, at the step's end).
 - **ACCENT.** A step with a note and a LEVEL above 100 (the LEVEL lane) opens the jaw a little more: up to half at 127. It needs no mouth
   value on that step.
-- **F7 FILL** writes a random line of vowels, some FOLLOW, some glided, over LENGTH. If the lane holds something you wrote, it asks first (F1
-  confirms, any other key leaves it); pressing F7 again rolls another.
 
-A palette pad writes the cursor step, moves on and, in TRACT, sounds the mouth while it is held. With step pads held it writes those steps and
-the cursor stays. SHIFT + a palette pad only sounds; SHIFT + a step pad clears the step; SHIFT + F6 empties the lane. Playing writes the mouth in
+A palette pad (the lower two rows) sounds the mouth while it is held, in TRACT, and becomes the lane's hand; it writes nothing by itself. A step
+pad puts the hand on an empty step; with step pads held, a palette pad writes those steps; with REC on it writes as you play. SHIFT + a palette pad
+only sounds; SHIFT + a step pad clears the step; SHIFT + F6 empties the lane. Playing writes the mouth in
 every mode, but it speaks in TRACT only: outside TRACT the lane is dim, it still edits, and the strip says MOUTH SPEAKS IN TRACT. Stopping the
 transport opens the mouth.
 
@@ -621,48 +620,60 @@ SAVE WAV in SAMPLE EDIT still writes 16-bit mono at 44.1 kHz, the rate of the sl
 *PATTERN playing with FOLLOW on: the bright frame is the playhead.*
 
 Eight patterns, A to H, of up to sixteen steps each. Each step has five lanes: **NOTE** (a chord or a note), **CARRIER** (what sounds on that
-step: FOLLOW, SYNTH, NOISE, a slot or LIVE), **LEVEL**, **SLICE** (which slice of the speaking slot fires) and **MOUTH** (TRACT mode's mouth). NOTE, INSTR (carrier), VOL (level)
-and FX (slice, then MOUTH on a second press, then slice again) pick the lane; so does F2. UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it).
+step: FOLLOW, SYNTH, NOISE, a slot or LIVE), **LEVEL**, **SLICE** (which slice of the speaking slot fires) and **MOUTH** (TRACT mode's mouth). UP and DOWN walk the lanes
+in that order (NOTE at the top, no wrap); the buttons NOTE, INSTR (carrier), VOL (level) and FX (slice, then MOUTH on a second press, then slice again) pick one directly.
+SHIFT + UP and DOWN are the octave (the same one PERFORM and SAMPLE use; the strip says it, and the NOTE lane's hand moves with it).
 
-The pads: the top two rows are the lane's palette (chords or notes for NOTE, the carriers for CARRIER, steps of level, slices). The CARRIER palette has eight pads: FOLLOW, SYNTH, NOISE, SLOT 1 to 4 and LIVE.
+**The pads.** The top two rows are the screen's own: the sixteen steps (up to LENGTH; a step pad past LENGTH does nothing) are the first eight pads of each row, and the
+pattern pads, A to H, are the last four of each row. The lower two rows are the lane's palette, as SAMPLE has its keyboard: chords or notes for NOTE, the carriers for CARRIER,
+steps of level, slices, the mouth's vowels or words. A palette pad sounds while it is held and becomes the lane's **hand** (it stays lit); it writes nothing by
+itself. Each lane has its own hand: the NOTE lane starts on the key root, CARRIER on FOLLOW, LEVEL on its lowest pad, SLICE and MOUTH on the first pad.
+
+- A step pad on an **empty** step puts the hand there, and the cursor goes there.
+- A step pad on a **full** step that is not under the cursor chooses it: the cursor goes there, it sounds, and its value becomes the hand. Nothing is written.
+- A step pad on the full step **under the cursor** clears it.
+- Holding a step pad (or several) and pressing a palette pad writes every held step with that pad, and the pad is the hand too. The cursor stays.
+- SHIFT + a step pad: on NOTE it makes the step a **tie** (a held note that runs on into the next step; again it clears to a rest); on the other lanes it clears the lane's value there.
+- SHIFT + a palette pad only sounds.
+- **REC** (the REC button, a REC tag on the screen; it goes off when you leave PATTERN) makes a palette pad write as well: with the transport stopped it writes the cursor step and moves
+  on, so sixteen presses are sixteen notes; with the pattern playing it writes the step that plays (a press just before the next step lands on that one, as MIDI recording does).
+  A held step pad wins over REC. The MIDI keyboard still records on its own whenever the transport runs.
+
+The CARRIER palette has eight pads: FOLLOW, SYNTH, NOISE, SLOT 1 to 4 and LIVE.
 LIVE sounds that step through the audio input, as SOUNDS LIVE does on PERFORM (in TRACT the input goes through the tube); it works whether SPEAKS is a slot or the input (with no input ever chosen on F2 SPEAKS it plays whatever the input gives at power-up, likely silence or noise), and the next step with a carrier
-switches away from it (FOLLOW leaves the carrier as it is). A pattern file with a LIVE step does not load on an older image. Switching to LIVE mid-pattern needs more testing on the unit (a click at the switch is possible). A palette
-pad writes into the step under the cursor and moves the cursor on; with one or more step pads held it writes every held step instead and the cursor stays (on every lane, not only NOTE). The lower two rows, columns 1 to 8, are the sixteen steps up to LENGTH
-(a step pad past LENGTH does nothing). The lower right columns pick the pattern, A to H. SHIFT + a step pad makes it a rest.
-
-On the VOL lane a palette pad also sounds the step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
+switches away from it (FOLLOW leaves the carrier as it is). A pattern file with a LIVE step does not load on an older image. Switching to LIVE mid-pattern needs more testing on the unit (a click at the switch is possible).
+On the VOL lane a palette pad also sounds the cursor step's note or chord at that level while it is held (a rest sounds nothing); on the FX lane it
 fires that slice of the slot SPEAKS is on, as SAMPLE's pads do (nothing with SPEAKS on LIVE or above the slice count). INSTR stays silent.
 
-On the NOTE lane the palette is the shared pair of note rows, A and B (the notes palette of section 4, the same one SAMPLE plays; PERFORM's layout does not change it). F6 TOP PADS sets both rows at once to one of six kinds, the same six as F1 LOW PADS on SAMPLE: NOTE+TRIAD (A plays notes, B triads), NOTE, TRIAD, 7TH, OPEN and POWER. A tap steps to the next and wraps from POWER to NOTE+TRIAD, the encoder stops at the ends, both rows flash once, and there is no OFF. If the pair is none of the six, the key reads MIXED and the first tap sets NOTE+TRIAD. A row of the same kind plays and writes the same notes here and on SAMPLE.
-A pad writes what its row plays: a note or a chord of the row's kind. **For a bass line of
-single notes, set the row to NOTE**: sixteen presses are sixteen notes. A palette pad sounds while it is held, and keeps sounding when the pattern plays the same note
-(its gate off, a repeat or Stop does not cut it; needs more testing); SHIFT + a palette pad sounds
-and writes nothing.
+On the NOTE lane the palette is the shared pair of note rows, A and B (the notes palette of section 4, the same one SAMPLE plays; PERFORM's layout does not change it).
+F4 CHORD picks row B's kind, TRIAD, 7TH, OPEN or POWER, and puts row A on NOTE; it acts on the first tap, wraps from POWER to TRIAD, and the encoder stops at the ends. The pair is also set to
+A NOTE and B TRIAD (or the F4 kind) whenever you enter PATTERN, so a palette pad always plays a note or a chord. A row of the same kind plays and writes the same notes here and on SAMPLE.
+A pad writes what its row plays: a note or a chord of the row's kind. A palette pad keeps sounding when the pattern plays the same note
+(its gate off, a repeat or Stop does not cut it; needs more testing).
 
 | Key | What it does |
 |---|---|
-| F1 PATTERN | A to H |
-| F2 LANE | NOTE, CARRIER, LEVEL (ACCENT in TRACT, where the level drives the jaw), SLICE or MOUTH |
-| F3 LENGTH | 1 to 16 steps |
-| F4 TEMPO | The tempo |
-| F5 VALUE | The cursor step's value in the lane; the encoder edits it. LEVEL runs 1 to 100, and 1 to 127 in TRACT; the palette's last pad is the top |
-| F6 TOP PADS | NOTE lane: both palette rows at once, NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN or POWER (a tap steps and wraps, the encoder stops at the ends, both rows flash, never OFF). MOUTH lane: SET, the palette VOWELS or WORDS (outside TRACT it flips the page and says where the lane is heard). Dim on the other lanes; a tap there says NOTE LANE ONLY |
-| F7 | Blank, except FILL on the MOUTH lane (outside TRACT it fills and says HEARD IN TRACT ONLY) |
-| SHIFT + F6 CLR LANE | Clears the lane. F1 confirms |
+| F1 LENGTH | 1 to 16 steps |
+| F2 TEMPO | The tempo |
+| F3 VALUE | The cursor step's value in the lane; the encoder edits it. LEVEL runs 1 to 100, and 1 to 127 in TRACT (ACCENT, where the level drives the jaw); the palette's last pad is the top. Lit on entry |
+| F4 CHORD | NOTE lane: row B's chord kind (see above). MOUTH lane: SET, the palette VOWELS or WORDS (outside TRACT it flips the page and says where the lane is heard). Blank on CARRIER, LEVEL and SLICE |
+| F5, F6, F7 | Blank |
+| F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
+| SHIFT + F6 CLR LANE | Clears the lane. F1 confirms; any other key says NOT CLEARED |
 | SHIFT + F7 FOLLOW | The cursor rides the playhead |
 | SHIFT + F8 CAPTURE | MOUTH lane only: reads the slot SAMPLE shows into the lane. Pressed again while it reads, it cancels |
-| F8 SAVE | Saves the eight patterns to the card (`pattern.o3a`). The project is FILE's: F2 SAVE there |
 
-**The MOUTH lane** writes TRACT's mouth, one value a step. Its palette has two pages, VOWELS and WORDS (F6 SET flips them), and F7 FILL writes a
-line for you. Section 5b says what each value does and how the pads write it. SHIFT + F6 empties the lane, as on the others.
+The F keys with a value (LENGTH, TEMPO, VALUE) light on a first tap and step on a second; LEFT and RIGHT are one encoder step of the lit key. SHIFT + LEFT and RIGHT move the cursor.
+SAVE, CLR LANE, FOLLOW, CAPTURE, CHORD and SET act on the tap.
+
+**The MOUTH lane** writes TRACT's mouth, one value a step. Its palette has two pages, VOWELS and WORDS (F4 SET flips them).
+Section 5b says what each value does and how the pads write it. SHIFT + F6 empties the lane, as on the others.
 SHIFT + F8 CAPTURE writes the lane from a recording: see "Capturing a voice" in section 5b.
 
 PLAY starts and stops the transport. COPY copies the step under the cursor; INSERT puts the copy there and moves the steps after it one
 to the right (the last step inside LENGTH falls off). DELETE empties the step. With SHIFT they work on the whole pattern: SHIFT + COPY
 copies it, SHIFT + INSERT pastes it over the current one, LENGTH too, and SHIFT + DELETE empties it after F1 confirms (any other key
 leaves it as it is). A different pattern starts when the one that plays ends. While a SONG chain plays, a pattern pad says SONG PLAYS THE CHAIN and changes nothing.
-
-Under the strip two lines tell where the pads are: rows A and B above (F6 TOP PADS), steps and patterns below, SHIFT + a step for a rest.
 
 The lane's header says where the lane is heard: CARRIER and LEVEL are not heard in TUNE, and the MOUTH lane speaks in TRACT only. The lane still edits, and its name is dim. With nothing under the cursor, the strip says F8 SAVES and that holding SHIFT shows the SHIFT row (CLR LANE, FOLLOW, CAPTURE). On the SLICE lane, VALUE and the palette say SPEAKS HAS NO SLICES when the slot SPEAKS is on has none.
 

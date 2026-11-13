@@ -202,30 +202,35 @@ tick, into a 1.41 MB int16 stage in the SDRAM; the 16-bit 44.1 kHz case skips th
 ### PATTERN
 
 Sixteen steps as cells with five lanes under each (NOTE, CARRIER, LEVEL, SLICE, MOUTH), the playhead in the voice ink, the cursor framed, the lane in
-force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever the notes palette's rows A and B play there (A NOTE and B TRIAD at start; the palette is PATTERN's own, not PERFORM's layout). Pads: rows 2 and 3, columns 0 to 7, are steps 1 to 16 (two rows of eight; `kLedDim` with content, `kLedMid` the cursor, `kLedOn`
-the playhead); columns 8 to 11 of those rows are patterns A to H (`kLedMid` the current, `kLedOn` the one playing); rows 0 and 1 are the lane's
-palette: NOTE the notes palette's rows A and B (row 0 is A, row 1 is B, as they play), CARRIER eight pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4, LIVE; the cell reads FLW, SYN, NSE, S1 to S4, LIV), LEVEL 24 steps of
-velocity, SLICE slices 1 to 24, MOUTH two pages (below). A palette pad writes into the cursor's step and moves the cursor on (the tracker's step entry); a step pad moves
-the cursor there (SHIFT + step pad: a rest in the lane).
+force highlighted, the pattern letter A to H large at the left. The NOTE lane holds a chord (root, type, voicing) or a single note, whatever the notes palette's rows A and B play there (A NOTE and B TRIAD at start; the palette is PATTERN's own, not PERFORM's layout). Pads (the flipped model, rd-pat): the top two rows (0 and 1) are the screen's own: steps 1 to 16 are pads 0 to 7 and 12 to 19 (`kLedDim` with content, `kLedMid` the cursor, `kLedOn`
+the playhead), patterns A to H are pads 8 to 11 and 20 to 23 (`kLedMid` the current, `kLedOn` the one playing). The lower two rows (pads 24 to 47, palette index = pad - 24) are the lane's
+palette, as SAMPLE has its keyboard: NOTE the notes palette's rows A and B (row A is the lower row 0 pair's first, B the second, as they play), CARRIER eight pads (FOLLOW, SYNTH, NOISE, SLOT 1 to 4, LIVE; the cell reads FLW, SYN, NSE, S1 to S4, LIV), LEVEL 24 steps of
+velocity, SLICE slices 1 to 24, MOUTH two pages (below). A palette pad sounds while held and becomes the lane's **hand** (lit `kLedMid`; `aud_` marks a sounding pad `kLedOn`); it writes nothing by itself.
+Each lane has its own hand (`Hand{Step s; mouth}`), the NOTE one starting on the key root (palette index 0), CARRIER on FOLLOW, LEVEL on `level_of_pad(0)`, SLICE and MOUTH on 1. A step pad
+(`press_step`): on an empty step it puts the hand there and the cursor goes there (`Put`); on a full step not under the cursor it moves the cursor, sounds the step and takes its value as
+the hand, writing nothing (`Chose`; a TIE leaves the hand alone); on the full step under the cursor it clears it (`Cleared`). Holding step pads and pressing a palette pad writes every held step with
+the pad's value, the hand changes too and the cursor stays. SHIFT + a step pad: `tie_toggle` on NOTE (again clears to a rest), `rest_lane` on the other lanes. SHIFT + a palette pad only sounds.
+**REC** (`Button::Rec`, a `REC` tag at (24, 78); the kit has no REC LED API; off on `leave()`) makes a palette pad write too: stopped, at the cursor and then the cursor moves on; playing, on the step
+that plays through `rec_target(playing, edge)`, the `midipat::target_of` rule. Held steps win over REC. MIDI recording stays unconditional.
 On LEVEL the palette pad also sounds the cursor step's note or chord at that level while held (a rest sounds nothing); on SLICE it fires the
 slice on the SPEAKS slot through SAMPLE's `fire_slice` (Q5); CARRIER stays silent.
 
-- F1 PATTERN (A to H) · F2 LANE (NOTE, CARRIER, LEVEL, SLICE, MOUTH; also the buttons NOTE, INSTR, VOL and FX, which picks SLICE, then MOUTH on a second press,
-  then SLICE again; UP / DOWN are the octave) · F3 LENGTH (1 to 16 steps) · F4 TEMPO · F5 VALUE (the cursor step's value in the lane, the encoder edits it) ·
-  F6 TOP PADS (NOTE lane: both palette rows at once, one of six kinds: NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER; a tap steps and wraps, the encoder stops at the
-  ends, both rows flash; never OFF) or SET (MOUTH lane: the palette page, VOWELS or WORDS), dim on the others · F7 blank, except FILL on the MOUTH lane ·
-  SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
-  (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1) · F8 SAVE (FILE's save, here).
+- F1 LENGTH (1 to 16 steps) · F2 TEMPO · F3 VALUE (the cursor step's value in the lane, the encoder edits it; lit on entry) · F4 CHORD (NOTE lane: row B's kind TRIAD, 7TH, OPEN or POWER, row A on NOTE,
+  acting on the first tap, wrapping on a tap, the encoder stopping at the ends; MOUTH lane: SET, the palette page VOWELS or WORDS, dim outside TRACT; blank on CARRIER, LEVEL and SLICE) ·
+  F5, F6, F7 blank (free for the randomisation lane) · F8 SAVE (FILE's save, here) · SHIFT + F6 CLR LANE (action, F1 confirms) · SHIFT + F7 FOLLOW (the cursor rides the playhead) · SHIFT + F8 CAPTURE
+  (MOUTH lane: reads the slot SAMPLE shows into the lane, a second press cancels; MC1); SHIFT + F5 is blank.
+- Arrows: LEFT / RIGHT one encoder step of the lit F key, SHIFT + LEFT / RIGHT the cursor, UP / DOWN the lane across NOTE, CARRIER, LEVEL, SLICE, MOUTH (no wrap), SHIFT + UP / DOWN the
+  octave, the NOTE hand moving by 12 with it. The buttons NOTE, INSTR, VOL and FX pick lanes (FX: SLICE, then MOUTH, then SLICE). F value keys (LENGTH, TEMPO, VALUE): a tap lights, a second tap steps;
+  action keys (SAVE, CAPTURE, CLR LANE, SET, CHORD) act on the tap. F1 PATTERN, F2 LANE, F6 TOP PADS and F7 FILL are gone.
 
 **The MOUTH lane** (V3, V3b; `stepseq.h`, `pattern_logic.h`). A step's byte is the value in bits 0 to 3 (0 FOLLOW, 1 to 9 the vowels A to U, 10 to 12 the
 closures LIPS, TIP and BACK, 13 WORD, 14 WOB, 15 refused), bits 4 to 6 the word (WOW, YEAH, YOI, WAH, OW, BA, DA, GA) or the WOB rate (1/4, 1/8, 1/16, 1/32,
-1/8T, 1/16T), and bit 7 GLD (vowels only). The palette has two pages and F6 SET flips them. VOWELS: row 0 the strip (pads 0 to 8 the vowels, 9 to 11 the
+1/8T, 1/16T), and bit 7 GLD (vowels only). The palette has two pages and F4 SET flips them. VOWELS: row 0 the strip (pads 0 to 8 the vowels, 9 to 11 the
 closures), row 1 pads 0 to 8 the vowels with GLD (the cell shows a `>`). WORDS: row 0 pads 0 to 7 the eight words, row 1 pads 0 to 5 the six WOB rates.
-A palette pad writes the cursor step and moves on (with step pads held it writes them and the cursor stays); in TRACT it sounds the mouth while it is held
+A palette pad (the lower two rows) becomes the lane's hand and writes only when step pads are held or REC is on; in TRACT it sounds the mouth while it is held
 (a word once, from the main loop; a WOB pad nothing, the strip says "WOB PLAYS WITH THE LINE"), SHIFT + a palette pad only sounds, SHIFT + a step pad clears
-the step. The lane is dim outside TRACT; it still edits, and the strip says "MOUTH SPEAKS IN TRACT". F7 FILL is a seeded random walk of vowels over LENGTH
-(some FOLLOW, some GLD); it asks first (F1 confirms, any other key leaves it) unless the lane is empty or is the last fill's own output, and F7 again rolls
-another. SHIFT + F6 clears the lane (CLEAR <LANE> LANE, F1 confirms). The hook turns the line into Param events to the tract unit (VOWEL, SLIDE, CLOSE, ACCENT),
+the step. The lane is dim outside TRACT; it still edits, and the strip says "MOUTH SPEAKS IN TRACT". The seeded random walk of vowels (`pt::fill_mouth`, `fill_seed`, `mouth_lane_*`, the `kFilled` / `kFillPrompt`
+texts and their tests) stays in the code, but no key reaches it now. SHIFT + F6 clears the lane (CLEAR <LANE> LANE, F1 confirms). The hook turns the line into Param events to the tract unit (VOWEL, SLIDE, CLOSE, ACCENT),
 at most four on one frame and ten a step (the tract unit takes 32 a block), in every mode: a closure shuts the mouth at the step and opens it at the gate's end (no note: the step's end); a GLD vowel arrives by the
 step's end (SLIDE is a third of the move, capped at 500 ms); ACCENT is 0.5 * (LEVEL - 100) / 27 on a step with a note and a LEVEL above 100, so the LEVEL lane
 that only turned a step down above also opens the jaw in TRACT; Stop writes CLOSE 0, SLIDE 0 and ACCENT 0. A held pad of PERFORM's MOUTH strip suppresses the
@@ -246,7 +251,10 @@ the cursor, SHIFT + step pad rests the lane in force, a pattern pad shows that p
 F1..F5 point the encoder at a key (a second tap steps it, wrapping), F6 asks "CLEAR <LANE> LANE: F1 CONFIRMS" (F1 clears; any other key cancels and says NOT CLEARED), F7 is FOLLOW, F8 saves through the app's FILE job.
 The F6 label is `CLR LANE` (it does not fit the key in full); HELP spells it out. SLICE is read-only (U6c). No new unit parameter.
 
-**TOP PADS** (lane5; `pattern_screen.cpp`, `sample_logic.h`, `tests/pattern_screen_test.cpp`, `app/scenarios/pattern.txt`): F6 on the NOTE lane is one key for both palette rows, the same six values as SAMPLE's F1 LOW PADS (`kLowA`, `kLowB`, `low_pads_step`: NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER), never OFF. The first tap steps, a tap wraps, the encoder stops at the ends, both rows flash once; a pair outside the six (it can only come from the pair's saved state, no screen sets it) reads MIXED and steps to NOTE+TRIAD. F7 has no name, value, action or HELP row, except FILL on the MOUTH lane, where F6 stays SET. `row_` and the ROW / PLAYS keys are gone. PATTERN and SAMPLE play and write the same notes for rows of the same kind because both call `pads::pad_play` with the row's octave. The two hint lines under the PATTERN strip name F6 TOP PADS.
+**F4 CHORD** (rd-pat; `pattern_screen.cpp`, `pattern_logic.h` `chord_step`, `palette_chord`, `palette_normal`, `tests/pattern_screen_test.cpp`, `app/scenarios/pattern.txt`, `pattern_hand.txt`): replaces TOP PADS. On the NOTE lane it picks row B's kind among TRIAD, 7TH, OPEN
+and POWER and writes rows A = NOTE and B = that kind through `perform_->notes_set`; it acts on the first tap, wraps on a tap and the encoder stops at the ends. `normalise_palette()` runs on enter (and F4) so
+a pair left by SAMPLE or an old project is always a notes row and a chord row. `kLowA`, `kLowB` and `low_pads_*` stay in `sample_logic.h`: SAMPLE's F1 LOW PADS and `tests/sample_test.cpp` use them. `row_` and the ROW / PLAYS
+keys are gone. PATTERN and SAMPLE play and write the same notes for rows of the same kind because both call `pads::pad_play` with the row's octave. The two hint lines under the PATTERN strip describe the hand, the steps and SHIFT.
 
 Built in U7a (`sample_edit_screen.cpp`, pure logic in `sample_edit_logic.h`, `tests/sample_edit_test.cpp`, `app/scenarios/sample_edit.txt`): the cursor and the
 cut table of the selected slot. The encoder moves the cursor a sample at a time, SHIFT + encoder a 64th of the slot; INSERT cuts at the cursor (it snaps to

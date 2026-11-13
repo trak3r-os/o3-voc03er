@@ -6,23 +6,28 @@
 input tone 220 -12  # a modulator at the line jack, so the notes can be heard
 record on
 wait 200
-tap pattern  # the PATTERN screen: palette pads write the cursor's step and move it on
+tap pattern  # the PATTERN screen: with REC on the palette pads (the lower two rows) write the cursor's step and move it on
 wait 100
-pad 0
-pad 3
-pad 7
-pad 12
-pad 15
+tap rec
+pad 24
+pad 27
+pad 31
+pad 36
+pad 39
 expect state steps=5
+press shift
 tap left
 tap left
 tap left
 tap left
 tap left
+release shift
 tap instr  # the CARRIER lane: SYNTH on step 1, NOISE on step 3
-pad 1
+pad 25
+press shift
 tap right
-pad 2
+release shift
+pad 26
 snap 01_recorded
 expect state carriers=2
 press shift

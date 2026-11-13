@@ -1,0 +1,108 @@
+# PATTERN, the hand (rd-pat, 2026-11-13): the lower two rows are the lane's palette (a pad sounds and becomes the hand, it writes nothing); the top rows
+# are the steps (1..8, 9..16) and the patterns. A step pad on an empty step puts the hand there, on a full step chooses it (the cursor goes there, it sounds,
+# its value becomes the hand), on a full step under the cursor clears it. LEFT / RIGHT turn the lit F key (VALUE), SHIFT + LEFT / RIGHT move the cursor.
+# A chord is put, SHIFT + a step pad ties, REC makes the palette write. Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/pattern_hand.txt --out <dir>
+input tone 220 -8
+wait 300
+tap performance
+wait 100
+tap pattern
+wait 150
+snap 01_enter
+# a palette pad: it sounds while held and becomes the hand, the grid stays empty
+paddown 27
+wait 200
+padup 27
+wait 200
+wait 100
+snap 02_hand_chosen
+# step pads on empty steps put the hand: steps 1, 2, then another hand on step 3
+paddown 0
+wait 40
+padup 0
+wait 40
+paddown 1
+wait 40
+padup 1
+wait 40
+paddown 31
+wait 40
+padup 31
+wait 40
+paddown 2
+wait 40
+padup 2
+wait 40
+wait 100
+snap 03_put
+# step 1 is full and not under the cursor: choose it (the cursor goes there, it sounds, its value is the hand, nothing written)
+paddown 0
+wait 200
+padup 0
+wait 200
+wait 100
+snap 04_chosen
+# the same pad again, now under the cursor: it clears
+paddown 0
+wait 40
+padup 0
+wait 40
+wait 100
+snap 05_cleared
+# LEFT / RIGHT are one encoder step of the lit key (VALUE: the note under the cursor), SHIFT + LEFT / RIGHT the cursor
+tap right
+tap right
+tap right
+wait 100
+snap 06_value_arrows
+press shift
+tap right
+release shift
+wait 100
+snap 07_cursor_arrow
+# a chord: F4 CHORD to 7TH, a row B pad, put at step 5; then SHIFT + step 6 ties it
+tap f4
+wait 100
+paddown 36
+wait 200
+padup 36
+wait 200
+paddown 4
+wait 40
+padup 4
+wait 40
+press shift
+paddown 5
+wait 40
+padup 5
+wait 40
+release shift
+wait 100
+snap 08_chord_tie
+# REC: the palette writes at the cursor and the cursor moves on (stopped transport)
+tap rec
+wait 60
+paddown 24
+wait 40
+padup 24
+wait 40
+paddown 26
+wait 40
+padup 26
+wait 40
+paddown 29
+wait 40
+padup 29
+wait 40
+wait 100
+snap 09_rec
+# leaving the screen turns REC off
+tap performance
+wait 60
+tap pattern
+wait 150
+snap 10_rec_off_after_leave
+record on
+tap play
+wait 1800
+wav pattern_hand

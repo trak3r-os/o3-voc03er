@@ -65,9 +65,9 @@ snap 15_pattern_tract_note
 tap vol
 wait 200
 snap 16_pattern_tract_accent
-tap f7
+tap f4
 wait 200
-snap 17_pattern_f7_on_level
+snap 17_pattern_f4_on_level
 # the same lane in TUNE: dim, with its header cue
 tap performance
 wait 200

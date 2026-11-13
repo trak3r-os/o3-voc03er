@@ -1,26 +1,31 @@
 # The per-step carrier switch (V5c): four notes written into the pattern, a carrier set on three steps (the PATTERN screen's CARRIER lane: SY synth,
-# NZ noise, L1..L4 loops; LEFT / RIGHT move the cursor), the transport started with SHIFT + PLAY so the bar runs, and the cells
+# NZ noise, L1..L4 loops; SHIFT + LEFT / RIGHT move the cursor), the transport started with SHIFT + PLAY so the bar runs, and the cells
 # showing the tags. The simulator's input is synthetic: this shows the screen and that the switch path runs; how each carrier sounds
 # and the click at a switch on a real source are the unit's to say.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/carrier_steps.txt --out <dir>   (the dir must exist)
 record on
 wait 200
-tap pattern  # the PATTERN screen: palette pads write the cursor's step and move it on
+tap pattern  # the PATTERN screen: with REC on the palette pads (the lower two rows) write the cursor's step and move it on
 wait 100
-pad 0
-pad 3
-pad 7
-pad 3
+tap rec
+pad 24
+pad 27
+pad 31
+pad 27
 snap 01_four_notes
+press shift
 tap left
 tap left
 tap left
 tap left
+release shift
 tap instr  # the CARRIER lane: SYNTH on step 1, a step skipped, NOISE on step 3, SLOT 1 on step 4
-pad 1
+pad 25
+press shift
 tap right
-pad 2
-pad 4
+release shift
+pad 26
+pad 28
 snap 02_carriers_set
 expect state carriers=3
 press shift
