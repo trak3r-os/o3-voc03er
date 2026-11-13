@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.5.0 (pre-release)
+
+A play release: PATTERN rebuilt with a generator (RANDOM with seeds, STYLE, DENSITY, RANDOM ALL, one UNDO), SAMPLE that sounds with one
+finger, SAMPLE EDIT's beat slices, SAMPLE REC's AUTOPLAY, the same arrows and pads on every screen, the screens saying why nothing sounds,
+parameter strips on PERFORM, MIDI learn, TRACT presets, WAV import, and the fixes since v0.4.0. It is a pre-release and needs more testing.
+It is built on o3sdk 979ebff. Projects saved by v0.4.0 load as before (the dropped SLICES MONO / POLY flag is read and ignored).
+
+### What a unit has shown
+
+Booted on a unit: the candidates `v0.4.0-39-g0779741` and `v0.4.0-40-g0664283` (the same product code as v0.5.0 but the version text) went
+in through the bootloader's update path, started on PERFORM with no start-up fault and no crash record, CPU at 32 % idle on 0779741.
+Not tried on a unit yet: PATTERN's RANDOM, STYLE, DENSITY and UNDO under the fingers, SAMPLE's one-finger rules by ear, the arrows on every
+screen, the silence lines. Known and open: PERFORM's F7 opens its list on the tap (a tap to step and a hold to list is next), a held pad of
+rows B and C does not show, and a slot stopped by SAMPLE's F5 LOOP is silent in PERFORM until LOOP is on again.
+
+
 ### Added
 
 - **PATTERN makes patterns for you, and takes them back (rd-pb).** F5 RANDOM rolls the lane with a new seed and takes the light (`pattern_gen.h`, main loop only, steps 0..LENGTH-1, written through the bank's atomic setters): the encoder and LEFT / RIGHT then scroll the seeds, position 0 is ORIGINAL (the lane before the run), the window shows the number. F6 STYLE (NOTE BASS, LEAD, CHORDS, LONG; SLICE CHOP, ORDER; MOUTH VOWELS, WORDS; CARRIER and LEVEL one style, dim) and F7 DENSITY (1 to 8, default 4) re-roll a live run with the same seed. SHIFT + F5 RANDOM ALL rolls every lane with one seed. SHIFT + F1 UNDO is one level (the whole `PatternData` copied before a destructive act: a step cleared, overwritten or tied, CLR LANE, a RANDOM run as one, RANDOM ALL, a REC pass, INSERT, DELETE, paste, LENGTH, VALUE on a new step); again it redoes; another pattern or leaving the screen drops it. SLICE with no cuts says `NO SLICES: CUT THE SLOT ON SAMPLE EDIT` and writes nothing. The SLICE lane's palette pad alone now brings the note in BANDS, TALK and ROBOT (through SAMPLE's public pieces; SAMPLE's own `note_start` is still private). HELP, hints and the F row name the new keys; manual "Make a pattern fast". Tests in `tests/pattern_screen_test.cpp`, scenario `app/scenarios/pattern_random.txt`. Needs more testing on the unit: the feel of scrolling seeds while the transport plays, and the slice note by ear.
