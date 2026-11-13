@@ -1,7 +1,8 @@
-# PARAMS: the unit's values in four pages of eight (CARRIER, SHAPE, TUNE, TRACT) on the F row, PERFORM's voiceprint small above them. Each page, a value
-# changed and seen (NOISE under the encoder, a bigger voiceprint noise floor is not what is checked: the number and its bar are), VOICING (the app's own
-# key, SMOOTH by default, stepped to CLOSE and WIDE with the same chord pad held each time: the WAV carries the three chords), QUALITY at 24, PARAMS
-# pressed again paging on, SHIFT + PARAMS the same as PARAMS.
+# PARAMS in BANDS (the mode the unit starts in): the in-depth editor of the mode PERFORM is in, only what BANDS hears, in pages of eight on the F row:
+# CARRIER, VOICE & NOTES, NOTES (ARP alone: BANDS has seventeen live keys), PERFORM's voiceprint small above them, the title PARAMS  BANDS. Each page, a value
+# changed and seen (NOISE under the encoder; the number and its bar are what is checked), VOICING (the app's own key, SMOOTH by default, stepped to CLOSE and
+# WIDE with the same chord pad held each time: the WAV carries the three chords), PARAMS pressed again paging on and round, UP and DOWN paging, SHIFT + PARAMS
+# the same as PARAMS, HELP. The other four modes are app/scenarios/params_modes.txt.
 # The simulator shows the screen and that the engine takes the values; it cannot say what the frame costs or how it sounds.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/params.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -19,7 +20,7 @@ wait 150
 snap 03_sub
 tap down
 wait 300
-snap 04_shape
+snap 04_voice_and_notes
 tap f5
 wait 150
 snap 04b_voicing_smooth
@@ -47,58 +48,35 @@ snap 04e_voicing_clamped_at_smooth
 tap f2
 turn 20
 wait 200
-snap 05_quality_24
-tap f3
-wait 200
-snap 06_freeze
-tap params
-wait 300
-snap 07_tune
+snap 05_thru_changed
 tap f1
 turn 3
-tap f2
+wait 150
+snap 06_formant
+tap params
+wait 300
+snap 07_notes_arp_alone
 turn 2
 wait 200
-snap 08_tune_changed
+snap 08_arp_changed
+tap params
+wait 300
+snap 09_round_on_carrier
 tap up
-tap up
+wait 300
+snap 10_up_is_the_last_page
+tap down
 wait 200
-snap 09_back_on_carrier
 press shift
 tap params
 release shift
 wait 300
-snap 10_shift_params_pages
-# V2: the TRACT page (VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS: the tract unit's own parameters), live in every mode: in BANDS its strip says
-# TRACT MODE ONLY and the values are kept; then in TRACT mode the voiceprint above it is the mouth.
-tap params
-tap params
-wait 300
-snap 11_tract_page_in_bands
-tap f1
-turn 30
-tap f3
-turn -10
-tap f6
-turn 1
-wait 200
-snap 12_tract_values_in_bands
+snap 11_shift_params_pages
 press shift
 tap config
 release shift
 wait 300
-snap 13_tract_page_help
+snap 12_params_help
 tap config
 wait 200
-tap performance
-tap f1
-turn 8
-wait 400
-tap params
-wait 400
-snap 14_tract_page_in_tract
-tap f5
-turn 4
-wait 200
-snap 15_glide_changed
 wav params

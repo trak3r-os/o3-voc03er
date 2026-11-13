@@ -53,7 +53,7 @@ tap f7
 turn -6
 tap f7
 wait 200
-# ---- PARAMS: its three pages with a chord held
+# ---- PARAMS in TALK (the mode PERFORM is in here): its three pages (CARRIER, VOICE & NOTES, NOTES) with a chord held
 tap params
 wait 300
 paddown 38
@@ -61,10 +61,10 @@ wait 400
 snap m_params
 tap params
 wait 300
-snap m_params_shape
+snap m_params_voice
 tap params
 wait 300
-snap m_params_tune
+snap m_params_notes
 padup 38
 # ---- MASTER, the monitor on
 tap master

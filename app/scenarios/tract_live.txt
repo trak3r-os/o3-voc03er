@@ -1,4 +1,4 @@
-# TRACT, LIVE source (LT1, docs/REVIEW-2026-11-11.md): PARAMS page 1 key 6 (MOUTH, TRACT's SOURCE) steps from PADS to LIVE, and the tube's shape then follows the
+# TRACT, LIVE source (LT1, docs/REVIEW-2026-11-11.md): PARAMS' MIX & NOTES page in TRACT, F8 (MOUTH, TRACT's SOURCE) steps from PADS to LIVE, and the tube's shape then follows the
 # voice at the input instead of the pad or lane. The voiceprint's mouth profile is drawn from the engine's parameters (the main loop never reads the unit's state), so
 # it does NOT follow the live shape: the pictures show the key, the chord and that nothing breaks. The input is a 220 Hz tone, then 600 Hz, then none (a flat tone is
 # no vowel, docs/ENGINE-REALISM.md); that the mouth follows a voice, and how it sounds, is the unit's. tests/mouth_test.cpp measures the mapping with synthetic vowels.
@@ -13,9 +13,9 @@ tap params
 wait 300
 tap down
 wait 300
-snap 01_shape_page_mouth_pads
+snap 01_mix_page_mouth_pads
 expect state voc_mode=tract
-tap f6
+tap f8
 turn 1
 wait 800
 snap 02_mouth_live_220

@@ -64,12 +64,12 @@ snap 11_tract_c
 tap samplerec
 wait 200
 snap 12_rec_tract
-# MOUTH = LIVE: PARAMS page 1 key 6 steps PADS to LIVE; the SPEAKS and NONE sides move the mouth, so SAMPLE and SAMPLE REC do not dim them
+# MOUTH = LIVE: PARAMS' MIX & NOTES page in TRACT, F8 (MOUTH), steps PADS to LIVE; the SPEAKS and NONE sides move the mouth, so SAMPLE and SAMPLE REC do not dim them
 tap params
 wait 300
 tap down
 wait 300
-tap f6
+tap f8
 turn 1
 wait 800
 tap sampleplay

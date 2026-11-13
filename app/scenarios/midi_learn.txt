@@ -1,6 +1,6 @@
 # PARAMS, MIDI learn (ML1): SHIFT + an F key arms the kit's learn for that value; the screen says LEARN <NAME>: MOVE A KNOB and lights the key; the same
 # keys again cancel (LEARN OFF); VOICING (not a unit parameter) shows "-" on the held-SHIFT row and cannot be armed (CANNOT LEARN THIS VALUE); a controller
-# binds (the strip says LEARNED CC n) and then moves the value, the screen following it; the TRACT page learns the tract unit's own values.
+# binds (the strip says LEARNED CC n) and then moves the value, the screen following it; the TRACT mouth page learns the tract unit's own values (the mode is PERFORM's F1).
 # The simulator shows the screen and the engine taking the binding; a real controller's feel and the strip's confirmation on the unit stay to check.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/midi_learn.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -24,7 +24,7 @@ wait 150
 snap 03_cancelled
 release shift
 wait 100
-# VOICING (page SHAPE, F5) is the app's own setting: "-" on the held-SHIFT row, and the key cannot be armed
+# VOICING (page VOICE & NOTES, F5) is the app's own setting: "-" on the held-SHIFT row, and the key cannot be armed
 tap down
 wait 200
 press shift
@@ -56,8 +56,16 @@ wait 100
 midi usb b0 15 7f
 wait 300
 snap 07_moved_by_controller
-tap up
+tap performance
 wait 200
+tap f1
+turn -8
+turn 4
+wait 400
+tap params
+tap params
+tap params
+wait 300
 press shift
 tap f1
 wait 150

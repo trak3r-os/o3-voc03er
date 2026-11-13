@@ -4,6 +4,15 @@
 
 ### Added
 
+- **PM1: PARAMS is the in-depth editor of the mode PERFORM is in.** The four fixed pages (CARRIER, SHAPE, TUNE, TRACT) are gone: each of the five modes has its own pages, with only the values it hears
+  (`params::key_live` with the carrier source; SPEED outside TUNE only with the VOICE carrier), packed in pages of eight in the order carrier sound, voice shaping, notes and timing, then TRACT's mouth.
+  BANDS and ROBOT: CARRIER, VOICE & NOTES, NOTES; TALK: the same three with QUALITY and FREEZE; TUNE: one page, TUNING & MIX; TRACT: CARRIER, MIX & NOTES, MOUTH. Each page has a short tab name, the tabs adapt to one to four,
+  the title names the mode (`PARAMS  BANDS`), no key is dim and there is no "HEARD IN ..." line. MODE left PARAMS: PERFORM's F1 changes it, and PARAMS follows any change of the mode (PERFORM, a preset, a project
+  load, a MIDI program change) by showing the new mode's first page with a valid focus; a learn armed on a value no longer shown is cancelled; page and focus are not remembered per mode. `params::kTable`, `key_def`, `KeyDef`, `key_modes` and `key_live` are kept; the pages are
+  a constexpr view over the table (`params::layout_of`) with `static_assert`s (every heard key exactly once, none that is not heard). MIDI learn, the saved bindings, the project file and the presets are unchanged: the binding stays on the parameter (the table's
+  coordinates), not on a screen position. The unreachable FREEZE refusal text is removed (app.cpp clears FREEZE on a mode change). TRACT's MOUTH key moved from the SHAPE page to MIX & NOTES (F8, or the NOTES & MOUTH page with the VOICE carrier).
+  Found in the walk: a one-key last page (BANDS' ARP, ROBOT's ARP, TRACT's HISS with the VOICE carrier) is unavoidable under the pack-in-eights rule. Tests in `params_test` (layout coverage, the mode and carrier follow, learn kept and dropped), scenarios `params.txt`,
+  `params_modes.txt` (the five modes and the VOICE carrier, every page), and the PARAMS-driving ones (`liveness`, `midi_learn`, `tract_live`, `ux3_sample_cue`, `manual_screens`); the manual's PARAMS section and images are redone. Needs more testing on the unit (the tabs and pages by hand in each mode, learn after a mode change).
 - **UX3: the cues and refusals of SAMPLE, SAMPLE REC, SAMPLE LOAD, SONG and FILE say what they mean.** (1) *Mode cue:* in TUNE a SOUNDS slot, and in TRACT a SPEAKS slot or a slot on no side, is not heard
   (with MOUTH on PADS TRACT hears a slot only through DRY; with MOUTH on LIVE the slot moves the mouth and is not dimmed, the line says so): SAMPLE's side badge and the side value show dim with a reason line, SAMPLE REC's AFTER key and side line do the same (MANUAL section 10, "The mode cue"). (3) *FILE:* F5 without a
   name says NAME THE PROJECT FIRST; SAVE says "AUDIO NOT SAVED: F5" when a slot holds audio the project's WAVs do not carry (a re-record of the same length is noticed through a per-slot flag set by a take or a load and cleared by F5); NEW says its slots keep their audio, on the

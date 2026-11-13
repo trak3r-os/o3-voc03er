@@ -21,6 +21,7 @@ using Button = app::Button;
 namespace {
 
 constexpr std::uint64_t kNoteMs = 2000;
+constexpr int kTitleY = 44;  // under the header, above the voiceprint
 constexpr int kTabsY = 224;
 constexpr int kTabH = 44;
 constexpr int kVpX = 26, kVpY = 78, kVpW = 748, kVpH = 128;
@@ -43,11 +44,13 @@ void ParamsScreen::init(dsp::UnitId voice, dsp::UnitId tract, PerformScreen* per
   voice_ = voice;
   tract_ = tract;
   perform_ = perform;
-  page_ = 0;  // setup() can run again on this object (tests, `reboot`): PARAMS opens on its first page
+  mode_ = 0;  // setup() can run again on this object (tests, `reboot`): PARAMS opens on the first page of the mode (sync reads it)
+  voice_carrier_ = false;
+  page_ = 0;
   learn_armed_ = false;
   learn_page_ = 0;
   learn_key_ = 0;
-  focus_ = static_cast<std::uint8_t>(pr::first_focus(0));
+  focus_ = static_cast<std::uint8_t>(pr::first_focus_at(pr::layout_of(0, 0), 0));
   note_ = nullptr;
 }
 
@@ -55,6 +58,7 @@ const ui::Theme* ParamsScreen::theme(const app::Context&) const noexcept { retur
 
 void ParamsScreen::enter(app::Context& ctx) noexcept {
   note_ = nullptr;
+  (void)sync(ctx);
   ctx.redraw();
 }
 
@@ -71,6 +75,42 @@ void ParamsScreen::say(app::Context& ctx, const char* text) noexcept {
   ctx.redraw();
 }
 
+// The layout of the engine's mode and carrier now. A change of the mode: the first page, its first key. A change of the carrier alone (SPEED comes or
+// goes, the later keys move): the focused value keeps the focus where it still is. Either way a learn that is no longer on the page is cancelled.
+const pr::Layout& ParamsScreen::sync(app::Context& ctx) noexcept {
+  const dsp::Engine& e = ctx.engine();
+  const unsigned mode = perform::mode_index(e.param(voice_, Vocoder::Mode));
+  const unsigned car_src = static_cast<unsigned>(e.param(voice_, Vocoder::CarSrc) + 0.5f);  // SPEED is heard in any mode with the VOICE source (liveness.h)
+  const pr::Layout& lay = pr::layout_of(mode, car_src);
+  const bool voice_carrier = car_src == live::kCarrierVoice;
+  if (mode != mode_ || voice_carrier != voice_carrier_) {
+    const pr::Cell was = pr::cell_at(pr::layout_of(mode_, voice_carrier_ ? live::kCarrierVoice : 0u), page_, focus_);
+    unsigned p = 0, k = 0;
+    if (mode == mode_ && pr::find_cell(lay, was, p, k)) {
+      page_ = static_cast<std::uint8_t>(p);
+      focus_ = static_cast<std::uint8_t>(k);
+    } else {
+      page_ = 0;
+      focus_ = static_cast<std::uint8_t>(pr::first_focus_at(lay, 0));
+      note_ = nullptr;
+    }
+    mode_ = static_cast<std::uint8_t>(mode);
+    voice_carrier_ = voice_carrier;
+  }
+  if (!pr::focusable_at(lay, page_, focus_)) {  // a valid focus, whatever happened
+    page_ = static_cast<std::uint8_t>(page_ < lay.pages ? page_ : 0u);
+    focus_ = static_cast<std::uint8_t>(pr::first_focus_at(lay, page_));
+  }
+  if (learn_armed_) {
+    unsigned p = 0, k = 0;
+    const pr::Cell armed{learn_page_, learn_key_};
+    if (!pr::find_cell(lay, armed, p, k) || p != page_) {
+      learn_drop(ctx);
+    }
+  }
+  return lay;
+}
+
 // ---- MIDI learn (ML1) ---------------------------------------------------------------------------------------------------------------
 
 void ParamsScreen::learn_drop(app::Context& ctx) noexcept {
@@ -80,14 +120,19 @@ void ParamsScreen::learn_drop(app::Context& ctx) noexcept {
   learn_armed_ = false;
 }
 
-bool ParamsScreen::learn_on(const app::Context& ctx, unsigned key) const noexcept {
-  return learn_armed_ && learn_page_ == page_ && learn_key_ == key && ctx.midi().learning();
+bool ParamsScreen::learn_on(const app::Context& ctx, const pr::Layout& lay, unsigned key) const noexcept {
+  const pr::Cell c = pr::cell_at(lay, page_, key);
+  return learn_armed_ && !pr::blank(c) && c.page == learn_page_ && c.key == learn_key_ && ctx.midi().learning();
 }
 
 // SHIFT + F `key`: arm learn for its parameter, or cancel it when it is armed on that key; a value that is not a unit parameter says so.
-void ParamsScreen::learn_key(app::Context& ctx, unsigned key) noexcept {
-  const bool can = pr::learnable(page_, key);
-  switch (pr::learn_tap(can, can && learn_on(ctx, key))) {
+void ParamsScreen::learn_key(app::Context& ctx, const pr::Layout& lay, unsigned key) noexcept {
+  const pr::Cell cell = pr::cell_at(lay, page_, key);
+  if (pr::blank(cell)) {
+    return;
+  }
+  const bool can = pr::learnable(cell.page, cell.key);
+  switch (pr::learn_tap(can, can && learn_on(ctx, lay, key))) {
     case pr::LearnTap::Cannot:
       learn_drop(ctx);  // an arm on another key goes too, so the message is not hidden under "MOVE A KNOB"
       say(ctx, "CANNOT LEARN THIS VALUE");
@@ -99,28 +144,30 @@ void ParamsScreen::learn_key(app::Context& ctx, unsigned key) noexcept {
     case pr::LearnTap::Arm:
       break;
   }
-  const pr::KeyDef& k = pr::key_def(page_, key);
+  const pr::KeyDef& k = pr::def_of(cell);
   learn_drop(ctx);  // an earlier arm (another key) goes whether or not this one takes
   if (!ctx.midi().learn(unit_of(k, voice_, tract_), k.param)) {
     say(ctx, "CANNOT LEARN THIS VALUE");
     return;
   }
   learn_armed_ = true;
-  learn_page_ = static_cast<std::uint8_t>(page_);
-  learn_key_ = static_cast<std::uint8_t>(key);
+  learn_page_ = cell.page;
+  learn_key_ = cell.key;
   note_ = nullptr;
   ctx.redraw();
 }
 
 void ParamsScreen::next_page(app::Context& ctx, int delta) noexcept {
+  const pr::Layout& lay = sync(ctx);
   learn_drop(ctx);  // the arm is a page's: the next page's keys are other values
-  page_ = static_cast<std::uint8_t>(pr::next_page(page_, delta));
-  focus_ = static_cast<std::uint8_t>(pr::first_focus(page_));
+  page_ = static_cast<std::uint8_t>(pr::next_page_in(lay, page_, delta));
+  focus_ = static_cast<std::uint8_t>(pr::first_focus_at(lay, page_));
   note_ = nullptr;
   ctx.redraw();
 }
 
 void ParamsScreen::update(app::Context& ctx) noexcept {
+  (void)sync(ctx);
   if (perform_ != nullptr) {
     perform_->update(ctx);  // the pads' bend and vibrato, as on PERFORM
   }
@@ -136,11 +183,12 @@ void ParamsScreen::update(app::Context& ctx) noexcept {
 // ---- input --------------------------------------------------------------------------------------------------------------------------
 
 // `delta` detents of key `key` (a tap steps once, coarse, and wraps at the end). The value is read back from the engine, stepped and written.
-void ParamsScreen::step(app::Context& ctx, unsigned key, int delta, bool coarse, bool tap) noexcept {
-  if (!pr::focusable(page_, key)) {
+void ParamsScreen::step(app::Context& ctx, const pr::Layout& lay, unsigned key, int delta, bool coarse, bool tap) noexcept {
+  const pr::Cell cell = pr::cell_at(lay, page_, key);
+  if (pr::blank(cell) || !pr::focusable(cell.page, cell.key)) {
     return;
   }
-  const pr::KeyDef& k = pr::key_def(page_, key);
+  const pr::KeyDef& k = pr::def_of(cell);
   dsp::Engine& e = ctx.engine();
   if (k.kind == pr::Kind::App) {
     if (perform_ != nullptr && k.fmt == pr::Fmt::Voicing) {
@@ -151,28 +199,24 @@ void ParamsScreen::step(app::Context& ctx, unsigned key, int delta, bool coarse,
   }
   const dsp::UnitId id = unit_of(k, voice_, tract_);
   const int next = pr::step_display(k, read(e, id, k), delta, coarse, tap);
-  if (k.kind == pr::Kind::Value && k.param == Vocoder::Freeze && next != 0 && !live::voice_heard(Vocoder::Freeze, perform::mode_index(e.param(voice_, Vocoder::Mode)))) {
-    say(ctx, "FREEZE: HEARD IN TALK ONLY");  // a latching gesture: outside TALK it refuses, as PERFORM's does (UX2)
-    return;
-  }
   (void)e.set_param(id, k.param, pr::to_param(k.fmt, next));
   ctx.redraw();
 }
 
 void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
+  const pr::Layout& lay = sync(ctx);
   unsigned k = 0;
   if (in.fkey_press(k)) {
     if (k >= pr::kKeys) {
       return;
     }
     if (in.shift) {  // ML1: SHIFT + F is MIDI learn (the focus and the value stay as they are)
-      learn_key(ctx, k);
+      learn_key(ctx, lay, k);
       return;
     }
-    const pr::KeyDef& def = pr::key_def(page_, k);
-    if (pr::live_kind(def.kind)) {
+    if (pr::focusable_at(lay, page_, k)) {
       if (k == focus_) {  // a second tap steps the value on
-        step(ctx, k, 1, true, true);
+        step(ctx, lay, k, 1, true, true);
       } else {
         focus_ = static_cast<std::uint8_t>(k);
         ctx.redraw();
@@ -181,7 +225,7 @@ void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     return;
   }
   if (in.turn()) {
-    step(ctx, focus_, in.delta(), in.shift, false);
+    step(ctx, lay, focus_, in.delta(), in.shift, false);
     return;
   }
   if (in.press(Button::Up)) {
@@ -202,9 +246,11 @@ void ParamsScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
 }
 
 void ParamsScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
+  const pr::Layout& lay = sync(ctx);
   const bool shift = ctx.panel().shift();
   for (unsigned i = 0; i < pr::kKeys; ++i) {
-    out.label[i] = shift ? (pr::learnable(page_, i) ? "LEARN" : "-") : pr::key_def(page_, i).name;
+    const pr::Cell c = pr::cell_at(lay, page_, i);
+    out.label[i] = pr::blank(c) ? "" : (shift ? (pr::learnable_at(lay, page_, i) ? "LEARN" : "-") : pr::view_name(c));
   }
 }
 
@@ -230,23 +276,23 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
       {Button::Fx, "PATTERN: SLICE, MOUTH LANE", nullptr},
       {Button::Shift, "COARSE STEPS; F KEYS: LEARN", nullptr},
   };
+  // The layout this screen shows (sync sees the same engine on the next frame; a help opened in the very frame of a mode change reads the new one).
+  const dsp::Engine& e = ctx.engine();
+  const pr::Layout& lay = pr::layout_of(perform::mode_index(e.param(voice_, Vocoder::Mode)), static_cast<unsigned>(e.param(voice_, Vocoder::CarSrc) + 0.5f));
+  const unsigned page = page_ < lay.pages ? page_ : 0u;
   if (perform_ != nullptr) {
     perform_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
-    for (unsigned i = 0; i < app::kFKeyCount; ++i) {
-      h.fkey_shift[i] = nullptr;
-    }
   }
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
-    h.fkey_shift[i] = pr::learnable(page_, i) ? "LEARN" : nullptr;
+    h.fkey_shift[i] = pr::learnable_at(lay, page, i) ? "LEARN" : nullptr;
   }
-  h.summary = page_ == pr::kTractPage
-                  ? "THE MOUTH OF TRACT: VOWEL, TONGUE, JAW, LIPS, GLIDE, SIZE, RES, HISS.\n"
-                    "DIM: NOT HEARD IN THIS MODE (THEY SPEAK IN TRACT). SHIFT + F: LEARN."
-                  : "FOUR PAGES OF EIGHT VALUES: CARRIER, SHAPE, TUNE, TRACT. PARAMS OR UP\n"
-                    "AND DOWN TURN THE PAGE. DIM: NOT HEARD IN THIS MODE. SHIFT + F: LEARN.";
+  h.summary =
+      "THE VALUES OF THE MODE PERFORM IS IN: ONLY WHAT IT HEARS, IN PAGES OF EIGHT.\n"
+      "PARAMS OR UP AND DOWN TURN THE PAGE. MODE IS PERFORM'S F1. SHIFT + F: LEARN.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     // a blank key has no row; MOUTH (LT1) says what it does: the pads and the lane, or the voice at the input, shape the tube
-    h.fkey[i] = !pr::focusable(page_, i) ? nullptr : (pr::key_def(page_, i).fmt == pr::Fmt::Source ? "MOUTH: PADS OR LIVE VOICE" : "TAP: FOCUS, THEN STEP");
+    const pr::Cell c = pr::cell_at(lay, page, i);
+    h.fkey[i] = pr::blank(c) ? nullptr : (pr::def_of(c).fmt == pr::Fmt::Source ? "MOUTH: PADS OR LIVE VOICE" : "TAP: FOCUS, THEN STEP");
   }
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
@@ -256,11 +302,11 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
 // ---- draw ---------------------------------------------------------------------------------------------------------------------------
 
 void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
+  const pr::Layout& lay = sync(ctx);
   const dsp::Engine& e = ctx.engine();
   const app::AudioIn& ain = ctx.audio_in();
   const SourceName* src = ain.available() ? find_source(ain.source()) : nullptr;
-  const unsigned mode = perform::mode_index(e.param(voice_, Vocoder::Mode));
-  const unsigned car_src = static_cast<unsigned>(e.param(voice_, Vocoder::CarSrc) + 0.5f);  // SPEED is heard in any mode with the VOICE source (liveness.h)
+  const unsigned mode = mode_;
   const unsigned tempo = e.stats().tempo_mbpm;
 
   ornoir::Voiceprint vp;
@@ -281,34 +327,40 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
 
   ornoir::FKey keys[ornoir::kFKeys];
   const pr::KeyDef* focused = nullptr;
+  const char* focused_name = "";
   const bool shift_row = ctx.panel().shift();  // ML1: held SHIFT turns the row into LEARN cells
   for (unsigned i = 0; i < pr::kKeys; ++i) {
-    const pr::KeyDef& k = pr::key_def(page_, i);
-    keys[i].name = k.name;
-    if (pr::live_kind(k.kind)) {
-      keys[i].dim = !pr::key_live(k, mode, car_src);  // not heard in this mode (liveness.h); a tap still sets it
-      const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, unit_of(k, voice_, tract_), k);
-      char txt[12];
-      pr::format_value(k, v, txt);
-      std::memcpy(keys[i].value, txt, sizeof txt < sizeof keys[i].value ? sizeof txt : sizeof keys[i].value);
-      keys[i].value[sizeof keys[i].value - 1u] = '\0';
-      keys[i].pct = pr::bar_of(k, v);
-      keys[i].hot = i == focus_;
-      if (i == focus_) {
-        focused = &k;
-      }
+    const pr::Cell c = pr::cell_at(lay, page_, i);
+    if (pr::blank(c)) {
+      continue;  // the end of the mode's last page: nothing there
+    }
+    const pr::KeyDef& k = pr::def_of(c);
+    keys[i].name = pr::view_name(c);
+    const int v = k.kind == pr::Kind::App ? read_app(perform_, k) : read(e, unit_of(k, voice_, tract_), k);
+    char txt[12];
+    pr::format_value(k, v, txt);
+    std::memcpy(keys[i].value, txt, sizeof txt < sizeof keys[i].value ? sizeof txt : sizeof keys[i].value);
+    keys[i].value[sizeof keys[i].value - 1u] = '\0';
+    keys[i].pct = pr::bar_of(k, v);
+    keys[i].hot = i == focus_;
+    if (i == focus_) {
+      focused = &k;
+      focused_name = pr::view_name(c);
     }
   }
 
   if (shift_row) {
     for (unsigned i = 0; i < pr::kKeys; ++i) {
-      const pr::KeyDef& k = pr::key_def(page_, i);
+      const pr::Cell c = pr::cell_at(lay, page_, i);
       keys[i] = ornoir::FKey{};
-      if (pr::learnable(page_, i)) {
+      if (pr::blank(c)) {
+        continue;
+      }
+      if (pr::learnable(c.page, c.key)) {
         keys[i].name = "LEARN";
-        std::strncpy(keys[i].value, k.name, sizeof keys[i].value - 1u);  // the value it would bind (the array starts zeroed: FKey{})
-        keys[i].hot = learn_on(ctx, i);
-      } else if (k.kind != pr::Kind::None) {
+        std::strncpy(keys[i].value, pr::view_name(c), sizeof keys[i].value - 1u);  // the value it would bind (the array starts zeroed: FKey{})
+        keys[i].hot = learn_on(ctx, lay, i);
+      } else {
         keys[i].name = "-";
         std::memcpy(keys[i].value, "-", 2);  // the window shows the value's slot: a dash
         keys[i].dim = true;
@@ -316,44 +368,46 @@ void ParamsScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noe
     }
   }
 
+  const unsigned tabs = lay.pages;
+  const int tab_w = pr::tab_w(tabs);
   ui::plot::Canvas c(r);
   c.open();
   ornoir::header_shapes(c, h);
   ornoir::frow_shapes(c, keys);
   ornoir::voiceprint_strip(c, kVpX, kVpY, kVpW, kVpH, vp);
-  for (unsigned i = 0; i < pr::kPages; ++i) {  // the page tabs
-    const int x = pr::tab_x(i);
-    ornoir::fill_rect(c, x, kTabsY, pr::kTabW, kTabH, i == page_ ? Color::Accent : Color::Empty);
-    ornoir::fill_rect(c, x + 2, kTabsY + 2, pr::kTabW - 4, kTabH - 4, Color::Pane);
+  for (unsigned i = 0; i < tabs; ++i) {  // the page tabs: as many as the mode has pages
+    const int x = pr::tab_x(tabs, i);
+    ornoir::fill_rect(c, x, kTabsY, tab_w, kTabH, i == page_ ? Color::Accent : Color::Empty);
+    ornoir::fill_rect(c, x + 2, kTabsY + 2, tab_w - 4, kTabH - 4, Color::Pane);
   }
   c.close();
   ornoir::header_text(r, h);
   ornoir::frow_text(r, keys);
 
-  for (unsigned i = 0; i < pr::kPages; ++i) {
-    const int cx = pr::tab_x(i) + pr::kTabW / 2;
-    r.text(centred(r, pr::kPageNames[i], Face::Label, cx), kTabsY + 14, pr::kPageNames[i], i == page_ ? Color::Text : Color::TextDim, Face::Label);
+  char title[24] = "PARAMS  ";  // the screen's name and the mode it edits
+  std::strncat(title, perform::kModeNames[mode], sizeof title - std::strlen(title) - 1u);
+  r.text(kVpX, kTitleY, title, Color::Text, Face::Display);
+
+  for (unsigned i = 0; i < tabs; ++i) {
+    const int cx = pr::tab_x(tabs, i) + tab_w / 2;
+    r.text(centred(r, lay.name[i], Face::Label, cx), kTabsY + 14, lay.name[i], i == page_ ? Color::Text : Color::TextDim, Face::Label);
   }
 
-  // The focused key's name, big, and the line under it: the budget warning, or a moment's note.
+  // The focused key's name, big, and the line under it: the learn prompt, or a moment's note.
   if (focused != nullptr) {
-    r.text(kVpX, 292, focused->name, Color::Text, Face::Display);
+    r.text(kVpX, 292, focused_name, Color::Text, Face::Display);
   }
-  if (learn_armed_ && learn_on(ctx, learn_key_)) {
+  bool armed_here = false;
+  for (unsigned i = 0; i < pr::kKeys && !armed_here; ++i) {
+    armed_here = learn_on(ctx, lay, i);
+  }
+  if (armed_here) {
     char line[48] = "LEARN ";
-    std::strncat(line, pr::key_def(learn_page_, learn_key_).name, 16);
+    std::strncat(line, pr::view_name(pr::Cell{learn_page_, learn_key_}), 16);
     std::strncat(line, ": MOVE A KNOB", sizeof line - std::strlen(line) - 1u);
     r.text(kVpX, 350, line, Color::Accent, Face::Label);
   } else if (note_ != nullptr) {
     r.text(kVpX, 350, note_, Color::TextDim, Face::Label);
-  } else if (focused != nullptr && !pr::key_live(*focused, mode, car_src)) {
-    char where[40];
-    if (focused->kind == pr::Kind::Value) {  // the focused key is dim: it still sets, and this is where it is heard
-      live::voice_heard_text(focused->param, car_src, where);
-    } else {
-      live::heard_text(pr::key_modes(*focused, car_src), where);
-    }
-    r.text(kVpX, 350, where, Color::TextDim, Face::Label);
   }
 }
 

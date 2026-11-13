@@ -1,6 +1,6 @@
-# UX2, the liveness table: a DIM key or pad is not heard in this mode. A tap on a dim PARAMS or SHIFT-row key still sets the value and says where it is heard;
-# the FORMANT pads and the strips go dark and refuse; FREEZE refuses outside TALK. TALK (FREEZE lit, the shift row, FORMANT and THRU heard), TUNE (the CARRIER
-# page and the TUNE page of PARAMS, a dim key tapped; the shift row with GLIDE, GATE and ARP dim), TRACT (PATTERN's LEVEL lane is ACCENT, its header cue), the
+# UX2, the liveness table: a DIM key or pad is not heard in this mode. A tap on a dim SHIFT-row key still sets the value and says where it is heard;
+# the FORMANT pads and the strips go dark and refuse; FREEZE refuses outside TALK. PARAMS has no dim keys: it shows only what the mode hears (TUNE's one page here).
+# TALK (FREEZE lit, the shift row, FORMANT and THRU heard), TUNE (PARAMS' one page; the shift row with GLIDE, GATE and ARP dim), TRACT (PATTERN's LEVEL lane is ACCENT, its header cue), the
 # PERFORM title in each mode, and MASTER opening with nothing focused. The simulator shows the screens and that the engine takes the values; it cannot say how
 # dim reads on the unit's LEDs or the display.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/liveness.txt --out <dir>   (the dir must exist)
@@ -40,19 +40,13 @@ release shift
 wait 200
 tap params
 wait 300
-snap 08_tune_params_carrier_dim
-tap f2
+snap 08_tune_params_only_heard
+tap f3
 wait 200
-snap 09_tune_dim_key_says_where
+snap 09_tune_key_focused
 tap params
 wait 300
-snap 10_tune_params_shape
-tap params
-wait 300
-snap 11_tune_params_tune_page
-tap f8
-wait 200
-snap 12_arp_dim_in_tune
+snap 10_tune_params_stays_on_its_page
 # ROBOT and TRACT titles
 tap performance
 wait 200
