@@ -79,12 +79,12 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | PLAY | Starts or stops the transport: the pattern, the bar lines that takes and loop starts wait for | everywhere |
 | REC | PERFORM: capture (section 2). SAMPLE REC: start the take at the bar, again to stop at the bar. SAMPLE and SAMPLE EDIT: arm the selected slot (SAMPLE REC opens armed). PATTERN: write arm, the pads record into the step under the playhead | all but the lists |
 | COPY | PATTERN: copies the step under the cursor (SHIFT: the whole pattern). SAMPLE EDIT: copies the slot, sample and cuts, to the next empty slot (F1 confirms) | PATTERN, SAMPLE EDIT |
-| INSERT | PATTERN: pastes the copied step at the cursor, the rest moving right (SHIFT: pastes the pattern). SAMPLE EDIT: inserts a cut at the cursor | PATTERN, SAMPLE EDIT |
-| DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the cut at the cursor (SHIFT: the slot's sample, F1 confirms); PERFORM the latched pad; SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
-| SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE, SHIFT + F2 is SLICE CH; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP. Four combinations and the kit's two, no more | everywhere |
-| UP / DOWN | Which: the slot (SAMPLE, SAMPLE EDIT, SAMPLE REC), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
+| INSERT | PATTERN: pastes the copied step at the cursor, the rest moving right (SHIFT: pastes the pattern). SAMPLE EDIT: inserts a cut at the cursor (a picked slice: in its middle) | PATTERN, SAMPLE EDIT |
+| DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the picked slice's cut, else the cut nearest the cursor in view (SHIFT: the slot's sample, F1 confirms); PERFORM the latched pad; SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
+| SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE EDIT, with a lower pad latches its note, SHIFT + UP / DOWN is the slot and SHIFT + F8 clears the cuts; on SAMPLE, SHIFT + F2 is SLICE CH; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP; on PARAMS, with an F key MIDI learn. Each screen's section lists its own | everywhere |
+| UP / DOWN | Which: the slot (SAMPLE, SAMPLE REC; SAMPLE EDIT: zoom out / in, SHIFT the slot), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
 | LEFT / RIGHT | Where: the octave of the pads (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the take's length (SAMPLE REC); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
-| Encoder | The latched F value; in a list the row; in SAMPLE EDIT the cursor, a sample fine, SHIFT coarse (a 64th of the sample) | everywhere |
+| Encoder | The latched F value; in a list the row; in SAMPLE EDIT the picked slice's start, else the cursor, a picture pixel a click at the zoom (SHIFT: coarser, at most a 64th of the view; with a pick, one sample) | everywhere |
 
 ## 4. The screens
 
@@ -160,14 +160,26 @@ of the top rows auditions that slice through the vocoder, and a pad of the botto
 
 - F1 CUT EVEN (OFF, 8, 16, 24 equal parts; turning re-cuts) · F2 CUT BEATS (OFF, 4, 8, 16 a bar, on the bars the take was recorded on; dimmed for
   a loaded WAV) · F3 CUT HITS (0 to 100: the sensitivity of the onset detector, 0 off; the cuts follow it as it turns; the first tap from 0 lands at 50, then by 10, and 100 wraps to 0) · F4 START and F5 END (the
-  trim) · F6 NORMALISE (action, F1 confirms) · F7 SAVE WAV (`Samples/slotN_NNN.wav` by the kit's `save_wav`, the strip shows the progress) · SHIFT + F8
-  CLR CUTS (F8 alone changes nothing and says where CLR CUTS is). COPY copies the slot to the next empty one (F1 confirms).
+  trim) · F6 NORMALISE (action, F1 confirms) · F7 SAVE WAV (`Samples/slotN_NNN.wav` by the kit's `save_wav`, the strip shows the progress) · F8 SPEAKS (the slot speaks, or back to LIVE) · SHIFT + F8
+  CLR CUTS. COPY copies the slot to the next empty one (F1 confirms).
 - F1 to F3 and SHIFT + F8 replace the table and say so before the value is taken ("REPLACES 5 CUTS"; the key waiting for its second press reads CONFIRM); INSERT and DELETE edit it. A cut lands on a zero crossing
   within 64 samples when one is there.
-- Beat slices by hand (SE1): a tap on a top pad picks that slice, plays it and lights the pad high; the picked slice takes the encoder ahead of the lit F key. The
-  encoder moves its start between its neighbours (quiet-crossing snap, the kit's acceleration; SHIFT + encoder one sample a detent), LEFT / RIGHT pick the previous / next slice,
-  and the waveform zooms to about 0.5 s around the start. Slice 1's start is the trim START (one notion of start). The same pad again, an F key or UP / DOWN lets the slice go
-  (that key counts as a first tap). A pad past the last slice splits nothing: INSERT adds a cut. F1 reads CONFIRM while something waits for it, and a trim and NORMALISE say NO UNDO.
+- Beat slices by hand (SE1, SE3): a tap on a top pad picks that slice, plays it and lights the pad high; a pad always picks, from any state, and an F key or SHIFT + UP / DOWN
+  lets the pick go (that key counts as a first tap). One state is kept besides the cursor: the pick takes the encoder ahead of the lit F key and sets the cursor to the slice's start,
+  so DELETE with nothing picked still works on the cursor. The pick shows three ways: its span filled on the cut strip, its start line the brightest, and the line under the picture
+  `SLICE 3 OF 8   START 0.500 S   LEN 0.250 S`. The encoder moves its start between its neighbours (quiet-crossing snap from 24 samples a detent up, the kit's acceleration; SHIFT + encoder
+  one sample a detent); LEFT / RIGHT pick the previous / next slice and stop at the ends (`FIRST SLICE`, `LAST SLICE`). Slice 1's start is the trim START (one notion of start). A pad past the
+  last slice splits nothing: INSERT adds a cut (a picked slice: in its middle, `CUT 5 ADDED: 9 SLICES`). DELETE with a pick removes its start cut and moves the pick to the slice that swallowed it
+  (`CUT 5 REMOVED: 7 SLICES`; slice 1: `SLICE 1 CANNOT GO`); with none, the cut nearest the cursor inside the visible window, or `NO CUT IN VIEW`. F1 reads CONFIRM while something waits for it, and a trim and
+  NORMALISE say NO UNDO.
+- Zoom (SE2): UP in, DOWN out, eleven rungs of 176400, 88200, 44100, ... 344 samples across (a rung as wide as the slot is the whole slot and is skipped), the window centred on the picked start or
+  the cursor and clamped inside the slot. The picture is 186 min / max columns of four pixels, rebuilt by `zoom_build` only when the window or the audio changes, reading at most
+  `kZoomSpan` (22,050) samples (a column wider than 119 samples reads every stride-th one); the cuts in view are drawn with their numbers, the whole slot keeps the overview bitmap. The label reads
+  `ZOOM 0.5 S`, `ZOOM 20 MS` or `WHOLE SLOT`; the encoder step is the window over 744 pixels (one sample at the deepest rung). The cut strip below always shows the whole slot, with the window as a bracket.
+- Hearing a slice (SE3): the header names the slot's route place (`SPEAKS`, `SOUNDS` or nothing). F8 (plain) toggles SPEAKS through the same route change as SAMPLE's side value (`plan_side`; an empty slot
+  refuses in one line; the live input leaves the mix while the slot speaks, and F8 again gives the voice back to LIVE); SHIFT + F8 is CLR CUTS. While SHIFT is held the F row shows the SHIFT functions. SHIFT + a lower pad latches
+  that pad's note or chord (PERFORM's audition path, its physical release swallowed; the LED shows it; SHIFT + the same pad lets it go, SHIFT + another moves it, a plain press plays over it); leaving the screen, a mode change,
+  a project load and init release it. The hint `SHIFT + LOW PAD LATCHES A NOTE` shows when a slice pad is pressed in BANDS, TALK or ROBOT with the SYNTH carrier and no note held (it cannot see a note the step sequencer plays).
 
 ### SAMPLE LOAD
 

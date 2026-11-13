@@ -541,15 +541,32 @@ UP and DOWN pick the slot. F1 LOW PADS changes the shared pair of note rows (PAT
 
 *SAMPLE EDIT: the take across the screen, cuts as numbered marks, trim as brackets.*
 
-SAMPLE EDIT shows the take across the whole screen. Cuts are marks numbered 1 to 24. The encoder moves the cursor; LEFT and RIGHT jump
-from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice; the bottom rows play
-SAMPLE's two note rows (A NOTE, B TRIAD at first; F1 LOW PADS on SAMPLE changes them).
+SAMPLE EDIT shows the take across the whole screen. Cuts are marks numbered 1 to 24. The encoder moves the cursor, about one picture pixel a click
+(SHIFT: coarser); LEFT and RIGHT jump from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice;
+the bottom rows play SAMPLE's two note rows (A NOTE, B TRIAD at first; F1 LOW PADS on SAMPLE changes them). The header names the slot's place in the
+route: `SLOT 2  SPEAKS` (the slot is the vocoder's voice), `SLOT 3  SOUNDS` (it is the carrier) or nothing.
 
-**Moving a slice's start.** Tap a top pad: that slice plays, its pad lights bright, and the waveform zooms to about half a second around the slice's
-start. Now the encoder moves that start (it stays between its neighbours and lands on a quiet crossing point; SHIFT + encoder moves one sample a click).
-LEFT and RIGHT pick the previous or next slice. Tap the same pad again, press an F key, or press UP or DOWN to let the slice go and go back to the
-whole take. Slice 1's start is the trim START (F4): moving one moves the other, and pad 1 plays from START while it is moved (up to the second slice). A pad past the last slice does not make a slice; INSERT does, and the
-line says so.
+**Picking a slice.** Tap a top pad: that slice plays, its pad lights bright, and the screen marks it three ways: its span is filled on the cut strip,
+its start line is the brightest, and the line under the picture reads `SLICE 3 OF 8   START 0.500 S   LEN 0.250 S`. LEFT and RIGHT pick the previous or
+next slice and stop at the ends; a tap on another pad picks that one. The encoder now moves the picked slice's start (it stays between its neighbours and
+lands on a quiet crossing point; SHIFT + encoder moves one sample a click). An F key or SHIFT + UP / DOWN lets the slice go (that F key counts as a first tap).
+Slice 1's start is the trim START (F4): moving one moves the other, and pad 1 plays from START while it is moved (up to the second slice). A pad past
+the last slice does not make a slice; INSERT does, and the line says so.
+
+**Cutting and deleting.** With a slice picked, INSERT cuts it in its middle (`CUT 5 ADDED: 9 SLICES`) and DELETE removes its start cut: the pick
+moves to the slice that swallowed it (`CUT 5 REMOVED: 7 SLICES`). Slice 1 has no cut to remove, and the line says so. With nothing picked, DELETE
+removes the cut nearest the cursor inside the picture, or says there is none there. SHIFT + DELETE still empties the slot and asks first.
+
+**Zoom.** UP zooms in and DOWN out, in steps of two, from WHOLE SLOT down to about 8 ms across (the label reads `ZOOM 0.5 S`, `ZOOM 20 MS` or `WHOLE SLOT`). The
+picture is centred on the picked start (or on the cursor) and stays inside the slot. The cuts in view carry their numbers, and the encoder step follows the
+zoom: at the deepest zoom a click is one sample. SHIFT + UP and SHIFT + DOWN pick the slot before and after (the one SAMPLE shows).
+
+**Hearing a slice.** A slot's slices are the vocoder's voice, unless the slot is the SOUNDS source. In BANDS, TALK and ROBOT a slice pad is heard
+only while a synth note sounds, and the live input is still mixed in unless the slot speaks. So: **SHIFT + a lower pad latches its note or chord**
+(the pad's LED shows it; SHIFT + the same pad lets it go, SHIFT + another pad moves it; a plain press plays over it), and **F8 SPEAKS** makes the slot
+the vocoder's voice (the live input leaves the mix; press it again to give the voice back to LIVE; an empty slot says so). The latch is let go
+when you leave the screen, change the mode or load a project. When a slice pad is pressed in BANDS, TALK or ROBOT with no note sounding, the screen says
+`SHIFT + LOW PAD LATCHES A NOTE` (it cannot see a note the step sequencer is playing). The new keys and the zoom need more testing on the unit.
 
 | Key | What it does |
 |---|---|
@@ -559,7 +576,8 @@ line says so.
 | F4 START, F5 END | Trim the take |
 | F6 NORMALISE | Raises the level to the top. F1 confirms |
 | F7 SAVE WAV | Saves the slot as a WAV file in the card's `Samples/` folder |
-| SHIFT + F8 CLR CUTS | Removes every cut. F8 alone changes nothing and says so |
+| F8 SPEAKS | The slot speaks (the vocoder's voice) or goes back to LIVE |
+| SHIFT + F8 CLR CUTS | Removes every cut (asks twice on a table you edited) |
 
 F1 to F3 and SHIFT + F8 replace the cuts you have; the screen says how many it replaces, and the key reads CONFIRM: press it again to commit. While
 something waits for its F1 (NORMALISE, the trim, COPY, SHIFT + DELETE) F1 reads CONFIRM, and the trim and NORMALISE say NO UNDO. A cut lands on a quiet crossing point close by

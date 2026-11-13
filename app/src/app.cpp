@@ -161,7 +161,7 @@ class MyApp final : public app::App {
     params_.init(voice, tube, &perform_);
     master_.init(voice, &meter_, &pick_source_cb, this);
     sample_.init(voice, &voc_, &perform_, &carriers_);
-    sample_edit_.init(&sample_, g_loop_mem);
+    sample_edit_.init(&sample_, g_loop_mem, &perform_);
     sample_load_.init(&sample_, g_loop_mem);
     file_.init(voice, &sample_, &perform_, &pattern_, &g_bank, &g_chain, &sample_load_, g_loop_mem);
     file_.set_tract(tube);

@@ -664,8 +664,7 @@ constexpr unsigned job_percent(const Job& j) noexcept {
 
 inline constexpr std::uint32_t kSliceStep = 32;               // samples a detent moves a slice start (about a pixel of the zoom); the kit's acceleration multiplies the detents
 inline constexpr std::uint32_t kSliceSnap = kSnapRadius;      // how far past the target the quiet-crossing search looks, in the direction of the move
-inline constexpr std::uint32_t kZoomHalf = kRateHz / 4u;      // the zoom shows a quarter second each side of the start
-inline constexpr std::uint32_t kZoomSpan = 2u * kZoomHalf;
+inline constexpr std::uint32_t kZoomSpan = kRateHz / 2u;      // the most samples one zoom rebuild reads (about): half a second, the old fixed window
 inline constexpr unsigned kZoomColW = 4;                      // px a zoom column is wide: 186 columns, 2 words each in the display list
 inline constexpr unsigned kZoomCols = kPicW / kZoomColW;
 static_assert(kPicW % kZoomColW == 0u, "the zoom columns tile the picture");
@@ -724,18 +723,18 @@ inline bool slice_limits(const sm::SliceTable& t, unsigned i, std::uint32_t cap,
   return lo <= hi;
 }
 
-// A start `detents` on: kSliceStep a detent, snapped to the quietest zero crossing ahead of the target (the way it moves), or one sample a detent and no
-// snap when `fine` (SHIFT). Held inside [lo, hi]; a target the clamp moved is not snapped. `s` nullptr: no snap. A `pos` already outside [lo, hi] (the
-// START bracket F4 left past cut 2) is not thrown back to the edge: the window widens to take it in, so a detent away from the range stays put and one
-// towards it walks in by steps (0 detents alone brings it into the range).
-inline std::uint32_t slice_move(const std::int16_t* s, std::uint32_t len, std::uint32_t pos, int detents, bool fine, std::uint32_t lo, std::uint32_t hi) noexcept {
+// A start `detents` on, `step` samples a detent, snapped to the quietest zero crossing ahead of the target (the way it moves) when `snap`. Held inside
+// [lo, hi]; a target the clamp moved is not snapped. `s` nullptr: no snap. A `pos` already outside [lo, hi] (the START bracket F4 left past cut 2) is not
+// thrown back to the edge: the window widens to take it in, so a detent away from the range stays put and one towards it walks in by steps (0 detents
+// alone brings it into the range).
+inline std::uint32_t slice_move_step(const std::int16_t* s, std::uint32_t len, std::uint32_t pos, int detents, std::uint32_t step, bool snap, std::uint32_t lo,
+                                     std::uint32_t hi) noexcept {
   if (hi < lo || detents == 0) {
     return pos < lo ? lo : (pos > hi ? hi : pos);
   }
   const std::uint32_t lo2 = pos < lo ? pos : lo;
   const std::uint32_t hi2 = pos > hi ? pos : hi;
-  const std::int64_t step = fine ? 1 : static_cast<std::int64_t>(kSliceStep);
-  const std::int64_t want = static_cast<std::int64_t>(pos) + static_cast<std::int64_t>(detents) * step;
+  const std::int64_t want = static_cast<std::int64_t>(pos) + static_cast<std::int64_t>(detents) * static_cast<std::int64_t>(step == 0u ? 1u : step);
   if (want <= static_cast<std::int64_t>(lo2)) {
     return lo2;
   }
@@ -743,11 +742,16 @@ inline std::uint32_t slice_move(const std::int16_t* s, std::uint32_t len, std::u
     return hi2;
   }
   std::uint32_t at = static_cast<std::uint32_t>(want);
-  if (!fine) {
+  if (snap) {
     at = snap_quiet(s, len, at, detents > 0);
     at = at < lo2 ? lo2 : (at > hi2 ? hi2 : at);
   }
   return at;
+}
+
+// The SE1 step: kSliceStep a detent and snapped, or one sample a detent and no snap when `fine` (SHIFT).
+inline std::uint32_t slice_move(const std::int16_t* s, std::uint32_t len, std::uint32_t pos, int detents, bool fine, std::uint32_t lo, std::uint32_t hi) noexcept {
+  return slice_move_step(s, len, pos, detents, fine ? 1u : kSliceStep, !fine, lo, hi);
 }
 
 // Cut `i` (> 0) starts at `pos`: the cut before it ends there and this one ends where it did. Refused (false, nothing changed) for cut 0, a cut past the
@@ -764,33 +768,91 @@ inline bool set_slice_start(sm::SliceTable& t, unsigned i, std::uint32_t pos) no
   return true;
 }
 
-// The zoom's first sample for a start at `centre` (negative when the window reaches before the slot: those columns are blank).
-constexpr std::int32_t zoom_lo(std::uint32_t centre) noexcept { return static_cast<std::int32_t>(centre) - static_cast<std::int32_t>(kZoomHalf); }
+// ---- SE2: the zoom ladder, the window, the stride build ---------------------------------------------------------------------------------
 
-// x (0 .. kPicW - 1) of `pos` in the window that starts at `lo`; -1 when `pos` is outside it.
-constexpr int zoom_x(std::uint32_t pos, std::int32_t lo) noexcept {
-  const std::int64_t d = static_cast<std::int64_t>(pos) - lo;
-  return d < 0 || d >= static_cast<std::int64_t>(kZoomSpan) ? -1 : static_cast<int>(d * static_cast<std::int64_t>(kPicW) / static_cast<std::int64_t>(kZoomSpan));
+// The zoom rungs, widest first: rung 0 is the whole slot (the overview picture); each rung after it halves the span, 4 s down to 344 samples (7.8 ms) across,
+// about a pixel to every second sample. A rung at least as wide as the slot is the whole slot as well (zoom_step skips it).
+inline constexpr unsigned kZoomRungs = 11;
+inline constexpr std::uint32_t kZoomRung[kZoomRungs] = {0u, 176400u, 88200u, 44100u, 22050u, 11025u, 5512u, 2756u, 1378u, 689u, 344u};
+static_assert(kZoomRung[kZoomRungs - 1u] >= kZoomCols, "the deepest zoom has a sample for every column");
+inline constexpr std::uint32_t kZoomReadCol = kZoomSpan / kZoomCols + 1u;  // the most samples a column reads: a wider one reads every `stride`-th sample
+inline constexpr std::uint32_t kSnapMinStep = 24;                          // under this many samples a detent the quiet-crossing snap would be bigger than the step
+
+// The span in samples of `rung` over a slot of `len` samples: the slot itself for rung 0 or a rung at least as wide as the slot.
+constexpr std::uint32_t zoom_span(unsigned rung, std::uint32_t len) noexcept {
+  return rung == 0u || rung >= kZoomRungs || kZoomRung[rung] >= len ? len : kZoomRung[rung];
 }
 
-// The window's columns: the lowest and highest sample of each (kZoomSpan / kZoomCols samples), from the slot's `s[0 .. len - 1]`. A column wholly outside
-// the slot is blank (hi < lo). Reads at most kZoomSpan samples, never outside the slot.
-inline void zoom_build(const std::int16_t* s, std::uint32_t len, std::int32_t lo, std::int16_t (&mn)[kZoomCols], std::int16_t (&mx)[kZoomCols]) noexcept {
+// True when `rung` shows the slot whole.
+constexpr bool zoom_whole(unsigned rung, std::uint32_t len) noexcept { return zoom_span(rung, len) >= len; }
+
+// The rung one step in (dir > 0) or out (dir < 0): in skips the rungs that are as wide as the slot and stays where it is at the deepest (or when the slot is
+// shorter than the deepest rung); out goes back to the whole slot from the first real rung.
+constexpr unsigned zoom_step(unsigned rung, std::uint32_t len, int dir) noexcept {
+  if (rung >= kZoomRungs) {
+    rung = kZoomRungs - 1u;
+  }
+  if (dir > 0) {
+    if (zoom_whole(rung, len)) {
+      rung = 0;
+    }
+    unsigned r = rung + 1u;
+    while (r < kZoomRungs && kZoomRung[r] >= len) {
+      ++r;
+    }
+    return r < kZoomRungs ? r : rung;
+  }
+  if (dir < 0) {
+    if (rung <= 1u) {
+      return 0;
+    }
+    return kZoomRung[rung - 1u] >= len ? 0u : rung - 1u;
+  }
+  return rung;
+}
+
+// The window's first sample for a view `span` samples wide centred on `centre`: held inside the slot ([0, len - span]); 0 for the whole slot.
+constexpr std::uint32_t zoom_lo_for(std::uint32_t centre, std::uint32_t span, std::uint32_t len) noexcept {
+  if (span >= len) {
+    return 0;
+  }
+  const std::uint32_t half = span / 2u;
+  const std::uint32_t lo = centre > half ? centre - half : 0u;
+  return lo > len - span ? len - span : lo;
+}
+
+// x (0 .. kPicW - 1) of `pos` in the window [lo, lo + span); -1 when `pos` is outside it.
+constexpr int zoom_x(std::uint32_t pos, std::uint32_t lo, std::uint32_t span) noexcept {
+  if (span == 0u || pos < lo || pos - lo >= span) {
+    return -1;
+  }
+  return static_cast<int>(static_cast<std::uint64_t>(pos - lo) * kPicW / span);
+}
+
+// The samples a picture pixel stands for at this zoom (the slot's `len` when whole), at least 1: what a detent of the encoder moves, so a detent is about a
+// pixel and the deepest zoom steps a single sample.
+constexpr std::uint32_t zoom_detent(std::uint32_t span) noexcept { return span / kPicW > 0u ? span / kPicW : 1u; }
+
+// The window's columns: the lowest and highest sample of each (span / kZoomCols samples), from the slot's `s[0 .. len - 1]`. A column wholly outside the slot
+// is blank (hi < lo). A column wider than kZoomReadCol samples reads every stride-th one, so a rebuild reads at most about kZoomSpan samples whatever the
+// span; never outside the slot.
+inline void zoom_build(const std::int16_t* s, std::uint32_t len, std::uint32_t lo, std::uint32_t span, std::int16_t (&mn)[kZoomCols],
+                       std::int16_t (&mx)[kZoomCols]) noexcept {
   for (unsigned c = 0; c < kZoomCols; ++c) {
     mn[c] = 1;
     mx[c] = 0;
-    if (s == nullptr) {
+    if (s == nullptr || span == 0u) {
       continue;
     }
-    const std::int64_t a0 = static_cast<std::int64_t>(lo) + static_cast<std::int64_t>(kZoomSpan) * c / kZoomCols;
-    const std::int64_t b0 = static_cast<std::int64_t>(lo) + static_cast<std::int64_t>(kZoomSpan) * (c + 1u) / kZoomCols;
-    const std::int64_t a = a0 < 0 ? 0 : a0;
-    const std::int64_t b = b0 > static_cast<std::int64_t>(len) ? static_cast<std::int64_t>(len) : b0;
+    const std::uint64_t a = static_cast<std::uint64_t>(lo) + static_cast<std::uint64_t>(span) * c / kZoomCols;
+    const std::uint64_t b0 = static_cast<std::uint64_t>(lo) + static_cast<std::uint64_t>(span) * (c + 1u) / kZoomCols;
+    const std::uint64_t b = b0 > len ? len : b0;
     if (a >= b) {
       continue;
     }
+    const std::uint64_t stride = (b - a) / kZoomReadCol + 1u;
     std::int16_t lo_v = INT16_MAX, hi_v = INT16_MIN;
-    for (std::int64_t i = a; i < b; ++i) {
+    for (std::uint64_t i = a; i < b; i += stride) {
       const std::int16_t v = s[i];
       lo_v = v < lo_v ? v : lo_v;
       hi_v = v > hi_v ? v : hi_v;
@@ -798,6 +860,84 @@ inline void zoom_build(const std::int16_t* s, std::uint32_t len, std::int32_t lo
     mn[c] = lo_v;
     mx[c] = hi_v;
   }
+}
+
+// The zoom label: WHOLE SLOT, else the span as a time, `ZOOM 4 S` / `ZOOM 0.5 S` from 500 ms up, `ZOOM 125 MS` under it.
+inline void zoom_text(unsigned rung, std::uint32_t len, char (&out)[16], unsigned rate = kRateHz) noexcept {
+  const std::uint32_t span = zoom_span(rung, len);
+  unsigned n = 0;
+  const auto put = [&](const char* p) {
+    while (*p != '\0' && n + 1u < sizeof out) {
+      out[n++] = *p++;
+    }
+  };
+  const auto put_uint = [&](std::uint32_t v) {
+    char d[11];
+    unsigned k = 0;
+    do {
+      d[k++] = static_cast<char>('0' + v % 10u);
+      v /= 10u;
+    } while (v != 0u && k < sizeof d);
+    while (k != 0u && n + 1u < sizeof out) {
+      out[n++] = d[--k];
+    }
+  };
+  if (rung == 0u || span >= len || rate == 0u) {
+    put("WHOLE SLOT");
+  } else {
+    const std::uint32_t ms = static_cast<std::uint32_t>(static_cast<std::uint64_t>(span) * 1000u / rate);
+    put("ZOOM ");
+    if (ms >= 500u) {
+      const std::uint32_t tenths = (ms + 50u) / 100u;
+      put_uint(tenths / 10u);
+      if (tenths % 10u != 0u) {
+        put(".");
+        put_uint(tenths % 10u);
+      }
+      put(" S");
+    } else {
+      put_uint(ms);
+      put(" MS");
+    }
+  }
+  out[n] = '\0';
+}
+
+// The cut nearest `pos` among the table's cuts 1.. (never the one at 0) whose start is inside [lo, hi): its index, or -1 when there is none. A tie goes to
+// the earlier. Used by DELETE with no slice picked: the cut the cursor points at in the view.
+inline int nearest_cut(const sm::SliceTable& t, std::uint32_t pos, std::uint32_t lo, std::uint32_t hi) noexcept {
+  int best = -1;
+  std::uint32_t best_d = UINT32_MAX;
+  for (unsigned i = 1; i < t.count; ++i) {
+    const std::uint32_t a = t.cut[i].start;
+    if (a < lo || a >= hi) {
+      continue;
+    }
+    const std::uint32_t d = a > pos ? a - pos : pos - a;
+    if (d < best_d) {
+      best_d = d;
+      best = static_cast<int>(i);
+    }
+  }
+  return best;
+}
+
+// Where INSERT splits slice `i` (of `t`, its start as drawn `start`, which is the trim START for slice 0): the middle of it, snapped to a zero crossing,
+// kept kMinCutSamples clear of both ends. 0 when the slice is too short to split.
+inline std::uint32_t slice_middle(const sm::SliceTable& t, unsigned i, std::uint32_t start, const std::int16_t* s) noexcept {
+  if (i >= t.count) {
+    return 0;
+  }
+  const std::uint32_t end = t.cut[i].start + t.cut[i].len;
+  if (end < start + 2u * kMinCutSamples) {
+    return 0;
+  }
+  const std::uint32_t mid = start + (end - start) / 2u;
+  std::uint32_t at = s != nullptr ? snap_zero(s, t.length, mid) : mid;
+  const std::uint32_t lo = start + kMinCutSamples;
+  const std::uint32_t hi = end - kMinCutSamples;
+  at = at < lo ? lo : (at > hi ? hi : at);
+  return at;
 }
 
 // ---- the confirmations: F6 and SHIFT + DELETE ask, F1 confirms ---------------------------------------------------------------------------
