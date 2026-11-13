@@ -81,7 +81,7 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | COPY | PATTERN: copies the step under the cursor (SHIFT: the whole pattern). SAMPLE EDIT: copies the slot, sample and cuts, to the next empty slot (F1 confirms) | PATTERN, SAMPLE EDIT |
 | INSERT | PATTERN: pastes the copied step at the cursor, the rest moving right (SHIFT: pastes the pattern). SAMPLE EDIT: inserts a cut at the cursor | PATTERN, SAMPLE EDIT |
 | DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the cut at the cursor (SHIFT: the slot's sample, F1 confirms); PERFORM the latched pad; SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
-| SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE, SHIFT + F1 is ROW and SHIFT + F2 is SLICE CH; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP. Four combinations and the kit's two, no more | everywhere |
+| SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE, SHIFT + F2 is SLICE CH; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP. Four combinations and the kit's two, no more | everywhere |
 | UP / DOWN | Which: the slot (SAMPLE, SAMPLE EDIT, SAMPLE REC), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
 | LEFT / RIGHT | Where: the octave of the pads (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the take's length (SAMPLE REC); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
 | Encoder | The latched F value; in a list the row; in SAMPLE EDIT the cursor, a sample fine, SHIFT coarse (a 64th of the sample) | everywhere |
@@ -107,7 +107,7 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
   first slot that is empty, on no side and not recording (none: "NO EMPTY SLOT"; there is no re-record), records 2 bars (`kCapBars`; the
   stop is written in the middle of the second bar while the transport plays, so the unit stops at the bar line, and at once when it is stopped),
   and REC again cancels while it waits for the bar or stops early while it records. The ADC and the route change in one step, when the loop holds audio.
-  The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side is SAMPLE's F2 SIDE, and FOLLOW is a value of the pattern's CARRIER lane.
+  The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side is simply one that SAMPLE's F2 SPEAKS and F3 SOUNDS do not name, and FOLLOW is a value of the pattern's CARRIER lane.
 - Pads: row 0 the controls, rows A, B and C the layout (section 7); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
   releases. REC captures.
 - LEDs: section 7 (the layout's rows: root, scale, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays).
@@ -120,19 +120,19 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
 Left: the four slots as a column (the selected framed: name, length, 0.5X / 1X / 2X, FWD / REV, the side it is on in that side's ink). Middle:
 the selected slot's overview waveform with its cuts, the play line moving, the sounding slices lit. Right: SOUNDS as on PERFORM, the chord.
 
-- F1 PLAYS (what the chosen row plays, PERFORM's PLAYS values; SHIFT + F1 ROW chooses A or B; MODE stays on PERFORM and PARAMS) · F2 SIDE (SHIFT + F2 SLICE CH, MS1: the MIDI slice channel, below in 7c) (SPEAKS, SOUNDS, NONE: which picker this slot goes to; the pickers of PERFORM see the same thing) · F3 SPEED (0.5X, 1X, 2X)
-  · F4 DIR (FWD, REV) · F5 LOOP (the whole slot plays round, from the bar: ON, OFF) · F6 TRIG (GATE: a slice stops at the pad's release; ONE SHOT:
-  to its end) · F7 CHOKE (ON: a new slice of this slot cuts the one sounding; OFF: they overlap) · F8 LEVEL (-24 to +12 dB). UP / DOWN the slot.
+- F1 LOW PADS (what the two lower rows play, both at once and never off: NOTE+TRIAD (the default), NOTE, TRIAD, 7TH, OPEN, POWER; a tap steps and wraps, the encoder stops at the ends; both rows flash; it writes PERFORM's notes pair, so a pair outside the list shows row A's kind; with one kind on both rows, row A plays it one octave above row B; MODE stays on PERFORM and PARAMS) · F2 SPEAKS (LIVE, SLOT 1 to 4: a tap makes the selected slot speak (its loop starts), a second tap returns to LIVE and stops that loop; the encoder steps over slots that hold audio; an empty slot refuses with "EMPTY: NOTHING TO PLAY"; the cue line says what the slot does now; SHIFT + F2 SLICE CH, MS1: the MIDI slice channel, below in 7c) · F3 SPEED (0.5X, 1X, 2X)
+  · F4 DIR (FWD, REV) · F5 LOOP (the whole slot plays round, from the bar: ON, OFF; ON plus a slice pad repeats that slice, one repeating slice a slot, the key reads ON SL n; OFF stops everything of the slot) · F6 TRIG (GATE: a slice stops at the pad's release, and with LOOP on it repeats while held, then the whole loop goes on; ONE SHOT:
+  to its end, and with LOOP on it repeats until another pad or F5) · F7 SLICES (MONO, the default: a new slice of this slot cuts the one sounding; POLY: they overlap) · F8 LEVEL (-24 to +12 dB). UP / DOWN the slot.
 - **Pads, the split.** The top two rows (pads 0 to 23) are slices 1 to 24 of the selected slot. The bottom two rows (pads 24 to 47) play PERFORM's
   layout rows A and B (section 7), at PERFORM's octave, through PERFORM's audition entry like PATTERN's palette; a pad sounds while it is held
   and a layout change or leaving the screen lets the notes go. A slice held with a layout pad is the gesture of the instrument: the slice sings
   that note or chord; there is no latch on this screen. The split, not a toggle, because the two things are played together; a toggle would
-  cost a press per phrase. F1 sets the row SHIFT + F1 chose (the row flashes), or, with a layout pad held, that pad's row. LEFT / RIGHT is the octave.
+  cost a press per phrase. F1 sets both rows at once (both flash). LEFT / RIGHT is the octave.
   Pad 24 maps to audition id 0 and so on: the entry's 24 ids hold the 24 pads without widening.
-- LEDs: a slice that exists `kLedDim`, the one sounding `kLedOn`, the SLICE lane's `kLedMid` on its step; the layout rows as on PATTERN's palette (root low, scale dim, held on, dark while ROW flashes). An empty
+- LEDs: a slice that exists `kLedDim`, the one sounding `kLedOn`, the SLICE lane's `kLedMid` on its step; the layout rows as on PATTERN's palette (root low, scale dim, held on, dark while LOW PADS flashes). An empty
   slot: the top rows dark and the screen says "EMPTY: SAMPLE REC OR SAMPLE LOAD".
 - Polyphony: four slice voices in all, the four loop readers (section 8). A fifth press takes the oldest, with the reader's 64-sample level
-  ramp, so it cannot click. CHOKE ON (the default) gives a slot one voice, the sliced-vocal feel.
+  ramp, so it cannot click. SLICES MONO (the default) gives a slot one voice, the sliced-vocal feel.
 
 ### SAMPLE REC
 
@@ -148,7 +148,7 @@ so what was sung is heard at once.
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
 Built in U4a. DELETE empties the slot in the unit (Rec 2 CLEAR, then back to 0), so every screen sees it empty; in a take it throws the take away.
-Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SIDE moves the slot (it leaves the other side first); it refuses only an empty slot or a route `allowed` rejects, and says why. The pads play PERFORM's layout (section 7); LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. F6 and F7 came in U5b.
+Built in U4b. No progress bar: LoopStatus has no play position, so the middle shows the slot name, length, state and side. F2 SPEAKS makes the slot speak or returns to LIVE; it refuses only an empty slot or a route `allowed` rejects, and says why. The pads play PERFORM's layout (section 7); LEFT/RIGHT is the octave; SHIFT and DELETE latch and release as on PERFORM. F6 and F7 came in U5b.
 A refused AFTER leaves the slot on no side and the screen says which side holds it; AUTOPLAY OFF places nothing; a slot already on a side just plays
 again. Leaving the screen cancels an armed take and stops a running one at the bar, on no side. F2, F3, F6 and F7 step on a second tap, F5 on every tap.
 
@@ -610,7 +610,7 @@ plays looped and takes SPEAKS (the side that held LIVE), so you hear it through 
 visible, for a take of a chosen length into a chosen slot.)
 
 **To slices.** SAMPLE EDIT (1): the take across the screen. F2 CUT BEATS (2), turn to 16 (3): sixteen marks. SAMPLE PLAY (4): the top two rows
-light; a pad plays its slice through the note or chord held on the bottom rows (the notes palette, A and B); hold a slice and change the pad under it. F2 SIDE is already SPEAKS;
+light; a pad plays its slice through the note or chord held on the bottom rows (the notes palette, A and B); hold a slice and change the pad under it. F2 SPEAKS is the slot's side;
 on PERFORM F3 SOUNDS to NOISE makes the same slices whisper. Four presses; a WAV instead of a take is SAMPLE LOAD, UP / DOWN, F1 OPEN, three more.
 
 **To an external carrier.** On PERFORM, F3 SOUNDS: the picker lists SYNTH, NOISE, LIVE "MIC (SAME AS SPEAKS)", SLOT 1. With the microphone on

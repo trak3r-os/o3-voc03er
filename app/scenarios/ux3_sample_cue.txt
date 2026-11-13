@@ -1,13 +1,13 @@
-# UX3-1, UX3-5, UX3-8 on SAMPLE: the side a mode does not play shows dim with its reason below. A 1 BAR take in slot 1, F2 walks its SIDE (SPEAKS, SOUNDS, NONE, a snap
-# each); PERFORM's mode key goes to TUNE (a SOUNDS slot is not heard), then to TRACT (a SPEAKS slot, and a slot on NO side, are heard only through DRY). A slice pad past the count
-# says "n SLICES". At the end the TRACT mouth goes LIVE (PARAMS' MIX page, F1): the same sides are then heard as the mouth's source too, not dim, and the line says "MOVES THE MOUTH (LIVE) AND DRY". The simulator shows the lines; whether a slot is heard in the mode is the unit's and the ear's.
+# UX3-1, UX3-5, UX3-8 on SAMPLE: the cue line under the slot says what it does now and whether the mode hears it. A 1 BAR take goes to SOUNDS (SAMPLE REC AFTER: SOUNDS); PERFORM's
+# mode key goes to TUNE (a SOUNDS slot is not heard there: the line says so), where F2 SPEAKS makes the slot speak and a second tap goes back to LIVE. Then TRACT (the slot on no side
+# plays to nowhere, its pads speak, and SPEAKS is heard only through DRY unless the mouth is LIVE). A slice pad past the count says "n SLICES". At the end the TRACT mouth goes LIVE
+# (PARAMS' MIX page, F1): F2 is then not dim, and the line says the slot "MOVES THE MOUTH (LIVE) AND DRY". The simulator shows the lines; whether a slot is heard in the mode is the unit's and the ear's.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/ux3_sample_cue.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
 tap samplerec
 wait 200
 tap f3
-tap f4
 tap f4
 tap f4
 tap play
@@ -17,20 +17,11 @@ tap rec
 wait 9000
 tap sampleplay
 wait 300
-snap 01_take_side
-tap f2
-wait 100
-snap 02_side_b
-tap f2
-wait 100
-snap 03_side_c
-tap f2
-wait 100
-snap 04_side_d
+snap 01_take_sounds
 # a slice pad past the count: the line says how many slices there are
 paddown 20
 wait 100
-snap 05_pad_past_count
+snap 02_pad_past_count
 padup 20
 tap performance
 wait 100
@@ -40,13 +31,13 @@ tap f1
 wait 400
 tap sampleplay
 wait 300
-snap 06_mode_a
+snap 03_tune_sounds_slot
 tap f2
 wait 100
-snap 07_mode_b
+snap 04_tune_speaks
 tap f2
 wait 100
-snap 08_mode_c
+snap 05_tune_live
 tap performance
 wait 100
 tap f1
@@ -54,17 +45,17 @@ tap f1
 wait 400
 tap sampleplay
 wait 300
-snap 09_tract_a
+snap 06_tract_no_side
 tap f2
 wait 100
-snap 10_tract_b
+snap 07_tract_speaks
 tap f2
 wait 100
-snap 11_tract_c
+snap 08_tract_live
 tap samplerec
 wait 200
-snap 12_rec_tract
-# MOUTH = LIVE: PARAMS' MIX page in TRACT, F1 (MOUTH), steps PADS to LIVE; the SPEAKS and NONE sides move the mouth, so SAMPLE and SAMPLE REC do not dim them
+snap 09_rec_tract
+# MOUTH = LIVE: PARAMS' MIX page in TRACT, F1 (MOUTH), steps PADS to LIVE; SPEAKS then moves the mouth too, so SAMPLE and SAMPLE REC do not dim it
 tap params
 wait 300
 tap up
@@ -73,13 +64,13 @@ turn 1
 wait 800
 tap sampleplay
 wait 300
-snap 13_tract_live_c
+snap 10_tract_live_no_side
 tap f2
 wait 100
-snap 14_tract_live_d
+snap 11_tract_live_speaks
 tap f2
 wait 100
-snap 15_tract_live_a
+snap 12_tract_live_live
 tap samplerec
 wait 200
-snap 16_rec_tract_live
+snap 13_rec_tract_live

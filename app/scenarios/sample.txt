@@ -1,4 +1,4 @@
-# SAMPLE: a 1 BAR take of a tone on SAMPLE REC (AFTER NONE), then the slot on SAMPLE: LOOP, SIDE as the carrier under a held note of layout row A, SPEED, DIR, LEVEL,
+# SAMPLE: a 1 BAR take of a tone on SAMPLE REC (AFTER NONE), then the slot on SAMPLE: LOOP, F2 SPEAKS (the slot speaks, then back to LIVE), a held note of layout row A, SPEED, DIR, LEVEL,
 # an empty slot, a refusal. The simulator shows the screen and that the unit plays; it cannot say how it sounds or what the frame costs.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample.txt --out <dir>   (the dir must exist)
 input tone 220 -8
@@ -21,11 +21,13 @@ tap f5
 wait 4000
 snap 02_loop
 tap f2
+wait 100
+snap 03_speaks
 tap f2
 wait 100
+snap 03b_back_to_live
 tap f2
 wait 100
-snap 03_sounds
 paddown 26
 wait 1500
 snap 04_row_a_held
@@ -41,10 +43,13 @@ padup 26
 tap down
 wait 100
 tap f2
-tap f2
 wait 100
 snap 06_empty_refused
-tap shift
+press shift
 tap config
+release shift
 wait 300
 snap 07_help
+tap f2
+wait 200
+snap 08_help_pads

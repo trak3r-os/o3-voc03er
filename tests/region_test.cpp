@@ -266,3 +266,93 @@ TEST_CASE("region: Vocoder parameters: the frame, the status, recording priority
   r.block({rp(2, RF::Trig, 1.0f)});
   CHECK_FALSE(r.v.loop_status(2).region);  // the bank here is 4 * 4000 samples: past it
 }
+
+TEST_CASE("region: a repeating region wraps through the ramps until it is released, and Trig 1 is unchanged") {
+  Bank b;
+  const std::uint32_t start = 100, len = 300;
+  b.l.set_region_start(0, start);
+  b.l.set_region_len(0, len);
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  const auto out = b.render(1000, 37);
+  CHECK(b.l.region_repeating(0));
+  // the second pass plays the same samples as the first, through the same ramps: out[len + j] is the start's ramp-in again
+  for (std::uint32_t j = 0; j < 40; ++j) {
+    const float f = j < 64 ? static_cast<float>(j + 1) / 64.0f : 1.0f;
+    CHECK(out[len + j] == doctest::Approx(b.at(start + j) * f).epsilon(1e-5).scale(1.0));
+  }
+  CHECK(out[len - 1] == 0.0f);  // each pass ends on zero, so the wrap is a ramp down then a ramp up
+  CHECK(max_step(out) < 0.02f);
+  float peak = 0.0f;
+  for (std::uint32_t k = 2 * len; k < 1000; ++k) peak = std::fmax(peak, std::fabs(out[k]));
+  CHECK(peak > 0.03f);  // still sounding long after one pass (the bank's samples are 0.03 to 0.07)
+  // a release fades it out and it stays off
+  b.l.release_region(0, 0);
+  const auto tail = b.render(300, 64);
+  CHECK_FALSE(b.l.region(0));
+  CHECK_FALSE(b.l.region_repeating(0));
+  CHECK(tail[299] == 0.0f);
+  // Trig 1 (repeat false) ends by itself after one pass
+  Bank c;
+  c.l.set_region_start(0, start);
+  c.l.set_region_len(0, len);
+  REQUIRE(c.l.trig_region(0, 0, 100, false));
+  (void)c.render(1000, 37);
+  CHECK_FALSE(c.l.region(0));
+  // a retrigger with repeat false stops the repeating of the old one
+  b.l.set_region_start(0, start);
+  b.l.set_region_len(0, len);
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  (void)b.render(500, 64);
+  REQUIRE(b.l.trig_region(0, 0, 100, false));
+  (void)b.render(1000, 64);
+  CHECK_FALSE(b.l.region(0));
+}
+
+TEST_CASE("region: a gated repeat releases to the whole loop, which resumes where it paused") {
+  Bank b;
+  std::vector<float> in(1000);
+  for (std::size_t k = 0; k < in.size(); ++k) in[k] = 0.2f + 0.0003f * static_cast<float>(k);
+  b.l.begin_record(0);
+  REQUIRE(b.l.record(0, in.data(), 1000) == 1000);
+  b.l.end_record(0);
+  REQUIRE(b.l.start(0));
+  std::vector<float> o(300);
+  b.l.play(0, o.data(), 300, false);
+  b.l.set_region_start(0, kPer + 10);
+  b.l.set_region_len(0, 600);  // from 256 samples up the loop ducks under the region, so the resume is a ramp too
+  REQUIRE(b.l.trig_region(0, 0, 100, true));
+  std::vector<float> rep(1900, 0.0f);
+  for (std::uint32_t p = 0; p < 1900; p += 100) b.l.play(0, rep.data() + p, 100, false);
+  CHECK(b.l.region_repeating(0));
+  CHECK(b.l.playing(0));  // the loop is only paused
+  b.l.release_region(0, 0);
+  std::vector<float> after(400, 0.0f);
+  for (std::uint32_t p = 0; p < 400; p += 100) b.l.play(0, after.data() + p, 100, false);
+  CHECK_FALSE(b.l.region(0));
+  CHECK(b.l.playing(0));
+  CHECK(max_step(rep) < 0.02f);
+
+  CHECK(max_step(after) < 0.02f);
+  float peak = 0.0f;
+  for (std::uint32_t k = 200; k < 400; ++k) peak = std::fmax(peak, std::fabs(after[k]));
+  CHECK(peak > 0.1f);  // the loop sounds again after the release
+}
+
+TEST_CASE("region: Vocoder Trig 2 repeats, shows in the status, and Trig 0 ends it") {
+  Rig r;
+  r.block({rp(0, RF::Start, 1500.0f), rp(0, RF::Len, 300.0f), rp(0, RF::Trig, 2.0f)});
+  for (int k = 0; k < 20; ++k) r.block({});  // far past one pass of 300 samples
+  auto st = r.v.loop_status(0);
+  CHECK(st.region);
+  CHECK(st.repeat);
+  r.block({rp(0, RF::Trig, 0.0f)});
+  r.block({});
+  st = r.v.loop_status(0);
+  CHECK_FALSE(st.region);
+  CHECK_FALSE(st.repeat);
+  // Trig 1 is not a repeat
+  r.block({rp(0, RF::Trig, 1.0f)});
+  CHECK_FALSE(r.v.loop_status(0).repeat);
+  for (int k = 0; k < 20; ++k) r.block({});
+  CHECK_FALSE(r.v.loop_status(0).region);
+}

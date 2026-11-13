@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// SAMPLE's pure logic (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"): SIDE against route::allowed, the SPEED and LEVEL steps, the
+// SAMPLE's pure logic (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"): SPEAKS against route::allowed, LOW PADS pairs, the SPEED and LEVEL steps, the
 // dB text, the pads' split. Apart from the screen so tests/sample_test.cpp holds them. Nothing here allocates; tract_live is the one engine read.
 
+#include "pads_logic.h"
 #include "strip_logic.h"
 
 #include <o3_voc03er/modes.h>
@@ -23,10 +24,10 @@ inline constexpr const char* kDirNames[2] = {"FWD", "REV"};                    /
 inline constexpr float kLevelMinDb = -24.0f;
 inline constexpr float kLevelMaxDb = 12.0f;
 
-// F2 SIDE: which picker the slot goes to.
+// Which side of the route a slot is on: the vocoder's input (SPEAKS), the carrier (SOUNDS), or neither (NO SIDE: only its pads speak).
 enum class Side : std::uint8_t { Speaks, Sounds, None };
 inline constexpr unsigned kSideCount = 3;
-inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "NONE"};
+inline constexpr const char* kSideNames[kSideCount] = {"SPEAKS", "SOUNDS", "NO SIDE"};
 
 // The top two rows (pads 0..23) are the slices of the selected slot.
 inline constexpr unsigned kTopPads = 24;
@@ -83,10 +84,91 @@ constexpr SidePlan plan_side(route::Route cur, Side target, unsigned slot, bool 
   return p;
 }
 
-// The next side by `delta`, wrapping SPEAKS, SOUNDS, NONE.
-constexpr Side step_side(Side s, int delta) noexcept {
-  const int n = static_cast<int>(kSideCount);
-  return static_cast<Side>(((static_cast<int>(s) + delta) % n + n) % n);
+// ---- F2 SPEAKS --------------------------------------------------------------------------------------------------------------------------
+// F2 shows and chooses what the vocoder listens to, as PERFORM's SPEAKS chip names it: position 0 is LIVE, 1..4 are SLOT 1..4. SOUNDS for a slot is
+// PERFORM's to choose, so there is no NONE here: a slot that does not speak is simply not the one that speaks.
+
+inline constexpr unsigned kSpeaksPositions = 1u + route::kSlots;
+
+// The position of `r.speaks` (0 LIVE, 1..4 a slot).
+constexpr unsigned speaks_pos(route::Route r) noexcept { return route::is_slot(r.speaks) ? static_cast<unsigned>(r.speaks - route::kFirstSlot) + 1u : 0u; }
+
+// A tap on F2 for `slot`: it speaks, or, when it already does, SPEAKS goes back to LIVE (Side::None frees the slot's side, which is SPEAKS only).
+constexpr Side tap_speaks_target(route::Route r, unsigned slot) noexcept { return side_of(r, slot) == Side::Speaks ? Side::None : Side::Speaks; }
+
+// The encoder: `delta` steps along LIVE, SLOT 1..4 over the slots that hold audio (bit i of `audio`: slot i + 1), stopping at the ends.
+constexpr unsigned step_speaks(unsigned pos, int delta, unsigned audio) noexcept {
+  unsigned p = pos < kSpeaksPositions ? pos : 0u;
+  int left = delta;
+  while (left != 0) {
+    const int dir = left > 0 ? 1 : -1;
+    int q = static_cast<int>(p) + dir;
+    while (q >= 1 && q <= static_cast<int>(route::kSlots) && ((audio >> (q - 1)) & 1u) == 0u) {
+      q += dir;
+    }
+    if (q < 0 || q > static_cast<int>(route::kSlots)) {
+      break;
+    }
+    p = static_cast<unsigned>(q);
+    left -= dir;
+  }
+  return p;
+}
+
+// What the F2 note says (static strings, one per slot): the slot speaks now; and the same when it was the SOUNDS source, which a slot cannot be
+// at the same time (plan_side frees SOUNDS to the synth).
+inline constexpr const char* kSpeaksNote[route::kSlots] = {"SLOT 1 SPEAKS", "SLOT 2 SPEAKS", "SLOT 3 SPEAKS", "SLOT 4 SPEAKS"};
+inline constexpr const char* kSpeaksFreedNote[route::kSlots] = {"SLOT 1 SPEAKS. SOUNDS BACK TO SYNTH", "SLOT 2 SPEAKS. SOUNDS BACK TO SYNTH",
+                                                                "SLOT 3 SPEAKS. SOUNDS BACK TO SYNTH", "SLOT 4 SPEAKS. SOUNDS BACK TO SYNTH"};
+inline constexpr const char* kSpeaksLiveNote = "SPEAKS: BACK TO LIVE";
+
+// ---- F1 LOW PADS ------------------------------------------------------------------------------------------------------------------------
+// One key sets both lower rows: a pair (row A, row B). The first is the palette's own default; the others give both rows the same kind (row A sounds
+// an octave above row B in the default palette, so the two are not duplicates). There is no OFF.
+inline constexpr unsigned kLowPadsCount = 6;
+inline constexpr pads::Plays kLowA[kLowPadsCount] = {pads::Plays::Note, pads::Plays::Note, pads::Plays::Triad, pads::Plays::Seventh, pads::Plays::Open, pads::Plays::Power};
+inline constexpr pads::Plays kLowB[kLowPadsCount] = {pads::Plays::Triad, pads::Plays::Note, pads::Plays::Triad, pads::Plays::Seventh, pads::Plays::Open, pads::Plays::Power};
+inline constexpr const char* kLowPadsNames[kLowPadsCount] = {"NOTE+TRIAD", "NOTE", "TRIAD", "7TH", "OPEN", "POWER"};
+// The same for the F1 key's value: the Data face holds about eight characters in a 100 px key.
+inline constexpr const char* kLowPadsKey[kLowPadsCount] = {"NOTE+TRI", "NOTE", "TRIAD", "7TH", "OPEN", "POWER"};
+
+// The pair the palette holds: the exact one, else (a pair that is not in the list) the one that gives both rows row A's kind, else -1 (row A is OFF or
+// a parameter strip).
+constexpr int low_pads_index(pads::Plays a, pads::Plays b) noexcept {
+  for (unsigned i = 0; i < kLowPadsCount; ++i) {
+    if (kLowA[i] == a && kLowB[i] == b) {
+      return static_cast<int>(i);
+    }
+  }
+  for (unsigned i = 1; i < kLowPadsCount; ++i) {
+    if (kLowA[i] == a && kLowB[i] == a) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+// The pair after a step: a tap goes on and wraps, the encoder stops at the ends. From a pair the list has no place for (-1) the step lands on the first.
+constexpr unsigned low_pads_step(int cur, int delta, bool wrap) noexcept {
+  if (cur < 0) {
+    return 0u;
+  }
+  const int n = static_cast<int>(kLowPadsCount);
+  const int v = cur + delta;
+  if (wrap) {
+    return static_cast<unsigned>((v % n + n) % n);
+  }
+  return v < 0 ? 0u : (v >= n ? kLowPadsCount - 1u : static_cast<unsigned>(v));
+}
+
+// The key's value: the pair's name; a pair outside the list shows row A's kind.
+constexpr const char* low_pads_name(pads::Plays a, pads::Plays b) noexcept {
+  const int i = low_pads_index(a, b);
+  return i >= 0 ? kLowPadsNames[i] : pads::kPlaysNames[pads::idx(a)];
+}
+constexpr const char* low_pads_key(pads::Plays a, pads::Plays b) noexcept {
+  const int i = low_pads_index(a, b);
+  return i >= 0 ? kLowPadsKey[i] : pads::kPlaysShort[pads::idx(a)];
 }
 
 // SPEED held inside 0.5X..2X by a detent; a tap wraps.
@@ -242,12 +324,61 @@ inline bool tract_live(const o3sdk::dsp::Engine& e) noexcept {
   }
   return false;
 }
-// UX3-5: what a slot on NO side does, for the line under the badge. Verified in PerformScreen::set_route: a slot that leaves a side has its Play turned
-// off, so its whole loop is stopped; its slices (role MOD) still speak when they are played. F5 LOOP can start the loop of a NO side slot, and then it
-// speaks as a modulator too (vocoder.cpp run_loops: a loop that is not on the carrier plays into the modulator), so the line follows the loop.
-inline constexpr const char* kNoneLine = "NO SIDE: ONLY SLICES SPEAK. F2 SIDE";
-inline constexpr const char* kNoneLoopLine = "NO SIDE: LOOP AND SLICES SPEAK";
-constexpr const char* none_line(bool loop_on) noexcept { return loop_on ? kNoneLoopLine : kNoneLine; }
+// What the cue line says in one plain line about the selected slot (at most 52 characters; `out` holds 64): what the slot does now, or why it is quiet in this
+// mode (UX3-1). Verified in PerformScreen::set_route: a slot that leaves a side has its Play turned off, so a slot on no side plays only its slices (role MOD);
+// its loop, if F5 starts it, is not heard (the cue says so). `speaks` is the route's SPEAKS value: a slot on no side speaks its pads over LIVE, or together with
+// the slot that speaks.
+inline void cue_line(char (&out)[64], unsigned slot, Side side, Cue cue, bool loop_on, std::uint8_t speaks) noexcept {
+  const auto put = [&out](unsigned& n, const char* t) {
+    for (unsigned i = 0; t[i] != '\0' && n + 1u < sizeof out; ++i) {
+      out[n++] = t[i];
+    }
+  };
+  unsigned n = 0;
+  put(n, "SLOT ");
+  out[n++] = static_cast<char>('1' + (slot & 3u));
+  put(n, side == Side::Speaks ? " SPEAKS: " : (side == Side::Sounds ? " SOUNDS: " : ": "));
+  if (cue == Cue::TuneSilent) {
+    put(n, "TUNE PLAYS NO SYNTH, NOT HEARD");
+  } else if (cue == Cue::TractDry) {
+    put(n, "TRACT HEARS IT ONLY THROUGH DRY");
+  } else if (cue == Cue::TractLive) {
+    put(n, "IT MOVES THE MOUTH (LIVE) AND DRY");
+  } else if (side == Side::Speaks) {
+    put(n, "THE VOCODER HEARS IT, NOT THE INPUT");
+  } else if (side == Side::Sounds) {
+    put(n, "IT IS THE CARRIER (PERFORM)");
+  } else {
+    put(n, loop_on ? "LOOP NOT HEARD, PADS SPEAK " : "ITS PADS SPEAK ");
+    if (route::is_slot(speaks)) {
+      put(n, "WITH SLOT ");
+      out[n++] = static_cast<char>('1' + ((speaks - route::kFirstSlot) & 3u));
+    } else {
+      put(n, "OVER LIVE");
+    }
+  }
+  out[n] = '\0';
+}
+
+// F5's value: "OFF", "ON", or "ON SL 5" while a pad repeats that slice (`slice1` is the slice + 1, 0 none; the key shows about 8 characters, so "ON SL 12" at most).
+inline void loop_text(bool on, unsigned slice1, char (&out)[12]) noexcept {
+  const char* t = on ? "ON" : "OFF";
+  unsigned n = 0;
+  for (; t[n] != '\0'; ++n) {
+    out[n] = t[n];
+  }
+  if (on && slice1 != 0u) {
+    const char* w = " SL ";
+    for (unsigned i = 0; w[i] != '\0'; ++i) {
+      out[n++] = w[i];
+    }
+    if (slice1 >= 10u) {
+      out[n++] = static_cast<char>('0' + (slice1 / 10u) % 10u);
+    }
+    out[n++] = static_cast<char>('0' + slice1 % 10u);
+  }
+  out[n] = '\0';
+}
 
 // UX3-8: a slice pad past the slot's count says how many slices there are ("5 SLICES", "1 SLICE", "NO SLICES: SLOT IS EMPTY" for an empty slot); `out` holds 32.
 inline void slices_line(unsigned count, char (&out)[32]) noexcept {

@@ -667,13 +667,23 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   auto h = std::make_unique<sim::Harness>(o3sdk_app(), nullptr, nullptr, &card);
   REQUIRE(h->start());
   h->run_ms(300);
-  // SAMPLE's lower two rows are the palette (pads 24..47); F1 LOW PADS is the lit key there and steps row A.
-  const auto row_b_lit = [&] {  // a pad of B (a triad) lights on column 0, a root, in the default key
-    unsigned n = 0;
+  // SAMPLE's lower two rows are the palette (pads 24..47); F1 LOW PADS is the lit key there and sets both rows (never OFF).
+  // The LEDs show roots, the same for every kind, so the screen itself tells the kinds apart: the F1 key reads NOTE+TRI or POWER.
+  platform::host::ScratchDir shots("o3_voc03er-file-sp1-png");
+  REQUIRE(shots.ok());
+  const auto lower = [&](const char* name) {  // the screen's PNG, as bytes
+    const std::string path = shots.path() + "/" + name + ".png";
+    REQUIRE(h->snapshot(path));
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  };
+  const auto row_b_lit = [&] {  // a pad of B lights
     for (unsigned c = 0; c < 12; ++c) {
-      n += h->leds().level(36 + c) != 0 ? 1u : 0u;
+      if (h->leds().level(36 + c) != 0) {
+        return true;
+      }
     }
-    return n != 0u;
+    return false;
   };
   const auto open_sample = [&] {
     tap(*h, app::Button::SamplePlay);
@@ -690,10 +700,19 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   open_sample();
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
-  h->turn(5);  // A: NOTE to OFF (dark)
-  h->run_ms(100);
-  CHECK(row_a_dark());
-  CHECK(row_b_lit());  // B is untouched
+  const std::string first = lower("first");  // NOTE+TRIAD
+  // The palette is back at NOTE+TRIAD when a detent down changes nothing: the encoder stops at the first value (the rest of the screen moves with the project).
+  const auto at_first = [&] {
+    const std::string before = lower("before");
+    h->turn(-1);
+    h->run_ms(900);
+    return lower("after") == before;
+  };
+  h->turn(5);  // LOW PADS: NOTE+TRIAD to POWER, both rows (they flash dark first)
+  h->run_ms(900);
+  CHECK_FALSE(row_a_dark());
+  CHECK(row_b_lit());
+  CHECK(lower("power") != first);
   // NEW.
   tap(*h, app::Button::File);
   h->run_ms(60);
@@ -703,10 +722,11 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   open_sample();
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
+  CHECK(at_first());
   // The same after a LOAD.
   h->turn(5);
-  h->run_ms(100);
-  CHECK(row_a_dark());
+  h->run_ms(900);
+  CHECK(lower("power") != first);
   tap(*h, app::Button::File);
   h->run_ms(60);
   tap(*h, app::Button::F1);  // LOAD asks
@@ -717,6 +737,7 @@ TEST_CASE("file: SP1 NEW and a LOAD put the notes palette back to A NOTE, B TRIA
   open_sample();
   CHECK_FALSE(row_a_dark());
   CHECK(row_b_lit());
+  CHECK(at_first());
   tap(*h, app::Button::File);  // leave the app as a fresh one: the singleton keeps the loaded name
   h->run_ms(60);
   tap(*h, app::Button::F4);

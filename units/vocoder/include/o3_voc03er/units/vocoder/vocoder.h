@@ -142,7 +142,9 @@ class Vocoder final : public o3sdk::dsp::Unit {
 
   // Region play (U5a): ids 49..60, three for each reader n = 0..3 (ids 49 + 3n + field). Start counts samples from the start of the whole bank
   // (0 .. Loop::kBankSamples - 1), Len is in samples; both are read at the Trig. Trig 1 starts the reader on that region at the event's frame at
-  // the reader's own speed, direction and level; Trig 0 releases it; otherwise it ends at its end. See Loop (Regions).
+  // the reader's own speed, direction and level; Trig 2 starts it the same way and it repeats (the end fades out and the start fades in again,
+  // the whole slot's loop stays paused under it) until Trig 0 or a new Trig; Trig 0 releases it (the paused loop resumes); otherwise it ends
+  // at its end. See Loop (Regions).
   enum class RegionField : std::uint16_t { Start, Len, Trig };
   static constexpr std::uint16_t region_param(unsigned reader, RegionField f) noexcept {
     return static_cast<std::uint16_t>(R1Start + 3u * reader + static_cast<unsigned>(f));
@@ -246,6 +248,7 @@ class Vocoder final : public o3sdk::dsp::Unit {
     std::uint32_t length = 0;  // samples recorded so far (while recording) or in the loop
     bool on_bar = false;       // the loop holds a whole number of bars and is re-synced at the bar lines (a take that filled the buffer early is not)
     bool region = false;       // sounding a region (the whole loop, if it was playing, is paused under it)
+    bool repeat = false;       // ... and that region repeats (Trig 2)
     std::uint32_t position = 0;  // where the reader is, in samples from the start of the bank (the region's, else the loop's), as of the block's end
   };
   LoopStatus loop_status(unsigned loop) const noexcept;

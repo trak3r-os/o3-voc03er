@@ -52,8 +52,10 @@ constexpr o3sdk::core::ParamDesc region_start_row(const char* name) {
 constexpr o3sdk::core::ParamDesc region_len_row(const char* name) {
   return {name, "", nullptr, nullptr, 0.0f, kBankMax, 0.0f, 2048, 16, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0};
 }
-constexpr const char* kTrigNames[] = {"OFF", "TRIG"};
-constexpr o3sdk::core::ParamDesc region_trig_row(const char* name) { return loop_row(name, kTrigNames); }
+constexpr const char* kTrigNames[] = {"OFF", "TRIG", "REPEAT"};
+constexpr o3sdk::core::ParamDesc region_trig_row(const char* name) {
+  return {name, "", kTrigNames, nullptr, 0.0f, 2.0f, 0.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0};
+}
 
 constexpr const char* kCarNames[] = {"FOLLOW", "SYNTH", "NOISE", "LOOP1", "LOOP2", "LOOP3", "LOOP4", "LIVE", "VOICE"};
 
@@ -540,7 +542,7 @@ void Vocoder::loop_param_event(std::uint16_t id, float v, std::uint32_t frame) n
 }
 
 // A region parameter (ids 49..60). Start and Len are staged in the Loop; Trig 1 starts the reader's region at `frame` unless its slot is
-// armed or recording (the recording has priority), Trig 0 releases it.
+// armed or recording (the recording has priority), Trig 2 does the same and the region repeats until Trig 0 or a new Trig, Trig 0 releases it.
 // Load = slot x kMaxSamples + length, length 1..kMaxSamples, so slot 3 with a full 16 s is 2,822,400 and every value has one reading
 // (v > 0: slot = (v - 1) / kMaxSamples). The app wrote that sample into the slot's memory from the main loop while the slot was stopped.
 // Like the other action-like parameters (a Rec off, a Trig 0) its default, 0, is a no-op, which is all prepare() and Engine::start() ever
@@ -617,7 +619,7 @@ void Vocoder::region_param_event(std::uint16_t id, float v, std::uint32_t frame)
       if (v < 0.5f) {
         loops_.release_region(n, frame);
       } else if (slot_[n].rec == Slot::Rec::Idle) {
-        (void)loops_.trig_region(n, frame);
+        (void)loops_.trig_region(n, frame, 100, v >= 1.5f);
       }
       break;
   }
@@ -1000,7 +1002,7 @@ void Vocoder::publish_loops() noexcept {
     } else if (s.rec == Slot::Rec::Recording) {
       rec = s.want_rec ? 2u : 3u;
     }
-    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.on_bar(i) ? 64u : 0u) | (loops_.length(i) << 8);
+    const std::uint32_t w = rec | (loops_.playing(i) ? 4u : 0u) | (s.want_play ? 8u : 0u) | (s.carrier ? 16u : 0u) | (loops_.region_sounding(i) ? 32u : 0u) | (loops_.on_bar(i) ? 64u : 0u) | (loops_.region_repeating(i) ? 128u : 0u) | (loops_.length(i) << 8);
     pos_[i].store(loops_.bank_position(i), std::memory_order_relaxed);
     status_[i].store(w, std::memory_order_relaxed);
     const std::uint32_t half_db = static_cast<std::uint32_t>(static_cast<int>(std::floor(s.level_db * 2.0f + 0.5f)) + 64);
@@ -1020,6 +1022,7 @@ Vocoder::LoopStatus Vocoder::loop_status(unsigned loop) const noexcept {
   st.carrier = (w & 16u) != 0u;
   st.region = (w & 32u) != 0u;
   st.on_bar = (w & 64u) != 0u;
+  st.repeat = (w & 128u) != 0u;
   st.length = w >> 8;
   st.position = pos_[loop].load(std::memory_order_relaxed);
   const std::uint32_t o = opts_[loop].load(std::memory_order_relaxed);

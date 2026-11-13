@@ -30,6 +30,7 @@ void Loop::clear() noexcept {
     st_s_[i] = 0;
     st_l_[i] = 0;
     st_v_[i] = 100;
+    st_r_[i] = false;
     rv_[i] = 100;
     bars_[i] = 0;
     k0_[i] = 0;
@@ -726,6 +727,7 @@ void Loop::mix_slow(unsigned i, float* dst, std::uint32_t n, bool add) noexcept 
 void Loop::region_off(unsigned i) noexcept {
   act_[i] = false;
   rst_[i] = false;
+  rep_[i] = false;
   cmd_[i] = Cmd::None;
   fn_[i] = 0;
   dir_[i] = 0;
@@ -745,11 +747,12 @@ void Loop::set_region_len(unsigned i, std::uint32_t len) noexcept {
   }
 }
 
-bool Loop::trig_region(unsigned i, std::uint32_t frame, std::uint8_t level) noexcept {
+bool Loop::trig_region(unsigned i, std::uint32_t frame, std::uint8_t level, bool repeat) noexcept {
   if (mem_ == nullptr || i >= kCount || rec_[i] || st_l_[i] == 0u || st_s_[i] >= bank_samples()) {
     return false;
   }
   st_v_[i] = level < 100u ? level : std::uint8_t{100};
+  st_r_[i] = repeat;
   cmd_[i] = Cmd::Start;
   cf_[i] = static_cast<std::uint16_t>(frame);
   return true;
@@ -781,6 +784,7 @@ bool Loop::begin_region(unsigned i) noexcept {
   rhf_[i] = 0;
   rrq_[i] = bq_;  // a region that starts while bent plays at the bent speed from its first sample
   rv_[i] = st_v_[i];
+  rep_[i] = st_r_[i];
   rg_[i] = rv_[i] >= 100u ? gain_[i] : gain_[i] * (static_cast<float>(rv_[i]) * 0.01f);
   ghost_off(i);  // the loop's own stop tail or jump fade is not carried under a region
   fn_[i] = 0;
@@ -866,8 +870,8 @@ std::uint32_t Loop::region_chunk(unsigned i, float* dst, std::uint32_t n, bool a
   dir_[i] = static_cast<std::int8_t>(dir);
   if (nn == outs || (dir < 0 && fn == 0u)) {  // the region is over
     act_[i] = false;
-    if (rst_[i]) {
-      (void)begin_region(i);  // a retrigger: the new region follows the fade-out at once
+    if (rst_[i] || rep_[i]) {
+      (void)begin_region(i);  // a retrigger (the new region follows the fade-out at once) or a repeat (this one again)
     }
     if (!act_[i]) {
       region_off(i);
@@ -1024,7 +1028,7 @@ std::uint32_t Loop::region_chunk_bent(unsigned i, float* dst, std::uint32_t n, b
   dir_[i] = static_cast<std::int8_t>(dir);
   if (over) {
     act_[i] = false;
-    if (rst_[i]) {
+    if (rst_[i] || rep_[i]) {
       (void)begin_region(i);
     }
     if (!act_[i]) {
@@ -1059,6 +1063,7 @@ void Loop::mix_region(unsigned i, float* dst, std::uint32_t n, bool add) noexcep
       } else if (act_[i]) {
         dir_[i] = -1;
         rst_[i] = false;
+        rep_[i] = false;  // the fade-out is the end: a repeating region lets go
       }
     } else if (act_[i]) {  // a retrigger: fade the old one out, the new one starts when it is silent
       if (fn_[i] == 0u) {

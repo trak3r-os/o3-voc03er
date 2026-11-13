@@ -1100,12 +1100,12 @@ void SampleEditScreen::audition_pad(app::Context& ctx, const app::Input& in) noe
       const sm::Cut whole = t.cut[0];
       t.cut[0].start = from;
       t.cut[0].len = to - from;
-      (void)sample_->pad_input(ctx, in);
+      (void)sample_->pad_input(ctx, in, false);
       t.cut[0] = whole;
       return;
     }
   }
-  (void)sample_->pad_input(ctx, in);
+  (void)sample_->pad_input(ctx, in, false);
 }
 
 void SampleEditScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {

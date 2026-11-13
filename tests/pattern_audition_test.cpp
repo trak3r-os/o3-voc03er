@@ -332,8 +332,7 @@ TEST_CASE("slice: a palette pad writes the slice and fires it on the SPEAKS slot
   CHECK(unit_param(*rig.h, kTrigReader0) == doctest::Approx(0.0f));
   tap(*rig.h, app::Button::SamplePlay);
   rig.h->run_ms(60);
-  tap(*rig.h, app::Button::F2);  // SIDE: SPEAKS
-  tap(*rig.h, app::Button::F2);
+  tap(*rig.h, app::Button::F2);  // SPEAKS: this slot (a second tap would go back to LIVE)
   rig.h->run_ms(60);
   tap(*rig.h, app::Button::Pattern);
   rig.h->run_ms(60);  // the lane is still SLICE (a second FX would reach MOUTH)

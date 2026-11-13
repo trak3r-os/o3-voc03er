@@ -4,17 +4,19 @@
 // SAMPLE (docs/UI-DESIGN.md, "SAMPLE (SAMPLE PLAY): the slots"), in the OR NOIR skin: the four slots as a column (the selected one framed: name,
 // length, speed, direction, its side in that side's ink), the slot's slices and play line in the middle, SOUNDS and the pad row on the right.
 //
-//   F1 LOW PADS  F2 SIDE  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 CHOKE  F8 LEVEL        SHIFT + F1: ROW (A or B)
-//   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on (DIR and LOOP flip at once). UP / DOWN: the slot.
+//   F1 LOW PADS  F2 SPEAKS  F3 SPEED  F4 DIR  F5 LOOP  F6 TRIG  F7 SLICES  F8 LEVEL        SHIFT: F2 SLICE CH, F3 OCTAVE
+//   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on (F1, F2, DIR, LOOP, TRIG and SLICES act on the first tap). UP / DOWN: the slot.
 //   The bottom two pad rows (here, on SAMPLE EDIT, FILE and SAMPLE LOAD) play notes from the notes palette PATTERN shares (SP1: PerformScreen::notes(), not PERFORM's layout, which is per mode
-//   and may hold parameter strips): A NOTE and B TRIAD at start, F1 LOW PADS sets the row SHIFT + F1 chose (or the row of a pad that is held) to NOTE, TRIAD, 7TH,
-//   OPEN, POWER or OFF. They sound through PERFORM's audition entry like PATTERN's palette, at PERFORM's octave; the palette lives in RAM (a restart, a
-//   project load or F4 NEW puts the defaults back). The top two rows are the slot's slices 1..24 (even cuts,
-//   8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), it plays its cut once and stops at the end cut (TRIG ONE SHOT, the default; GATE also stops it at the release).
-//   A slice turns the slot's whole loop off (LOOP reads OFF) until F5 starts it again; a new hit restarts the slice from its start cut.
-//   TRIG and CHOKE are per slot; CHOKE ON (default) gives a slot one voice (a hit fades the sounding slice out and starts the new one), OFF lets its slices overlap on the free readers (or steal the oldest).
-//   SIDE moves the slot between SPEAKS, SOUNDS and NONE; an empty slot is refused and the screen says why. LOOP is the unit's Play: the whole
-//   slot plays round from the bar. SPEED, DIR and LEVEL are the slot's own parameters (Vocoder::loop_param).
+//   and may hold parameter strips): A NOTE and B TRIAD at start, F1 LOW PADS sets both rows at once (NOTE+TRIAD, NOTE, TRIAD, 7TH, OPEN, POWER; never OFF). They sound through
+//   PERFORM's audition entry like PATTERN's palette, at PERFORM's octave; the palette lives in RAM (a restart, a project load or F4 NEW puts the defaults back). The top two rows
+//   are the slot's slices 1..24 (even cuts, 8 by default, until SAMPLE EDIT): a press plays a slice on a loop reader (see trigger()), it plays its cut once and stops at the end cut
+//   (TRIG ONE SHOT, the default; GATE also stops it at the release). A slice turns the slot's whole loop off (LOOP reads OFF) until F5 starts it again; a new hit restarts the slice from
+//   its start cut. With LOOP ON a pad does not turn it off: it repeats that slice (the unit's Trig 2) on the slot's own reader, until another pad or F5 OFF (TRIG GATE: until the
+//   release, then the whole loop goes on). A ONE SHOT repeat goes on when the screen is left (PERFORM's pads play over it).
+//   TRIG and SLICES are per slot; SLICES MONO (default) gives a slot one voice (a hit fades the sounding slice out and starts the new one), POLY lets its slices overlap on the free readers
+//   (or steal the oldest). F2 SPEAKS is what the vocoder listens to, as PERFORM's SPEAKS chip names it: LIVE or SLOT 1..4. A tap makes the selected slot speak (again: back to LIVE), the
+//   encoder steps LIVE, SLOT 1..4 over the slots that hold audio; an empty slot is refused and the screen says why. The line under the panes says what the selected slot does now.
+//   LOOP is the unit's Play: the whole slot plays round from the bar. SPEED, DIR and LEVEL are the slot's own parameters (Vocoder::loop_param).
 //
 // Main loop only; the cursor is a few bytes, the tables are in the SDRAM (g_sd in the .cpp).
 
@@ -77,7 +79,7 @@ class SampleScreen final : public o3sdk::app::Screen {
   void set_choke_off(unsigned slot, bool off) noexcept;
   void cuts_changed() noexcept;  // after any edit of a table: the next service() pass publishes the SPEAKS slot's cuts again
   Vocoder::LoopStatus status(unsigned slot) const noexcept { return view(slot); }
-  bool pad_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept;  // a pad press or release; false when `in` is no pad
+  bool pad_input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in, bool repeat_ok = true) noexcept;  // a pad press or release; false when `in` is no pad. SAMPLE EDIT passes false: its pad auditions the slice once, whatever LOOP says
   void pad_leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept;
   void pad_leave(o3sdk::app::Context& ctx) noexcept;  // the slice voices and the held layout pads let go
   void pad_update(o3sdk::app::Context& ctx) noexcept;
@@ -111,16 +113,19 @@ class SampleScreen final : public o3sdk::app::Screen {
   void say(o3sdk::app::Context& ctx, const char* text) noexcept;
   void write(o3sdk::app::Context& ctx, Vocoder::LoopField f, float v) noexcept;
   void write_slot(o3sdk::app::Context& ctx, unsigned loop, Vocoder::LoopField f, float v) noexcept;
-  void set_side(o3sdk::app::Context& ctx, int delta) noexcept;
-  void trigger(o3sdk::app::Context& ctx, unsigned slot, unsigned pad) noexcept;  // slice `pad` of `slot` (SAMPLE: the selected slot; fire_slice: SPEAKS)
+  void set_speaks(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;  // F2: the selected slot speaks (a tap), or the encoder steps LIVE, SLOT 1..4
+  void move_slot(o3sdk::app::Context& ctx, unsigned slot, const route::Route& cur, const sample::SidePlan& plan) noexcept;  // writes a plan: leave a side, then enter one
+  // slice `pad` of `slot` (SAMPLE: the selected slot; fire_slice: SPEAKS). `pressed`: a pad of this screen (not the SLICE lane or PATTERN's audition): with the slot's LOOP on
+  // it repeats that slice instead of turning the loop off.
+  void trigger(o3sdk::app::Context& ctx, unsigned slot, unsigned pad, bool pressed = false) noexcept;
+  void stop_repeat(o3sdk::app::Context& ctx, unsigned slot) noexcept;  // the slot's repeating slice lets go (F5 OFF)
   void release_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;
   void stop_loop(o3sdk::app::Context& ctx, unsigned slot) noexcept;  // Play 0 on the slot's loop when it plays or waits (a slice owns the slot)
   void release_all(o3sdk::app::Context& ctx) noexcept;
   const pads::Layout& lay() const noexcept;  // the notes palette (PERFORM::notes(): rows A and B, note kinds only), the defaults when no PERFORM is wired
   void play_pad(o3sdk::app::Context& ctx, unsigned pad) noexcept;     // pad 24..47: what this screen's row A (24..35) or B (36..47) plays there, held until the release
   void release_play(o3sdk::app::Context& ctx, unsigned pad) noexcept;  // its release (a pad that is not held does nothing)
-  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;  // F1: the note kind of the row of the lowest held layout pad, else of the chosen row
-  void flip_row(o3sdk::app::Context& ctx) noexcept;                    // SHIFT + F1: the other row; its pads go dark for a moment
+  void step_plays(o3sdk::app::Context& ctx, int delta, bool tap) noexcept;  // F1: both rows at once (sample::kLowPadsNames); their pads go dark for a moment
   void draw_line(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, unsigned slot, std::uint32_t length, int x, int y, int w) const noexcept;
   Vocoder::LoopStatus view(unsigned loop) const noexcept;
 
@@ -130,11 +135,10 @@ class SampleScreen final : public o3sdk::app::Screen {
   StepSeq* seq_ = nullptr;
   std::uint8_t slot_ = 0;       // 0..3
   std::uint8_t focus_ = 0;      // the F key the encoder drives (F1, PLAYS)
-  std::uint8_t row_ = 0;        // the layout row F1 sets: 0 A, 1 B (pads 24..35, 36..47)
   std::uint8_t slice_ch_ = 0;   // the MIDI slice channel (SLICE CH): 0 SAME, 1..16, 17 OFF
   bool shift_slice_ = false;    // SHIFT + F2 was the last SHIFT key: the encoder steps SLICE CH while SHIFT is held
   bool shift_oct_ = false;      // SHIFT + F3 was the last SHIFT key: the encoder and the arrows step PERFORM's octave while SHIFT is held (AK1)
-  std::uint64_t flash_until_ = 0;  // ROW changed: its pads are dark until then
+  std::uint64_t flash_until_ = 0;  // LOW PADS changed: the lower pads are dark until then
   std::uint32_t aud_ = 0;       // the layout pads sounding (bit pad - 24): the audition entry's pad ids; main loop only
   bool key_tap_ = false;        // turn() came from a second tap on an F key, not from the encoder
   const char* note_ = nullptr;  // a moment's line (a static string), until note_until_

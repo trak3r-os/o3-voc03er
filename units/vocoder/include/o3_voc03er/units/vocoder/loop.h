@@ -137,10 +137,13 @@ class Loop {
   void set_region_len(unsigned i, std::uint32_t len) noexcept;
   // `level` 0..100 (100 full) is the region's level, staged here and taken when the region begins (a region still sounding keeps its own);
   // the default is full, so a caller that never passes it plays at full level.
-  bool trig_region(unsigned i, std::uint32_t frame, std::uint8_t level = 100) noexcept;
+  // `repeat`: at its natural end the region begins again at once through the same ramps (out at its end, in at its start) until release_region
+  // or a new trig_region; a retrigger takes the repeat flag of the new trig_region.
+  bool trig_region(unsigned i, std::uint32_t frame, std::uint8_t level = 100, bool repeat = false) noexcept;
   void release_region(unsigned i, std::uint32_t frame) noexcept;
   bool region(unsigned i) const noexcept { return i < kCount && (act_[i] || cmd_[i] != Cmd::None); }  // sounding or about to
   bool region_sounding(unsigned i) const noexcept { return i < kCount && act_[i]; }
+  bool region_repeating(unsigned i) const noexcept { return i < kCount && act_[i] && rep_[i]; }  // sounding a region that wraps
   void play(unsigned i, float* dst, std::uint32_t n, bool add) noexcept;  // the region if any, else mix()
   // Where reader i is, in samples from the start of the bank: its region's position, else its loop's.
   std::uint32_t bank_position(unsigned i) const noexcept;
@@ -222,6 +225,8 @@ class Loop {
   Cmd cmd_[kCount] = {};
   bool act_[kCount] = {};
   bool rst_[kCount] = {};
+  bool st_r_[kCount] = {};  // the staged repeat flag (trig_region), taken by begin_region
+  bool rep_[kCount] = {};   // the sounding region wraps at its end (until a release or a retrigger)
 };
 
 }  // namespace o3_voc03er

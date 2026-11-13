@@ -57,8 +57,54 @@ TEST_CASE("sample: SIDE moves a slot between SPEAKS, SOUNDS and NONE, refuses an
   CHECK_FALSE(p.refused);
   CHECK(sm::side_of(on_speaks, 1) == sm::Side::Speaks);
   CHECK(sm::side_of(on_speaks, 0) == sm::Side::None);
-  CHECK(sm::step_side(sm::Side::None, 1) == sm::Side::Speaks);
-  CHECK(sm::step_side(sm::Side::Speaks, -1) == sm::Side::None);
+}
+
+TEST_CASE("sample: F2 SPEAKS positions, the tap target and the encoder step over the slots that hold audio") {
+  route::Route r;
+  CHECK(sm::speaks_pos(r) == 0u);
+  r.speaks = route::kFirstSlot + 2;
+  CHECK(sm::speaks_pos(r) == 3u);
+  CHECK(sm::tap_speaks_target(r, 2) == sm::Side::None);  // it speaks already: back to LIVE
+  CHECK(sm::tap_speaks_target(r, 1) == sm::Side::Speaks);
+  CHECK(sm::tap_speaks_target(route::Route{}, 0) == sm::Side::Speaks);
+  const unsigned audio = 0b0101u;  // slots 1 and 3 hold audio
+  CHECK(sm::step_speaks(0, 1, audio) == 1u);
+  CHECK(sm::step_speaks(1, 1, audio) == 3u);  // slot 2 is empty: skipped
+  CHECK(sm::step_speaks(3, 1, audio) == 3u);  // stops at the end
+  CHECK(sm::step_speaks(3, -1, audio) == 1u);
+  CHECK(sm::step_speaks(1, -1, audio) == 0u);
+  CHECK(sm::step_speaks(0, -1, audio) == 0u);  // stops at LIVE
+  CHECK(sm::step_speaks(0, 1, 0u) == 0u);      // nothing to speak
+}
+
+TEST_CASE("sample: F1 LOW PADS values, steps and the name of a pair outside the list") {
+  using o3_voc03er::pads::Plays;
+  CHECK(sm::kLowPadsCount == 6u);
+  CHECK(std::strcmp(sm::kLowPadsNames[0], "NOTE+TRIAD") == 0);
+  CHECK(sm::low_pads_index(Plays::Note, Plays::Triad) == 0);
+  CHECK(sm::low_pads_index(Plays::Power, Plays::Power) == 5);
+  CHECK(sm::low_pads_index(Plays::Seventh, Plays::Note) == 3);  // not a pair of the list: row A's kind
+  CHECK(sm::low_pads_index(Plays::Off, Plays::Note) == -1);
+  CHECK(sm::low_pads_step(0, 1, false) == 1u);
+  CHECK(sm::low_pads_step(5, 1, false) == 5u);  // the encoder stops
+  CHECK(sm::low_pads_step(5, 1, true) == 0u);   // a tap wraps
+  CHECK(sm::low_pads_step(0, -1, false) == 0u);
+  CHECK(sm::low_pads_step(-1, 1, false) == 0u);
+  CHECK(std::strcmp(sm::low_pads_name(Plays::Seventh, Plays::Off), "7TH") == 0);
+  CHECK(std::strcmp(sm::low_pads_name(Plays::Off, Plays::Note), "OFF") == 0);  // shown as it is; the next step repairs it
+  CHECK(std::strcmp(sm::low_pads_name(Plays::Note, Plays::Triad), "NOTE+TRIAD") == 0);
+}
+
+TEST_CASE("sample: F5's value names the repeating slice") {
+  char t[12];
+  sm::loop_text(false, 0, t);
+  CHECK(std::strcmp(t, "OFF") == 0);
+  sm::loop_text(true, 0, t);
+  CHECK(std::strcmp(t, "ON") == 0);
+  sm::loop_text(true, 5, t);
+  CHECK(std::strcmp(t, "ON SL 5") == 0);
+  sm::loop_text(true, 12, t);
+  CHECK(std::strcmp(t, "ON SL 12") == 0);
 }
 
 TEST_CASE("sample: SPEED, LEVEL and the pad split") {
@@ -173,10 +219,17 @@ struct Rig {
   void take() {
     tap(*h, app::Button::SampleRec);
     h->run_ms(60);
-    tap(*h, app::Button::F3);  // LENGTH: 1 BAR
+    // SAMPLE REC keeps its focus and AFTER across the harnesses of one process (one app object): the first take steps LENGTH to 1 BAR and AFTER
+    // to NONE from the defaults; a later one starts with AFTER on NONE and the focus on F4, so it needs one more step to come back to NONE.
+    static bool taken = false;
+    tap(*h, app::Button::F3);  // LENGTH: 1 BAR (a later take only moves the focus)
     tap(*h, app::Button::F4);  // AFTER
     tap(*h, app::Button::F4);
     tap(*h, app::Button::F4);  // NONE
+    if (taken) {
+      tap(*h, app::Button::F4);
+    }
+    taken = true;
     tap(*h, app::Button::Rec);
     h->run_ms(9000);
   }
@@ -200,8 +253,7 @@ TEST_CASE("sample: SIDE refuses an empty slot and changes nothing") {
   Rig rig;
   sim::Harness& h = *rig.h;
   rig.open();
-  tap(h, app::Button::F2);  // focus SIDE
-  tap(h, app::Button::F2);  // step: SPEAKS, but the slot is empty
+  tap(h, app::Button::F2);  // SPEAKS acts on the first tap: SLOT 1 is empty, so it refuses
   h.run_ms(60);
   CHECK(unit_param(h, kModSrc) != doctest::Approx(3.0f));
   CHECK(unit_param(h, kCarSrc) != doctest::Approx(3.0f));
@@ -221,17 +273,13 @@ TEST_CASE("sample: SIDE, SPEED, DIR, LEVEL and LOOP reach the unit") {
   tap(h, app::Button::F5);  // and off
   h.run_ms(300);
   CHECK(slot1(Vocoder::LoopField::Play) == doctest::Approx(0.0f));
-  tap(h, app::Button::F2);  // focus SIDE
-  tap(h, app::Button::F2);  // SPEAKS
+  tap(h, app::Button::F2);  // SPEAKS: the first tap makes SLOT 1 speak
   h.run_ms(60);
   CHECK(unit_param(h, kModSrc) == doctest::Approx(3.0f));
   CHECK(slot1(Vocoder::LoopField::Play) == doctest::Approx(1.0f));  // a slot on a side plays
-  tap(h, app::Button::F2);  // SOUNDS: a move
+  tap(h, app::Button::F2);  // it speaks already: SPEAKS goes back to LIVE (SOUNDS is PERFORM's)
   h.run_ms(60);
-  CHECK(unit_param(h, kCarSrc) == doctest::Approx(3.0f));
   CHECK(unit_param(h, kModSrc) != doctest::Approx(3.0f));
-  tap(h, app::Button::F2);  // NONE
-  h.run_ms(60);
   CHECK(unit_param(h, kCarSrc) != doctest::Approx(3.0f));
   CHECK(slot1(Vocoder::LoopField::Play) == doctest::Approx(0.0f));
   tap(h, app::Button::F3);  // focus SPEED
@@ -376,23 +424,59 @@ TEST_CASE("sample: a retrigger restarts from the slice's start cut, and a hit fa
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("sample: a slice turns the slot's loop off, and the loop does not come back when the slice ends") {
+TEST_CASE("sample: with LOOP off a slice turns nothing on; the loop does not come back when the slice ends") {
   Rig rig;
   sim::Harness& h = *rig.h;
   rig.take();
   rig.open();
-  tap(h, app::Button::F5);  // LOOP on (a flip)
-  h.run_ms(2500);           // the bar comes and the loop plays
-  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
   h.pad_down(5);
   h.run_ms(40);
   h.pad_up(5);
-  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));  // LOOP reads OFF: the pads own the slot
-  h.run_ms(3000);  // the slice ended long ago
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(1.0f));  // a plain slice: once, never a repeat
+  h.run_ms(3000);                                                         // the slice ended long ago
   CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
-  tap(h, app::Button::F5);  // F5 starts it again
-  h.run_ms(60);
+  tap(h, app::Button::F5);  // F5 starts the loop
+  h.run_ms(2500);
   CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample: LOOP ON and a slice pad repeats that slice; GATE goes back to the whole loop on the release; F5 OFF stops it") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  tap(h, app::Button::F5);  // LOOP on
+  h.run_ms(2500);
+  REQUIRE(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  h.pad_down(5);  // ONE SHOT: it repeats until another pad or F5
+  h.run_ms(40);
+  h.pad_up(5);
+  h.run_ms(40);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));  // REPEAT, and the release does not end it
+  const float start5 = rp(h, 0, Vocoder::RegionField::Start);
+  h.pad_down(2);  // another pad: the repeat moves there, one repeating slice per slot
+  h.run_ms(40);
+  h.pad_up(2);
+  h.run_ms(40);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));
+  CHECK(rp(h, 0, Vocoder::RegionField::Start) != doctest::Approx(start5));
+  tap(h, app::Button::F5);  // OFF: everything of the slot stops
+  h.run_ms(60);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(0.0f));
+  tap(h, app::Button::F5);  // ON again
+  h.run_ms(2500);
+  REQUIRE(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));
+  tap(h, app::Button::F6);  // TRIG: GATE
+  h.pad_down(3);
+  h.run_ms(40);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(2.0f));  // it repeats while held
+  h.pad_up(3);
+  h.run_ms(60);
+  CHECK(rp(h, 0, Vocoder::RegionField::Trig) == doctest::Approx(0.0f));  // the release lets go ...
+  CHECK(lp(h, 0, Vocoder::LoopField::Play) == doctest::Approx(1.0f));    // ... and the slot's whole loop goes on
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
@@ -487,79 +571,82 @@ TEST_CASE("sample: rows 2 and 3 play layout rows A (a note) and B (a triad) whil
   CHECK(r.h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("sample: F1 PLAYS sets the chosen row and SHIFT + F1 chooses it; OFF is dark and silent") {
+TEST_CASE("sample: F1 LOW PADS sets both lower rows at once, steps from the first tap, and never goes OFF") {
   LayoutRig r;
   CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
-  r.h.turn(5);  // F1 is the lit key: A to OFF
-  r.h.run_ms(60);
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);
-  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);  // B is untouched
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+  r.h.turn(1);  // NOTE+TRIAD to NOTE: both rows follow
+  r.h.run_ms(300);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+  r.h.pad_down(kRowB + 5);  // row B plays a plain note now: one pitch, not a chord
+  CHECK(r.listen(300) > kSound);
+  r.h.pad_up(kRowB + 5);
+  r.h.run_ms(900);
+  for (int i = 0; i < 12; ++i) {  // past the last value, and back: no step is dark
+    r.h.turn(1);
+    r.h.run_ms(250);
+    CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+    CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+  }
   r.h.pad_down(kRowA + 5);
-  CHECK(r.listen(300) < kSound);
+  CHECK(r.listen(300) > kSound);  // POWER on A
   r.h.pad_up(kRowA + 5);
-  r.h.press(app::Button::Shift);
-  r.h.run_ms(5);
-  tap(r.h, app::Button::F1);  // ROW: B
-  r.h.release(app::Button::Shift);
-  r.h.run_ms(250);  // past the flash
-  r.h.turn(4);
-  r.h.run_ms(60);
-  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);  // B plays OFF too
-  r.h.turn(-30);
-  r.h.run_ms(60);
-  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);  // NOTE at the bottom: lit again
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);  // and A stays OFF
+  r.h.run_ms(900);
+  r.h.turn(-40);  // stops at NOTE+TRIAD, the first
+  r.h.run_ms(300);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+  tap(r.h, app::Button::F1);  // a tap steps at once (no focus-only first tap) and wraps at the end
+  r.h.run_ms(300);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
   CHECK(r.h.runtime().frame_failures() == 0u);
 }
 
-TEST_CASE("sample: the row flashes dark when SHIFT + F1 chooses it") {
+TEST_CASE("sample: both lower rows flash dark when F1 steps LOW PADS; SHIFT + F1 does nothing") {
   LayoutRig r;
+  r.h.turn(1);
+  r.h.run_ms(20);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);  // both rows' pads are dark for the flash (150 ms)
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);
+  r.h.run_ms(300);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
   r.h.press(app::Button::Shift);
   r.h.run_ms(5);
   r.h.press(app::Button::F1);
   r.h.run_ms(20);
   r.h.release(app::Button::F1);
   r.h.run_ms(20);
-  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);  // B's pads are dark for the flash (150 ms)
-  r.h.release(app::Button::Shift);
-  r.h.run_ms(300);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);  // no flash: nothing changed
   CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
+  r.h.release(app::Button::Shift);
 }
 
-TEST_CASE("sample: F1 offers only the note kinds, and stops at OFF (no strips, SP1)") {
-  LayoutRig r;
-  r.h.turn(40);  // NOTE, TRIAD, 7TH, OPEN, POWER, OFF, and no further: no strip follows
-  r.h.run_ms(60);
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);
-  r.h.pad_down(kRowA + 11);
-  CHECK(r.listen(300) < kSound);
-  CHECK(unit_param(r.h, Vocoder::Wave) < 1.5f);  // the pad set nothing
-  r.h.pad_up(kRowA + 11);
-  r.h.pad_down(kRowB + 2);  // B is still a triad
-  CHECK(r.listen(300) > kSound);
-  CHECK(r.led(kRowB + 2) == app::kLedOn);
-  r.h.pad_up(kRowB + 2);
-  r.h.turn(-40);  // and back: NOTE is the first
-  r.h.run_ms(60);
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
-  CHECK(r.h.runtime().frame_failures() == 0u);
-}
-
-TEST_CASE("sample: a held pad of row B plus F1 changes that row, and ROW follows it") {
+TEST_CASE("sample: a held lower pad lets go when F1 steps LOW PADS") {
   LayoutRig r;
   r.h.pad_down(kRowB + 5);
   r.h.run_ms(60);
-  r.h.turn(4);  // the held pad's row (B) goes to OFF, and its note lets go
+  r.h.turn(2);  // the held pad's old meaning ends, its note lets go
   r.h.run_ms(60);
-  CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) == 12u);
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
   r.h.pad_up(kRowB + 5);
   r.h.run_ms(900);
   CHECK(r.listen(200) < kSound);
-  r.h.turn(-30);  // ROW followed to B: B is NOTE again, A was never touched
-  r.h.run_ms(60);
   CHECK(r.count(kRowB, kRowB + 11, app::kLedOff) < 12u);
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
+}
+
+TEST_CASE("sample: two rows of the same kind play the same notes an octave apart") {
+  o3_voc03er::pads::Layout l;
+  CHECK(sm::low_pads_index(l.row[0], l.row[1]) == 0);
+  l.row[0] = o3_voc03er::pads::Plays::Note;
+  l.row[1] = o3_voc03er::pads::Plays::Note;
+  CHECK(sm::low_pads_index(l.row[0], l.row[1]) == 1);
+  for (unsigned col = 0; col < 12; ++col) {
+    const auto a = o3_voc03er::pads::pad_play(l, o3_voc03er::pads::Row::A, col, 0);
+    const auto b = o3_voc03er::pads::pad_play(l, o3_voc03er::pads::Row::B, col, 0);
+    CHECK(a.kind == b.kind);
+    CHECK(a.note == b.note + 12);
+  }
 }
 
 TEST_CASE("sample: leaving SAMPLE with a layout pad held lets it go, and the late release is harmless") {
@@ -610,9 +697,9 @@ TEST_CASE("sample: in TRACT the lower pads still play notes, F1 is a note kind, 
   CHECK(tract_param(r.h, TractUnit::Vowel) == doctest::Approx(vowel));
   r.h.pad_up(kRowA + 5);
   r.h.run_ms(900);
-  r.h.turn(5);  // F1 LOW PADS: row A to OFF (a strip name is not on the list)
-  r.h.run_ms(60);
-  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) == 12u);
+  r.h.turn(5);  // F1 LOW PADS: both rows to POWER (a strip name is not on the list)
+  r.h.run_ms(300);
+  CHECK(r.count(kRowA, kRowA + 11, app::kLedOff) < 12u);
   r.h.pad_down(kRowA + 5);
   r.h.run_ms(60);
   CHECK(tract_param(r.h, TractUnit::Vowel) == doctest::Approx(vowel));
@@ -650,13 +737,27 @@ TEST_CASE("sample: UX3 mode cue: TUNE does not hear SOUNDS, TRACT hears SPEAKS a
   CHECK(sm::cue_dim(sm::Cue::TractDry));
   CHECK_FALSE(sm::cue_dim(sm::Cue::TractLive));
   CHECK_FALSE(sm::cue_dim(sm::Cue::Heard));
-  // The two NONE lines: the slices alone, or the loop as well when F5 LOOP has started it; both short enough for the Micro line.
-  CHECK(sm::none_line(false) == sm::kNoneLine);
-  CHECK(sm::none_line(true) == sm::kNoneLoopLine);
-  CHECK(std::strlen(sm::kNoneLine) <= 40u);
-  CHECK(std::strlen(sm::kNoneLoopLine) <= 40u);
-  CHECK(std::strstr(sm::kNoneLine, "ONLY SLICES") != nullptr);
-  CHECK(std::strstr(sm::kNoneLoopLine, "LOOP") != nullptr);
+  // The cue line: one plain line for the selected slot, short enough for the Label face in 800 px (52 characters).
+  char line[64];
+  for (unsigned slot = 0; slot < 4; ++slot) {
+    for (const sm::Side side : {sm::Side::Speaks, sm::Side::Sounds, sm::Side::None}) {
+      for (const sm::Cue cue : {sm::Cue::Heard, sm::Cue::TuneSilent, sm::Cue::TractDry, sm::Cue::TractLive}) {
+        for (const bool loop : {false, true}) {
+          sm::cue_line(line, slot, side, cue, loop, route::kFirstSlot);
+          CHECK(std::strlen(line) <= 52u);
+          CHECK(line[5] == static_cast<char>('1' + slot));
+        }
+      }
+    }
+  }
+  sm::cue_line(line, 1, sm::Side::None, sm::Cue::Heard, false, route::kSpeaksLive);
+  CHECK(std::strcmp(line, "SLOT 2: ITS PADS SPEAK OVER LIVE") == 0);
+  sm::cue_line(line, 1, sm::Side::None, sm::Cue::Heard, true, route::kFirstSlot + 2);
+  CHECK(std::strcmp(line, "SLOT 2: LOOP NOT HEARD, PADS SPEAK WITH SLOT 3") == 0);
+  sm::cue_line(line, 0, sm::Side::Speaks, sm::Cue::TractDry, false, route::kFirstSlot);
+  CHECK(std::strstr(line, "ONLY THROUGH DRY") != nullptr);
+  sm::cue_line(line, 2, sm::Side::Speaks, sm::Cue::Heard, false, route::kFirstSlot + 2);
+  CHECK(std::strcmp(line, "SLOT 3 SPEAKS: THE VOCODER HEARS IT, NOT THE INPUT") == 0);
   // The reader refusal says Recording or Armed, as it is.
   CHECK(sm::no_reader_line(false) == sm::kNoReaderRecLine);
   CHECK(sm::no_reader_line(true) == sm::kNoReaderArmedLine);
