@@ -1,0 +1,72 @@
+# SAMPLE EDIT, SE1 (beat slices by hand): a 1 BAR take with the even cuts (8), then a tap on pad 3 picks slice 3 (lit high, the waveform zoomed to about
+# 0.5 s around its start), the encoder moves that start (SHIFT: one sample a detent), RIGHT picks the next slice, a pad past the last slice splits
+# nothing (INSERT does), slice 1 is the trim START, the same pad again lets it go, and a hand-edited table makes F1 read CONFIRM (the REPLACES step), SHIFT + F8 (CLR CUTS) ask the same way, F8 alone say so, and
+# NORMALISE show NO UNDO. The simulator shows the screen; the feel of the step, the snap and the acceleration are for the unit, by hand and ear.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/sample_edit_slice.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 300
+tap samplerec
+wait 200
+tap f3
+tap f4
+tap f4
+tap f4
+tap play
+wait 500
+record on
+tap rec
+wait 9000
+tap sampleedit
+wait 300
+snap 01_overview
+pad 2
+wait 500
+snap 02_picked
+turn 3
+wait 150
+snap 03_moved
+press shift
+turn -4
+release shift
+wait 150
+snap 04_fine
+tap right
+wait 300
+snap 05_next
+pad 12
+wait 300
+snap 06_past_last
+pad 0
+wait 400
+turn 2
+wait 150
+snap 07_slice1_is_trim_start
+pad 0
+wait 400
+snap 08_let_go
+tap f1
+wait 150
+tap f1
+wait 150
+snap 09_replaces_confirm
+tap f6
+wait 150
+snap 10_normalise_no_undo
+tap f4
+wait 100
+turn 2
+wait 150
+snap 11_trim_start
+tap f1
+wait 150
+snap 12_trim_no_undo
+press shift
+wait 20
+tap f8
+wait 150
+snap 13_clear_cuts_asks
+release shift
+wait 50
+tap f8
+wait 150
+snap 14_f8_alone_says

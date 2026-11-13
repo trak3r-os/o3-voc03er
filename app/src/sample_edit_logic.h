@@ -660,13 +660,153 @@ constexpr unsigned job_percent(const Job& j) noexcept {
   return j.phase == JobPhase::Done ? 100u : (j.count == 0u ? 0u : static_cast<unsigned>(static_cast<std::uint64_t>(j.pos) * 100u / j.count));
 }
 
+// ---- SE1: a slice picked on its pad, its start placed by the encoder, the picture zoomed on it -----------------------------------------------
+
+inline constexpr std::uint32_t kSliceStep = 32;               // samples a detent moves a slice start (about a pixel of the zoom); the kit's acceleration multiplies the detents
+inline constexpr std::uint32_t kSliceSnap = kSnapRadius;      // how far past the target the quiet-crossing search looks, in the direction of the move
+inline constexpr std::uint32_t kZoomHalf = kRateHz / 4u;      // the zoom shows a quarter second each side of the start
+inline constexpr std::uint32_t kZoomSpan = 2u * kZoomHalf;
+inline constexpr unsigned kZoomColW = 4;                      // px a zoom column is wide: 186 columns, 2 words each in the display list
+inline constexpr unsigned kZoomCols = kPicW / kZoomColW;
+static_assert(kPicW % kZoomColW == 0u, "the zoom columns tile the picture");
+
+// The sample in [from, from + radius] (towards the end when `forward`, else towards the start, never past [1, len - 1]) where the signal crosses zero
+// most quietly: s[i - 1] and s[i] on different sides of zero (zero counting as positive), and the larger of the two |values| the smallest; a tie goes to the
+// one nearest `from`. `from` itself when none is there. A search that starts at the target and goes the way the encoder turns never lands behind the
+// target, so the start cannot stick on a crossing (tests/sample_edit_test.cpp).
+inline std::uint32_t snap_quiet(const std::int16_t* s, std::uint32_t len, std::uint32_t from, bool forward, std::uint32_t radius = kSliceSnap) noexcept {
+  if (s == nullptr || len < 2u) {
+    return from;
+  }
+  std::uint32_t best = from;
+  std::int32_t best_mag = INT32_MAX;
+  for (std::uint32_t d = 0; d <= radius; ++d) {
+    if (!forward && d > from) {
+      break;
+    }
+    const std::uint32_t i = forward ? from + d : from - d;
+    if (i < 1u || i >= len) {
+      if (forward) {
+        break;
+      }
+      continue;
+    }
+    if ((s[i - 1u] < 0) == (s[i] < 0)) {
+      continue;
+    }
+    const std::int32_t a = s[i - 1u] < 0 ? -static_cast<std::int32_t>(s[i - 1u]) : s[i - 1u];
+    const std::int32_t b = s[i] < 0 ? -static_cast<std::int32_t>(s[i]) : s[i];
+    const std::int32_t mag = a > b ? a : b;
+    if (mag < best_mag) {
+      best_mag = mag;
+      best = i;
+    }
+  }
+  return best;
+}
+
+// Where a slice start may be: [lo, hi] samples. Slice i (> 0) stays kMinCutSamples clear of the cut before it and of the cut after it (the slot's end for the
+// last one); slice 0 is the trim START, so it starts at 0 and stops short of cut 2 and of `cap` (the END bracket) by the same margin. False when there is no room.
+inline bool slice_limits(const sm::SliceTable& t, unsigned i, std::uint32_t cap, std::uint32_t& lo, std::uint32_t& hi) noexcept {
+  lo = hi = 0;
+  if (i >= t.count) {
+    return false;
+  }
+  std::uint32_t top = i + 1u < t.count ? t.cut[i + 1u].start : t.length;
+  if (i == 0u && cap < top) {
+    top = cap;
+  }
+  if (top < kMinCutSamples) {
+    return false;
+  }
+  hi = top - kMinCutSamples;
+  lo = i == 0u ? 0u : t.cut[i - 1u].start + kMinCutSamples;
+  return lo <= hi;
+}
+
+// A start `detents` on: kSliceStep a detent, snapped to the quietest zero crossing ahead of the target (the way it moves), or one sample a detent and no
+// snap when `fine` (SHIFT). Held inside [lo, hi]; a target the clamp moved is not snapped. `s` nullptr: no snap. A `pos` already outside [lo, hi] (the
+// START bracket F4 left past cut 2) is not thrown back to the edge: the window widens to take it in, so a detent away from the range stays put and one
+// towards it walks in by steps (0 detents alone brings it into the range).
+inline std::uint32_t slice_move(const std::int16_t* s, std::uint32_t len, std::uint32_t pos, int detents, bool fine, std::uint32_t lo, std::uint32_t hi) noexcept {
+  if (hi < lo || detents == 0) {
+    return pos < lo ? lo : (pos > hi ? hi : pos);
+  }
+  const std::uint32_t lo2 = pos < lo ? pos : lo;
+  const std::uint32_t hi2 = pos > hi ? pos : hi;
+  const std::int64_t step = fine ? 1 : static_cast<std::int64_t>(kSliceStep);
+  const std::int64_t want = static_cast<std::int64_t>(pos) + static_cast<std::int64_t>(detents) * step;
+  if (want <= static_cast<std::int64_t>(lo2)) {
+    return lo2;
+  }
+  if (want >= static_cast<std::int64_t>(hi2)) {
+    return hi2;
+  }
+  std::uint32_t at = static_cast<std::uint32_t>(want);
+  if (!fine) {
+    at = snap_quiet(s, len, at, detents > 0);
+    at = at < lo2 ? lo2 : (at > hi2 ? hi2 : at);
+  }
+  return at;
+}
+
+// Cut `i` (> 0) starts at `pos`: the cut before it ends there and this one ends where it did. Refused (false, nothing changed) for cut 0, a cut past the
+// count, or a `pos` outside slice_limits. The table keeps tiling.
+inline bool set_slice_start(sm::SliceTable& t, unsigned i, std::uint32_t pos) noexcept {
+  std::uint32_t lo = 0, hi = 0;
+  if (i == 0u || !slice_limits(t, i, t.length, lo, hi) || pos < lo || pos > hi) {
+    return false;
+  }
+  const std::uint32_t end = t.cut[i].start + t.cut[i].len;
+  t.cut[i - 1u].len = pos - t.cut[i - 1u].start;
+  t.cut[i].start = pos;
+  t.cut[i].len = end - pos;
+  return true;
+}
+
+// The zoom's first sample for a start at `centre` (negative when the window reaches before the slot: those columns are blank).
+constexpr std::int32_t zoom_lo(std::uint32_t centre) noexcept { return static_cast<std::int32_t>(centre) - static_cast<std::int32_t>(kZoomHalf); }
+
+// x (0 .. kPicW - 1) of `pos` in the window that starts at `lo`; -1 when `pos` is outside it.
+constexpr int zoom_x(std::uint32_t pos, std::int32_t lo) noexcept {
+  const std::int64_t d = static_cast<std::int64_t>(pos) - lo;
+  return d < 0 || d >= static_cast<std::int64_t>(kZoomSpan) ? -1 : static_cast<int>(d * static_cast<std::int64_t>(kPicW) / static_cast<std::int64_t>(kZoomSpan));
+}
+
+// The window's columns: the lowest and highest sample of each (kZoomSpan / kZoomCols samples), from the slot's `s[0 .. len - 1]`. A column wholly outside
+// the slot is blank (hi < lo). Reads at most kZoomSpan samples, never outside the slot.
+inline void zoom_build(const std::int16_t* s, std::uint32_t len, std::int32_t lo, std::int16_t (&mn)[kZoomCols], std::int16_t (&mx)[kZoomCols]) noexcept {
+  for (unsigned c = 0; c < kZoomCols; ++c) {
+    mn[c] = 1;
+    mx[c] = 0;
+    if (s == nullptr) {
+      continue;
+    }
+    const std::int64_t a0 = static_cast<std::int64_t>(lo) + static_cast<std::int64_t>(kZoomSpan) * c / kZoomCols;
+    const std::int64_t b0 = static_cast<std::int64_t>(lo) + static_cast<std::int64_t>(kZoomSpan) * (c + 1u) / kZoomCols;
+    const std::int64_t a = a0 < 0 ? 0 : a0;
+    const std::int64_t b = b0 > static_cast<std::int64_t>(len) ? static_cast<std::int64_t>(len) : b0;
+    if (a >= b) {
+      continue;
+    }
+    std::int16_t lo_v = INT16_MAX, hi_v = INT16_MIN;
+    for (std::int64_t i = a; i < b; ++i) {
+      const std::int16_t v = s[i];
+      lo_v = v < lo_v ? v : lo_v;
+      hi_v = v > hi_v ? v : hi_v;
+    }
+    mn[c] = lo_v;
+    mx[c] = hi_v;
+  }
+}
+
 // ---- the confirmations: F6 and SHIFT + DELETE ask, F1 confirms ---------------------------------------------------------------------------
 
 enum class Pending : std::uint8_t { None, Normalise, Empty, Copy };  // zeroed is None
 
 // ---- the REPLACES warning ---------------------------------------------------------------------------------------------------------------
 
-// F1 (CUT EVEN) and F8 (CLR CUTS) replace the table. When the table holds the hand's work (`edited`), the first attempt on a key only warns and a
+// F1 (CUT EVEN) and SHIFT + F8 (CLR CUTS) replace the table. When the table holds the hand's work (`edited`), the first attempt on a key only warns and a
 // second one on the same key takes it; the arm then stays open for that key, so turning F1 through 8, 16 and 24 warns once. Anything else
 // (the cursor, the slot, another key) closes it. Without `edited` there is no warning (the arm still opens, for the next step to come).
 struct Arm {

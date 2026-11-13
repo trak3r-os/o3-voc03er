@@ -514,6 +514,12 @@ SAMPLE EDIT shows the take across the whole screen. Cuts are marks numbered 1 to
 from cut to cut. INSERT makes a cut at the cursor, DELETE removes one. A pad of the top rows plays that slice; the bottom rows play
 SAMPLE's two note rows (A NOTE, B TRIAD at first; F1 LOW PADS on SAMPLE changes them).
 
+**Moving a slice's start.** Tap a top pad: that slice plays, its pad lights bright, and the waveform zooms to about half a second around the slice's
+start. Now the encoder moves that start (it stays between its neighbours and lands on a quiet crossing point; SHIFT + encoder moves one sample a click).
+LEFT and RIGHT pick the previous or next slice. Tap the same pad again, press an F key, or press UP or DOWN to let the slice go and go back to the
+whole take. Slice 1's start is the trim START (F4): moving one moves the other, and pad 1 plays from START while it is moved (up to the second slice). A pad past the last slice does not make a slice; INSERT does, and the
+line says so.
+
 | Key | What it does |
 |---|---|
 | F1 CUT EVEN | Cuts into 8, 16 or 24 equal parts |
@@ -522,9 +528,10 @@ SAMPLE's two note rows (A NOTE, B TRIAD at first; F1 LOW PADS on SAMPLE changes 
 | F4 START, F5 END | Trim the take |
 | F6 NORMALISE | Raises the level to the top. F1 confirms |
 | F7 SAVE WAV | Saves the slot as a WAV file in the card's `Samples/` folder |
-| F8 CLR CUTS | Removes every cut |
+| SHIFT + F8 CLR CUTS | Removes every cut. F8 alone changes nothing and says so |
 
-F1 to F3 replace the cuts you have; the screen says how many it replaces before you commit. A cut lands on a quiet crossing point close by
+F1 to F3 and SHIFT + F8 replace the cuts you have; the screen says how many it replaces, and the key reads CONFIRM: press it again to commit. While
+something waits for its F1 (NORMALISE, the trim, COPY, SHIFT + DELETE) F1 reads CONFIRM, and the trim and NORMALISE say NO UNDO. A cut lands on a quiet crossing point close by
 so it does not click. COPY copies the slot, cuts and all, to the next empty slot.
 
 ### SAMPLE LOAD

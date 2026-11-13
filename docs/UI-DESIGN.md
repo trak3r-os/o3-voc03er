@@ -160,10 +160,14 @@ of the top rows auditions that slice through the vocoder, and a pad of the botto
 
 - F1 CUT EVEN (OFF, 8, 16, 24 equal parts; turning re-cuts) · F2 CUT BEATS (OFF, 4, 8, 16 a bar, on the bars the take was recorded on; dimmed for
   a loaded WAV) · F3 CUT HITS (0 to 100: the sensitivity of the onset detector, 0 off; the cuts follow it as it turns; the first tap from 0 lands at 50, then by 10, and 100 wraps to 0) · F4 START and F5 END (the
-  trim) · F6 NORMALISE (action, F1 confirms) · F7 SAVE WAV (`Samples/slotN_NNN.wav` by the kit's `save_wav`, the strip shows the progress) · F8 CLR
-  CUTS. COPY copies the slot to the next empty one (F1 confirms).
-- F1 to F3 replace the table and say so before the value is taken ("REPLACES 5 CUTS"); INSERT and DELETE edit it. A cut lands on a zero crossing
+  trim) · F6 NORMALISE (action, F1 confirms) · F7 SAVE WAV (`Samples/slotN_NNN.wav` by the kit's `save_wav`, the strip shows the progress) · SHIFT + F8
+  CLR CUTS (F8 alone changes nothing and says where CLR CUTS is). COPY copies the slot to the next empty one (F1 confirms).
+- F1 to F3 and SHIFT + F8 replace the table and say so before the value is taken ("REPLACES 5 CUTS"; the key waiting for its second press reads CONFIRM); INSERT and DELETE edit it. A cut lands on a zero crossing
   within 64 samples when one is there.
+- Beat slices by hand (SE1): a tap on a top pad picks that slice, plays it and lights the pad high; the picked slice takes the encoder ahead of the lit F key. The
+  encoder moves its start between its neighbours (quiet-crossing snap, the kit's acceleration; SHIFT + encoder one sample a detent), LEFT / RIGHT pick the previous / next slice,
+  and the waveform zooms to about 0.5 s around the start. Slice 1's start is the trim START (one notion of start). The same pad again, an F key or UP / DOWN lets the slice go
+  (that key counts as a first tap). A pad past the last slice splits nothing: INSERT adds a cut. F1 reads CONFIRM while something waits for it, and a trim and NORMALISE say NO UNDO.
 
 ### SAMPLE LOAD
 

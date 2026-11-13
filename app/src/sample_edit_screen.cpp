@@ -40,7 +40,7 @@ constexpr std::uint32_t kResendMs = 100;
 static_assert(se::kTrimFade == Loop::kFadeSamples, "the trim's seam is the unit's own fade");
 
 constexpr const char* kSlotNames[4] = {"SLOT 1", "SLOT 2", "SLOT 3", "SLOT 4"};
-constexpr const char* kKeyNames[ornoir::kFKeys] = {"CUT EVEN", "BEATS", "HITS", "START", "END", "NORMALISE", "SAVE WAV", "CLR CUTS"};
+constexpr const char* kKeyNames[ornoir::kFKeys] = {"CUT EVEN", "BEATS", "HITS", "START", "END", "NORMALISE", "SAVE WAV", "SH+CLEAR"};
 
 // The screen's state, in the SDRAM (O3SDK_BIG: zero at start, main loop only), so the screen object is the vtable and two pointers.
 struct EditData {
@@ -73,9 +73,20 @@ struct EditData {
   bool key_tap;                        // turn() came from a second tap on F1
   const char* note;                    // a moment's line (a static string or note_buf), until note_until
   std::uint64_t note_until;
-  char note_buf[32];
+  char note_buf[48];
+  std::uint8_t sel1;                   // SE1: the slice picked on its pad, plus one (0 none); valid while sel_slot and sel_len are the table's (see selected())
+  std::uint8_t sel_slot;
+  std::uint32_t sel_len;
+  std::uint8_t warn_key1;              // a REPLACES line is up for this F key, plus one (0 none): that key says CONFIRM until the arm closes or the line is answered
+  bool zoom_ok;                        // the zoom columns below are for zoom_slot, zoom_at and zoom_len (any change of the samples clears it)
+  std::uint8_t zoom_slot;
+  std::int32_t zoom_at;
+  std::uint32_t zoom_len;
+  alignas(4) std::int16_t zoom_mn[se::kZoomCols];  // the zoomed picture's columns (lowest and highest sample of each): 2 x 186 x 2 B
+  alignas(4) std::int16_t zoom_mx[se::kZoomCols];
 };
 static_assert(offsetof(EditData, hop) % 4u == 0u, "the hop energies are word aligned");
+static_assert(offsetof(EditData, zoom_mn) % 4u == 0u && offsetof(EditData, zoom_mx) % 4u == 0u && sizeof(EditData::zoom_mn) % 4u == 0u, "the zoom columns are word aligned");
 O3SDK_BIG EditData g_se = {};
 
 void cat(char* dst, std::size_t cap, const char* s) noexcept {
@@ -135,11 +146,15 @@ void SampleEditScreen::enter(app::Context& ctx) noexcept {
   g_se.focus = kFocusCursor;
   g_se.pending = se::Pending::None;
   g_se.note = nullptr;
+  g_se.sel1 = 0;
+  g_se.warn_key1 = 0;
+  g_se.zoom_ok = false;
   ctx.redraw();
 }
 
 void SampleEditScreen::leave(app::Context& ctx) noexcept {
   g_se.pending = se::Pending::None;
+  g_se.sel1 = 0;
   g_se.scan = se::HopScan{};  // reads only: stopping it costs nothing but the pass
   if (g_se.saving) {  // the job reads the slot's memory and the other screens write it: the card keeps no half file
     ctx.files().cancel();
@@ -185,6 +200,8 @@ void SampleEditScreen::slot_replaced(unsigned slot) noexcept {
   g_se.hop_len[slot] = 0;
   g_se.cursor[slot] = 0;
   g_se.beats[slot] = 0;
+  g_se.sel1 = 0;
+  g_se.zoom_ok = false;
 }
 
 bool SampleEditScreen::trim_brackets(unsigned slot, std::uint32_t length, std::uint32_t& start, std::uint32_t& end) noexcept {
@@ -239,13 +256,27 @@ bool SampleEditScreen::refuse(app::Context& ctx, bool needs_cuts) noexcept {
 }
 
 // The table changed: the SPEAKS slot's cuts reach the step sequencer at the next service() pass.
-static void table_changed(SampleScreen& s, unsigned slot, bool edited, unsigned code) noexcept {
+static void table_changed(SampleScreen& s, unsigned slot, bool edited, unsigned code, bool keep_sel = false) noexcept {
+  if (!keep_sel) {
+    g_se.sel1 = 0;  // the slices were renumbered or replaced: back to the overview
+  }
+  g_se.zoom_ok = false;
   s.set_edited(slot, edited);
   s.set_even_code(slot, code);
   s.cuts_changed();
   g_se.beats[slot & 3u] = 0;  // F2's own call sets it again after this
   g_se.scan_sens = 0;         // a scan still running keeps its energies, but its cuts must not replace this table
   g_se.hits[slot & 3u] = 0;   // so does F3's
+}
+
+// A recut key (F1..F3, SHIFT + F8) met a table the hand edited: the line says what the key will replace, and the key reads CONFIRM until it is pressed again.
+void SampleEditScreen::warn_replaces(app::Context& ctx, unsigned key, unsigned count) noexcept {
+  g_se.note_buf[0] = '\0';
+  cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
+  cat_uint(g_se.note_buf, sizeof g_se.note_buf, count);
+  cat(g_se.note_buf, sizeof g_se.note_buf, key == 7u ? " CUTS: SHIFT + F8 AGAIN" : " CUTS: PRESS AGAIN");
+  g_se.warn_key1 = static_cast<std::uint8_t>(key + 1u);
+  say(ctx, g_se.note_buf);
 }
 
 void SampleEditScreen::insert(app::Context& ctx) noexcept {
@@ -300,13 +331,10 @@ void SampleEditScreen::recut(app::Context& ctx, unsigned code) noexcept {
   }
   sm::SliceTable& t = sample_->table(slot);
   if (se::arm_step(g_se.arm, 0u, sample_->edited(slot)) == se::Gate::Warn) {
-    g_se.note_buf[0] = '\0';
-    cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
-    cat_uint(g_se.note_buf, sizeof g_se.note_buf, t.count);
-    cat(g_se.note_buf, sizeof g_se.note_buf, " CUTS");
-    say(ctx, g_se.note_buf);
+    warn_replaces(ctx, 0u, t.count);
     return;
   }
+  g_se.warn_key1 = 0;
   sm::even_cuts(t, t.length, n);
   table_changed(*sample_, slot, true, code);
   g_se.note = nullptr;  // the warning has been answered
@@ -346,13 +374,10 @@ void SampleEditScreen::recut_beats(app::Context& ctx, unsigned code) noexcept {
   }
   sm::SliceTable& t = sample_->table(slot);
   if (se::arm_step(g_se.arm, 1u, sample_->edited(slot)) == se::Gate::Warn) {
-    g_se.note_buf[0] = '\0';
-    cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
-    cat_uint(g_se.note_buf, sizeof g_se.note_buf, t.count);
-    cat(g_se.note_buf, sizeof g_se.note_buf, " CUTS");
-    say(ctx, g_se.note_buf);
+    warn_replaces(ctx, 1u, t.count);
     return;
   }
+  g_se.warn_key1 = 0;
   const se::BeatCut r = se::beat_cuts(t, t.length, perform::bar_samples(ctx.engine().stats().tempo_mbpm), se::beats_per_bar(code));
   if (r.count == 0u) {
     say(ctx, "BEAT TOO SHORT");
@@ -420,13 +445,10 @@ void SampleEditScreen::recut_hits(app::Context& ctx, unsigned code) noexcept {
   }
   const sm::SliceTable& t = sample_->table(slot);
   if (se::arm_step(g_se.arm, 2u, sample_->edited(slot)) == se::Gate::Warn) {
-    g_se.note_buf[0] = '\0';
-    cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
-    cat_uint(g_se.note_buf, sizeof g_se.note_buf, t.count);
-    cat(g_se.note_buf, sizeof g_se.note_buf, " CUTS");
-    say(ctx, g_se.note_buf);
+    warn_replaces(ctx, 2u, t.count);
     return;
   }
+  g_se.warn_key1 = 0;
   if (g_se.hop_len[slot] != t.length) {
     se::hop_scan_begin(g_se.scan, t.length);
     g_se.scan_slot = static_cast<std::uint8_t>(slot);
@@ -482,7 +504,7 @@ void SampleEditScreen::ask_normalise(app::Context& ctx) noexcept {
     return;
   }
   g_se.pending = se::Pending::Normalise;
-  say(ctx, "NORMALISE TO -1 DB? F1 CONFIRMS");
+  say(ctx, "NORMALISE TO -1 DB: F1 CONFIRMS (NO UNDO)");
 }
 
 void SampleEditScreen::ask_empty(app::Context& ctx) noexcept {
@@ -557,6 +579,7 @@ void SampleEditScreen::norm_finish(app::Context& ctx) noexcept {
   g_se.norm = se::Norm{};
   g_se.hop_len[g_se.norm_slot & 3u] = 0;
   overview::shared().mark_dirty(g_se.norm_slot);  // the samples changed in place: the picture is built again
+  g_se.zoom_ok = false;
   say(ctx, g_se.note_buf);
 }
 
@@ -622,14 +645,14 @@ void SampleEditScreen::send_load(app::Context& ctx) noexcept {
 }
 
 // F4 or F5 tapped: points the encoder at the bracket; a second tap puts it back at its end.
-void SampleEditScreen::tap_bracket(app::Context& ctx, bool end_side) noexcept {
+void SampleEditScreen::tap_bracket(app::Context& ctx, bool end_side, bool first) noexcept {
   if (refuse(ctx, true)) {
     return;
   }
   const unsigned slot = sample_->slot() & 3u;
   fit_brackets(slot);
   const std::uint8_t want = end_side ? kFocusEnd : kFocusStart;
-  if (g_se.focus == want) {
+  if (g_se.focus == want && !first) {
     (end_side ? g_se.br[slot].end : g_se.br[slot].start) = end_side ? g_se.br_len[slot] : 0u;
   }
   g_se.focus = want;
@@ -793,13 +816,10 @@ void SampleEditScreen::clear_cuts(app::Context& ctx) noexcept {
   const unsigned slot = sample_->slot() & 3u;
   sm::SliceTable& t = sample_->table(slot);
   if (se::arm_step(g_se.arm, 7u, sample_->edited(slot)) == se::Gate::Warn) {
-    g_se.note_buf[0] = '\0';
-    cat(g_se.note_buf, sizeof g_se.note_buf, "REPLACES ");
-    cat_uint(g_se.note_buf, sizeof g_se.note_buf, t.count);
-    cat(g_se.note_buf, sizeof g_se.note_buf, " CUTS");
-    say(ctx, g_se.note_buf);
+    warn_replaces(ctx, 7u, t.count);
     return;
   }
+  g_se.warn_key1 = 0;
   se::clear_cuts(t);
   table_changed(*sample_, slot, false, 3u);  // one cut over the slot: nothing of the hand's left to guard
   g_se.note = nullptr;
@@ -809,6 +829,123 @@ void SampleEditScreen::clear_cuts(app::Context& ctx) noexcept {
 // F1's step: `delta` is the encoder's detents (or +1 for a second tap, which wraps).
 void SampleEditScreen::turn(app::Context& ctx, int delta) noexcept {
   recut(ctx, se::step_even(sample_->even_code(sample_->slot()), delta, g_se.key_tap));
+}
+
+// ---- SE1: one slice picked on its pad ---------------------------------------------------------------------------------------------------
+
+// The picked slice's index plus one, 0 when none, or when the slot, its length or its cut count are no longer the ones it was picked in.
+unsigned SampleEditScreen::selected() const noexcept {
+  if (sample_ == nullptr || g_se.sel1 == 0u) {
+    return 0;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  const sm::SliceTable& t = sample_->table(slot);
+  return g_se.sel_slot == slot && g_se.sel_len == t.length && t.length != 0u && g_se.sel1 <= t.count ? g_se.sel1 : 0u;
+}
+
+// Where slice `i` starts as the picture shows it: slice 1 starts at the trim's START bracket (the table's cut 1 stays at 0), the others at their cut.
+static std::uint32_t slice_start(const sm::SliceTable& t, unsigned slot, unsigned i) noexcept {
+  return i == 0u ? g_se.br[slot].start : t.cut[i].start;
+}
+
+void SampleEditScreen::select_slice(app::Context& ctx, unsigned index) noexcept {
+  const unsigned slot = sample_->slot() & 3u;
+  const sm::SliceTable& t = sample_->table(slot);
+  if (index >= t.count) {
+    return;
+  }
+  fit_brackets(slot);
+  g_se.sel1 = static_cast<std::uint8_t>(index + 1u);
+  g_se.sel_slot = static_cast<std::uint8_t>(slot);
+  g_se.sel_len = t.length;
+  g_se.note = nullptr;
+  set_cursor(ctx, slice_start(t, slot, index));
+}
+
+void SampleEditScreen::clear_sel(app::Context& ctx) noexcept {
+  if (g_se.sel1 != 0u) {
+    g_se.sel1 = 0;
+    ctx.redraw();
+  }
+}
+
+// LEFT or RIGHT with a slice picked: the one before or after it (held inside the table).
+void SampleEditScreen::step_slice(app::Context& ctx, int dir) noexcept {
+  const unsigned sel = selected();
+  const unsigned count = sample_->table(sample_->slot() & 3u).count;
+  if (sel == 0u || count == 0u) {
+    return;
+  }
+  const unsigned i = dir < 0 ? (sel > 1u ? sel - 2u : 0u) : (sel < count ? sel : count - 1u);
+  select_slice(ctx, i);
+}
+
+// A top pad was tapped: its slice is picked (and the pad plays it, SAMPLE's pad_input); the same pad again goes back to the overview. A pad past the last
+// slice splits nothing: the line says INSERT does.
+void SampleEditScreen::pad_tap(app::Context& ctx, unsigned pad) noexcept {
+  const unsigned slot = sample_->slot() & 3u;
+  const sm::SliceTable& t = sample_->table(slot);
+  if (t.length == 0u || sample_->status(slot).rec != Vocoder::LoopStatus::Rec::Idle) {
+    return;
+  }
+  if (pad >= t.count) {
+    clear_sel(ctx);
+    g_se.note_buf[0] = '\0';
+    cat(g_se.note_buf, sizeof g_se.note_buf, "NO SLICE ");
+    cat_uint(g_se.note_buf, sizeof g_se.note_buf, pad + 1u);
+    cat(g_se.note_buf, sizeof g_se.note_buf, ": INSERT ADDS A CUT");
+    say(ctx, g_se.note_buf);
+    return;
+  }
+  if (selected() == pad + 1u) {
+    clear_sel(ctx);
+  } else {
+    select_slice(ctx, pad);
+  }
+}
+
+// The encoder with a slice picked: its start between its neighbours (slice 1: the trim START, between 0 and the next cut or the END bracket).
+void SampleEditScreen::turn_slice(app::Context& ctx, int delta, bool fine) noexcept {
+  const unsigned sel = selected();
+  if (sel == 0u) {
+    return;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  sm::SliceTable& t = sample_->table(slot);
+  const unsigned i = sel - 1u;
+  fit_brackets(slot);
+  std::uint32_t lo = 0, hi = 0;
+  if (!se::slice_limits(t, i, g_se.br[slot].end, lo, hi)) {
+    say(ctx, "NO ROOM TO MOVE");
+    return;
+  }
+  const std::uint32_t pos = slice_start(t, slot, i);
+  const std::uint32_t at = se::slice_move(samples(), t.length, pos, delta, fine, lo, hi);
+  if (at == pos) {
+    return;
+  }
+  if (i == 0u) {
+    g_se.br[slot].start = at;  // the one notion of slice 1's start: the trim's START (a trim is still F4 or F5, then F1)
+  } else if (se::set_slice_start(t, i, at)) {
+    table_changed(*sample_, slot, true, 3u, true);
+  } else {
+    return;
+  }
+  g_se.note = nullptr;
+  set_cursor(ctx, at);
+}
+
+void SampleEditScreen::zoom_refresh(unsigned slot, std::uint32_t centre) noexcept {
+  const std::int32_t lo = se::zoom_lo(centre);
+  const std::uint32_t len = sample_->table(slot).length;
+  if (g_se.zoom_ok && g_se.zoom_slot == slot && g_se.zoom_at == lo && g_se.zoom_len == len) {
+    return;
+  }
+  se::zoom_build(samples(), len, lo, g_se.zoom_mn, g_se.zoom_mx);
+  g_se.zoom_slot = static_cast<std::uint8_t>(slot);
+  g_se.zoom_at = lo;
+  g_se.zoom_len = len;
+  g_se.zoom_ok = true;
 }
 
 void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
@@ -826,22 +963,31 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     g_se.note = nullptr;
     ctx.redraw();
   }
-  const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 1u || k == 2u || k == 7u)) ||
-                         (in.turn() && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats || g_se.focus == kFocusHits));
+  // SE1: a picked slice owns the encoder and LEFT / RIGHT; an F key (not SHIFT's) or UP / DOWN lets it go. The key that lets it go is a first tap: a bracket
+  // or a value it points at is not stepped, reset or trimmed by the press that only leaves the slice.
+  const bool was_sel = selected() != 0u;
+  const bool keeps_arm = in.type == app::Input::Type::Release || (fk && !in.shift && (k == 0u || k == 1u || k == 2u)) ||
+                         (fk && in.shift && k == 7u) || (in.press(Button::Shift) && g_se.warn_key1 == 8u) ||
+                         (in.turn() && !was_sel && (g_se.focus == kFocusCut || g_se.focus == kFocusBeats || g_se.focus == kFocusHits));
   if (!keeps_arm) {
     se::arm_cancel(g_se.arm);
+    g_se.warn_key1 = 0;
   }
   if (fk) {
-    if (in.shift) {
+    if (in.shift) {  // SHIFT + F8 clears the cuts (a hand's table asks twice); the other SHIFT + F keys are free
+      if (k == 7u) {
+        clear_cuts(ctx);  // the pick goes with the table when the clear really happens (table_changed); the warning keeps it
+      }
       return;
     }
+    g_se.sel1 = 0;
     if (k == 0u) {
       const unsigned bs = sample_->slot() & 3u;
-      if ((g_se.focus == kFocusStart || g_se.focus == kFocusEnd) && (fit_brackets(bs), se::trim_moved(g_se.br[bs], g_se.br_len[bs]))) {
+      if (!was_sel && (g_se.focus == kFocusStart || g_se.focus == kFocusEnd) && (fit_brackets(bs), se::trim_moved(g_se.br[bs], g_se.br_len[bs]))) {
         run_trim(ctx);  // a bracket in hand and off its end: F1 confirms the trim
         return;
       }
-      if (g_se.focus == kFocusCut) {  // a second tap steps it
+      if (g_se.focus == kFocusCut && !was_sel) {  // a second tap steps it
         g_se.key_tap = true;
         turn(ctx, 1);
         g_se.key_tap = false;
@@ -856,7 +1002,7 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
         say(ctx, "NOT A TAKE: WHOLE BARS ONLY");
         return;
       }
-      if (g_se.focus == kFocusBeats) {  // a second tap steps it
+      if (g_se.focus == kFocusBeats && !was_sel) {  // a second tap steps it
         g_se.key_tap = true;
         turn_beats(ctx, 1);
         g_se.key_tap = false;
@@ -867,7 +1013,7 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       if (refuse(ctx, true)) {
         return;
       }
-      if (g_se.focus == kFocusHits) {  // a second tap steps it
+      if (g_se.focus == kFocusHits && !was_sel) {  // a second tap steps it
         g_se.key_tap = true;
         turn_hits(ctx, 1);
         g_se.key_tap = false;
@@ -875,11 +1021,11 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       g_se.focus = kFocusHits;
       ctx.redraw();
     } else if (k == 3u || k == 4u) {
-      tap_bracket(ctx, k == 4u);
+      tap_bracket(ctx, k == 4u, was_sel);
     } else if (k == 5u) {
       ask_normalise(ctx);
     } else if (k == 7u) {
-      clear_cuts(ctx);
+      say(ctx, "SHIFT + F8 CLEARS THE CUTS");  // F8 alone never changes the table
     } else {
       save_wav(ctx);  // the encoder stays where it was
     }
@@ -887,7 +1033,9 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   }
   if (in.turn()) {
     g_se.key_tap = false;
-    if (g_se.focus == kFocusCut) {
+    if (was_sel) {
+      turn_slice(ctx, in.delta(), in.shift);
+    } else if (g_se.focus == kFocusCut) {
       turn(ctx, in.delta());
     } else if (g_se.focus == kFocusBeats) {
       turn_beats(ctx, in.delta());
@@ -905,9 +1053,14 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
   const unsigned slot = sample_->slot() & 3u;
   if (in.press(Button::Up) || in.press(Button::Down)) {
     g_se.focus = kFocusCursor;
+    g_se.sel1 = 0;
     sample_->set_slot(in.press(Button::Up) ? (slot > 0u ? slot - 1u : 0u) : slot + 1u);
     ctx.redraw();
   } else if (in.press(Button::Left) || in.press(Button::Right)) {  // repeats arrive as presses (repeat_buttons)
+    if (was_sel) {
+      step_slice(ctx, in.press(Button::Left) ? -1 : 1);  // a slice is picked: the one before or after it
+      return;
+    }
     g_se.focus = kFocusCursor;
     const sm::SliceTable& t = sample_->table(slot);
     set_cursor(ctx, in.press(Button::Left) ? se::prev_cut(t, cursor()) : se::next_cut(t, cursor()));
@@ -926,19 +1079,67 @@ void SampleEditScreen::input(app::Context& ctx, const app::Input& in) noexcept {
       ask_copy(ctx);
     }
   } else if (g_se.job_kind == kJobNone) {
-    (void)sample_->pad_input(ctx, in);  // the pads, as on SAMPLE; none while a job rewrites a slot
+    if (in.pad_press() && !sm::layout_pad(in.pad())) {
+      pad_tap(ctx, in.pad());  // SE1: the pad also picks its slice
+    }
+    audition_pad(ctx, in);  // the pads, as on SAMPLE; none while a job rewrites a slot
   }
+}
+
+// The pads, as SAMPLE plays them, except pad 1 while the trim's START is off 0: slice 1 starts at the START bracket (the table's cut 1 stays at 0 until
+// F4 + F1 trims), so the pad plays from there and what the encoder moves is what is heard. The cut is swapped for the one press only: the voice copies it
+// when it fires and the table is whole again before anything else reads it.
+void SampleEditScreen::audition_pad(app::Context& ctx, const app::Input& in) noexcept {
+  const unsigned slot = sample_->slot() & 3u;
+  sm::SliceTable& t = sample_->table(slot);
+  if (in.pad_press() && in.pad() == 0u && t.count != 0u && t.length != 0u && sample_->status(slot).rec == Vocoder::LoopStatus::Rec::Idle) {
+    fit_brackets(slot);
+    const std::uint32_t from = g_se.br[slot].start;
+    const std::uint32_t to = t.count > 1u ? t.cut[1].start : t.length;
+    if (from != 0u && from + se::kMinCutSamples <= to) {
+      const sm::Cut whole = t.cut[0];
+      t.cut[0].start = from;
+      t.cut[0].len = to - from;
+      (void)sample_->pad_input(ctx, in);
+      t.cut[0] = whole;
+      return;
+    }
+  }
+  (void)sample_->pad_input(ctx, in);
 }
 
 void SampleEditScreen::leds(app::Context& ctx, app::PadLeds& leds) noexcept {
   if (sample_ != nullptr) {
     sample_->pad_leds(ctx, leds);
+    const unsigned sel = selected();
+    if (sel != 0u) {
+      leds.set(sel - 1u, app::kLedOn);  // the picked slice's pad, high
+    }
   }
 }
 
+// A bracket is in hand and off its end, and no slice is picked: F1 would trim.
+bool SampleEditScreen::trim_armed() noexcept {
+  if (sample_ == nullptr || (g_se.focus != kFocusStart && g_se.focus != kFocusEnd) || selected() != 0u) {
+    return false;
+  }
+  const unsigned slot = sample_->slot() & 3u;
+  if (sample_->table(slot).length == 0u) {
+    return false;
+  }
+  fit_brackets(slot);
+  return se::trim_moved(g_se.br[slot], g_se.br_len[slot]);
+}
+
+// The key that answers what waits is labelled CONFIRM: F1 for NORMALISE, EMPTY, COPY and a trim; the F key that met a table the hand edited (REPLACES).
+static bool confirming(unsigned k, bool trim) noexcept {
+  return (k == 0u && (g_se.pending != se::Pending::None || trim)) || g_se.warn_key1 == k + 1u;
+}
+
 void SampleEditScreen::soft_keys(app::Context& ctx, app::SoftKeys& out) noexcept {
+  const bool trim = trim_armed();
   for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
-    out.label[i] = kKeyNames[i];
+    out.label[i] = confirming(i, trim) ? "CONFIRM" : kKeyNames[i];
   }
   out.hot = static_cast<std::uint8_t>(g_se.focus == kFocusCut ? 1u : (g_se.focus == kFocusBeats ? 2u : (g_se.focus == kFocusHits ? 4u : (g_se.focus == kFocusStart ? 8u : (g_se.focus == kFocusEnd ? 16u : 0u)))));
   out.dim = beats_dim(ctx) ? 2u : 0u;  // F2 is dim for a WAV
@@ -964,11 +1165,21 @@ void SampleEditScreen::update(app::Context& ctx) noexcept {
   for (unsigned i = 0; i < sm::kReaders; ++i) {  // a fresh take (possibly of the same length) makes the slot's energies stale
     if (sample_->status(i).rec != Vocoder::LoopStatus::Rec::Idle) {
       g_se.hop_len[i] = 0;
+      if (g_se.sel_slot == i) {
+        g_se.sel1 = 0;  // a retake of the same length would bring the old pick back over new samples
+      }
+      if (g_se.zoom_slot == i) {
+        g_se.zoom_ok = false;  // and the old take's cached columns
+      }
     }
   }
   if (g_se.note != nullptr && ctx.uptime_ms() >= g_se.note_until) {
     g_se.note = nullptr;
     g_se.pending = se::Pending::None;
+    if (g_se.warn_key1 != 0u) {  // the REPLACES line ran out: so does the second tap that took it
+      se::arm_cancel(g_se.arm);
+      g_se.warn_key1 = 0;
+    }
   }
   ctx.redraw();  // the slot's length can change under a take
 }
@@ -978,12 +1189,12 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "SLOT BEFORE", nullptr},
       {Button::Down, "SLOT AFTER", nullptr},
-      {Button::Left, "PREVIOUS CUT, HOLD REPEATS", nullptr},
-      {Button::Right, "NEXT CUT, HOLD REPEATS", nullptr},
+      {Button::Left, "PREVIOUS CUT OR SLICE", nullptr},
+      {Button::Right, "NEXT CUT OR SLICE", nullptr},
       {Button::Insert, "A CUT AT THE CURSOR", nullptr},
       {Button::Delete, "THE CUT AT THE CURSOR", nullptr},
       {Button::Copy, "COPY TO THE NEXT EMPTY SLOT", nullptr},
-      {Button::Shift, "COARSE CURSOR", nullptr},
+      {Button::Shift, "CURSOR COARSE, SLICE FINE", nullptr},
       {Button::Params, "PARAMS: FOUR PAGES", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
@@ -1003,8 +1214,8 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   if (sample_ != nullptr) {
     sample_->help(ctx, h);  // the pad labels and groups; the rest is replaced below
   }
-  h.summary = "INSERT CUTS AT THE CURSOR, DELETE REMOVES THE CUT THERE.\n"
-              "SHIFT + DELETE EMPTIES THE SLOT, COPY COPIES IT, F4 / F5 TRIM: F1 CONFIRMS.";
+  h.summary = "TAP A PAD: ITS SLICE PLAYS, THE ENCODER MOVES ITS START. INSERT CUTS, DELETE REMOVES A CUT.\n"
+              "SHIFT + DELETE EMPTIES THE SLOT, COPY COPIES IT, F4 / F5 TRIM, F1 CONFIRMS. SHIFT + F8: CLEAR.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     h.fkey[i] = nullptr;
     h.fkey_shift[i] = nullptr;
@@ -1016,11 +1227,12 @@ void SampleEditScreen::help(const app::Context& ctx, app::Help& h) const noexcep
   h.fkey[3] = "TRIM START, F1 TRIMS";
   h.fkey[4] = "TRIM END, F1 TRIMS";
   h.fkey[5] = "PEAK TO -1 DB, F1 CONFIRMS";
-  h.fkey[7] = "ONE CUT OVER THE SLOT";
-  h.pads = "UPPER ROWS: THE SLOT'S CUTS. LOWER ROWS: THE NOTES PALETTE, ROWS A AND B.";
+  h.fkey[7] = "SHIFT + F8: ONE CUT";
+  h.fkey_shift[7] = "CLR CUTS";
+  h.pads = "UPPER: A TAP PICKS AND PLAYS A SLICE, AGAIN LETS GO. LOWER: THE NOTES PALETTE, ROWS A AND B.";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
-  h.encoder = "CURSOR, LIT F KEY, BRACKET";
+  h.encoder = "PICKED START, ELSE CURSOR";
 }
 
 void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) noexcept {
@@ -1042,6 +1254,8 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     keys[i].name = kKeyNames[i];
     keys[i].dim = false;
   }
+  const unsigned sel = selected();
+  const bool trim = trim_armed();
   keys[0].hot = g_se.focus == kFocusCut;
   cat(keys[0].value, sizeof keys[0].value, se::even_name(sample_->even_code(slot)));
   const bool bdim = beats_dim(ctx);
@@ -1074,30 +1288,87 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     bracket_on = se::trim_moved(br, len) || g_se.focus == kFocusStart || g_se.focus == kFocusEnd;
   }
 
+  // SE1 / the confirm cue: the waiting key reads CONFIRM and says what it will do; a trim and a NORMALISE cannot be undone.
+  for (unsigned i = 0; i < ornoir::kFKeys; ++i) {
+    if (confirming(i, trim)) {
+      keys[i].name = "CONFIRM";
+      keys[i].hot = true;
+      keys[i].value[0] = '\0';
+      const char* what = g_se.warn_key1 == i + 1u ? "REPLACES" : (g_se.pending == se::Pending::Normalise || g_se.pending == se::Pending::None ? "NO UNDO" : (g_se.pending == se::Pending::Empty ? "EMPTY" : "COPY"));
+      cat(keys[i].value, sizeof keys[i].value, what);
+    }
+  }
+  if (g_se.pending == se::Pending::Normalise) {
+    keys[5].hot = true;
+    keys[5].value[0] = '\0';
+    cat(keys[5].value, sizeof keys[5].value, "NO UNDO");
+  }
+
   ui::plot::Canvas c(r);
   c.open();
   ornoir::header_shapes(c, h);
   ornoir::frow_shapes(c, keys);
   ornoir::fill_rect(c, kX, kWaveY, kW, kWaveH, Color::Empty);  // the overview's rectangle
   ornoir::fill_rect(c, kX + 2, kWaveY + 2, kW - 4, kWaveH - 4, Color::Pane);
-  if (len != 0u && overview::shared().shown(slot)) {  // the picture at 1x (the kit has no bitmap scaling), centred; the cuts and the cursor are lines over it
+  // SE1: with a slice picked the picture is the window around its start (about 0.5 s), as min / max columns; the cuts and the brackets are mapped into it.
+  const std::uint32_t sel_pos = sel != 0u ? slice_start(t, slot, sel - 1u) : 0u;
+  const std::int32_t zlo = se::zoom_lo(sel_pos);
+  if (sel != 0u) {
+    zoom_refresh(slot, sel_pos);
+    int peak = 512;  // a floor, so a quiet window is not blown up into noise
+    for (unsigned i = 0; i < se::kZoomCols; ++i) {
+      if (g_se.zoom_mn[i] <= g_se.zoom_mx[i]) {
+        const int hi_v = g_se.zoom_mx[i];
+        const int lo_v = -static_cast<int>(g_se.zoom_mn[i]);
+        peak = hi_v > peak ? hi_v : peak;
+        peak = lo_v > peak ? lo_v : peak;
+      }
+    }
+    const int mid = kPicY + kPicH / 2;
+    const int half = kPicH / 2 - 2;
+    for (unsigned i = 0; i < se::kZoomCols; ++i) {
+      if (g_se.zoom_mn[i] > g_se.zoom_mx[i]) {
+        continue;  // before the slot's start or past its end
+      }
+      const int top = mid - g_se.zoom_mx[i] * half / peak;
+      const int bot = mid - g_se.zoom_mn[i] * half / peak;
+      ornoir::fill_rect(c, kPicX + static_cast<int>(i * se::kZoomColW), top, static_cast<int>(se::kZoomColW) - 1, bot - top + 1, Color::TextDim);
+    }
+    for (unsigned i = 1; i < t.count; ++i) {
+      const int x = se::zoom_x(t.cut[i].start, zlo);
+      if (x >= 0) {
+        ornoir::fill_rect(c, kPicX + x, kPicY, 1, kPicH, Color::Accent);
+      }
+    }
+    const int w0 = se::mark_x(zlo < 0 ? 0u : static_cast<std::uint32_t>(zlo), len);
+    int w1 = se::mark_x(static_cast<std::uint32_t>(zlo + static_cast<std::int32_t>(se::kZoomSpan)), len);
+    w1 = w1 > w0 + 2 ? w1 : w0 + 2;
+    ornoir::fill_rect(c, kX + w0, kBarY - 6, w1 - w0, 3, Color::Text);  // where the window sits on the ruler
+  } else if (len != 0u && overview::shared().shown(slot)) {  // the picture at 1x (the kit has no bitmap scaling), centred; the cuts and the cursor are lines over it
     overview::shared().draw(c, slot, true, kPicX, kPicY, sample_->slot_ink(ctx, slot));
     for (unsigned i = 0; i < t.count; ++i) {
       ornoir::fill_rect(c, se::mark_x(t.cut[i].start, len), kPicY, 1, kPicH, Color::Accent);
     }
     ornoir::fill_rect(c, se::mark_x(cur, len), kPicY, 1, kPicH, Color::Text);
   }
-  if (bracket_on) {  // [ START and END ] on the picture and the ruler: one map, the cursor's
-    const int xs = se::mark_x(br.start, len);
-    const int xe = se::mark_x(br.end, len);
+  if (bracket_on) {  // [ START and END ] on the picture and the ruler: one map, the cursor's (the window's while a slice is picked)
+    const int xs = sel != 0u ? se::zoom_x(br.start, zlo) : se::mark_x(br.start, len);
+    const int xe = sel != 0u ? se::zoom_x(br.end, zlo) : se::mark_x(br.end, len);
+    const int base = sel != 0u ? kPicX : 0;
     for (int side = 0; side < 2; ++side) {
       const int x = side == 0 ? xs : xe - 1;
+      ornoir::fill_rect(c, se::mark_x(side == 0 ? br.start : br.end, len) - (side == 0 ? 0 : 1), kBarY - 14, 3, kBarH + 28, Color::Accent);  // the ruler always shows it
+      if (sel != 0u && (side == 0 ? xs : xe) < 0) {
+        continue;  // outside the window: no bracket on the picture
+      }
       const int serif = side == 0 ? 0 : -6;
-      ornoir::fill_rect(c, x, kPicY, 3, kPicH, Color::Accent);
-      ornoir::fill_rect(c, x + serif, kPicY, 9, 3, Color::Accent);
-      ornoir::fill_rect(c, x + serif, kPicY + kPicH - 3, 9, 3, Color::Accent);
-      ornoir::fill_rect(c, x, kBarY - 14, 3, kBarH + 28, Color::Accent);
+      ornoir::fill_rect(c, base + x, kPicY, 3, kPicH, Color::Accent);
+      ornoir::fill_rect(c, base + x + serif, kPicY, 9, 3, Color::Accent);
+      ornoir::fill_rect(c, base + x + serif, kPicY + kPicH - 3, 9, 3, Color::Accent);
     }
+  }
+  if (sel != 0u) {  // the picked start over the brackets: slice 1's start is the START bracket, the same line
+    ornoir::fill_rect(c, kPicX + se::zoom_x(sel_pos, zlo) - 1, kPicY, 3, kPicH, Color::Text);
   }
   ornoir::fill_rect(c, kX, kBarY, kW, kBarH, Color::Empty);
   if (len != 0u) {
@@ -1112,6 +1383,18 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
   c.close();
   ornoir::header_text(r, h);
   ornoir::frow_text(r, keys);
+  if (sel != 0u) {
+    r.text(kX + 8, kWaveY + 6, "ZOOM 0.5 S", Color::TextDim, Face::Micro);
+    for (unsigned i = 0; i < t.count; ++i) {  // the cuts in the window by number (1 is the START bracket)
+      const int x = se::zoom_x(i == 0u ? br.start : t.cut[i].start, zlo);
+      if (x >= 0) {
+        char num[4];
+        num[0] = '\0';
+        cat_uint(num, sizeof num, i + 1u);
+        r.text(kPicX + x + 5, kPicY - 14, num, i + 1u == sel ? Color::Text : Color::Accent, Face::Micro);
+      }
+    }
+  }
 
   char buf[40];
   r.text(kX, 88, kSlotNames[slot], Color::Text, Face::Display);
@@ -1169,6 +1452,8 @@ void SampleEditScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&)
     r.text(kX, 398, pb, Color::Accent, Face::Label);
   } else if (g_se.note != nullptr) {
     r.text(kX, 398, g_se.note, Color::Accent, Face::Label);
+  } else if (sel != 0u) {
+    r.text(kX, 398, sel == 1u ? "SLICE 1 = TRIM START: ENCODER MOVES, SHIFT FINE" : "SLICE START: ENCODER MOVES, SHIFT FINE, LEFT RIGHT PICK", Color::Accent, Face::Label);
   } else if (has && se::trim_moved(br, len)) {  // a bracket off its end: say what F1 does now
     const bool armed = g_se.focus == kFocusStart || g_se.focus == kFocusEnd;
     r.text(kX, 398, armed ? "TRIM TO THE BRACKETS: F1 CONFIRMS (NO UNDO)" : "BRACKETS MOVED: F4 OR F5, THEN F1 TRIMS", Color::Accent, Face::Label);

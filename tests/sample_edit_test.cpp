@@ -498,6 +498,15 @@ void tap(sim::Harness& h, app::Button b) {
   h.run_ms(5);
 }
 
+// SHIFT + key: SHIFT goes down first and stays through the key (CLR CUTS is SHIFT + F8).
+void shift_tap(sim::Harness& h, app::Button b) {
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, b);
+  h.release(app::Button::Shift);
+  h.run_ms(5);
+}
+
 float unit_param(sim::Harness& h, std::uint16_t id) {
   float best = 0.0f;
   for (unsigned u = 0; u < 8; ++u) {
@@ -552,8 +561,20 @@ struct Rig {
     tap(*h, app::Button::SampleEdit);
     h->run_ms(60);
   }
-  // Pad `pad` pressed and let go: the region's Start and Len the unit was asked for, and whether it was asked at all.
+  // Pad `pad` pressed and let go: the region's Start and Len the unit was asked for, and whether it was asked at all. SAMPLE EDIT (SE1) also picks the
+  // slice (the encoder then moves its start) or, on the pad already picked, lets it go: tap_pad keeps that, audition (the probe most tests use) taps a
+  // pad that got picked once more, so the encoder is the F key's again.
   bool audition(unsigned pad, float& start, float& len) {
+    const bool on = tap_pad(pad, start, len);
+    if (on) {
+      h->pad_down(pad);
+      h->run_ms(40);
+      h->pad_up(pad);
+      h->run_ms(40);
+    }
+    return on;
+  }
+  bool tap_pad(unsigned pad, float& start, float& len) {
     // The voice of the one before ends first. TRIG ONE SHOT (the default since issue #3) leaves Trig at 1 after its cut ends (only a hit
     // or a GATE release writes it), so Trig reads 1 between hits: the rig lowers it, as a GATE release would, and a hit raises it again.
     const dsp::UnitId voc = voc_unit(*h);
@@ -599,6 +620,7 @@ TEST_CASE("sample edit: the screen opens on an empty slot and every cut key says
   tap(h, app::Button::F1);
   tap(h, app::Button::F1);
   tap(h, app::Button::F8);
+  shift_tap(h, app::Button::F8);
   tap(h, app::Button::F2);
   tap(h, app::Button::F7);
   h.turn(5);
@@ -630,6 +652,7 @@ TEST_CASE("sample edit: INSERT cuts at the cursor, the pads play the hand's cut,
   tap(h, app::Button::Insert);   // the same spot again: too close, nothing changes
   h.run_ms(60);
   CHECK_FALSE(rig.audition(9, s, l));
+  REQUIRE(rig.audition(1, s, l));  // a pad puts the cursor on its slice's start: the hand's cut
   tap(h, app::Button::Delete);  // the cursor is on the hand's cut
   h.run_ms(60);
   CHECK_FALSE(rig.audition(8, s, l));  // back to eight
@@ -682,16 +705,55 @@ TEST_CASE("sample edit: any other key cancels the REPLACES warning") {
   tap(h, app::Button::Insert);
   h.run_ms(60);
   REQUIRE(rig.audition(8, s, l));  // nine cuts, the hand's
-  tap(h, app::Button::F8);         // warns
+  shift_tap(h, app::Button::F8);   // warns
   tap(h, app::Button::Right);      // cancels
-  tap(h, app::Button::F8);         // warns again
+  shift_tap(h, app::Button::F8);   // warns again
   CHECK(rig.audition(8, s, l));    // nine still; the pad cancels the arm too
-  tap(h, app::Button::F8);         // warns
-  tap(h, app::Button::F8);         // the second one in a row takes it
+  shift_tap(h, app::Button::F8);   // warns
+  shift_tap(h, app::Button::F8);   // the second one in a row takes it
   h.run_ms(60);
   CHECK_FALSE(rig.audition(1, s, l));  // one cut over the slot
   CHECK(rig.audition(0, s, l));
   CHECK(l > 0.0f);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: the SHIFT + F8 warning keeps the picked slice, the clear itself lets it go") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l = 0;
+  rig.shift_turn(3);
+  tap(h, app::Button::Insert);
+  h.run_ms(60);
+  REQUIRE(rig.tap_pad(3, s, l));  // slice 4 picked
+  h.run_ms(2500);
+  CHECK(h.leds().level(3) == app::kLedOn);
+  shift_tap(h, app::Button::F8);  // only warns: the table is the hand's
+  h.run_ms(300);
+  CHECK(h.leds().level(3) == app::kLedOn);  // cancelling it would leave the pick as it was
+  shift_tap(h, app::Button::F8);  // the second one takes it
+  h.run_ms(2500);
+  CHECK(h.leds().level(3) != app::kLedOn);
+  CHECK_FALSE(rig.audition(1, s, l));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: F8 alone never changes the cuts, SHIFT + F8 clears them") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l = 0;
+  CHECK(rig.audition(7, s, l));  // eight even cuts, nothing the hand did: SHIFT + F8 clears them at once
+  tap(h, app::Button::F8);
+  h.run_ms(60);
+  CHECK(rig.audition(7, s, l));  // F8 alone did nothing
+  shift_tap(h, app::Button::F8);
+  h.run_ms(60);
+  CHECK_FALSE(rig.audition(1, s, l));
+  CHECK(rig.audition(0, s, l));
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
@@ -1399,4 +1461,396 @@ TEST_CASE("sample edit: F3 CUT HITS scans the take, cuts at its onsets, warns be
   CHECK_FALSE(rig.audition(8, s, l));
   CHECK(h.runtime().frame_failures() == 0u);
   CHECK(h.display().peak_frame_words() < 2048u);
+}
+
+// ---- SE1: a slice picked on its pad, its start moved by the encoder ----
+
+namespace {
+
+// +1000 up to 100, -1000 to 140, +30 to 200, -30 to 300, +1000 to 400: sign changes at 100 and 140 (loud), 200 (quiet), 300 (loud).
+std::vector<std::int16_t> crossings() {
+  std::vector<std::int16_t> v(400, 1000);
+  for (unsigned i = 100; i < 140; ++i) v[i] = -1000;
+  for (unsigned i = 140; i < 200; ++i) v[i] = 30;
+  for (unsigned i = 200; i < 300; ++i) v[i] = -30;
+  return v;
+}
+
+}  // namespace
+
+TEST_CASE("sample edit: snap_quiet takes the quietest crossing ahead, in the way the start moves") {
+  const std::vector<std::int16_t> v = crossings();
+  CHECK(se::snap_quiet(v.data(), 400, 90, true) == 100u);   // 100 and 140 are as loud: the nearer one
+  CHECK(se::snap_quiet(v.data(), 400, 150, true) == 200u);  // the quiet one
+  CHECK(se::snap_quiet(v.data(), 400, 210, false) == 200u);
+  CHECK(se::snap_quiet(v.data(), 400, 232, true) == 232u);  // nothing within 64 ahead: the target itself
+  CHECK(se::snap_quiet(v.data(), 400, 250, false) == 200u);
+  CHECK(se::snap_quiet(nullptr, 0, 5, true) == 5u);
+  CHECK(se::snap_quiet(v.data(), 400, 399, true) == 399u);  // the end of the slot: nothing past it
+  CHECK(se::snap_quiet(v.data(), 400, 0, false) == 0u);
+}
+
+TEST_CASE("sample edit: a slice start keeps moving the way the encoder turns, a crossing cannot hold it") {
+  const std::vector<std::int16_t> v = crossings();
+  std::uint32_t pos = 50;
+  for (unsigned n = 0; n < 40 && pos < 390; ++n) {
+    const std::uint32_t at = se::slice_move(v.data(), 400, pos, 1, false, 0, 390);
+    CHECK(at > pos);
+    pos = at;
+  }
+  CHECK(pos == 390u);
+  for (unsigned n = 0; n < 40 && pos > 0; ++n) {
+    const std::uint32_t at = se::slice_move(v.data(), 400, pos, -1, false, 0, 390);
+    CHECK(at < pos);
+    pos = at;
+  }
+  CHECK(pos == 0u);
+  // on a crossing already: the next detent leaves it, either way
+  CHECK(se::slice_move(v.data(), 400, 200, 1, false, 0, 390) > 200u);
+  CHECK(se::slice_move(v.data(), 400, 200, -1, false, 0, 390) < 200u);
+}
+
+TEST_CASE("sample edit: slice_limits keep a slice start between its neighbours, slice 1 between 0 and the next cut or the END bracket") {
+  const sm::SliceTable t = even(8000, 8);  // a cut every 1000
+  std::uint32_t lo = 9, hi = 9;
+  REQUIRE(se::slice_limits(t, 3, t.length, lo, hi));
+  CHECK(lo == 2000u + se::kMinCutSamples);
+  CHECK(hi == 4000u - se::kMinCutSamples);
+  REQUIRE(se::slice_limits(t, 7, t.length, lo, hi));
+  CHECK(hi == 8000u - se::kMinCutSamples);
+  REQUIRE(se::slice_limits(t, 0, t.length, lo, hi));  // the START bracket: from 0, short of cut 2
+  CHECK(lo == 0u);
+  CHECK(hi == 1000u - se::kMinCutSamples);
+  REQUIRE(se::slice_limits(t, 0, 500, lo, hi));  // and of the END bracket
+  CHECK(hi == 500u - se::kMinCutSamples);
+  CHECK_FALSE(se::slice_limits(t, 0, 10, lo, hi));
+  CHECK_FALSE(se::slice_limits(t, 8, t.length, lo, hi));
+  CHECK(hi == 0u);
+  CHECK(lo == 0u);
+}
+
+TEST_CASE("sample edit: slice_limits with one slice, with 24, and with a table too short for two margins") {
+  std::uint32_t lo = 9, hi = 9;
+  const sm::SliceTable one = even(8000, 1);
+  REQUIRE(se::slice_limits(one, 0, one.length, lo, hi));  // the one slice: from 0 to the slot's end, short of the END bracket
+  CHECK(lo == 0u);
+  CHECK(hi == 8000u - se::kMinCutSamples);
+  REQUIRE(se::slice_limits(one, 0, 3000, lo, hi));
+  CHECK(hi == 3000u - se::kMinCutSamples);
+  CHECK_FALSE(se::slice_limits(one, 1, one.length, lo, hi));
+  const sm::SliceTable full = even(24000, 24);  // a cut every 1000
+  REQUIRE(se::slice_limits(full, 0, full.length, lo, hi));
+  CHECK(lo == 0u);
+  CHECK(hi == 1000u - se::kMinCutSamples);
+  REQUIRE(se::slice_limits(full, 12, full.length, lo, hi));
+  CHECK(lo == 11000u + se::kMinCutSamples);
+  CHECK(hi == 13000u - se::kMinCutSamples);
+  REQUIRE(se::slice_limits(full, 23, full.length, lo, hi));  // the last: to the slot's end
+  CHECK(lo == 22000u + se::kMinCutSamples);
+  CHECK(hi == 24000u - se::kMinCutSamples);
+  CHECK_FALSE(se::slice_limits(full, 24, full.length, lo, hi));
+  CHECK_FALSE(se::slice_limits(even(100, 4), 1, 100, lo, hi));  // 25-sample slices: no room for two margins
+}
+
+TEST_CASE("sample edit: slice_move from a start outside its limits walks in, never jumps to the edge") {
+  // START left at 6000 by F4 while cut 2 is at 1000: the limits are [0, 936]
+  CHECK(se::slice_move(nullptr, 8000, 6000, 1, false, 0, 936) == 6000u);   // away from the range: stays
+  CHECK(se::slice_move(nullptr, 8000, 6000, 40, true, 0, 936) == 6000u);
+  CHECK(se::slice_move(nullptr, 8000, 6000, -1, false, 0, 936) == 5968u);  // towards it: a step
+  CHECK(se::slice_move(nullptr, 8000, 6000, -3, true, 0, 936) == 5997u);
+  CHECK(se::slice_move(nullptr, 8000, 6000, -1000, false, 0, 936) == 0u);  // all the way in: the far edge
+  CHECK(se::slice_move(nullptr, 8000, 6000, -170, false, 0, 936) == 560u);
+  // and below the range
+  CHECK(se::slice_move(nullptr, 8000, 100, -1, false, 2064, 3936) == 100u);
+  CHECK(se::slice_move(nullptr, 8000, 100, 1, false, 2064, 3936) == 132u);
+  CHECK(se::slice_move(nullptr, 8000, 100, 1000, false, 2064, 3936) == 3936u);
+}
+
+TEST_CASE("sample edit: slice_move steps 32 a detent, one sample with SHIFT, and clamps to its limits") {
+  CHECK(se::slice_move(nullptr, 8000, 3000, 1, false, 2064, 3936) == 3032u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, -2, false, 2064, 3936) == 2936u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, 2, true, 2064, 3936) == 3002u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, -3, true, 2064, 3936) == 2997u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, 1000, false, 2064, 3936) == 3936u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, -1000, false, 2064, 3936) == 2064u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, 1000, true, 2064, 3936) == 3936u);
+  CHECK(se::slice_move(nullptr, 8000, 3000, 0, false, 2064, 3936) == 3000u);
+  CHECK(se::slice_move(nullptr, 8000, 3900, 1, false, 2064, 3936) == 3932u);
+  CHECK(se::slice_move(nullptr, 8000, 3930, 1, false, 2064, 3936) == 3936u);  // the clamp
+  CHECK(se::slice_move(nullptr, 8000, 4500, 0, false, 2064, 3936) == 3936u);  // a start outside comes back in
+}
+
+TEST_CASE("sample edit: set_slice_start moves the cut and keeps the table tiling; cut 1 and out-of-range targets are refused") {
+  sm::SliceTable t = even(8000, 8);
+  REQUIRE(se::set_slice_start(t, 3, 3500));
+  CHECK(t.cut[2].start == 2000u);
+  CHECK(t.cut[2].len == 1500u);
+  CHECK(t.cut[3].start == 3500u);
+  CHECK(t.cut[3].len == 500u);
+  CHECK(t.count == 8u);
+  CHECK(tiles(t));
+  const sm::SliceTable before = t;
+  CHECK_FALSE(se::set_slice_start(t, 0, 100));  // slice 1 is the trim START, not a cut
+  CHECK_FALSE(se::set_slice_start(t, 3, 1500u + se::kMinCutSamples - 1u));
+  CHECK_FALSE(se::set_slice_start(t, 3, 4000u - se::kMinCutSamples + 1u));
+  CHECK_FALSE(se::set_slice_start(t, 8, 100));
+  CHECK(std::memcmp(&t, &before, sizeof t) == 0);
+  REQUIRE(se::set_slice_start(t, 7, 7936));
+  CHECK(t.cut[7].len == 64u);
+  CHECK(tiles(t));
+}
+
+TEST_CASE("sample edit: the zoom window is a quarter second each side of the start, its columns blank outside the slot") {
+  CHECK(se::zoom_lo(1000) == 1000 - 11025);
+  const std::int32_t lo = se::zoom_lo(1000);
+  CHECK(se::zoom_x(1000, lo) == static_cast<int>(se::kPicW) / 2);  // the start is the middle
+  CHECK(se::zoom_x(0, lo) == 338);
+  const std::int32_t far = se::zoom_lo(100000);
+  CHECK(se::zoom_x(100000u - 11025u - 1u, far) == -1);
+  CHECK(se::zoom_x(100000u - 11025u, far) == 0);
+  CHECK(se::zoom_x(100000u - 11025u + se::kZoomSpan - 1u, far) == static_cast<int>(se::kPicW) - 1);
+  CHECK(se::zoom_x(100000u - 11025u + se::kZoomSpan, far) == -1);
+  std::vector<std::int16_t> v(5000, 1000);
+  std::int16_t mn[se::kZoomCols], mx[se::kZoomCols];
+  se::zoom_build(v.data(), 5000, lo, mn, mx);
+  CHECK(mn[83] > mx[83]);  // wholly before the slot
+  CHECK(mn[85] == 1000);
+  CHECK(mx[85] == 1000);
+  CHECK(mn[126] == 1000);
+  CHECK(mn[127] > mx[127]);  // wholly past its end
+  CHECK(mn[185] > mx[185]);
+  se::zoom_build(nullptr, 5000, lo, mn, mx);
+  CHECK(mn[100] > mx[100]);
+  std::vector<std::int16_t> w(30000, 0);
+  w[1000] = -700;  // the start's column holds it
+  w[1005] = 900;
+  se::zoom_build(w.data(), 30000, lo, mn, mx);
+  CHECK(mn[se::kZoomCols / 2] == -700);
+  CHECK(mx[se::kZoomCols / 2] == 900);
+}
+
+TEST_CASE("sample edit: a tap on a pad picks its slice, lit high; the encoder moves its start; the same pad again lets it go") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0, s = 0, l = 0;
+  REQUIRE(rig.tap_pad(2, s0, l0));  // picked, and it plays
+  h.run_ms(2500);
+  CHECK(h.leds().level(2) == app::kLedOn);
+  CHECK(h.leds().level(3) == app::kLedDim);
+  CHECK(h.leds().level(8) == app::kLedOff);
+  h.turn(3);  // the picked start, not the lit F key or the cursor
+  h.run_ms(60);
+  REQUIRE(rig.tap_pad(2, s, l));  // the same pad: lets it go, and plays the slice as it is now
+  CHECK(s >= s0 + 3.0f * static_cast<float>(se::kSliceStep));
+  CHECK(s + l == doctest::Approx(s0 + l0).epsilon(0.0001));  // the end stays where it was
+  h.run_ms(2500);
+  CHECK(h.leds().level(2) == app::kLedDim);
+  const float moved = s;
+  h.turn(40);  // back to the cursor: the table is not touched
+  h.run_ms(60);
+  REQUIRE(rig.audition(2, s, l));
+  CHECK(s == doctest::Approx(moved));
+  float sb = 0, lb = 0;  // the slice before ends where this one now starts
+  REQUIRE(rig.audition(1, sb, lb));
+  CHECK(sb + lb == doctest::Approx(moved));
+  CHECK(h.runtime().frame_failures() == 0u);
+  CHECK(h.display().peak_frame_words() < 2048u);
+}
+
+TEST_CASE("sample edit: SHIFT + encoder moves the picked start a sample a detent, and it stays 64 samples from its neighbours") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0, s = 0, l = 0;
+  REQUIRE(rig.tap_pad(2, s0, l0));
+  rig.shift_turn(-5);
+  REQUIRE(rig.tap_pad(2, s, l));  // lets it go
+  CHECK(s == doctest::Approx(s0 - 5.0f));
+  CHECK(s + l == doctest::Approx(s0 + l0));
+  float sp = 0, lp = 0;
+  REQUIRE(rig.audition(1, sp, lp));
+  REQUIRE(rig.tap_pad(2, s, l));  // picked again
+  for (int i = 0; i < 60; ++i) {  // far past the slice before (a slice is up to 16 s): held 64 samples after its start
+    h.turn(-400);
+    h.run_ms(10);
+  }
+  h.run_ms(60);
+  REQUIRE(rig.tap_pad(2, s, l));
+  CHECK(s == doctest::Approx(sp + static_cast<float>(se::kMinCutSamples)));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: LEFT and RIGHT pick the previous or next slice, held inside the table; a pad past the last splits nothing") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s = 0, l = 0;
+  REQUIRE(rig.tap_pad(2, s, l));
+  tap(h, app::Button::Right);
+  h.run_ms(2500);
+  CHECK(h.leds().level(3) == app::kLedOn);
+  CHECK(h.leds().level(2) == app::kLedDim);
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);  // held at slice 1
+  h.run_ms(60);
+  CHECK(h.leds().level(0) == app::kLedOn);
+  CHECK(h.leds().level(1) == app::kLedDim);
+  REQUIRE(rig.tap_pad(7, s, l));
+  tap(h, app::Button::Right);  // held at the last
+  h.run_ms(2500);
+  CHECK(h.leds().level(7) == app::kLedOn);
+  CHECK(h.leds().level(8) == app::kLedOff);
+  CHECK_FALSE(rig.tap_pad(10, s, l));  // past the last: nothing is picked, nothing is cut
+  h.run_ms(2500);
+  CHECK(h.leds().level(7) == app::kLedDim);
+  CHECK(h.leds().level(10) == app::kLedOff);
+  CHECK_FALSE(rig.tap_pad(8, s, l));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: slice 1's start is the trim START: the table is untouched, F4 then F1 trims by what the encoder moved") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0, s = 0, l = 0;
+  REQUIRE(rig.tap_pad(0, s0, l0));  // slice 1 picked
+  h.run_ms(2500);
+  CHECK(h.leds().level(0) == app::kLedOn);
+  rig.shift_turn(100);
+  h.turn(2);
+  h.run_ms(60);
+  const float moved = 100.0f + 2.0f * static_cast<float>(se::kSliceStep);  // at least: the acceleration may add detents
+  tap(h, app::Button::F4);  // lets the slice go; the first tap on START keeps where it is
+  h.run_ms(2500);
+  CHECK(h.leds().level(0) == app::kLedDim);
+  rig.stop_slot();
+  h.run_ms(500);
+  tap(h, app::Button::F1);  // the bracket is off its end: this trims
+  h.run_ms(900);
+  REQUIRE(rig.audition(0, s, l));
+  CHECK(s < 1.0f);
+  CHECK(l0 - l >= moved - 1.0f);
+  CHECK(l0 - l < moved + 4.0f * static_cast<float>(se::kSliceStep) + 2.0f * static_cast<float>(se::kSnapRadius));
+  CHECK(cuts_heard(rig) == 8u);  // no cut was added or lost
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: an F key lets the picked slice go and counts as a first tap; UP and DOWN let it go too") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0, s = 0, l = 0;
+  REQUIRE(rig.tap_pad(4, s0, l0));
+  tap(h, app::Button::F2);  // CUT BEATS: the first tap points the encoder at it, nothing is replaced
+  h.run_ms(2500);
+  CHECK(h.leds().level(4) == app::kLedDim);
+  REQUIRE(rig.tap_pad(4, s, l));  // the table is as it was
+  CHECK(s == doctest::Approx(s0));
+  CHECK(l == doctest::Approx(l0));
+  h.run_ms(2500);
+  CHECK(h.leds().level(4) == app::kLedOn);  // picked again
+  tap(h, app::Button::Down);
+  h.run_ms(2500);
+  CHECK(h.leds().level(4) != app::kLedOn);
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: pad 1 plays from the START bracket, and the table is whole again after the press") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0, s = 0, l = 0;
+  REQUIRE(rig.audition(0, s0, l0));
+  CHECK(s0 < 1.0f);
+  const float whole = l0 * 8.0f;
+  tap(h, app::Button::F4);
+  rig.shift_turn(3);  // START at 3/64 of the slot
+  h.run_ms(60);
+  REQUIRE(rig.tap_pad(0, s, l));  // slice 1 picked: it sounds from where START is
+  CHECK(s == doctest::Approx(whole * 3.0f / 64.0f).epsilon(0.01));
+  CHECK(s + l == doctest::Approx(l0).epsilon(0.0001));  // up to cut 2, as before
+  REQUIRE(rig.audition(1, s, l));  // cut 2 is where it was
+  CHECK(s == doctest::Approx(l0));
+  CHECK(cuts_heard(rig) == 8u);
+  tap(h, app::Button::F4);  // START back to 0 (SHIFT + encoder, the bracket in hand): the swapped cut came back whole
+  rig.shift_turn(-3);
+  h.run_ms(60);
+  REQUIRE(rig.audition(0, s, l));
+  CHECK(s < 1.0f);
+  CHECK(l == doctest::Approx(l0).epsilon(0.0001));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: a START past cut 2 is not thrown back to the edge by the encoder on slice 1") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.take();
+  rig.open();
+  float s0 = 0, l0 = 0, s = 0, l = 0;
+  REQUIRE(rig.audition(0, s0, l0));
+  const float whole = l0 * 8.0f;
+  tap(h, app::Button::F4);
+  rig.shift_turn(12);  // START at 12/64: cut 2 is at 8/64
+  h.run_ms(60);
+  REQUIRE(rig.tap_pad(0, s, l));  // slice 1 picked (START is past its end: it plays as the table has it)
+  h.turn(3);                      // away from the range: START stays
+  h.run_ms(60);
+  tap(h, app::Button::F4);  // lets the slice go; the first tap on START keeps where it is
+  rig.stop_slot();
+  h.run_ms(500);
+  tap(h, app::Button::F1);  // trims at START
+  h.run_ms(900);
+  REQUIRE(rig.audition(0, s, l));
+  CHECK(s < 1.0f);
+  CHECK(l == doctest::Approx(whole * 4.0f / 64.0f).epsilon(0.1));  // the head up to 12/64 is gone; thrown back to cut 2 it would be 8/64
+  CHECK(h.runtime().frame_failures() == 0u);
+}
+
+TEST_CASE("sample edit: a pad on an empty slot picks nothing; a take that starts under the screen drops the pick") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.open();  // nothing recorded yet
+  h.pad_down(2);
+  h.run_ms(40);
+  h.pad_up(2);
+  h.run_ms(2500);
+  CHECK(h.leds().level(2) != app::kLedOn);
+  CHECK(h.runtime().frame_failures() == 0u);
+  // Two takes of the same length, made from outside this screen (an armed one reaching its bar, PERFORM's capture, MIDI): driven on the unit.
+  const dsp::UnitId voc = voc_unit(h);
+  REQUIRE(voc != dsp::kNoUnit);
+  const auto record = [&](std::uint32_t ms) {
+    (void)h.engine().set_param(voc, Vocoder::loop_param(0, Vocoder::LoopField::Rec), 1.0f);
+    h.run_ms(ms);
+    (void)h.engine().set_param(voc, Vocoder::loop_param(0, Vocoder::LoopField::Rec), 0.0f);
+    h.run_ms(1500);
+  };
+  record(6000u);
+  rig.open();
+  float s0 = 0, l0 = 0;
+  REQUIRE(rig.tap_pad(2, s0, l0));  // picked: lit high, the picture zoomed
+  h.run_ms(2500);
+  CHECK(h.leds().level(2) == app::kLedOn);
+  (void)h.engine().set_param(voc, Vocoder::loop_param(0, Vocoder::LoopField::Rec), 1.0f);  // the slot records under the screen
+  h.run_ms(600);
+  h.pad_down(3);  // a pad while the slot records picks nothing
+  h.run_ms(40);
+  h.pad_up(3);
+  h.run_ms(1000);
+  CHECK(h.leds().level(3) != app::kLedOn);
+  h.run_ms(4359);  // 600 + 40 + 1000 + 4359 ms: the take lands on the first one's exact length (the retake the pick must not survive); calibrated on the host sim
+  (void)h.engine().set_param(voc, Vocoder::loop_param(0, Vocoder::LoopField::Rec), 0.0f);
+  h.run_ms(2500);
+  CHECK(h.leds().level(2) != app::kLedOn);  // the old pick did not come back over the new samples, whatever the new length
+  CHECK(h.leds().level(3) != app::kLedOn);
+  CHECK(h.runtime().frame_failures() == 0u);
 }

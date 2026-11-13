@@ -15,6 +15,14 @@
   (NOTES IN is on by default; KEY would be silent at the default CHROM scale); ROBOT A NOTE, B SHAPE, C FORMANT; TRACT A NOTE, B TONGUE, C MOUTH (every row does something out of the box, and a mode that sounds from notes has a note row). A saved PADS chunk keeps
   its layouts: an existing project keeps its old layout until F4 NEW. Scenarios `sample_layout.txt` and the PERFORM ones, tests in `sample_test`, `perform_screen_test`, `pattern_screen_test`, `strip_logic_test`.
   Needs more testing on the unit.
+- **SE1: beat slices by hand in SAMPLE EDIT.** A tap on a top pad picks that slice (it plays, the pad is lit high) and the picked slice takes the encoder ahead of the lit F key: its start
+  moves between its neighbours with the quiet-crossing snap and the kit's acceleration, SHIFT + encoder one sample a detent. Slice 1's start is the trim START bracket (one notion of start;
+  the table's first cut stays at 0, and pad 1 plays from START while it is moved, so what moves is what is heard). LEFT / RIGHT pick the previous / next slice. The same pad, an F key or UP / DOWN lets it go (that key counts as a first tap, so it does not also step or
+  trim). A pad past the last slice says INSERT ADDS A CUT. While a slice is picked the waveform zooms to about 0.5 s around its start (186 cached min / max columns, no bitmap scaling) and the
+  brackets are remapped. F1 reads CONFIRM while something waits for it (the key a REPLACES warning waits on reads it instead) and the trim and NORMALISE say NO UNDO. CLR CUTS moves to SHIFT + F8
+  (a hand-edited table asks twice, "REPLACES n CUTS: SHIFT + F8 AGAIN"); F8 alone changes nothing. Scenario `sample_edit_slice.txt`; tests in `sample_edit_test` (selection, clamping, slice 1 =
+  trim START, deselect, SHIFT + F8). There was no hit overlay to remap. Needs more testing on the unit (the feel of the step, the snap and the acceleration, the zoom). Cost to read there: the zoom rebuilds
+  at most once per frame while the encoder turns (cached by position), about 22,050 SDRAM reads a rebuild, estimated 1 to 3 ms in the main loop (not the audio path); estimate, not measured.
 - **LC1: LIVE in PATTERN's CARRIER lane.** A step can sound through the live audio input, as PERFORM's SOUNDS LIVE does (the pattern's carrier ids are the engine's: 7 is LIVE, appended, the saved ids 0 to 6 never move;
   `kCarrierMax` 6 to 7, the three-bit carrier field already held it). INSTR gets a LIVE pad (pad 7, cell "LIV") and playback switches the carrier to LIVE on that step and to the next step's carrier after it, a Stop
   restoring the user's pick. It works with SPEAKS on a slot or on the input. Of the PATTERN lanes only SLICE needs a slot (it says SPEAKS HAS NO SLICES); MOUTH capture reads a recorded slot by design. No format
