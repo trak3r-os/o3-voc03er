@@ -1,8 +1,8 @@
 # PARAMS in each mode, walked as a first-time player would: PERFORM's F1 picks the mode (the encoder is sent to BANDS, then on to the mode), PARAMS shows only what that
-# mode hears, every page stepped with PARAMS (the last press goes round), a value turned on each page. TALK adds QUALITY and FREEZE (FREEZE works here), TUNE is one
-# page of seven keys with no carrier, ROBOT is BANDS' pages, TRACT adds the MOUTH page of the tract unit's own values (VOWEL, TONGUE, JAW, LIPS, T GLIDE, SIZE, RES,
-# HISS); then the carrier VOICE brings SPEED in (BANDS' VOICE & NOTES page, TRACT's pages one longer). The simulator shows the pages and that the engine takes
-# the values; it cannot say how they sound.
+# mode hears, in pages grouped by meaning with fixed cells, every page stepped with PARAMS (the last press goes round), a value turned on each page. BANDS and ROBOT:
+# CARRIER, VOICE, NOTES. TALK adds QUALITY and FREEZE to VOICE (FREEZE works here). TUNE is one page with no carrier. TRACT: CARRIER, MOUTH (the tract unit's own
+# values: VOWEL, TONGUE, JAW, LIPS, T GLIDE, SIZE, RES, HISS), NOTES, MIX. Then the carrier VOICE fills SPEED's reserved cell on NOTES and moves no other key. The
+# simulator shows the pages and that the engine takes the values; it cannot say how they sound.
 # Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/params_modes.txt --out <dir>   (the dir must exist)
 input tone 220 -8
 wait 300
@@ -18,21 +18,22 @@ wait 300
 snap 01_talk_carrier
 tap params
 wait 300
-snap 02_talk_voice_and_notes
-tap f4
+snap 02_talk_voice
+tap f6
 turn 1
 wait 300
 snap 03_talk_freeze_on
-tap f3
+tap f5
 turn 4
 wait 300
 snap 04_talk_quality
 tap params
 wait 300
 snap 05_talk_notes
+tap f4
 turn 1
-wait 200
-snap 06_talk_scale
+wait 300
+snap 06_talk_notes_gate
 # ---- TUNE
 tap performance
 turn -8
@@ -60,7 +61,7 @@ wait 300
 snap 10_robot_carrier
 tap params
 wait 300
-snap 11_robot_voice_and_notes
+snap 11_robot_voice
 tap f1
 turn 3
 wait 200
@@ -78,14 +79,7 @@ wait 300
 snap 14_tract_carrier
 tap params
 wait 300
-snap 15_tract_mix_and_notes
-tap f8
-turn 1
-wait 300
-snap 16_tract_mouth_source
-tap params
-wait 300
-snap 17_tract_mouth
+snap 15_tract_mouth
 turn 30
 tap f2
 turn 20
@@ -94,31 +88,46 @@ turn -10
 tap f6
 turn 1
 wait 300
-snap 18_tract_mouth_values
+snap 16_tract_mouth_values
 press shift
 tap config
 release shift
 wait 300
-snap 19_tract_mouth_help
+snap 17_tract_mouth_help
 tap config
 wait 200
-# ---- the carrier VOICE: SPEED comes in
+tap params
+wait 300
+snap 18_tract_notes
+tap params
+wait 300
+snap 19_tract_mix
+turn 1
+wait 300
+snap 20_tract_mix_source_live
+# ---- the carrier VOICE: SPEED's reserved cell on NOTES fills in, no other key moves
 tap performance
 tap f3
 turn 2
 tap f3
 wait 400
-# PARAMS opens where the carrier change found SIZE (its page is now "NOTES & MOUTH"); then the pages in order, round to the SPEED key
+# PARAMS opens on the page TRACT was left on (MIX, MOUTH source under the encoder), then the pages in order
 tap params
 wait 300
-snap 20_tract_voice_carrier_focus_kept_on_size
+snap 21_tract_voice_carrier_mix_unchanged
 tap params
 wait 300
-snap 21_tract_voice_carrier_mouth_hiss
-tap params
+snap 22_tract_voice_carrier_carrier_unchanged
 tap params
 wait 300
-snap 22_tract_voice_carrier_mix_and_notes_speed
+snap 23_tract_voice_carrier_mouth_unchanged
+tap params
+wait 300
+snap 24_tract_voice_carrier_notes_speed
+tap f3
+turn 3
+wait 300
+snap 25_tract_speed_changed
 tap performance
 tap f1
 turn -8
@@ -127,9 +136,12 @@ tap params
 wait 300
 tap down
 wait 300
-snap 23_bands_voice_carrier_speed
-tap f8
+snap 26_bands_voice_carrier_voice_unchanged
+tap down
+wait 300
+snap 27_bands_voice_carrier_notes_speed
+tap f3
 turn 3
 wait 300
-snap 24_bands_speed_changed
+snap 28_bands_speed_changed
 wav params_modes

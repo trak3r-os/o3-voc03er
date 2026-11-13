@@ -24,16 +24,20 @@ wait 150
 snap 03_cancelled
 release shift
 wait 100
-# VOICING (page VOICE & NOTES, F5) is the app's own setting: "-" on the held-SHIFT row, and the key cannot be armed
+# VOICING (page NOTES, F6) is the app's own setting: "-" on the held-SHIFT row, and the key cannot be armed
+tap down
+wait 100
 tap down
 wait 200
 press shift
 wait 150
 snap 04_shift_row_voicing_dash
-tap f5
+tap f6
 wait 150
 snap 05_voicing_cannot
 release shift
+wait 100
+tap up
 wait 100
 tap up
 wait 100
@@ -62,7 +66,6 @@ tap f1
 turn -8
 turn 4
 wait 400
-tap params
 tap params
 tap params
 wait 300

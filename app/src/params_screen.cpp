@@ -45,7 +45,6 @@ void ParamsScreen::init(dsp::UnitId voice, dsp::UnitId tract, PerformScreen* per
   tract_ = tract;
   perform_ = perform;
   mode_ = 0;  // setup() can run again on this object (tests, `reboot`): PARAMS opens on the first page of the mode (sync reads it)
-  voice_carrier_ = false;
   page_ = 0;
   learn_armed_ = false;
   learn_page_ = 0;
@@ -75,27 +74,19 @@ void ParamsScreen::say(app::Context& ctx, const char* text) noexcept {
   ctx.redraw();
 }
 
-// The layout of the engine's mode and carrier now. A change of the mode: the first page, its first key. A change of the carrier alone (SPEED comes or
-// goes, the later keys move): the focused value keeps the focus where it still is. Either way a learn that is no longer on the page is cancelled.
+// The layout of the engine's mode and carrier now. A change of the mode: the first page, its first key. A change of the carrier alone changes no cell
+// (SPEED's reserved cell fills in or goes blank): the focus stays where it is, and falls to the page's first key only when its cell went blank.
+// Either way a learn that is no longer on the page is cancelled.
 const pr::Layout& ParamsScreen::sync(app::Context& ctx) noexcept {
   const dsp::Engine& e = ctx.engine();
   const unsigned mode = perform::mode_index(e.param(voice_, Vocoder::Mode));
   const unsigned car_src = static_cast<unsigned>(e.param(voice_, Vocoder::CarSrc) + 0.5f);  // SPEED is heard in any mode with the VOICE source (liveness.h)
   const pr::Layout& lay = pr::layout_of(mode, car_src);
-  const bool voice_carrier = car_src == live::kCarrierVoice;
-  if (mode != mode_ || voice_carrier != voice_carrier_) {
-    const pr::Cell was = pr::cell_at(pr::layout_of(mode_, voice_carrier_ ? live::kCarrierVoice : 0u), page_, focus_);
-    unsigned p = 0, k = 0;
-    if (mode == mode_ && pr::find_cell(lay, was, p, k)) {
-      page_ = static_cast<std::uint8_t>(p);
-      focus_ = static_cast<std::uint8_t>(k);
-    } else {
-      page_ = 0;
-      focus_ = static_cast<std::uint8_t>(pr::first_focus_at(lay, 0));
-      note_ = nullptr;
-    }
+  if (mode != mode_) {
+    page_ = 0;
+    focus_ = static_cast<std::uint8_t>(pr::first_focus_at(lay, 0));
+    note_ = nullptr;
     mode_ = static_cast<std::uint8_t>(mode);
-    voice_carrier_ = voice_carrier;
   }
   if (!pr::focusable_at(lay, page_, focus_)) {  // a valid focus, whatever happened
     page_ = static_cast<std::uint8_t>(page_ < lay.pages ? page_ : 0u);
@@ -287,7 +278,7 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     h.fkey_shift[i] = pr::learnable_at(lay, page, i) ? "LEARN" : nullptr;
   }
   h.summary =
-      "THE VALUES OF THE MODE PERFORM IS IN: ONLY WHAT IT HEARS, IN PAGES OF EIGHT.\n"
+      "THE VALUES OF THE MODE PERFORM IS IN: ONLY WHAT IT HEARS, GROUPED BY MEANING.\n"
       "PARAMS OR UP AND DOWN TURN THE PAGE. MODE IS PERFORM'S F1. SHIFT + F: LEARN.";
   for (unsigned i = 0; i < app::kFKeyCount; ++i) {
     // a blank key has no row; MOUTH (LT1) says what it does: the pads and the lane, or the voice at the input, shape the tube

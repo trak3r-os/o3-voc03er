@@ -2,12 +2,14 @@
 #pragma once
 
 // PARAMS (docs/UI-DESIGN.md, "PARAMS"), in the OR NOIR skin: the in-depth editor of the mode PERFORM is in. It shows only the values that mode hears
-// (params_logic.h's layout of the mode: one to four pages of eight on the F row, tabs under PERFORM's small voiceprint, the title naming the mode).
+// (params_logic.h's layout of the mode: one to four pages by meaning on the F row, a one-word tab each under PERFORM's small voiceprint, the title naming the mode;
+// a key keeps its page and its cell whatever the carrier is).
 //
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on. SHIFT + the encoder: coarse steps.
 //   PARAMS pressed again (app.cpp calls next_page()), DOWN: the next page; UP: the one before.
-//   MODE is not here: PERFORM's F1 changes it. When the mode (or the VOICE carrier, which brings SPEED in) changes by any road (PERFORM, a preset, a
-//   project load, a MIDI program change), the screen shows the new layout on its first page; a learn armed on a value no longer on the page is cancelled.
+//   MODE is not here: PERFORM's F1 changes it. When the mode changes by any road (PERFORM, a preset, a project load, a MIDI program change), the
+//   screen shows the new layout on its first page; the VOICE carrier only fills in SPEED's reserved cell on NOTES (nothing else moves). A learn armed
+//   on a value no longer on the page is cancelled.
 //   MIDI learn (ML1): SHIFT + an F key arms the kit's learn for that value (the next controller binds, the strip says LEARNED CC n); the same keys
 //   again cancel. Held SHIFT turns the F row into LEARN cells ("-" where a value is not a unit parameter: VOICING). Leaving the page or the screen cancels.
 //   The binding stays on the parameter (the table's coordinates), never on the key's place in a page.
@@ -73,8 +75,7 @@ class ParamsScreen final : public o3sdk::app::Screen {
   o3sdk::dsp::UnitId voice_ = o3sdk::dsp::kNoUnit;
   o3sdk::dsp::UnitId tract_ = o3sdk::dsp::kNoUnit;
   PerformScreen* perform_ = nullptr;
-  std::uint8_t mode_ = 0;           // the mode and the carrier the layout was taken for (sync)
-  bool voice_carrier_ = false;
+  std::uint8_t mode_ = 0;           // the mode the layout was taken for (sync)
   std::uint8_t page_ = 0;           // a page of that layout
   std::uint8_t focus_ = 0;          // the F key the encoder drives (always one the page shows)
   const char* note_ = nullptr;                   // a moment's line (a static string), until note_until_

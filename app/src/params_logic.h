@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// PARAMS' pure logic (docs/UI-DESIGN.md, "PARAMS"): the table of every value, the per-mode pages of eight keys (the layouts), which key the encoder
+// PARAMS' pure logic (docs/UI-DESIGN.md, "PARAMS"): the table of every value, the per-mode pages (the layouts), which key the encoder
 // drives, how a key steps and how its value reads. Apart from the screen so a host test (tests/params_test.cpp) holds it. Nothing here allocates or
 // reads the engine; values go through the unit's own parameter ids, in the units PERFORM writes them (so the two screens never disagree).
 //
@@ -62,7 +62,7 @@ inline constexpr const char* kMouthSourceNames[2] = {"PADS", "LIVE"};
 
 // The table below is the catalogue of every value PARAMS can set (and a controller can learn): the fixed pages the project file and the saved
 // bindings were written against, and the coordinates (page, key) a binding names. The screen shows it through a per-mode layout (further down): only
-// what the mode hears, in pages of eight of its own. SHAPE is Wave as a morph, SPREAD is Detune, SUB and TILT the carrier's (U10). VOICING is the app's
+// what the mode hears, in pages of its own by meaning. SHAPE is Wave as a morph, SPREAD is Detune, SUB and TILT the carrier's (U10). VOICING is the app's
 // own (Kind::App).
 inline constexpr KeyDef kTable[kPages][kKeys] = {
     {{"SHAPE", Kind::Value, Vocoder::Wave, Fmt::Wave, 0, 200, 5, 25},
@@ -148,14 +148,21 @@ inline constexpr LearnTap learn_tap(bool can, bool armed_here) noexcept { return
 
 // ---- the per-mode pages ---------------------------------------------------------------------------------------------------------------
 //
-// PARAMS is the in-depth editor of the mode PERFORM is in, and it shows only what that mode hears (key_live, with the carrier source: SPEED appears
-// outside TUNE only while the carrier is VOICE). A Layout is a constexpr view over kTable: up to four pages of eight cells, each cell the table
-// coordinate (page, key) of a value or a blank at the end of the last page. The order runs the carrier's sound, what shapes the voice, the mix, the
-// notes and the timing, then TRACT's mouth. MODE is not in it: PERFORM's F1 changes the mode (the screen's mode is PERFORM's).
-// The binding of a MIDI controller and the project file name the table coordinate, never a position in a layout.
+// PARAMS is the in-depth editor of the mode PERFORM is in, and it shows only what that mode hears (key_live, with the carrier source). The pages are
+// written by meaning, one fixed definition each (a PageDef: a one-word tab and eight cells, each the table coordinate (page, key) of a value or blank),
+// and a mode is a list of them. A cell whose value the mode does not hear is blank, so a key keeps its page and its cell whatever the carrier source
+// or the mode is: SPEED has a reserved cell on NOTES (blank until the carrier is VOICE, a real cell on TUNE), QUALITY and FREEZE are TALK's two cells
+// at the end of VOICE. Blank cells may sit anywhere; a page never holds a single key. MODE is not here: PERFORM's F1 changes the mode (the screen's
+// mode is PERFORM's). The binding of a MIDI controller and the project file name the table coordinate, never a position in a layout.
+//
+//   CARRIER  SHAPE SPREAD SUB TILT NOISE ATTACK RELEASE GLIDE         BANDS TALK ROBOT TRACT
+//   VOICE    FORMANT THRU DRY LEVEL QUALITY FREEZE                    BANDS TALK ROBOT (QUALITY and FREEZE: TALK)
+//   NOTES    KEY SCALE SPEED GATE ARP VOICING                         BANDS TALK ROBOT TRACT
+//   TUNE     KEY SCALE SPEED AMOUNT NOTES IN DRY LEVEL                TUNE
+//   MOUTH    VOWEL TONGUE JAW LIPS T GLIDE SIZE RES HISS              TRACT
+//   MIX      MOUTH (what drives the tube) DRY LEVEL                   TRACT
 
 inline constexpr unsigned kMaxTabs = 4;
-inline constexpr unsigned kTabNameLen = 16;
 
 struct Cell {
   std::uint8_t page;  // kTable's page; kPages and above: blank
@@ -169,80 +176,68 @@ constexpr const KeyDef& def_of(Cell c) noexcept { return key_def(c.page, c.key);
 // The name a cell shows: the table's, except TRACT's GLIDE (the mouth's own), which would read like the carrier's GLIDE.
 constexpr const char* view_name(Cell c) noexcept { return c.page == 3u && c.key == 4u ? "T GLIDE" : def_of(c).name; }
 
-enum Section : std::uint8_t { SecCarrier, SecVoice, SecMix, SecNotes, SecMouth, SecTuning, kSectionCount };
-inline constexpr const char* kSectionNames[kSectionCount] = {"CARRIER", "VOICE", "MIX", "NOTES", "MOUTH", "TUNING"};
-
-struct Entry {
-  Cell cell;
-  Section section;
+struct PageDef {
+  const char* name;  // the tab, one word
+  Cell cell[kKeys];
 };
 
-// The order of every value PARAMS shows (MODE aside): the one list the layouts filter by liveness. TUNE has its own: it hears seven.
-inline constexpr Entry kMainOrder[] = {
-    {{0, 0}, SecCarrier}, {{0, 1}, SecCarrier}, {{0, 2}, SecCarrier}, {{0, 3}, SecCarrier},  // SHAPE SPREAD SUB TILT
-    {{0, 4}, SecCarrier}, {{0, 5}, SecCarrier}, {{0, 6}, SecCarrier}, {{2, 5}, SecCarrier},  // NOISE ATTACK RELEASE GLIDE
-    {{1, 6}, SecVoice},   {{1, 7}, SecVoice},   {{1, 1}, SecVoice},   {{1, 2}, SecVoice},    // FORMANT THRU QUALITY FREEZE
-    {{1, 3}, SecMix},     {{0, 7}, SecMix},                                                  // DRY LEVEL
-    {{1, 4}, SecNotes},   {{2, 0}, SecNotes},   {{2, 1}, SecNotes},   {{2, 2}, SecNotes},    // VOICING KEY SCALE SPEED
-    {{2, 6}, SecNotes},   {{2, 7}, SecNotes},   {{1, 5}, SecNotes},                          // GATE ARP MOUTH (what drives the tube)
-    {{3, 0}, SecMouth},   {{3, 1}, SecMouth},   {{3, 2}, SecMouth},   {{3, 3}, SecMouth},    // VOWEL TONGUE JAW LIPS
-    {{3, 4}, SecMouth},   {{3, 5}, SecMouth},   {{3, 6}, SecMouth},   {{3, 7}, SecMouth},    // T GLIDE SIZE RES HISS
-};
-inline constexpr Entry kTuneOrder[] = {
-    {{2, 0}, SecTuning}, {{2, 1}, SecTuning}, {{2, 2}, SecTuning}, {{2, 3}, SecTuning}, {{2, 4}, SecTuning},  // KEY SCALE SPEED AMOUNT NOTES IN
-    {{1, 3}, SecMix},    {{0, 7}, SecMix},                                                                    // DRY LEVEL
-};
+inline constexpr PageDef kCarrierPage{"CARRIER", {{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}, {2, 5}}};  // SHAPE SPREAD SUB TILT NOISE ATTACK RELEASE GLIDE
+inline constexpr PageDef kVoicePage{"VOICE", {{1, 6}, {1, 7}, {1, 3}, {0, 7}, {1, 1}, {1, 2}, kNoCell, kNoCell}};      // FORMANT THRU DRY LEVEL QUALITY FREEZE
+inline constexpr PageDef kNotesPage{"NOTES", {{2, 0}, {2, 1}, {2, 2}, {2, 6}, {2, 7}, {1, 4}, kNoCell, kNoCell}};      // KEY SCALE SPEED GATE ARP VOICING
+inline constexpr PageDef kTunePage{"TUNE", {{2, 0}, {2, 1}, {2, 2}, {2, 3}, {2, 4}, {1, 3}, {0, 7}, kNoCell}};         // KEY SCALE SPEED AMOUNT NOTES-IN DRY LEVEL
+inline constexpr PageDef kMouthPage{"MOUTH", {{3, 0}, {3, 1}, {3, 2}, {3, 3}, {3, 4}, {3, 5}, {3, 6}, {3, 7}}};         // VOWEL TONGUE JAW LIPS T-GLIDE SIZE RES HISS
+inline constexpr PageDef kMixPage{"MIX", {{1, 5}, {1, 3}, {0, 7}, kNoCell, kNoCell, kNoCell, kNoCell, kNoCell}};        // MOUTH DRY LEVEL
+
 inline constexpr unsigned kTuneMode = 2;  // the unit's Mode value of TUNE (liveness.h's kTuneOnly)
 static_assert(live::kTuneOnly == live::mode_bit(kTuneMode), "TUNE is mode 2 in the liveness table too");
+inline constexpr unsigned kTractMode = o3_voc03er::kModeTract;
+static_assert(live::kTractOnly == live::mode_bit(kTractMode), "TRACT is the mode of the tract-only keys");
+
+// The pages of a mode, in the order the tabs run: how many, and which definitions.
+constexpr unsigned mode_pages(unsigned mode, const PageDef* (&out)[kMaxTabs]) noexcept {
+  for (const PageDef*& p : out) {
+    p = nullptr;
+  }
+  if (mode == kTuneMode) {
+    out[0] = &kTunePage;
+    return 1;
+  }
+  if (mode == kTractMode) {
+    out[0] = &kCarrierPage;
+    out[1] = &kMouthPage;
+    out[2] = &kNotesPage;
+    out[3] = &kMixPage;
+    return 4;
+  }
+  out[0] = &kCarrierPage;  // BANDS, TALK, ROBOT
+  out[1] = &kVoicePage;
+  out[2] = &kNotesPage;
+  return 3;
+}
 
 struct Layout {
   std::uint8_t pages;  // 1..kMaxTabs
   std::uint8_t count;  // the cells shown in all
   Cell cell[kMaxTabs][kKeys];
-  char name[kMaxTabs][kTabNameLen];  // the tab's name: its first section, or "FIRST & LAST" where a page runs across
+  const char* name[kMaxTabs];  // the tabs
 };
 
 constexpr Layout build_layout(unsigned mode, bool voice_carrier) noexcept {
   Layout l{};
-  for (unsigned p = 0; p < kMaxTabs; ++p) {
-    for (unsigned k = 0; k < kKeys; ++k) {
-      l.cell[p][k] = kNoCell;
-    }
-  }
-  const bool tune = mode == kTuneMode;
-  const Entry* list = tune ? kTuneOrder : kMainOrder;
-  const unsigned n = tune ? static_cast<unsigned>(sizeof kTuneOrder / sizeof kTuneOrder[0]) : static_cast<unsigned>(sizeof kMainOrder / sizeof kMainOrder[0]);
-  Section first[kMaxTabs] = {};
-  Section last[kMaxTabs] = {};
+  const PageDef* def[kMaxTabs] = {};
+  const unsigned n = mode_pages(mode, def);
   unsigned shown = 0;
-  for (unsigned i = 0; i < n; ++i) {
-    if (!key_live(def_of(list[i].cell), mode, voice_carrier ? live::kCarrierVoice : 0u) || shown >= kMaxTabs * kKeys) {
-      continue;
+  for (unsigned p = 0; p < kMaxTabs; ++p) {
+    l.name[p] = p < n ? def[p]->name : "";
+    for (unsigned k = 0; k < kKeys; ++k) {
+      const Cell c = p < n ? def[p]->cell[k] : kNoCell;
+      const bool heard = !blank(c) && key_live(def_of(c), mode, voice_carrier ? live::kCarrierVoice : 0u);
+      l.cell[p][k] = heard ? c : kNoCell;
+      shown += heard ? 1u : 0u;
     }
-    const unsigned p = shown / kKeys;
-    l.cell[p][shown % kKeys] = list[i].cell;
-    if (shown % kKeys == 0u) {
-      first[p] = list[i].section;
-    }
-    last[p] = list[i].section;
-    ++shown;
   }
+  l.pages = static_cast<std::uint8_t>(n);
   l.count = static_cast<std::uint8_t>(shown);
-  l.pages = static_cast<std::uint8_t>((shown + kKeys - 1u) / kKeys);
-  for (unsigned p = 0; p < l.pages; ++p) {
-    unsigned at = 0;
-    const auto put = [&l, p, &at](const char* s) {
-      while (*s != '\0' && at + 1u < kTabNameLen) {
-        l.name[p][at++] = *s++;
-      }
-      l.name[p][at] = '\0';
-    };
-    put(kSectionNames[first[p]]);
-    if (last[p] != first[p]) {
-      put(" & ");
-      put(kSectionNames[last[p]]);
-    }
-  }
   return l;
 }
 
@@ -263,7 +258,8 @@ inline constexpr Layouts kLayouts = build_layouts();
 // The layout of mode `mode` (mode_index; held in range) with carrier source `car_src` (Vocoder::CarSrc).
 constexpr const Layout& layout_of(unsigned mode, unsigned car_src) noexcept { return kLayouts.v[mode < kModeCount ? mode : 0u][car_src == live::kCarrierVoice ? 1u : 0u]; }
 
-// What a layout shows is exactly what the mode hears, each value once (MODE aside: PERFORM changes the mode): checked for every mode and carrier.
+// What a layout shows is exactly what the mode hears, each value once (MODE aside: PERFORM changes the mode), and the pages keep their rules: checked
+// for every mode and carrier.
 constexpr bool shown_in_params(const KeyDef& d) noexcept { return live_kind(d.kind) && !(d.kind == Kind::Value && d.param == Vocoder::Mode); }
 constexpr unsigned occurrences(const Layout& l, Cell c) noexcept {
   unsigned n = 0;
@@ -274,10 +270,29 @@ constexpr unsigned occurrences(const Layout& l, Cell c) noexcept {
   }
   return n;
 }
+constexpr bool text_equal(const char* a, const char* b) noexcept {
+  while (*a != '\0' && *a == *b) {
+    ++a;
+    ++b;
+  }
+  return *a == *b;
+}
+// The position of `c` on page `p` of the layout: its key index, or kKeys when the page does not show it.
+constexpr unsigned position_on(const Layout& l, unsigned p, Cell c) noexcept {
+  for (unsigned k = 0; k < kKeys; ++k) {
+    if (same(l.cell[p][k], c)) {
+      return k;
+    }
+  }
+  return kKeys;
+}
 constexpr bool layouts_cover_exactly() noexcept {
   for (unsigned m = 0; m < kModeCount; ++m) {
     for (unsigned v = 0; v < 2; ++v) {
       const Layout& l = kLayouts.v[m][v];
+      if (l.pages < 1u || l.pages > kMaxTabs) {
+        return false;
+      }
       unsigned heard = 0;
       for (unsigned p = 0; p < kPages; ++p) {
         for (unsigned k = 0; k < kKeys; ++k) {
@@ -290,12 +305,28 @@ constexpr bool layouts_cover_exactly() noexcept {
           heard += want ? 1u : 0u;
         }
       }
-      // pages are full but the last; the cells after the last are blank; the page count follows the keys
-      if (l.count != heard || l.pages != (heard + kKeys - 1u) / kKeys || l.pages < 1u || l.pages > kMaxTabs) {
+      if (l.count != heard) {
         return false;
       }
-      for (unsigned i = 0; i < kMaxTabs * kKeys; ++i) {
-        if (blank(l.cell[i / kKeys][i % kKeys]) != (i >= heard)) {
+      for (unsigned p = 0; p < l.pages; ++p) {  // never a page with a single key (or none), a one-word tab
+        unsigned keys = 0;
+        for (unsigned k = 0; k < kKeys; ++k) {
+          keys += blank(l.cell[p][k]) ? 0u : 1u;
+        }
+        if (keys < 2u || l.name[p][0] == '\0') {
+          return false;
+        }
+        for (unsigned i = 0; l.name[p][i] != '\0'; ++i) {
+          if (l.name[p][i] == ' ') {
+            return false;
+          }
+        }
+        const unsigned dry = position_on(l, p, Cell{1, 3});
+        const unsigned lvl = position_on(l, p, Cell{0, 7});
+        if (dry < kKeys && lvl < kKeys && dry > lvl) {  // DRY, then LEVEL
+          return false;
+        }
+        if ((text_equal(l.name[p], "NOTES") || text_equal(l.name[p], "TUNE")) && !same(l.cell[p][0], Cell{2, 0})) {  // KEY is always F1
           return false;
         }
       }
@@ -303,7 +334,46 @@ constexpr bool layouts_cover_exactly() noexcept {
   }
   return true;
 }
-static_assert(layouts_cover_exactly(), "every table key a mode hears is on one of its pages once, and nothing it does not hear is");
+static_assert(layouts_cover_exactly(), "every table key a mode hears is on one of its pages once, nothing it does not hear is, no page has a single key");
+
+// A key never moves: whatever the carrier source, a cell shown without the VOICE carrier stands in the same place with it (SPEED's reserved cell is
+// the one that fills in), and a page of the same name puts the same key in the same cell in every mode.
+constexpr bool cells_hold_still() noexcept {
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    const Layout& a = kLayouts.v[m][0];
+    const Layout& b = kLayouts.v[m][1];
+    if (a.pages != b.pages) {
+      return false;
+    }
+    for (unsigned p = 0; p < a.pages; ++p) {
+      for (unsigned k = 0; k < kKeys; ++k) {
+        if (!blank(a.cell[p][k]) && !same(a.cell[p][k], b.cell[p][k])) {
+          return false;
+        }
+        if (blank(a.cell[p][k]) && !blank(b.cell[p][k]) && !same(b.cell[p][k], Cell{2, 2})) {  // only SPEED comes in
+          return false;
+        }
+      }
+    }
+    for (unsigned n = 0; n < kModeCount; ++n) {
+      const Layout& c = kLayouts.v[n][1];
+      for (unsigned p = 0; p < b.pages; ++p) {
+        for (unsigned q = 0; q < c.pages; ++q) {
+          if (!text_equal(b.name[p], c.name[q])) {
+            continue;
+          }
+          for (unsigned k = 0; k < kKeys; ++k) {
+            if (!blank(b.cell[p][k]) && position_on(c, q, b.cell[p][k]) != kKeys && position_on(c, q, b.cell[p][k]) != k) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+static_assert(cells_hold_still(), "a key keeps its page and its cell whatever the carrier source or the mode is");
 
 // A cell of the layout, or blank outside it.
 constexpr Cell cell_at(const Layout& l, unsigned page, unsigned key) noexcept { return page < l.pages && key < kKeys ? l.cell[page][key] : kNoCell; }

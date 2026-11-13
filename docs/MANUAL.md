@@ -225,24 +225,23 @@ zero for the slots. A bent slot is noisier in the highs: the read is a straight 
 ### PARAMS
 
 PARAMS is the in-depth editor of the mode PERFORM is in. The title names the mode (PARAMS TALK), and the F keys show only the values that mode hears, in
-pages of eight, with PERFORM's small voiceprint above so you see each change. Under the voiceprint one tab per page names it (CARRIER, VOICE & NOTES, ...); the lit
-tab is the page you are on. Press PARAMS again, or DOWN, for the next page, and UP for the one before; the last page goes round to the first. A tap on an F key points the
+pages that group what belongs together, with PERFORM's small voiceprint above so you see each change. Under the voiceprint one tab per page names it in one word (CARRIER, VOICE,
+NOTES, ...); the lit tab is the page you are on. Press PARAMS again, or DOWN, for the next page, and UP for the one before; the last page goes round to the first. A tap on an F key points the
 encoder at it (the key stays lit), a second tap steps it on, and SHIFT with the encoder takes coarse steps. The pads play PERFORM's layout here too.
 
 MODE is not here. Change the mode on PERFORM (F1), as before: PARAMS follows it, and shows the new mode's first page. It does the same when a preset, a project or a MIDI program
-change moves the mode. A page is never empty, and blank keys sit only at the end of a mode's last page.
+change moves the mode. A value keeps its page and its key in every mode that hears it (KEY is always NOTES' F1), and a blank key at the end of a page is only a value that mode does not hear.
 
 | Mode | Pages (tab names) and their keys |
 |---|---|
-| BANDS, ROBOT | CARRIER (SHAPE, SPREAD, SUB, TILT, NOISE, ATTACK, RELEASE, GLIDE), VOICE & NOTES (FORMANT, THRU, DRY, LEVEL, VOICING, KEY, SCALE, GATE), NOTES (ARP) |
-| TALK | CARRIER (as BANDS), VOICE & NOTES (FORMANT, THRU, QUALITY, FREEZE, DRY, LEVEL, VOICING, KEY), NOTES (SCALE, GATE, ARP) |
-| TUNE | TUNING & MIX (KEY, SCALE, SPEED, AMOUNT, NOTES IN, DRY, LEVEL): one page, because TUNE has no carrier, no gate, no arp and no glide |
-| TRACT | CARRIER (as BANDS), MIX & NOTES (DRY, LEVEL, VOICING, KEY, SCALE, GATE, ARP, MOUTH), MOUTH (VOWEL, TONGUE, JAW, LIPS, T GLIDE, SIZE, RES, HISS) |
+| BANDS, ROBOT | CARRIER (SHAPE, SPREAD, SUB, TILT, NOISE, ATTACK, RELEASE, GLIDE), VOICE (FORMANT, THRU, DRY, LEVEL), NOTES (KEY, SCALE, SPEED, GATE, ARP, VOICING) |
+| TALK | CARRIER (as BANDS), VOICE (FORMANT, THRU, DRY, LEVEL, QUALITY, FREEZE), NOTES (as BANDS) |
+| TUNE | TUNE (KEY, SCALE, SPEED, AMOUNT, NOTES IN, DRY, LEVEL): one page, because TUNE has no carrier, no gate, no arp and no glide |
+| TRACT | CARRIER (as BANDS), MOUTH (VOWEL, TONGUE, JAW, LIPS, T GLIDE, SIZE, RES, HISS), NOTES (as BANDS), MIX (MOUTH, DRY, LEVEL) |
 
-While the CARRIER source is VOICE, SPEED comes in beside KEY and SCALE (it smooths the note you sing), and the pages repack: for example BANDS' notes spill onto the NOTES page
-as GATE and ARP, and TRACT's pages become CARRIER, MIX & NOTES, NOTES & MOUTH (MOUTH, VOWEL, TONGUE, JAW, LIPS, T GLIDE, SIZE, RES) and MOUTH (HISS). A mode's last page
-can hold one key (BANDS' ARP, TRACT's HISS with a VOICE carrier): the pages are packed in eights, in the order carrier sound, voice shaping, notes and timing, the mouth.
-When the mode or the VOICE carrier changes while PARAMS is open, the focus stays on the same value if the new layout still shows it, and goes to the new first page's first key if not.
+SPEED is on NOTES' third key whatever the carrier is, but it is blank until the CARRIER source is VOICE (it smooths the note you sing); TUNE always has it. Nothing else
+moves when the carrier changes, and no page has a single key. VOICING sits on NOTES in every mode: it is how the chords are laid out, so it goes with the notes, not with the mix.
+When the mode changes while PARAMS is open it shows the new mode's first page. When only the VOICE carrier changes, the page stays, the focus stays on the same value if the key is still there, and goes to the page's first key if not.
 FREEZE is TALK's, so it is on TALK's page only, and it clears when you leave TALK.
 
 **Learn a controller.** Hold SHIFT and press a value's F key: the key lights, the line under the big name says LEARN and the value's name, MOVE A KNOB,
@@ -257,18 +256,18 @@ bindings are kept with the unit's settings, not with the project. Binding CC 1 t
 
 *CARRIER: SHAPE (the wave), SPREAD (how many detuned copies stack), SUB, TILT (dark to bright), NOISE (for the consonants), ATTACK, RELEASE and GLIDE (the slide between notes).*
 
-![PARAMS in TALK, page VOICE & NOTES](manual/img/params-voice.png)
+![PARAMS in TALK, page VOICE](manual/img/params-voice.png)
 
-*VOICE & NOTES in TALK: FORMANT and THRU, QUALITY (TALK's detail), FREEZE (it holds the vowel), DRY (the voice mixed in as it is), LEVEL, VOICING and KEY.*
+*VOICE in TALK: FORMANT and THRU, DRY (the voice mixed in as it is), LEVEL, QUALITY (TALK's detail) and FREEZE (it holds the vowel). NOTES, the next page, has KEY, SCALE, SPEED, GATE, ARP and VOICING.*
 
 VOICING has four settings. CLOSE stacks the notes as written. OPEN lifts the third an octave. WIDE spreads the chord over two octaves.
 SMOOTH, the default, picks the arrangement nearest the chord before, within the pad's octave, so a progression moves without jumps.
 
-MOUTH is on TRACT's MIX & NOTES page: PADS, the default, or LIVE. It says what moves the mouth (section 5b, "Your voice as the mouth"). It is not kept with the project and starts as PADS each time; a controller learned onto it moves it live, and the project does not keep that value either.
+MOUTH is on TRACT's MIX page (F1): PADS, the default, or LIVE. It says what moves the mouth (section 5b, "Your voice as the mouth"). It is not kept with the project and starts as PADS each time; a controller learned onto it moves it live, and the project does not keep that value either.
 
-![PARAMS in TUNE: its one page](manual/img/params-tune.png)
+![PARAMS in TUNE: its one page, TUNE](manual/img/params-tune.png)
 
-*TUNE: KEY, SCALE, SPEED (how fast a note is pulled), AMOUNT, NOTES IN (follow the notes you play), DRY and LEVEL. The F8 key is blank: a page of seven.*
+*TUNE: KEY, SCALE, SPEED (how fast a note is pulled), AMOUNT, NOTES IN (follow the notes you play), DRY and LEVEL. F8 is blank.*
 
 ![PARAMS in TRACT, page MOUTH](manual/img/params-tract.png)
 
@@ -388,7 +387,7 @@ into a pattern; it does not give you a voice you can talk through.
 The mouth values belong to TRACT: PARAMS shows them in TRACT only, where the mouth speaks. They keep their value when you leave TRACT, and a controller learned onto one still moves it.
 A strip pad that is held wins over the pattern's mouth line while it is held.
 
-**Your voice as the mouth.** TRACT can also take its mouth from the voice at the input. In TRACT, on PARAMS' MIX & NOTES page, press F8 (MOUTH) and step it to
+**Your voice as the mouth.** TRACT can also take its mouth from the voice at the input. In TRACT, on PARAMS' MIX page, press F1 (MOUTH) and step it to
 LIVE: the program reads the voice into the shape of a tube a few milliseconds at a time (from a window of about 23 ms), and the carrier speaks
 through it. Say an "ah" and then an "ee" and the synth does the same. PADS, the default, puts the mouth back in your hands. In LIVE the strip, the lane and
 VOWEL, TONGUE, JAW and LIPS do not move the mouth (SIZE, RES and HISS still work, and a closure still mutes), and when the voice goes quiet the mouth

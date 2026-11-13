@@ -1,6 +1,6 @@
-# PARAMS in BANDS (the mode the unit starts in): the in-depth editor of the mode PERFORM is in, only what BANDS hears, in pages of eight on the F row:
-# CARRIER, VOICE & NOTES, NOTES (ARP alone: BANDS has seventeen live keys), PERFORM's voiceprint small above them, the title PARAMS  BANDS. Each page, a value
-# changed and seen (NOISE under the encoder; the number and its bar are what is checked), VOICING (the app's own key, SMOOTH by default, stepped to CLOSE and
+# PARAMS in BANDS (the mode the unit starts in): the in-depth editor of the mode PERFORM is in, only what BANDS hears, in pages grouped by meaning on the F row:
+# CARRIER, VOICE, NOTES (KEY SCALE, SPEED's reserved cell blank, GATE ARP VOICING), PERFORM's voiceprint small above them, the title PARAMS  BANDS. Each page, a value
+# changed and seen (NOISE under the encoder; the number and its bar are what is checked), VOICING (the app's own key on NOTES, SMOOTH by default, stepped to CLOSE and
 # WIDE with the same chord pad held each time: the WAV carries the three chords), PARAMS pressed again paging on and round, UP and DOWN paging, SHIFT + PARAMS
 # the same as PARAMS, HELP. The other four modes are app/scenarios/params_modes.txt.
 # The simulator shows the screen and that the engine takes the values; it cannot say what the frame costs or how it sounds.
@@ -20,31 +20,7 @@ wait 150
 snap 03_sub
 tap down
 wait 300
-snap 04_voice_and_notes
-tap f5
-wait 150
-snap 04b_voicing_smooth
-paddown 26
-wait 600
-padup 26
-wait 400
-turn -3
-wait 150
-snap 04c_voicing_close
-paddown 26
-wait 600
-padup 26
-wait 400
-turn 2
-wait 150
-snap 04d_voicing_wide
-paddown 26
-wait 600
-padup 26
-wait 400
-turn 5
-wait 150
-snap 04e_voicing_clamped_at_smooth
+snap 04_voice
 tap f2
 turn 20
 wait 200
@@ -55,7 +31,32 @@ wait 150
 snap 06_formant
 tap params
 wait 300
-snap 07_notes_arp_alone
+snap 07_notes_key
+tap f6
+wait 150
+snap 07b_voicing_smooth
+paddown 26
+wait 600
+padup 26
+wait 400
+turn -3
+wait 150
+snap 07c_voicing_close
+paddown 26
+wait 600
+padup 26
+wait 400
+turn 2
+wait 150
+snap 07d_voicing_wide
+paddown 26
+wait 600
+padup 26
+wait 400
+turn 5
+wait 150
+snap 07e_voicing_clamped_at_smooth
+tap f5
 turn 2
 wait 200
 snap 08_arp_changed
@@ -64,7 +65,7 @@ wait 300
 snap 09_round_on_carrier
 tap up
 wait 300
-snap 10_up_is_the_last_page
+snap 10_up_is_the_notes_page
 tap down
 wait 200
 press shift

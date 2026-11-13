@@ -73,7 +73,7 @@ std::string page_text(const pm::Layout& l, unsigned page) {
 }
 }  // namespace
 
-TEST_CASE("params: every mode shows only what it hears, in pages of eight, in the order carrier, voice, mix, notes, mouth") {
+TEST_CASE("params: every mode shows only what it hears, in pages by meaning with fixed cells") {
   struct Want {
     unsigned mode;
     unsigned car;
@@ -82,16 +82,18 @@ TEST_CASE("params: every mode shows only what it hears, in pages of eight, in th
     const char* text[4];
   };
   const char* const carrier = "SHAPE SPREAD SUB TILT NOISE ATTACK RELEASE GLIDE";
+  const char* const mouth = "VOWEL TONGUE JAW LIPS T GLIDE SIZE RES HISS";
   const Want want[] = {
-      {0, 0, 3, {"CARRIER", "VOICE & NOTES", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL VOICING KEY SCALE GATE", "ARP _ _ _ _ _ _ _"}},
-      {0, kVoiceCar, 3, {"CARRIER", "VOICE & NOTES", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL VOICING KEY SCALE SPEED", "GATE ARP _ _ _ _ _ _"}},
-      {1, 0, 3, {"CARRIER", "VOICE & NOTES", "NOTES"}, {carrier, "FORMANT THRU QUALITY FREEZE DRY LEVEL VOICING KEY", "SCALE GATE ARP _ _ _ _ _"}},
-      {2, 0, 1, {"TUNING & MIX"}, {"KEY SCALE SPEED AMOUNT NOTES IN DRY LEVEL _"}},
-      {2, kVoiceCar, 1, {"TUNING & MIX"}, {"KEY SCALE SPEED AMOUNT NOTES IN DRY LEVEL _"}},
-      {3, 0, 3, {"CARRIER", "VOICE & NOTES", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL VOICING KEY SCALE GATE", "ARP _ _ _ _ _ _ _"}},
-      {4, 0, 3, {"CARRIER", "MIX & NOTES", "MOUTH"}, {carrier, "DRY LEVEL VOICING KEY SCALE GATE ARP MOUTH", "VOWEL TONGUE JAW LIPS T GLIDE SIZE RES HISS"}},
-      {4, kVoiceCar, 4, {"CARRIER", "MIX & NOTES", "NOTES & MOUTH", "MOUTH"},
-       {carrier, "DRY LEVEL VOICING KEY SCALE SPEED GATE ARP", "MOUTH VOWEL TONGUE JAW LIPS T GLIDE SIZE RES", "HISS _ _ _ _ _ _ _"}},
+      {0, 0, 3, {"CARRIER", "VOICE", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL _ _ _ _", "KEY SCALE _ GATE ARP VOICING _ _"}},
+      {0, kVoiceCar, 3, {"CARRIER", "VOICE", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL _ _ _ _", "KEY SCALE SPEED GATE ARP VOICING _ _"}},
+      {1, 0, 3, {"CARRIER", "VOICE", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL QUALITY FREEZE _ _", "KEY SCALE _ GATE ARP VOICING _ _"}},
+      {1, kVoiceCar, 3, {"CARRIER", "VOICE", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL QUALITY FREEZE _ _", "KEY SCALE SPEED GATE ARP VOICING _ _"}},
+      {2, 0, 1, {"TUNE"}, {"KEY SCALE SPEED AMOUNT NOTES IN DRY LEVEL _"}},
+      {2, kVoiceCar, 1, {"TUNE"}, {"KEY SCALE SPEED AMOUNT NOTES IN DRY LEVEL _"}},
+      {3, 0, 3, {"CARRIER", "VOICE", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL _ _ _ _", "KEY SCALE _ GATE ARP VOICING _ _"}},
+      {3, kVoiceCar, 3, {"CARRIER", "VOICE", "NOTES"}, {carrier, "FORMANT THRU DRY LEVEL _ _ _ _", "KEY SCALE SPEED GATE ARP VOICING _ _"}},
+      {4, 0, 4, {"CARRIER", "MOUTH", "NOTES", "MIX"}, {carrier, mouth, "KEY SCALE _ GATE ARP VOICING _ _", "MOUTH DRY LEVEL _ _ _ _ _"}},
+      {4, kVoiceCar, 4, {"CARRIER", "MOUTH", "NOTES", "MIX"}, {carrier, mouth, "KEY SCALE SPEED GATE ARP VOICING _ _", "MOUTH DRY LEVEL _ _ _ _ _"}},
   };
   for (const Want& w : want) {
     const pm::Layout& l = pm::layout_of(w.mode, w.car);
@@ -111,7 +113,7 @@ TEST_CASE("params: every mode shows only what it hears, in pages of eight, in th
   CHECK(&pm::layout_of(1, 3) == &pm::layout_of(1, 0));
 }
 
-TEST_CASE("params: a layout is full but at its last page, a tab name is short, a page is never empty, MODE is nowhere") {
+TEST_CASE("params: a page never holds a single key, a tab is one word, KEY is F1 of NOTES, DRY comes before LEVEL, MODE is nowhere") {
   for (unsigned m = 0; m < kModeCount; ++m) {
     for (const unsigned car : {0u, kVoiceCar}) {
       const pm::Layout& l = pm::layout_of(m, car);
@@ -124,19 +126,22 @@ TEST_CASE("params: a layout is full but at its last page, a tab name is short, a
         for (unsigned k = 0; k < pm::kKeys; ++k) {
           const pm::Cell c = l.cell[p][k];
           if (pm::blank(c)) {
-            CHECK(p + 1u == l.pages);  // a blank only on the last page
+            CHECK_FALSE(pm::focusable_at(l, p, k));
             continue;
           }
-          CHECK(in_page == k);  // and only after the last cell
           ++in_page;
           const pm::KeyDef& d = pm::def_of(c);
           CHECK(pm::key_live(d, m, car));
           CHECK_FALSE((d.kind == pm::Kind::Value && d.param == Vocoder::Mode));
           CHECK(pm::focusable_at(l, p, k));
         }
-        CHECK(in_page > 0u);
+        CHECK(in_page >= 2u);
         CHECK(std::strlen(l.name[p]) > 0u);
-        CHECK(std::strlen(l.name[p]) <= 13u);  // "VOICE & NOTES" at most
+        CHECK(std::string(l.name[p]).find(' ') == std::string::npos);
+        const std::string name = l.name[p];
+        if (name == "NOTES" || name == "TUNE") {
+          CHECK(pm::same(l.cell[p][0], pm::Cell{2, 0}));  // KEY
+        }
         shown += in_page;
       }
       CHECK(shown == l.count);
@@ -151,6 +156,49 @@ TEST_CASE("params: a layout is full but at its last page, a tab name is short, a
     for (unsigned a = 0; a < l.pages; ++a) {
       for (unsigned b = a + 1u; b < l.pages; ++b) {
         CHECK(std::string(l.name[a]) != std::string(l.name[b]));
+      }
+    }
+  }
+}
+
+TEST_CASE("params: the carrier moves no key: only SPEED's reserved cell fills in, and the same key sits in the same cell in every mode") {
+  for (unsigned m = 0; m < kModeCount; ++m) {
+    const pm::Layout& off = pm::layout_of(m, 0);
+    const pm::Layout& on = pm::layout_of(m, kVoiceCar);
+    INFO("mode " << m);
+    REQUIRE(off.pages == on.pages);
+    unsigned filled = 0;
+    for (unsigned p = 0; p < off.pages; ++p) {
+      for (unsigned k = 0; k < pm::kKeys; ++k) {
+        if (pm::blank(off.cell[p][k])) {
+          if (!pm::blank(on.cell[p][k])) {
+            CHECK(pm::same(on.cell[p][k], pm::Cell{2, 2}));  // SPEED
+            ++filled;
+          }
+        } else {
+          CHECK(pm::same(off.cell[p][k], on.cell[p][k]));
+        }
+      }
+    }
+    CHECK(filled == (m == 2u ? 0u : 1u));
+  }
+  // a key found on a page of the same name in two modes is in the same cell
+  for (unsigned a = 0; a < kModeCount; ++a) {
+    for (unsigned b = 0; b < kModeCount; ++b) {
+      const pm::Layout& la = pm::layout_of(a, kVoiceCar);
+      const pm::Layout& lb = pm::layout_of(b, kVoiceCar);
+      for (unsigned p = 0; p < la.pages; ++p) {
+        for (unsigned q = 0; q < lb.pages; ++q) {
+          if (std::string(la.name[p]) != lb.name[q]) {
+            continue;
+          }
+          for (unsigned k = 0; k < pm::kKeys; ++k) {
+            unsigned at = 0, cell = 0;
+            if (!pm::blank(la.cell[p][k]) && pm::find_cell(lb, la.cell[p][k], at, cell) && at == q) {
+              CHECK(cell == k);
+            }
+          }
+        }
       }
     }
   }
@@ -184,21 +232,26 @@ TEST_CASE("params: a page change is round inside the mode's own pages, and a pag
   CHECK_FALSE(pm::find_cell(bands, pm::kNoCell, page, key));
   CHECK(pm::find_cell(pm::layout_of(1, 0), pm::Cell{1, 2}, page, key));
   CHECK(page == 1u);
-  CHECK(key == 3u);
+  CHECK(key == 5u);
+  // NOTES opens on KEY, not on a blank: SPEED's cell is blank without the VOICE carrier, the cells after it are not
+  CHECK(pm::first_focus_at(bands, 2) == 0u);
+  CHECK_FALSE(pm::focusable_at(bands, 2, 2));
+  CHECK(pm::focusable_at(bands, 2, 3));
 }
 
 TEST_CASE("params: the learn of a cell is the table's rule on its coordinate, wherever the layout puts it") {
   const pm::Layout& talk = pm::layout_of(1, 0);
-  // TALK page 1: FORMANT THRU QUALITY FREEZE DRY LEVEL VOICING KEY
+  // TALK page 1: FORMANT THRU DRY LEVEL QUALITY FREEZE; page 2: KEY SCALE _ GATE ARP VOICING
   CHECK(pm::learnable_at(talk, 1, 0));
-  CHECK_FALSE(pm::learnable_at(talk, 1, 2));  // QUALITY
-  CHECK(pm::learnable_at(talk, 1, 3));        // FREEZE
-  CHECK_FALSE(pm::learnable_at(talk, 1, 6));  // VOICING
-  CHECK_FALSE(pm::learnable_at(talk, 2, 5));  // a blank
+  CHECK_FALSE(pm::learnable_at(talk, 1, 4));  // QUALITY
+  CHECK(pm::learnable_at(talk, 1, 5));        // FREEZE
+  CHECK_FALSE(pm::learnable_at(talk, 2, 5));  // VOICING
+  CHECK_FALSE(pm::learnable_at(talk, 2, 2));  // SPEED's reserved cell, blank
+  CHECK_FALSE(pm::learnable_at(talk, 2, 7));  // a blank
   CHECK_FALSE(pm::learnable_at(talk, 3, 0));  // no such page
   const pm::Layout& tract = pm::layout_of(4, 0);
-  CHECK(pm::learnable_at(tract, 2, 0));  // VOWEL
-  CHECK(pm::learnable_at(tract, 1, 7));  // MOUTH
+  CHECK(pm::learnable_at(tract, 1, 0));  // VOWEL
+  CHECK(pm::learnable_at(tract, 3, 0));  // MOUTH
   for (unsigned m = 0; m < kModeCount; ++m) {
     const pm::Layout& l = pm::layout_of(m, kVoiceCar);
     for (unsigned p = 0; p < l.pages; ++p) {
@@ -572,7 +625,7 @@ TEST_CASE("params: the screen moves a value through the engine, VOICING takes th
   h.run_ms(100);
   tap(h, app::Button::Params);
   h.run_ms(60);
-  REQUIRE(param(h, Vocoder::Mode) == doctest::Approx(0.0f));  // BANDS: CARRIER, VOICE & NOTES, NOTES
+  REQUIRE(param(h, Vocoder::Mode) == doctest::Approx(0.0f));  // BANDS: CARRIER, VOICE, NOTES
 
   // CARRIER opens on SHAPE; NOISE is F5, and a detent is a step of 2 %
   const float noise0 = param(h, Vocoder::Noise);
@@ -589,7 +642,7 @@ TEST_CASE("params: the screen moves a value through the engine, VOICING takes th
   CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise1).epsilon(0.02));
   CHECK(param(h, Vocoder::Sub) == doctest::Approx(0.02f).epsilon(0.02));
 
-  // DOWN pages to VOICE & NOTES, the encoder on FORMANT (a semitone a detent); there is no MODE key to turn
+  // DOWN pages to VOICE, the encoder on FORMANT (a semitone a detent); there is no MODE key to turn
   tap(h, app::Button::Down);
   h.run_ms(60);
   const float mode0 = param(h, Vocoder::Mode);
@@ -597,25 +650,30 @@ TEST_CASE("params: the screen moves a value through the engine, VOICING takes th
   h.run_ms(60);
   CHECK(param(h, Vocoder::Formant) == doctest::Approx(2.0f));
   CHECK(param(h, Vocoder::Mode) == doctest::Approx(mode0));
-  // VOICING is the app's key (F5 here): a tap points the encoder at it, so a turn moves nothing in the unit (the value is PerformScreen's)
-  tap(h, app::Button::F5);
+  // PARAMS pages on to NOTES, KEY under the encoder as the page opens
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  const float key0 = param(h, Vocoder::Key);
+  h.turn(1);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Key) == doctest::Approx(std::fmod(key0 + 1.0f, 12.0f)));
+  // VOICING is the app's key (F6 here): a tap points the encoder at it, so a turn moves nothing in the unit (the value is PerformScreen's)
+  tap(h, app::Button::F6);
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Formant) == doctest::Approx(2.0f));
+  CHECK(param(h, Vocoder::Key) == doctest::Approx(std::fmod(key0 + 1.0f, 12.0f)));
   CHECK(param(h, Vocoder::Mode) == doctest::Approx(mode0));
-  // PARAMS pages on to the last page of BANDS: ARP alone, under the encoder as the page opens
-  tap(h, app::Button::Params);
-  h.run_ms(60);
-  CHECK(param(h, Vocoder::Arp) == doctest::Approx(0.0f));
+  // ARP is F5; SPEED's cell (F3) is blank without the VOICE carrier and takes no focus: the encoder stays on ARP
+  tap(h, app::Button::F5);
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Arp) == doctest::Approx(1.0f));
-  // a blank key takes no focus: the encoder stays on ARP
-  tap(h, app::Button::F4);
+  tap(h, app::Button::F3);
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Arp) == doctest::Approx(2.0f));
-  // PARAMS goes round to CARRIER (SHAPE under the encoder), UP back to the page of ARP
+  // PARAMS goes round to CARRIER (SHAPE under the encoder), UP back to NOTES (KEY under the encoder)
   tap(h, app::Button::Params);
   h.run_ms(60);
   const float wave0 = param(h, Vocoder::Wave);
@@ -626,7 +684,8 @@ TEST_CASE("params: the screen moves a value through the engine, VOICING takes th
   h.run_ms(60);
   h.turn(1);
   h.run_ms(60);
-  CHECK(param(h, Vocoder::Arp) == doctest::Approx(3.0f));
+  CHECK(param(h, Vocoder::Key) == doctest::Approx(std::fmod(key0 + 2.0f, 12.0f)));
+  CHECK(param(h, Vocoder::Arp) == doctest::Approx(2.0f));
 
   h.press(app::Button::Shift);
   h.run_ms(2);
@@ -683,9 +742,11 @@ TEST_CASE("params: the screen follows the mode and the carrier, whoever changes 
   h.run_ms(100);
   tap(h, app::Button::Params);
   h.run_ms(60);
-  tap(h, app::Button::Down);  // BANDS, VOICE & NOTES
+  tap(h, app::Button::Down);  // BANDS, VOICE
   h.run_ms(60);
-  tap(h, app::Button::F5);    // VOICING
+  tap(h, app::Button::Down);  // NOTES
+  h.run_ms(60);
+  tap(h, app::Button::F6);    // VOICING
   h.run_ms(60);
   // a mode set on the unit (a preset, a project, a program change): TALK opens on CARRIER's first key
   set_voice(h, Vocoder::Mode, 1.0f);
@@ -693,10 +754,10 @@ TEST_CASE("params: the screen follows the mode and the carrier, whoever changes 
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Wave) != doctest::Approx(wave0));
-  // TALK's second page holds QUALITY and FREEZE: F3 is QUALITY, and a tap points the encoder at it
+  // TALK's VOICE page holds QUALITY (F5) and FREEZE (F6): a tap points the encoder at QUALITY
   tap(h, app::Button::Down);
   h.run_ms(60);
-  tap(h, app::Button::F3);
+  tap(h, app::Button::F5);
   const float quality0 = param(h, Vocoder::Quality);
   h.turn(1);
   h.run_ms(60);
@@ -708,26 +769,28 @@ TEST_CASE("params: the screen follows the mode and the carrier, whoever changes 
   h.run_ms(60);
   CHECK(param(h, Vocoder::Wave) != doctest::Approx(shape1));
   CHECK(param(h, Vocoder::Quality) == doctest::Approx(std::fmin(quality0 + 1.0f, 24.0f)));
-  // the carrier VOICE brings SPEED in: BANDS' second page is FORMANT THRU DRY LEVEL VOICING KEY SCALE SPEED
+  // the carrier VOICE fills SPEED's reserved cell, NOTES F3, and moves no other key
   set_voice(h, Vocoder::Mode, 0.0f);
   tap(h, app::Button::Down);
   h.run_ms(60);
-  tap(h, app::Button::F5);  // VOICING
+  tap(h, app::Button::Down);  // NOTES
+  h.run_ms(60);
+  tap(h, app::Button::F6);    // VOICING
   h.run_ms(60);
   (void)h.engine().set_param(voice_unit(h), Vocoder::CarSrc, 8.0f);
   h.run_ms(300);
-  tap(h, app::Button::F8);  // SPEED, on the page and the place the carrier gave it
+  tap(h, app::Button::F3);  // SPEED, on the page and in the cell reserved for it
   const float speed0 = param(h, Vocoder::Speed);
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Speed) == doctest::Approx(speed0 + 5.0f));
-  // and the carrier leaving takes SPEED away: the focus on it is not kept, the first page opens
+  // and the carrier leaving blanks that cell: the page stays, the focus moves to the page's first key (KEY)
   (void)h.engine().set_param(voice_unit(h), Vocoder::CarSrc, 0.0f);
   h.run_ms(300);
-  const float wave1 = param(h, Vocoder::Wave);
+  const float key1 = param(h, Vocoder::Key);
   h.turn(1);
   h.run_ms(60);
-  CHECK(param(h, Vocoder::Wave) != doctest::Approx(wave1));
+  CHECK(param(h, Vocoder::Key) == doctest::Approx(std::fmod(key1 + 1.0f, 12.0f)));
   CHECK(param(h, Vocoder::Speed) == doctest::Approx(speed0 + 5.0f));
   CHECK(h.runtime().frame_failures() == 0u);
 }
@@ -756,7 +819,7 @@ TEST_CASE("params: PERFORM's MODE key changes the mode and PARAMS opens on the n
   CHECK(param(h, Vocoder::Mode) == doctest::Approx(4.0f));
 }
 
-TEST_CASE("params: TRACT's third page is the tract unit's keys, written in TRACT only, and its HELP is valid") {
+TEST_CASE("params: TRACT's MOUTH page is the tract unit's keys, written in TRACT only, and its HELP is valid") {
   using o3_voc03er::TractUnit;
   sim::Harness h(::o3sdk_app());
   REQUIRE(h.start());
@@ -765,7 +828,7 @@ TEST_CASE("params: TRACT's third page is the tract unit's keys, written in TRACT
   set_voice(h, Vocoder::Mode, 4.0f);
   tap(h, app::Button::Params);
   h.run_ms(60);
-  tap(h, app::Button::Up);  // CARRIER, one page back: MOUTH (round)
+  tap(h, app::Button::Down);  // CARRIER, one page on: MOUTH
   h.run_ms(60);
   const float mode0 = param(h, Vocoder::Mode);
   // VOWEL is F1, the page's first key and so under the encoder as the page opens: a detent 1 %
@@ -885,7 +948,7 @@ TEST_CASE("params: SHIFT + F arms the kit's learn, the same keys cancel, a page 
   h.run_ms(40);
   CHECK_FALSE(km.learning());
 
-  // BANDS' second page: FORMANT THRU DRY LEVEL VOICING KEY SCALE GATE. VOICING (F5) is the app's: nothing arms
+  // BANDS' VOICE page: FORMANT THRU DRY LEVEL and four blanks: a blank arms nothing
   shift_tap(h, app::Button::F5);
   CHECK_FALSE(km.learning());
   // THRU (F2) arms like any value, and the same keys cancel
@@ -893,14 +956,16 @@ TEST_CASE("params: SHIFT + F arms the kit's learn, the same keys cancel, a page 
   CHECK(km.learning());
   shift_tap(h, app::Button::F2);
   CHECK_FALSE(km.learning());
-  // a blank key (the last page's) arms nothing
+  // NOTES: KEY SCALE _ GATE ARP VOICING. SPEED's reserved cell (F3) is blank without the VOICE carrier, and VOICING (F6) is the app's
   tap(h, app::Button::Params);
   h.run_ms(40);
-  shift_tap(h, app::Button::F4);
+  shift_tap(h, app::Button::F3);
+  CHECK_FALSE(km.learning());
+  shift_tap(h, app::Button::F6);
   CHECK_FALSE(km.learning());
 
   // leaving the screen cancels
-  shift_tap(h, app::Button::F1);  // ARP
+  shift_tap(h, app::Button::F5);  // ARP
   CHECK(km.learning());
   tap(h, app::Button::Performance);
   h.run_ms(60);
@@ -921,31 +986,38 @@ TEST_CASE("params: a learn armed on a value the new mode does not show is cancel
   set_voice(h, Vocoder::Mode, 2.0f);  // TUNE has no NOISE
   CHECK_FALSE(km.learning());
 
-  // TALK, second page: FORMANT THRU QUALITY FREEZE DRY LEVEL VOICING KEY
+  // TALK, VOICE page: FORMANT THRU DRY LEVEL QUALITY FREEZE
   set_voice(h, Vocoder::Mode, 1.0f);
   tap(h, app::Button::Down);
   h.run_ms(40);
-  shift_tap(h, app::Button::F3);  // QUALITY: not a live gesture
+  shift_tap(h, app::Button::F5);  // QUALITY: not a live gesture
   CHECK_FALSE(km.learning());
-  shift_tap(h, app::Button::F4);  // FREEZE
+  shift_tap(h, app::Button::F6);  // FREEZE
   REQUIRE(km.learning());
-  shift_tap(h, app::Button::F3);  // QUALITY: refused, and the arm on FREEZE is cancelled
+  shift_tap(h, app::Button::F5);  // QUALITY: refused, and the arm on FREEZE is cancelled
   CHECK_FALSE(km.learning());
   shift_tap(h, app::Button::F1);  // FORMANT, shown in BANDS too, but the mode change opens the first page: cancelled
   REQUIRE(km.learning());
   set_voice(h, Vocoder::Mode, 0.0f);
   CHECK_FALSE(km.learning());
-  // the carrier VOICE brings SPEED in and moves the keys after it: an arm on a key that stays on the page stays
+  // the carrier VOICE fills SPEED's cell and moves no key: an arm on a key that stays on the page stays
   tap(h, app::Button::Down);
   h.run_ms(40);
-  shift_tap(h, app::Button::F6);  // KEY
+  tap(h, app::Button::Down);  // NOTES
+  h.run_ms(40);
+  shift_tap(h, app::Button::F1);  // KEY
   REQUIRE(km.learning());
   (void)h.engine().set_param(voice_unit(h), Vocoder::CarSrc, 8.0f);
   h.run_ms(300);
   CHECK(km.learning());
+  // SPEED arms in its cell, and the carrier leaving takes the cell away and the arm with it
+  shift_tap(h, app::Button::F3);
+  REQUIRE(km.learning());
   (void)h.engine().set_param(voice_unit(h), Vocoder::CarSrc, 0.0f);
   h.run_ms(300);
-  CHECK(km.learning());  // KEY is on the page still, where it was
+  CHECK_FALSE(km.learning());
+  shift_tap(h, app::Button::F1);  // KEY, where it was
+  CHECK(km.learning());
   CHECK(h.runtime().frame_failures() == 0u);
 }
 
@@ -972,9 +1044,9 @@ TEST_CASE("params: a controller binds the parameter, not the place: the strip sa
   }
   CHECK(param(h, Vocoder::Noise) == doctest::Approx(1.0f).epsilon(0.02));
 
-  // TRACT: VOWEL is on the third page, and the binding is the tract unit's VOWEL
+  // TRACT: VOWEL is on the MOUTH page, and the binding is the tract unit's VOWEL
   set_voice(h, Vocoder::Mode, 4.0f);
-  tap(h, app::Button::Up);  // CARRIER, one page back: MOUTH
+  tap(h, app::Button::Down);  // CARRIER, one page on: MOUTH
   h.run_ms(40);
   shift_tap(h, app::Button::F1);  // VOWEL
   REQUIRE(km.learning());
@@ -1001,9 +1073,9 @@ TEST_CASE("params: FREEZE is on PARAMS in TALK only; a learned CC freezes in TAL
   set_voice(h, Vocoder::Mode, 1.0f);
   tap(h, app::Button::Params);
   h.run_ms(60);
-  tap(h, app::Button::Down);  // FORMANT THRU QUALITY FREEZE DRY LEVEL VOICING KEY
+  tap(h, app::Button::Down);  // VOICE: FORMANT THRU DRY LEVEL QUALITY FREEZE
   h.run_ms(60);
-  shift_tap(h, app::Button::F4);
+  shift_tap(h, app::Button::F6);
   midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 23, 0);
   h.run_ms(60);
   for (const int v : {0, 127}) {
@@ -1014,7 +1086,7 @@ TEST_CASE("params: FREEZE is on PARAMS in TALK only; a learned CC freezes in TAL
   midi.in(o3sdk::hal::midi::Port::Usb, 0xB0, 23, 0);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Freeze) == doctest::Approx(0.0f));
-  tap(h, app::Button::F4);  // the PARAMS key works in TALK
+  tap(h, app::Button::F6);  // the PARAMS key works in TALK
   h.turn(1);
   h.run_ms(60);
   CHECK(param(h, Vocoder::Freeze) == doctest::Approx(1.0f));
@@ -1036,7 +1108,7 @@ TEST_CASE("params: HELP names LEARN on the F keys that can take it, of the page 
   set_voice(h, Vocoder::Mode, 1.0f);
   tap(h, app::Button::Params);
   h.run_ms(60);
-  tap(h, app::Button::Down);  // TALK: FORMANT THRU QUALITY FREEZE DRY LEVEL VOICING KEY
+  tap(h, app::Button::Down);  // TALK, VOICE: FORMANT THRU DRY LEVEL QUALITY FREEZE
   h.run_ms(40);
   h.press(app::Button::Shift);
   h.run_ms(2);
@@ -1047,10 +1119,12 @@ TEST_CASE("params: HELP names LEARN on the F keys that can take it, of the page 
   const app::Help& help = h.runtime().help_overlay().help();
   CHECK(help.fkey_shift[0] != nullptr);  // FORMANT
   CHECK(help.fkey_shift[1] != nullptr);  // THRU
-  CHECK(help.fkey_shift[2] == nullptr);  // QUALITY
-  CHECK(help.fkey_shift[3] != nullptr);  // FREEZE
-  CHECK(help.fkey_shift[6] == nullptr);  // VOICING
-  CHECK(help.fkey_shift[7] != nullptr);  // KEY
+  CHECK(help.fkey_shift[2] != nullptr);  // DRY
+  CHECK(help.fkey_shift[3] != nullptr);  // LEVEL
+  CHECK(help.fkey_shift[4] == nullptr);  // QUALITY
+  CHECK(help.fkey_shift[5] != nullptr);  // FREEZE
+  CHECK(help.fkey_shift[6] == nullptr);  // blank
+  CHECK(help.fkey_shift[7] == nullptr);  // blank
   app::HelpProblem p;
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));

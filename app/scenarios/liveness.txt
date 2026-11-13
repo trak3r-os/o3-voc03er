@@ -43,7 +43,7 @@ wait 300
 snap 08_tune_params_only_heard
 tap f3
 wait 200
-snap 09_tune_key_focused
+snap 09_tune_speed_focused
 tap params
 wait 300
 snap 10_tune_params_stays_on_its_page

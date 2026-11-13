@@ -53,7 +53,7 @@ tap f7
 turn -6
 tap f7
 wait 200
-# ---- PARAMS in TALK (the mode PERFORM is in here): its three pages (CARRIER, VOICE & NOTES, NOTES) with a chord held
+# ---- PARAMS in TALK (the mode PERFORM is in here): its three pages (CARRIER, VOICE, NOTES) with a chord held
 tap params
 wait 300
 paddown 38
