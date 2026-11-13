@@ -6,6 +6,7 @@
 // a key keeps its page and its cell whatever the carrier is).
 //
 //   A tap on an F key points the encoder at it (it stays lit); a second tap steps it on. SHIFT + the encoder: coarse steps.
+//   LEFT / RIGHT: one encoder step of the lit key down / up (SHIFT passed as the encoder passes it, a held arrow repeats).
 //   PARAMS pressed again (app.cpp calls next_page()), DOWN: the next page; UP: the one before.
 //   MODE is not here: PERFORM's F1 changes it. When the mode changes by any road (PERFORM, a preset, a project load, a MIDI program change), the
 //   screen shows the new layout on its first page; the VOICE carrier only fills in SPEED's reserved cell on NOTES (nothing else moves). A learn armed
@@ -43,6 +44,7 @@ class ParamsScreen final : public o3sdk::app::Screen {
   void enter(o3sdk::app::Context& ctx) noexcept override;
   void leave(o3sdk::app::Context& ctx) noexcept override;
   void input(o3sdk::app::Context& ctx, const o3sdk::app::Input& in) noexcept override;
+  std::uint64_t repeat_buttons(const o3sdk::app::Context&) const noexcept override;  // LEFT / RIGHT: a held arrow repeats
   void draw(o3sdk::app::Context& ctx, o3sdk::ui::Renderer& r, const o3sdk::ui::Rect& area) noexcept override;
   void leds(o3sdk::app::Context& ctx, o3sdk::app::PadLeds& leds) noexcept override;
   void soft_keys(o3sdk::app::Context& ctx, o3sdk::app::SoftKeys& out) noexcept override;

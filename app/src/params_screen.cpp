@@ -223,9 +223,15 @@ void ParamsScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     next_page(ctx, -1);
   } else if (in.press(Button::Down)) {
     next_page(ctx, 1);
+  } else if (in.press(Button::Left) || in.press(Button::Right)) {  // one encoder step of the lit key, SHIFT as the encoder takes it; repeats arrive as presses
+    step(ctx, lay, focus_, in.press(Button::Left) ? -1 : 1, in.shift, false);
   } else if ((in.pad_press() || in.pad_release()) && perform_ != nullptr) {
     perform_->pad_event(ctx, in);
   }
+}
+
+std::uint64_t ParamsScreen::repeat_buttons(const app::Context&) const noexcept {
+  return (std::uint64_t{1} << static_cast<unsigned>(Button::Left)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Right));
 }
 
 // ---- pads, keys -----------------------------------------------------------------------------------------------------------------------
@@ -250,6 +256,8 @@ void ParamsScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
       {Button::Up, "PAGE BEFORE", nullptr},
       {Button::Down, "PAGE AFTER", nullptr},
+      {Button::Left, "LIT KEY DOWN, HOLD REPEATS", nullptr},
+      {Button::Right, "LIT KEY UP, HOLD REPEATS", nullptr},
       {Button::Params, "NEXT PAGE", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},

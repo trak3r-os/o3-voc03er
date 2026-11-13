@@ -1129,3 +1129,78 @@ TEST_CASE("params: HELP names LEARN on the F keys that can take it, of the page 
   const bool ok = app::help_check(help, &p);
   CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
 }
+
+// RD2: LEFT / RIGHT are one encoder step of the lit F key, on every page; UP / DOWN stay the page.
+TEST_CASE("params: LEFT / RIGHT step the lit key as the encoder does, SHIFT passes as coarse, a held arrow repeats, a tap alone moves nothing") {
+  sim::Harness h(::o3sdk_app());
+  REQUIRE(h.start());
+  h.run_ms(100);
+  tap(h, app::Button::Params);
+  h.run_ms(60);
+  REQUIRE(param(h, Vocoder::Mode) == doctest::Approx(0.0f));
+  const float noise0 = param(h, Vocoder::Noise);
+  tap(h, app::Button::F5);  // lights NOISE and changes nothing
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise0));
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  const float step = param(h, Vocoder::Noise) - noise0;
+  CHECK(step > 0.0f);
+  h.turn(1);  // the same step by the encoder
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise0 + 2.0f * step));
+  tap(h, app::Button::Left);
+  tap(h, app::Button::Left);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise0));
+  // SHIFT + arrow is SHIFT + encoder: the coarse step
+  h.press(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, app::Button::Right);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  const float coarse = param(h, Vocoder::Noise) - noise0;
+  CHECK(coarse > step * 1.5f);
+  h.press(app::Button::Shift);
+  h.run_ms(5);
+  tap(h, app::Button::Left);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(noise0));
+  // a held arrow repeats (the kit's auto-repeat arrives as presses) and the release stops it
+  h.press(app::Button::Right);
+  h.run_ms(1500);
+  h.release(app::Button::Right);
+  h.run_ms(20);
+  const float held = param(h, Vocoder::Noise);
+  CHECK(held - noise0 >= 4.0f * step);
+  h.run_ms(1000);
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(held));
+  // the arrows follow the focus: F3 SUB, and NOISE stays
+  tap(h, app::Button::F3);
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Sub) == doctest::Approx(0.02f).epsilon(0.02));
+  CHECK(param(h, Vocoder::Noise) == doctest::Approx(held));
+  // UP / DOWN are still the page: the encoder points at the next page's first key
+  tap(h, app::Button::Down);
+  h.run_ms(60);
+  const float formant0 = param(h, Vocoder::Formant);
+  tap(h, app::Button::Right);
+  h.run_ms(60);
+  CHECK(param(h, Vocoder::Formant) == doctest::Approx(formant0 + 1.0f));
+  CHECK(param(h, Vocoder::Sub) == doctest::Approx(0.02f).epsilon(0.02));
+  // HELP names the arrows
+  h.press(app::Button::Shift);
+  h.run_ms(2);
+  tap(h, app::Button::Config);
+  h.release(app::Button::Shift);
+  h.run_ms(60);
+  REQUIRE(h.runtime().help_open());
+  const app::Help& help = h.runtime().help_overlay().help();
+  CHECK(has_row(help, app::Button::Left));
+  CHECK(has_row(help, app::Button::Right));
+  app::HelpProblem p;
+  const bool ok = app::help_check(help, &p);
+  CHECK_MESSAGE(ok, std::string(app::help_field_name(p.field)) << " " << static_cast<unsigned>(p.index) << ": " << std::string(p.what));
+  CHECK(h.runtime().frame_failures() == 0u);
+}
