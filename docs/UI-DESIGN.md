@@ -54,9 +54,27 @@ MASTER; SAMPLE LOAD, SAMPLE PLAY, SAMPLE EDIT, SAMPLE REC, SONG; NOTE, INSTR, VO
 LEFT, RIGHT. The maintainer's words "instrument", "perform", "loader" and "backspace" are PARAMS, PERFORMANCE, SAMPLE LOAD and DELETE in that table;
 the jobs below read true under either wording. CONFIG is the kit's and gets no job.
 
-Rules the table follows: a screen button opens its screen (a second press pages where there are pages); the arrows mean the same everywhere
-(UP / DOWN: *which*, a slot, a lane, a row, a page; LEFT / RIGHT: *where*, a step, an octave, a cursor); DELETE removes what the cursor is on,
-with SHIFT all of it; REC always records; PLAY is always the transport.
+Rules the table follows: a screen button opens its screen (a second press pages where there are pages); DELETE removes what the cursor is on,
+with SHIFT all of it; REC always records; PLAY is always the transport. The pads and the F keys follow the four house rules below, written once
+(rd-ctl, the maintainer: "pads and the way the F keys are controlled cohesive on every screen... F keys whose value can be changed with the arrows
+where possible"); each screen's section says only what it adds.
+
+**The house rules** (code: `step_focused` on PERFORM, `turn` on SAMPLE REC, `step` on PARAMS, `edit` on SONG; tests in each screen's test file and
+`app/scenarios/arrows_everywhere.txt`):
+
+- **H1, the pads.** The lower two rows are the keyboard (PERFORM's chords); the top two rows are the screen's own things. PERFORM keeps all four rows
+  for the keyboard. PARAMS, MASTER and SAMPLE REC play PERFORM's pads (its code, so the carrier is played while a value is edited). The lists (FILE,
+  SAMPLE LOAD) are the kit's picker, which has no keyboard: a pad there picks the row under it (the one exception to H1, `FilePicker` is not this app's to change).
+- **H2, an F value key.** A tap lights it (the focus) and changes nothing; a second tap steps a list or a switch on; the encoder changes the lit key;
+  LEFT / RIGHT do exactly one encoder step of the lit key (SHIFT passed as the encoder passes it: coarse), and a held arrow repeats (`repeat_buttons`).
+  An action key (a thing done, not a value held) acts on the tap and takes no light.
+- **H3, UP / DOWN choose which**: the slot, the page, the row, the lane or the list. SHIFT + LEFT / RIGHT move the cursor where LEFT / RIGHT are the
+  lit key's (PATTERN, SAMPLE EDIT).
+- **H4, no F key lit.** LEFT / RIGHT step what the encoder holds: the SONG row's pattern letter, SAMPLE EDIT's cursor, a page in the lists.
+  The pads' octave is an F value like any other (SHIFT + F7 on PERFORM, SHIFT + F3 on SAMPLE; while it is lit the arrows step it).
+
+The exceptions, named: PERFORM refuses the arrows on the keys whose step would be a jump (F1 MODE, F8 QUALITY in TALK, SHIFT + F8 PRESET; the
+screen says so, `arrow_may_step`), and SAMPLE EDIT keeps UP / DOWN as the zoom (SHIFT + UP / DOWN is the slot).
 
 | Printed | What it does | Where |
 |---|---|---|
@@ -82,8 +100,8 @@ with SHIFT all of it; REC always records; PLAY is always the transport.
 | INSERT | PATTERN: pastes the copied step at the cursor, the rest moving right (SHIFT: pastes the pattern). SAMPLE EDIT: inserts a cut at the cursor (a picked slice: in its middle) | PATTERN, SAMPLE EDIT |
 | DELETE | What the cursor is on: PATTERN the step (SHIFT: the pattern); SAMPLE EDIT the picked slice's cut, else the cut nearest the cursor in view (SHIFT: the slot's sample, F1 confirms); PERFORM the latched pad; SAMPLE REC the take just made; the lists nothing, dimmed in HELP | as listed |
 | SHIFT | Held: on PERFORM, with a pad latches it (a note or chord stays while the hands leave); on SAMPLE EDIT, with a lower pad latches its note, SHIFT + UP / DOWN is the slot and SHIFT + F8 clears the cuts; on SAMPLE, SHIFT + F2 is SLICE CH; with the encoder coarse steps; with DELETE, COPY, INSERT their whole-object form; with CONFIG HELP; on PARAMS, with an F key MIDI learn. Each screen's section lists its own | everywhere |
-| UP / DOWN | Which: the slot (SAMPLE, SAMPLE REC; SAMPLE EDIT: zoom out / in, SHIFT the slot), the row (FILE, SAMPLE LOAD, SONG), the page (PARAMS, MASTER); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
-| LEFT / RIGHT | Where: the octave of the pads (PERFORM, SAMPLE, PATTERN); the cursor's step (PATTERN); the previous or next cut (SAMPLE EDIT); the lit F key's value (SAMPLE REC: one encoder click, SHIFT as the encoder's); a page of rows (the lists). Held, they repeat (`repeat_buttons`) | everywhere |
+| UP / DOWN | H3, which: the slot (SAMPLE, SAMPLE REC, SAMPLE LOAD; SAMPLE EDIT: zoom out / in, SHIFT the slot), the row (FILE, SONG), the page (PARAMS; MASTER has none); on PERFORM only a picker's cursor; on PATTERN the octave (PERFORM's and SAMPLE's) | everywhere |
+| LEFT / RIGHT | H2 and H4: one encoder step of the lit F key (PERFORM, SAMPLE, SAMPLE REC, PARAMS, MASTER; SHIFT as the encoder's, held they repeat via `repeat_buttons`); with no key lit, what the encoder holds (SONG the row's pattern, SAMPLE EDIT the previous or next cut, the lists a page of rows); on PATTERN the cursor's step | everywhere |
 | Encoder | The latched F value; in a list the row; in SAMPLE EDIT the picked slice's start, else the cursor, a picture pixel a click at the zoom (SHIFT: coarser, at most a 64th of the view; with a pick, one sample) | everywhere |
 
 ## 4. The screens
@@ -108,7 +126,7 @@ notes as blue tiles, the OUT meter. Under all of it a drawing of the pads as the
   stop is written in the middle of the second bar while the transport plays, so the unit stops at the bar line, and at once when it is stopped),
   and REC again cancels while it waits for the bar or stops early while it records. The ADC and the route change in one step, when the loop holds audio.
   The pickers have no NONE and no FOLLOW row: section 2 lists neither; a slot on no side (PADS ONLY: its slices answer the pads of SAMPLE and nothing else) is simply one that SAMPLE's F2 SPEAKS and PERFORM's SOUNDS picker do not name, and FOLLOW is a value of the pattern's CARRIER lane.
-- Pads: row 0 the controls, rows A, B and C the layout (section 7); LEFT / RIGHT an octave; SHIFT + pad latches; DELETE
+- Pads: row 0 the controls, rows A, B and C the layout (section 7); the octave is SHIFT + F7 (the arrows step it while it is lit); SHIFT + pad latches; DELETE
   releases. REC captures.
 - LEDs: section 7 (the layout's rows: root, scale, held or latched `kLedOn`, the pattern's notes `kLedMid` while it plays).
 - TRACT (V2): row C set to MOUTH (a PLAYS value of row C only, after BEND and before OFF) is the mouth strip, section 7. The voiceprint draws the tube's
@@ -127,7 +145,7 @@ the selected slot's overview waveform with its cuts, the play line moving, the s
   layout rows A and B (section 7), at PERFORM's octave, through PERFORM's audition entry like PATTERN's palette; a pad sounds while it is held
   and a layout change or leaving the screen lets the notes go. A slice held with a layout pad is the gesture of the instrument: the slice sings
   that note or chord; there is no latch on this screen. The split, not a toggle, because the two things are played together; a toggle would
-  cost a press per phrase. F1 sets both rows at once (both flash). LEFT / RIGHT is the octave.
+  cost a press per phrase. F1 sets both rows at once (both flash). The octave is SHIFT + F3 (AK1).
   Pad 24 maps to audition id 0 and so on: the entry's 24 ids hold the 24 pads without widening.
 - LEDs: a slice that exists `kLedDim`, the one sounding `kLedOn`, the SLICE lane's `kLedMid` on its step; the layout rows as on PATTERN's palette (root low, scale dim, held on, dark while LOW PADS flashes). An empty
   slot: the top rows dark and the screen says "EMPTY: SAMPLE REC OR SAMPLE LOAD".
@@ -142,7 +160,7 @@ again stops at the bar; LENGTH stops it by itself. After the take, with AUTOPLAY
 (SPEAKS or SOUNDS), or on SPEAKS when it is on neither, so what was sung is heard at once.
 
 - F1 SOURCE (LINE, LEFT, RIGHT, MIC LOW, MIC HIGH, RADIO, USB; a line source starts at gain 0) · F2 GAIN · F3 LENGTH (FREE, 1, 2, 4, 8 BARS; lit when the screen opens) · F4 AUTOPLAY (ON by default, OFF: what a take does when it ends) · F5 MONITOR (the kit's: the dry input to the output while
-  recording) · F6 SLOT (1 to 4; also UP / DOWN, whatever key is lit) · F7 and F8 blank. DELETE discards the take. LEFT / RIGHT are one encoder step of the lit key (`encoder_step`, the encoder's own call with SHIFT as the encoder passes it; held, they repeat): a tap on a key lights it, a second tap steps it. F4 AUTOPLAY never takes the light (a tap always switches it), so the arrows skip it.
+  recording) · F6 SLOT (1 to 4; also UP / DOWN, whatever key is lit) · F7 and F8 blank. DELETE discards the take. LEFT / RIGHT are one encoder step of the lit key (`encoder_step`, the encoder's own call with SHIFT as the encoder passes it; held, they repeat): a tap on a key lights it, a second tap steps it (H2). F4 AUTOPLAY takes the light like the rest: the first tap lights it, a second switches it, RIGHT is ON and LEFT is OFF (a switch's encoder step).
 - Pads: PERFORM's layout (section 7), so the carrier is played while recording (the take is the input, not the output). While recording the whole
   grid pulses `kLedLow` on the beat (`PadLeds::blink`), the one place the LEDs do that.
 
@@ -190,7 +208,7 @@ of the top rows auditions that slice through the vocoder, and a pad of the botto
 
 The kit's `FilePicker` (`app/file_picker.h`) over the app's folder, `.wav` only, with the file's size in the value column (the picker has no seconds
 column, so the seconds of a file go on the strip when it is loaded and the slot's on the line at the right); F1 OPEN loads it into the selected slot (named
-at the top, UP / DOWN change it), F8 BACK. PCM of 8 to 32 bits or 32-bit float, 22.05 to 96 kHz, mono or stereo (mixed to mono), converted on load to the slot's 16-bit 44.1 kHz mono, at most 16 s of
+at the top, UP / DOWN change it), F8 BACK. The encoder moves the picker's row, LEFT / RIGHT a page of rows (H4: it is the kit's list, so it has no F value to step; a pad picks a row, H1). PCM of 8 to 32 bits or 32-bit float, 22.05 to 96 kHz, mono or stereo (mixed to mono), converted on load to the slot's 16-bit 44.1 kHz mono, at most 16 s of
 the converted sound (a longer file gives its first 16 s and the strip says "FIRST 16.000 S LOADED, FILE HAS 20.000 S, 48K 24B TO 44.1K 16B"; a converted
 file ends its note with what was done). The listing is `Apps/o3_voc03er/`, because the kit loads from the app's folder only (section 9);
 the card as a USB disk (Config, CARD AS DISK) is how files get there from a computer. A slot that records or sounds refuses ("STOP THE SLOT FIRST"); a slot
@@ -321,6 +339,8 @@ The in-depth editor of the mode PERFORM is in (PM1, `params_logic.h`, `params_sc
 
 Two places differ from the first proposal of this layout: VOICING is on NOTES in every mode (it lays out the chords, and one cell everywhere keeps the rule), and TALK's QUALITY and FREEZE are the last two cells of VOICE, so DRY and LEVEL keep their cells in BANDS, TALK and ROBOT. Decision: MODE is not on PARAMS. PERFORM's F1 changes it and PARAMS follows (a preset, a project load and a MIDI program change also move it): `ParamsScreen::sync` runs on every entry point and, when the mode changes, shows the new mode's first page with its first focusable key, resets the focus (page and focus are not remembered per mode) and drops a learn armed on a value no longer shown; a change of the carrier source alone keeps the page and the focused value if its cell is still filled (a focus on SPEED's cell that goes blank moves to the page's first key; a learn armed there is dropped). FREEZE is TALK's only (app.cpp clears it on a mode change), so PARAMS has no refusal text for it. PARAMS again, DOWN: the next page; UP: the one before; both round, and drop a learn.
 
+Arrows (rd-ctl, H1 and H2): a tap on an F key lights it, a second steps it, LEFT / RIGHT are one encoder step of the lit key (SHIFT as the encoder's, held they repeat), UP / DOWN and PARAMS again change the page, and the pads play PERFORM's chords, so a value is heard while it is edited.
+
 MIDI learn (ML1): SHIFT + an F key arms `Midi::learn(unit, param)` for that value (the vocoder's parameter, or the tract unit's on TRACT's MOUTH pages: `params::learnable(page, key)` on the table's coordinates, Kind Value or Tract, except MODE (not on PARAMS since PM1) and QUALITY, which the strips refuse too: `live_safe_voice`; the binding is on the parameter, never on the key's place on a page, which is why `learn_page_` and `learn_key_` hold table coordinates); the same keys again call `learn_cancel` (the line says LEARN OFF), and `next_page`, `leave` and an arm the kit ended (a controller bound it: the strip says LEARNED CC n) drop it. A key that cannot take a controller (VOICING, MODE, QUALITY) says CANNOT LEARN THIS VALUE, arms nothing and cancels an arm on another key. SHIFT + F did nothing before on PARAMS, so no gesture moved. Held SHIFT redraws the F row as LEARN cells (the value's name under it, the armed key hot; "-" dim on VOICING) and the armed state is the line "LEARN <NAME>: MOVE A KNOB" under the big name; HELP gives the F keys that can take it the Shift label LEARN. `App::midi_learned_moved` only asks for a redraw: the kit has written the value to the engine, which is where the screens read and the project's save reads. Built in ML1 (`app/scenarios/midi_learn.txt`, `tests/params_test.cpp`). Not run with a real controller.
 
 ### MASTER
@@ -329,7 +349,7 @@ The signal path drawn large with the one rule written on it: LIVE (SOURCE, GAIN,
 LINE AND RADIO SHARE THE ADC; USB IS STEREO") → the mode → OUTPUT (DRY, LEVEL, RETURN LEVEL for USB, the tall OUT meter) and, with RADIO, FREQ
 with F7 / F8 seeking. F1 SOURCE · F2 GAIN · F3 MONITOR · F4 DRY · F5 LEVEL · F6 RETURN · F7 SEEK DOWN · F8 SEEK UP (dimmed unless RADIO).
 
-Built in U9b1 (`app/src/master_screen.{h,cpp}`, logic in `master_logic.h`, `tests/master_test.cpp`, `app/scenarios/master.txt`). Every key has a kit API: a dim key says why when tapped. Since UX2 nothing is focused on entering (a detent says TAP AN F KEY FIRST), the MODE panel is read only (it says SET ON PERFORM F1), SHIFT is the coarse encoder and the arrows and pads are not handled. SOURCE goes through the app's one source path (PERFORM's callback: `AudioIn::select`, the meter's reset, the USB channel), so the settling gate holds; GAIN is `AudioIn::set_gain` (dim on USB), MONITOR is `AudioIn::monitor` (a second tap toggles off / 70), RETURN is `UsbAudio::set_return_level` (live whenever the board has a USB audio device, whatever the source), DRY and LEVEL are the unit's parameters as PARAMS writes them; F7 / F8 are `Radio::seek` (live with RADIO as the source and a receiver that answered). The two tall meters are drawn in the screen with PERFORM's ladder rule (whole 6 px rows, held peak), not its masked dots. No pads, no UP / DOWN: MASTER has no pages. The screen object is about 40 bytes of SRAM_U (`__bss_end` 0x2001F8A8).
+Built in U9b1 (`app/src/master_screen.{h,cpp}`, logic in `master_logic.h`, `tests/master_test.cpp`, `app/scenarios/master.txt`). Every key has a kit API: a dim key says why when tapped. Since UX2 nothing is focused on entering (a detent says TAP AN F KEY FIRST), the MODE panel is read only (it says SET ON PERFORM F1), SHIFT is the coarse encoder, LEFT / RIGHT are one encoder step of the lit key (with none lit they say TAP AN F KEY FIRST, as the encoder does) and the pads play PERFORM's layout (H1; `PerformScreen::pad_down`, `pad_up`). SOURCE goes through the app's one source path (PERFORM's callback: `AudioIn::select`, the meter's reset, the USB channel), so the settling gate holds; GAIN is `AudioIn::set_gain` (dim on USB), MONITOR is `AudioIn::monitor` (a second tap toggles off / 70), RETURN is `UsbAudio::set_return_level` (live whenever the board has a USB audio device, whatever the source), DRY and LEVEL are the unit's parameters as PARAMS writes them; F7 / F8 are `Radio::seek` (live with RADIO as the source and a receiver that answered). The two tall meters are drawn in the screen with PERFORM's ladder rule (whole 6 px rows, held peak), not its masked dots. No UP / DOWN: MASTER has no pages. The screen object is about 40 bytes of SRAM_U (`__bss_end` 0x2001F8A8).
 
 Built in U9e (the old PLAY screen retired: `app/src/play_screen.{h,cpp}` deleted): PERFORM is home and every screen button opens its screen on every screen; SHIFT + PARAMS is PARAMS. The octave is PERFORM's (the state line's `octave` and `config.o3a` follow it); `steps`, `carriers` (pattern A of the bank) and `cursor` (PATTERN's) keep their names in the state line, `focus` and `value` are gone. The pattern's save on the card is PATTERN's F8 (`pattern.o3a`) and its load is the start; the old keys that loaded it (SAMPLE LOAD) and cycled the source (SAMPLE PLAY) are the WAV picker and SAMPLE now, and the source is picked on MASTER. `carrier_steps.txt`, `stepseq.txt` and `files.txt` write their steps with the PATTERN screen's palette. Unit check owed: SHIFT + PARAMS and PATTERN F8 by hand.
 
@@ -339,7 +359,7 @@ from values `View` publishes. The lattice runs at a quarter of the rate, so the 
 ### FILE
 
 The projects: the folders under `Apps/o3_voc03er/` (the picker with folders), F1 LOAD, F2 SAVE, F3 SAVE AS (the kit's `NameEntry`), F4 NEW, F5 SAVE
-WAVS, F8 BACK. A project is one `project.o3a` (the eight patterns, the chain, the routing, each slot's cuts, trim, speed, side and the WAV it came
+WAVS, F8 BACK. UP / DOWN and the encoder move the picker's row, LEFT / RIGHT a page of rows (held, they repeat; the kit's list holds the paging); a pad picks the row under it (H1's exception). A project is one `project.o3a` (the eight patterns, the chain, the routing, each slot's cuts, trim, speed, side and the WAV it came
 from, the engine's values) plus the slots' WAVs saved on request (4 x 1.4 MB at most; on a slow card about 17 s a slot, the strip shows it). A load
 reads the `.o3a`, then the WAVs it names from the project folder, one job after another, a slot greyed until its file has landed.
 
@@ -366,9 +386,22 @@ Not in the file: the WAV data, the octave, tempo and swing, the current pattern 
 The chain: up to 16 entries of a pattern letter and a repeat count, a row each; F1 ADD, F2 REPEATS, F3 LOOP CHAIN, F8 BACK; PLAY plays the chain
 from the cursor while this screen is up. Before U9 the one-line screen of section 3.
 
-SONG's two hint lines (lane5, `song_screen.cpp`, small type at the foot of the screen, replaced by a status note while one shows) say what the code does: UP and DOWN pick a row, the encoder its pattern A to H, F2 sets the encoder to the row's repeats (1 to 64) until F2 again, F1 or INSERT adds a row after the cursor (same pattern, 1 repeat), DELETE twice removes it, F3 LOOP restarts at row 1. Keys with no action: LEFT, RIGHT, SHIFT + F1..F8, and F4..F7 (blank).
+SONG's two hint lines (lane5, `song_screen.cpp`, small type at the foot of the screen, replaced by a status note while one shows) say what the code does: UP and DOWN pick a row, the encoder its pattern A to H, F2 sets the encoder to the row's repeats (1 to 64) until F2 again, F1 or INSERT adds a row after the cursor (same pattern, 1 repeat), DELETE twice removes it, F3 LOOP restarts at row 1. LEFT and RIGHT are one encoder step of what the encoder holds (the row's letter, or its repeats while F2 is lit; H4, held they repeat). Keys with no action: SHIFT + F1..F8, and F4..F7 (blank). F3 LOOP acts on the tap and takes no light, so the arrows keep the row's pattern.
 
 **Built in U9d** (`app/src/song_screen.{h,cpp}`, `song_logic.h`, `tests/song_test.cpp`, `app/scenarios/song.txt`). Two columns of eight rows; UP and DOWN move the cursor, the encoder the row's letter (after F2, its repeats 1 to 64), INSERT or F1 adds after the cursor with its pattern, DELETE removes. The one `g_chain` (SDRAM, all-zero at boot) is the app's, so FILE can save it. PLAY with SONG up and the transport stopped starts the cursor's row (an empty chain: PLAY as everywhere). Playback adds no timing path: the step sequencer counts the patterns it takes (`StepSeq::laps()`, one byte store at a pattern's end) and the screen, on the main loop, asks `request_pattern` for the pattern of the lap after the one in progress, so every change, an edit included, lands where a PATTERN change does, at the pattern's last step. The lit row is the lap in progress (it leads the audio by one step); the cursor is free. At the end of a chain that does not loop the screen stops the transport 7/8 of a step after the last lap's end is seen; leaving SONG ends the walking and leaves the transport playing the pattern it plays. Owed on the unit: the landing step of a chain change, the stop at the chain's end (the timer is the main loop's, a step can jitter), and a length-1 pattern at a boundary. The LOOP CHAIN label is a few pixels wider than its F key. The old stub row for SONG in `app.cpp` is dead data.
+
+### Say why nothing sounds (rd-ctl)
+
+In BANDS, TALK and ROBOT the voice is heard only while something speaks and a synth note sounds; TUNE needs only the speech, TRACT only the note
+(`silence.h`, the same mode bits as the liveness table). When the player is trying to be heard (a lower pad is down, a note held over MIDI, or the
+transport plays) and the half is missing for half a second, the screen says which, in its own words: `NO NOTE: HOLD A LOWER PAD OR PLAY A PATTERN`
+(the note first: it is the first thing to do) or `NOTHING SPEAKS: TALK INTO THE INPUT OR MAKE A SLOT SPEAK (SAMPLE F2)`. PERFORM shows it on its hint
+line while no picker, flash or dim note is up; PATTERN on its strip's note line. It goes at once when the sound returns or the trying stops, and a
+carrier that is not the synth (NOISE, a slot, LIVE, VOICE) needs no note. Nothing in it is in the audio path: `App::update` feeds `silence::Watch` once
+a pass from values the screens already read (the route, the pads held, the pattern's notes, the held MIDI notes (a 128-bit set kept in the main
+loop's `midi()` hook), the input meter's peak against -50 dB, the SPEAKS slot's loop status). `tests/silence_test.cpp` holds the logic, the two
+PERFORM cases in `tests/perform_screen_test.cpp` the lines, and `app/scenarios/arrows_everywhere.txt` shows them. The unit check that remains: the
+hint's wording and the half second by ear and eye, with a real input.
 
 ## 5. The skin
 
@@ -489,7 +522,7 @@ page CARRIER; SPREAD is also PERFORM's F8 in BANDS, because it is the one that i
 
 The first thing a new user reaches, and the one place the pads are explained: the other sections point here. KEY and SCALE are the TUNE parameters, so the chords and the pitch correction agree by construction.
 
-**The layout** (Q6, `pads_logic.h`, `docs/REVIEW-2026-11-11.md` section 3): the 12 columns are the 12 roots, C at the left of the octave LEFT / RIGHT chose.
+**The layout** (Q6, `pads_logic.h`, `docs/REVIEW-2026-11-11.md` section 3): the 12 columns are the 12 roots, C at the left of the octave SHIFT + F7 chose.
 Row 0 is the controls on every layout (below). Rows 1, 2 and 3 are A, B and C, each with a PLAYS value, and what a pad plays is
 `pads::pad_play(layout, row, col, octave)`, the same function on every screen. PLAYS values: NOTE (one note); TRIAD, 7TH, OPEN, POWER (a chord
 of the kind per pad: TRIAD, the triad the scale gives on that root, major, minor or diminished; 7TH, the seventh the scale gives; OPEN, root,

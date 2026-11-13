@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SAMPLE REC in the tests. The app is one static object for the whole test process, so the screen keeps its LENGTH, SLOT and AUTOPLAY from the test before (and the
 // executable holds every test file). These helpers state what a take needs without reading the screen: UP / DOWN always drive SLOT, LEFT / RIGHT step the lit F key
-// (the focus outlives a test too, so LENGTH is lit again with a tap on F3 first); AUTOPLAY is a toggle, so its state is tracked here (one value for the process, the screen's own default is ON).
+// (the focus outlives a test too, so LENGTH is lit again with a tap on F3 first); AUTOPLAY is set by the arrows after a tap on F4 (the state is tracked here too, one value for the process, the screen's own default is ON).
 #pragma once
 
 #include <o3sdk/app/app.h>
@@ -21,12 +21,11 @@ inline bool& rec_autoplay_on() {
   return on;
 }
 
-// F4 AUTOPLAY set to `on`, with SAMPLE REC open: a tap only when the screen is not there already.
+// F4 AUTOPLAY set to `on`, with SAMPLE REC open, whatever it was: a tap lights the key (or switches it, when it was lit), then LEFT sets it off or RIGHT on.
 inline void rec_autoplay(o3sdk::sim::Harness& h, bool on) {
-  if (rec_autoplay_on() != on) {
-    rec_tap(h, o3sdk::app::Button::F4);
-    rec_autoplay_on() = on;
-  }
+  rec_tap(h, o3sdk::app::Button::F4);
+  rec_tap(h, on ? o3sdk::app::Button::Right : o3sdk::app::Button::Left);
+  rec_autoplay_on() = on;
 }
 
 // LENGTH at FREE from whatever it was and whatever key was lit: a tap on F3 lights LENGTH (or steps it on, when it was lit already), then LEFT stops at FREE.

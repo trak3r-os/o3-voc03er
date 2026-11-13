@@ -40,6 +40,7 @@
 #include "midi_pattern_logic.h"
 #include "midi_slice_logic.h"
 #include "sample_screen.h"
+#include "silence.h"
 #include "song_screen.h"
 #include <cmath>
 
@@ -174,6 +175,9 @@ class MyApp final : public app::App {
     (void)ctx.midi().route(voice, 0);
     carriers_.init(voice, &g_bank, sample_.slice_map());
     perform_.set_mouth_hold_sink(&carriers_);
+    perform_.set_silence(&silence_);  // the line that says why nothing sounds (PERFORM, and PATTERN through PERFORM)
+    silence_.reset();
+    std::memset(midi_down_, 0, sizeof midi_down_);
     carriers_.set_mouth_hold(false);
     carriers_.set_tract(tube);  // the MOUTH lane (V3) writes the tract unit; none while PERFORM holds a strip pad
     voc_.bind_slices(sample_.slice_map());  // the same map the hook reads; its address never moves
@@ -214,6 +218,7 @@ class MyApp final : public app::App {
         }
       }
     }
+    feed_silence(ctx);  // why nothing sounds: the half second and the clearing, one pass at a time
     {  // what the hook needs of the main side: the carrier the user picked (restored on Stop), and the key and scale the chords are spelled in
       const dsp::Engine& e = ctx.engine();
       carriers_.set_picked(static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::CarSrc))));
@@ -430,6 +435,7 @@ class MyApp final : public app::App {
   // from the MOD pad (the larger wins). A controller the user bound by MIDI learn never reaches here (midi_learned_moved takes it). Main loop.
   bool midi(app::Context& ctx, const core::MidiMessage& m) noexcept override {
     const unsigned kind = core::midi_kind(m.status);
+    track_midi_notes(ctx, m, kind);
     if (kind == 0x90u || kind == 0x80u) {  // MS1: the notes of the slice channel (SAMPLE SHIFT + F2) fire the SPEAKS slot's slices, from note 36
       const unsigned user = ctx.midi().config().channel;
       const unsigned ch = core::midi_channel(m.status);
@@ -787,6 +793,8 @@ class MyApp final : public app::App {
     const bool row = song_.cursor() < g_chain.count;  // the cursor's row of the chain (a test reads what SONG's arrows did; after the others: a short buffer drops them)
     w.num("chain_pat", row ? g_chain.entry[song_.cursor()].pattern : 0u);
     w.num("chain_reps", row ? g_chain.entry[song_.cursor()].repeats : 0u);
+    w.num("rec_autoplay", sample_rec_.autoplay() ? 1u : 0u);  // SAMPLE REC's F4 (a test reads what the arrows did)
+    w.num("silence", static_cast<std::uint32_t>(silence_.shown()));  // the line PERFORM and PATTERN say: 0 none, 1 NO NOTE, 2 NOTHING SPEAKS
     return w.size();
   }
 
@@ -805,6 +813,48 @@ class MyApp final : public app::App {
       meter_.reset(now, o3_voc03er::InputMeter::kSettleHoldoffMs);
     }
     meter_.feed(p.l, p.r, now);
+  }
+
+  // The MIDI notes held on the user's channel (a 128-bit set; the main loop's midi() hook writes it, feed_silence reads it, nothing else does). A note on
+  // with velocity 0 is a note off; all notes off (CC 123) and all sound off (CC 120) empty it. The notes themselves go to the unit as before.
+  void track_midi_notes(app::Context& ctx, const core::MidiMessage& m, unsigned kind) noexcept {
+    if (!o3_voc03er::midipat::channel_ok(ctx.midi().config().channel, core::midi_channel(m.status))) {
+      return;
+    }
+    if (kind == 0xB0u && (m.data1 == 123u || m.data1 == 120u)) {
+      std::memset(midi_down_, 0, sizeof midi_down_);
+    } else if (kind == 0x90u && m.data2 > 0u) {
+      midi_down_[(m.data1 & 0x7Fu) >> 5] |= 1u << (m.data1 & 31u);
+    } else if (kind == 0x80u || kind == 0x90u) {
+      midi_down_[(m.data1 & 0x7Fu) >> 5] &= ~(1u << (m.data1 & 31u));
+    }
+  }
+
+  bool midi_held() const noexcept { return (midi_down_[0] | midi_down_[1] | midi_down_[2] | midi_down_[3]) != 0u; }
+
+  // Why nothing sounds (silence.h), once per pass, from values the screens read already: the route, the pads, the transport and the pattern it plays,
+  // the MIDI keys, the input meter and the SPEAKS slot. Nothing here reaches the audio path. The screens read silence_.shown().
+  void feed_silence(app::Context& ctx) noexcept {
+    const dsp::Engine& e = ctx.engine();
+    o3_voc03er::silence::Sources s;
+    s.mode = o3_voc03er::mode_index(e.param(voc_id_, o3_voc03er::Vocoder::Mode));
+    s.speaks = static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::ModSrc)));
+    s.sounds = static_cast<std::uint8_t>(std::lround(e.param(voc_id_, o3_voc03er::Vocoder::CarSrc)));
+    const bool running = e.playing();
+    s.pad_note = perform_.note_down();
+    s.midi_note = midi_held();
+    s.seq_note = running && o3_voc03er::notes_used(g_bank.pattern[carriers_.playing_pattern() % o3_voc03er::kBankPatterns]) != 0u;
+    s.input_live = ctx.audio_in().available();
+    s.input_peak = meter_.peak();
+    if (o3_voc03er::route::is_slot(s.speaks)) {
+      const o3_voc03er::Vocoder::LoopStatus st = voc_.loop_status(s.speaks - o3_voc03er::route::kFirstSlot);
+      s.slot_audio = st.length != 0u && (st.playing || st.region);
+    }
+    const bool trying = running || perform_.pad_down() || midi_held();
+    const o3_voc03er::silence::Why before = silence_.shown();
+    if (silence_.update(ctx.uptime_ms(), trying, o3_voc03er::silence::why(o3_voc03er::silence::facts(s))) != before) {
+      ctx.redraw();
+    }
   }
 
   // The one place a source is chosen (the console's `ain` and the SAMPLE PLAY key): the meter forgets the old source's peaks.
@@ -826,6 +876,8 @@ class MyApp final : public app::App {
 
   app::Context* ctx_ = nullptr;
   o3_voc03er::InputMeter meter_;
+  o3_voc03er::silence::Watch silence_;  // why nothing sounds (main loop only)
+  std::uint32_t midi_down_[4] = {};      // the MIDI notes held (track_midi_notes)
   dsp::UnitId voc_id_ = dsp::kNoUnit;
   dsp::UnitId tract_id_ = dsp::kNoUnit;
   static constexpr unsigned kNoMode = 0xFFu;

@@ -884,6 +884,10 @@ void FileScreen::soft_keys(app::Context&, app::SoftKeys& out) noexcept {
 
 void FileScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
   static constexpr app::HelpButton kButtons[] = {
+      {Button::Up, "LIST: ROW BEFORE", nullptr},
+      {Button::Down, "LIST: ROW AFTER", nullptr},
+      {Button::Left, "LIST: PAGE UP", nullptr},
+      {Button::Right, "LIST: PAGE DOWN", nullptr},
       {Button::Performance, "PERFORM: THE HOME SCREEN", nullptr},
       {Button::Play, "START OR STOP THE BAR", nullptr},
       {Button::File, "THIS SCREEN", nullptr},
@@ -910,7 +914,7 @@ void FileScreen::help(const app::Context& ctx, app::Help& h) const noexcept {
     h.fkey[7] = "WAIT: IT ENDS ALONE";
     h.summary = "A LOAD IS APPLYING THE PROJECT: IT FINISHES ON ITS OWN, BECAUSE STOPPING HALF WAY WOULD LEAVE TWO PROJECTS MIXED.";
   }
-  h.pads = "NOT USED HERE.";
+  h.pads = "A PAD PICKS THE LIST ROW UNDER IT.";
   h.buttons = kButtons;
   h.button_count = sizeof kButtons / sizeof kButtons[0];
   h.encoder = "MOVES THE CURSOR IN THE LIST";

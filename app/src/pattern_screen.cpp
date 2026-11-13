@@ -1280,6 +1280,9 @@ void PatternScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
            Face::Label);
   } else if (note_ != nullptr) {
     r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, note_, Color::Accent, Face::Label);
+  } else if (perform_ != nullptr && perform_->silence_watch() != nullptr && perform_->silence_watch()->shown() != silence::Why::None) {
+    // Why nothing sounds (silence.h): below every note of this screen's own, and gone the moment the sound returns.
+    r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 10, silence::text(perform_->silence_watch()->shown()), Color::Accent, Face::Label);
   } else {
     r.text(kGridX, kCellY + static_cast<int>(pt::kLanes) * kLaneStep + 6,  // two micro lines, clear of the F row at y 419 (UX2)
            lane() == pt::Lane::Note ? "LOWER PADS PICK. A STEP PAD: PUT, CHOOSE, AGAIN TO CLEAR. SHIFT + STEP: TIE (VALUE LEAVES IT)"

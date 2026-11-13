@@ -358,8 +358,8 @@ void SampleRecScreen::turn(app::Context& ctx, unsigned key, int delta) noexcept 
         say(ctx, kTooLong);  // allowed to choose, REC refuses until the tempo is faster
       }
       break;
-    case 3:  // AUTOPLAY
-      autoplay_ = !autoplay_;
+    case 3:  // AUTOPLAY: a switch as MONITOR: a tap toggles, the encoder and the arrows set it (down off, up on)
+      autoplay_ = tap || delta == 0 ? !autoplay_ : delta > 0;
       break;
     case 4: {  // MONITOR: the kit's, on or off
       app::AudioIn& a = ctx.audio_in();
@@ -399,7 +399,7 @@ void SampleRecScreen::input(app::Context& ctx, const app::Input& in) noexcept {
     if (in.shift || k > 5u) {
       return;
     }
-    if (k == focus_ || k == 3u) {  // a second tap steps the value on (AUTOPLAY has nothing else to do)
+    if (k == focus_) {  // a second tap steps the value on (a switch toggles)
       key_tap_ = true;
       turn(ctx, k, 1);
       key_tap_ = false;

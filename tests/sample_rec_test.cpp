@@ -19,6 +19,7 @@
 #include "../app/src/sample_rec_logic.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <cstddef>
 #include <memory>
@@ -280,6 +281,44 @@ TEST_CASE("sample_rec: after a tap on F5 the arrows set MONITOR on (RIGHT) and o
   CHECK(h.engine().input_monitor() == doctest::Approx(0.0f));
 }
 
+TEST_CASE("sample_rec: F4 AUTOPLAY takes the light as MONITOR does: a tap lights it, a second switches it, RIGHT sets it on and LEFT off") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  const auto autoplay = [&h] {
+    char line[1500];
+    const std::string text(line, h.runtime().state_line(line, sizeof line));
+    const std::size_t at = text.find("rec_autoplay=");
+    return at == std::string::npos ? -1 : std::atoi(text.c_str() + at + 13);
+  };
+  tap(h, app::Button::F1);  // the light is elsewhere
+  const int was = autoplay();
+  REQUIRE(was >= 0);
+  tap(h, app::Button::F4);  // lights AUTOPLAY, changes nothing
+  CHECK(autoplay() == was);
+  tap(h, app::Button::F4);  // a second tap switches it
+  CHECK(autoplay() == 1 - was);
+  tap(h, app::Button::Left);
+  CHECK(autoplay() == 0);
+  tap(h, app::Button::Left);  // already off: stays off
+  CHECK(autoplay() == 0);
+  tap(h, app::Button::Right);
+  CHECK(autoplay() == 1);
+  tap(h, app::Button::Right);  // already on: stays on
+  CHECK(autoplay() == 1);
+  h.press(app::Button::Shift);  // SHIFT passes as the encoder passes it: AUTOPLAY has no coarse step
+  tap(h, app::Button::Left);
+  h.release(app::Button::Shift);
+  CHECK(autoplay() == 0);
+  h.turn(1);  // the encoder sets it as the arrows do
+  h.run_ms(20);
+  CHECK(autoplay() == 1);
+  h.turn(-1);
+  h.run_ms(20);
+  CHECK(autoplay() == 0);
+  o3_voc03er::test::rec_autoplay(h, true);  // the screen outlives the test
+  CHECK(autoplay() == 1);
+}
+
 TEST_CASE("sample_rec: a held arrow repeats on the lit key (GAIN climbs by more than one step), and the release stops it") {
   Rig rig;
   sim::Harness& h = *rig.h;
@@ -302,14 +341,14 @@ TEST_CASE("sample_rec: REC again stops a free take, AUTOPLAY OFF leaves the slot
   Rig rig;
   sim::Harness& h = *rig.h;
   length_to_free(h);  // FREE
-  tap(h, app::Button::F4);  // AUTOPLAY OFF: the take waits in the slot
+  o3_voc03er::test::rec_autoplay(h, false);  // AUTOPLAY OFF: the take waits in the slot
   tap(h, app::Button::Rec);
   h.run_ms(2500);
   tap(h, app::Button::Rec);  // stops at the bar line
   h.run_ms(5000);
   CHECK(unit_param(h, kModSrc) != doctest::Approx(3.0f));
   CHECK(unit_param(h, kCarSrc) != doctest::Approx(3.0f));
-  tap(h, app::Button::F4);  // AUTOPLAY back ON (the screen outlives the test)
+  o3_voc03er::test::rec_autoplay(h, true);  // AUTOPLAY back ON (the screen outlives the test)
   tap(h, app::Button::F6);  // SLOT: focus, then DOWN / UP move the slot
   tap(h, app::Button::Down);
   tap(h, app::Button::Up);

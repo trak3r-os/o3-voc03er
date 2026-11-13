@@ -717,6 +717,19 @@ void PerformScreen::set_mod_wheel(app::Context& ctx, unsigned cc) noexcept {
   apply_vib(ctx);
 }
 
+// A held pad plays a note (a strip pad plays none), or a chord is latched.
+bool PerformScreen::note_down() const noexcept {
+  if (latched_ >= 0) {
+    return true;
+  }
+  for (unsigned p = 0; p < app::kPadCount; ++p) {
+    if (((held_ >> p) & 1u) != 0u && g_pd.count[p] != 0u) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // A moment's text on the hint line (VOL, ROOT, OCT).
 void PerformScreen::show_flash(app::Context& ctx, const char* name, const char* value) noexcept {
   std::size_t n = 0;
@@ -1896,8 +1909,13 @@ void PerformScreen::draw(app::Context& ctx, ui::Renderer& r, const ui::Rect&) no
     strip::plays_position(t, row_, pick_cursor_, strip::entry_count(row_, mode_), plays_pos);
   }
   // F7's list open: the cursor's place stays on show (a flash or a dim line would hide where the cursor is).
-  pads.key_hint = pick_ == 3u ? plays_pos : (flash_[0] != '\0' ? flash_ : (dim_line[0] != '\0' ? dim_line : (pick_ != 0u ? "" : pl::key_hint(focus_, mode, sfocus_))));
-  if (pick_ == 3u) {
+  // Why nothing sounds takes the line only where nothing else speaks on it: no flash, no dim key's line, no list open.
+  const silence::Why quiet = silence_ != nullptr ? silence_->shown() : silence::Why::None;
+  const bool say_why = quiet != silence::Why::None && pick_ == 0u && flash_[0] == '\0' && dim_line[0] == '\0';
+  pads.key_hint = pick_ == 3u ? plays_pos : (flash_[0] != '\0' ? flash_ : (dim_line[0] != '\0' ? dim_line : (pick_ != 0u || say_why ? "" : pl::key_hint(focus_, mode, sfocus_))));
+  if (say_why) {
+    pads.hint_left = silence::text(quiet);
+  } else if (pick_ == 3u) {
     pads.hint_left = "UP DOWN OR TURN: CURSOR  SHIFT TURN: GROUP  F7 OR F1: TAKE  F8: BACK";
   } else if (pick_ != 0u) {
     pads.hint_left = "UP DOWN OR TURN: CURSOR   F1 OR SAME KEY: TAKE   F8: BACK";

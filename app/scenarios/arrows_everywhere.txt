@@ -1,0 +1,62 @@
+# LEFT and RIGHT on every screen (rd-ctl, the maintainer's cohesion rule): an F value key lit by a tap, then the arrows do exactly one encoder step each
+# (PARAMS, MASTER, SONG; a held arrow repeats on the unit), and the line that says why nothing sounds (PERFORM and PATTERN, after half a second of trying).
+# Frames: 01 PARAMS with F2 lit, 02 the same after RIGHT three times; 03 MASTER, RIGHT before a key is tapped (the line TAP AN F KEY FIRST), 04 after F2 and
+# RIGHT three times; 05 SONG with an entry and the repeats lit (F2), 06 after RIGHT three times; 07 PERFORM with a pad held and nothing speaking
+# (NOTHING SPEAKS), 08 the transport running on an empty pattern (NO NOTE) on PERFORM, 09 the same on PATTERN.
+# The simulator shows the screens and the values (the console line is cut at 512 characters here, so the late pairs are read in the tests, not here); it cannot say that a held arrow repeats at the kit's rate on the unit.
+# Run: <build dir>/app/o3_voc03er_sim --scenario app/scenarios/arrows_everywhere.txt --out <dir>   (the dir must exist)
+input tone 220 -8
+wait 400
+tap params
+wait 300
+tap f2
+wait 200
+snap 01_params_f2_lit
+tap right
+tap right
+tap right
+wait 300
+snap 02_params_right_x3
+tap master
+wait 300
+tap right
+wait 200
+snap 03_master_tap_a_key_first
+tap f2
+tap right
+tap right
+tap right
+wait 300
+snap 04_master_right_x3
+tap song
+wait 300
+tap insert
+wait 100
+tap f2
+wait 200
+snap 05_song_repeats_lit
+tap right
+tap right
+tap right
+wait 300
+snap 06_song_right_x3
+expect state chain=1
+tap performance
+wait 300
+input off
+wait 1500
+paddown 16
+wait 800
+snap 07_perform_nothing_speaks
+padup 16
+wait 200
+input tone 220 -8
+wait 1000
+tap play
+wait 800
+snap 08_perform_no_note
+tap pattern
+wait 300
+snap 09_pattern_no_note
+tap play
+wait 300

@@ -34,6 +34,7 @@
 
 #include "pads_logic.h"
 #include "perform_logic.h"
+#include "silence.h"
 #include "skin/ornoir.h"
 #include "strip_logic.h"
 
@@ -70,6 +71,14 @@ class PerformScreen final : public o3sdk::app::Screen {
 
   // The step sequencer hook (V3): while a closure pad of the mouth strip is held the hook writes no mouth events (it sets the hook's relaxed flag). Null: none.
   void set_mouth_hold_sink(StepSeq* seq) noexcept { seq_ = seq; }
+
+  // Why nothing sounds (silence.h): the app's watch, fed every pass from App::update. While it holds an answer and no other note is on the hint line
+  // (a flash, a dim key's line, an open list) the line is the answer. Null: none. pad_down(): any pad is held (the player is trying to be heard);
+  // note_down(): a held pad plays a note, or a chord is latched (a strip pad plays none). Main loop only.
+  void set_silence(const silence::Watch* watch) noexcept { silence_ = watch; }
+  const silence::Watch* silence_watch() const noexcept { return silence_; }
+  bool pad_down() const noexcept { return held_ != 0u; }
+  bool note_down() const noexcept;
 
   const char* title() const noexcept override { return "PERFORM"; }
   o3sdk::app::Chrome chrome(const o3sdk::app::Context&) const noexcept override { return o3sdk::app::Chrome::None; }
@@ -238,6 +247,7 @@ class PerformScreen final : public o3sdk::app::Screen {
   // under a held pad still lets it go. Main loop only.
   std::uint64_t mouth_pads_ = 0;
   StepSeq* seq_ = nullptr;  // told whether a mouth pad is held (set_mouth_hold_sink)
+  const silence::Watch* silence_ = nullptr;  // the app's (set_silence), read in draw
   char why_[40] = {};  // strip_pad's refusal text
   perform::CloseHold mouth_;  // the held closures (the MOUTH strip's and the CL strips'), by pad
   const InputMeter* meter_ = nullptr;

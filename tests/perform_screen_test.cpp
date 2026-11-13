@@ -1233,3 +1233,48 @@ TEST_CASE("perform: FX1 sweep, row C stays chosen in every mode") {
     h.run_ms(400);
   }
 }
+
+namespace {
+// The answer the app says now for "why nothing sounds" (describe_state's `silence`): 0 none, 1 NO NOTE, 2 NOTHING SPEAKS; -1 when the line has no such pair.
+int silence_answer(sim::Harness& h) {
+  char line[1500];
+  const std::string text(line, h.runtime().state_line(line, sizeof line));
+  const std::size_t at = text.find("silence=");
+  return at == std::string::npos ? -1 : std::atoi(text.c_str() + at + 8);
+}
+}  // namespace
+
+TEST_CASE("perform: why nothing sounds, the transport runs on an empty pattern: NO NOTE after half a second, gone with a pad") {
+  Rig rig;  // the input is a tone: something speaks
+  sim::Harness& h = *rig.h;
+  h.run_ms(1000);
+  CHECK(silence_answer(h) == 0);  // not trying: nothing is said
+  tap(h, app::Button::Play);
+  h.run_ms(300);
+  CHECK(silence_answer(h) == 0);  // under the half second
+  h.run_ms(500);
+  CHECK(silence_answer(h) == 1);
+  h.pad_down(12 + 4);  // a lower pad plays a note
+  h.run_ms(50);
+  CHECK(silence_answer(h) == 0);  // the moment sound returns
+  h.pad_up(12 + 4);
+  h.run_ms(50);
+  tap(h, app::Button::Play);  // the transport stops: nothing is tried any more
+  h.run_ms(900);
+  CHECK(silence_answer(h) == 0);
+}
+
+TEST_CASE("perform: why nothing sounds, a pad with nothing speaking: NOTHING SPEAKS after half a second, gone with the pad") {
+  Rig rig;
+  sim::Harness& h = *rig.h;
+  rig.cap.input_tone(220.0f, -120.0f);  // the input falls silent
+  h.run_ms(1200);                       // the meter's 500 ms buckets forget the tone
+  h.pad_down(12 + 4);
+  h.run_ms(300);
+  CHECK(silence_answer(h) == 0);
+  h.run_ms(500);
+  CHECK(silence_answer(h) == 2);
+  h.pad_up(12 + 4);
+  h.run_ms(50);
+  CHECK(silence_answer(h) == 0);  // the pad is up: the line goes at once
+}

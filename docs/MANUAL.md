@@ -108,6 +108,20 @@ Every screen button on the Tracker opens its screen from anywhere. PERFORMANCE a
 display is F1 to F8; what they do is written above them on the screen and changes with the screen. A second tap on a focused F key steps
 its value; turning the encoder changes it too. SHIFT held shows a second row of values on PERFORM (below).
 
+### The same on every screen
+
+- **The pads.** The lower two rows are the keyboard. The top two rows are the screen's own things. PERFORM, PARAMS, MASTER and SAMPLE REC all play
+  the same keyboard, so you can hear a value while you change it. The two lists (FILE and SAMPLE LOAD) have no keyboard: a pad there picks the row under it.
+- **An F key with a value.** Tap it once and it lights: nothing changes yet. Tap it again to step a list or a switch. Turn the encoder to change
+  the lit key. LEFT and RIGHT do exactly one click of the encoder (with SHIFT, a coarse one), and hold them to repeat.
+- **A key that does something** (RECORD, OPEN, ADD) acts on the first tap.
+- **UP and DOWN** choose which: the slot, the page, the row. LEFT and RIGHT with no key lit move what the encoder moves (on SONG the row's pattern, in
+  a list a page).
+- **Exceptions.** On PERFORM the arrows do not step MODE, QUALITY in TALK, or PRESET (SHIFT + F8): those change the sound too much for a stray press.
+  SAMPLE EDIT keeps UP and DOWN for the zoom.
+- **When nothing sounds**, PERFORM and PATTERN say why after half a second: NO NOTE (hold a lower pad or play a pattern) or NOTHING SPEAKS (talk into
+  the input or make a slot speak).
+
 HELP is SHIFT + CONFIG: it lists every button and every F key of the screen you came from.
 
 ![HELP: every button, and below it the F keys of the screen it was opened from](manual/img/help.png)
@@ -227,7 +241,7 @@ zero for the slots. A bent slot is noisier in the highs: the read is a straight 
 PARAMS is the in-depth editor of the mode PERFORM is in. The title names the mode (PARAMS TALK), and the F keys show only the values that mode hears, in
 pages that group what belongs together, with PERFORM's small voiceprint above so you see each change. Under the voiceprint one tab per page names it in one word (CARRIER, VOICE,
 NOTES, ...); the lit tab is the page you are on. Press PARAMS again, or DOWN, for the next page, and UP for the one before; the last page goes round to the first. A tap on an F key points the
-encoder at it (the key stays lit), a second tap steps it on, and SHIFT with the encoder takes coarse steps. The pads play PERFORM's layout here too.
+encoder at it (the key stays lit), a second tap steps it on, and SHIFT with the encoder takes coarse steps. LEFT and RIGHT are one click of the encoder on the lit key, held they repeat. The pads play PERFORM's layout here too.
 
 MODE is not here. Change the mode on PERFORM (F1), as before: PARAMS follows it, and shows the new mode's first page. It does the same when a preset, a project or a MIDI program
 change moves the mode. A value keeps its page and its key in every mode that hears it (KEY is always NOTES' F1), and a blank key at the end of a page is only a value that mode does not hear.
@@ -292,7 +306,7 @@ microphone, the line and the radio share one converter; USB audio is stereo.
 | F6 RETURN | The level of the sound sent back over USB |
 | F7 SEEK DOWN, F8 SEEK UP | Radio only: look for the next station |
 
-MASTER opens with no key chosen, so the encoder moves nothing and the strip says TAP AN F KEY FIRST: tap SOURCE, GAIN or the value you want, then turn; a second tap on the same key steps it on. Leaving MASTER forgets the choice. SHIFT makes the encoder coarse; the F row ignores SHIFT here, and so do the arrows and the pads. The MODE panel in the middle only shows the mode (it says SET ON PERFORM F1).
+MASTER opens with no key chosen, so the encoder moves nothing and the strip says TAP AN F KEY FIRST: tap SOURCE, GAIN or the value you want, then turn; a second tap on the same key steps it on. Leaving MASTER forgets the choice. SHIFT makes the encoder coarse; the F row ignores SHIFT here. LEFT and RIGHT are one click of the encoder on the lit key (with none lit, they say TAP AN F KEY FIRST too), and the pads play PERFORM's keyboard. The MODE panel in the middle only shows the mode (it says SET ON PERFORM F1).
 
 ### SAMPLE, SAMPLE REC, SAMPLE EDIT, SAMPLE LOAD
 
@@ -471,7 +485,7 @@ The pads play PERFORM's layout (section 4, PERFORM), so you can play the synth u
 | F5 MONITOR | Hear the live input while you record |
 | F6 SLOT | Which slot, 1 to 4 (UP and DOWN pick it whatever key is lit) |
 
-A tap on an F key lights it and changes nothing; a second tap steps a value (GAIN by 5, MONITOR on or off, LENGTH and SLOT step on and wrap). LEFT and RIGHT are one encoder click of the lit key (held, they repeat; SHIFT makes GAIN's step 5): LENGTH when the screen opens, GAIN after a tap on F2, MONITOR on (RIGHT) or off (LEFT) after a tap on F5, and so on. F4 AUTOPLAY is the exception: it never takes the light, every tap on it switches ON and OFF, so the arrows do not act on it.
+A tap on an F key lights it and changes nothing; a second tap steps a value (GAIN by 5, MONITOR on or off, LENGTH and SLOT step on and wrap). LEFT and RIGHT are one encoder click of the lit key (held, they repeat; SHIFT makes GAIN's step 5): LENGTH when the screen opens, GAIN after a tap on F2, MONITOR on (RIGHT) or off (LEFT) after a tap on F5, and so on. F4 AUTOPLAY is a switch like the others: the first tap lights it, a second switches ON and OFF, RIGHT is ON and LEFT is OFF.
 
 A take of 1, 2, 4 or 8 bars plays back **on the bar**: the loop is brought back to the exact frame of every bar line, with a short
 crossfade, so it stays with the tempo (and at half speed, double speed or reverse). A FREE take, and a WAV that is not a whole number of
@@ -594,7 +608,7 @@ so it does not click. COPY copies the slot, cuts and all, to the next empty slot
 *SAMPLE LOAD with an empty card: it says so. Put WAV files in the app's folder and they are listed here.*
 
 SAMPLE LOAD lists the WAV files in `Apps/o3_voc03er/` on the card. To put files there, use Config's CARD AS DISK to see the card from a
-computer, or put the card in a computer. UP and DOWN pick a file, F1 loads it into the selected slot, F8 goes back. A slot that already
+computer, or put the card in a computer. The encoder (or a pad) picks a file, LEFT and RIGHT turn a page of the list (held, they repeat), UP and DOWN pick the slot, F1 loads the file into it, F8 goes back. A slot that already
 holds a sample asks first: F1 confirms, any other key cancels. A slot that cannot take a load says what to stop: "SLOT IS RECORDING: STOP THE TAKE FIRST", "SLOT LOOP IS ON: STOP THE LOOP FIRST"
 (the loop playing or queued) or "A SLICE IS SOUNDING: WAIT FOR IT" (a slice of any slot borrows the slot's memory while it sounds). The list shows at most 64 files; a folder with more says
 "LIST CUT AT 64 FILES: THE FIRST 64 SHOW" (keep the files you want in the first 64 by name, or move the rest into another folder). A file loaded into a slot that is on PADS says "PADS ONLY":
@@ -690,7 +704,7 @@ starts from the cursor's row; with the transport already running PLAY is the tra
 (it never restarts in the middle of a lap, which would cut the lap). The chain plays on when you leave SONG, so you can play over it from PERFORM; PLAY stops it. A change lands
 at the end of the pattern that plays. While the chain plays it owns what plays: a pattern you pick in PATTERN only changes what that screen shows and edits. Opening a project while it plays starts the new project's chain at its first row after the lap in progress. At the end of the chain the transport stops, unless F3 LOOP is on, which runs the chain round.
 
-Two lines at the foot of the screen say the keys (they give way to a status message while one shows): UP and DOWN pick a row; the encoder sets its pattern, A to H; F2 points the encoder at the row's repeats (1 to 64) until F2 again; F1 or INSERT adds a row after the cursor with the same pattern and one repeat; DELETE twice removes it; F3 LOOP restarts the chain at row 1 when it ends. LEFT, RIGHT, SHIFT with an F key and F4 to F7 do nothing here.
+Two lines at the foot of the screen say the keys (they give way to a status message while one shows): UP and DOWN pick a row; the encoder sets its pattern, A to H; F2 points the encoder at the row's repeats (1 to 64) until F2 again; F1 or INSERT adds a row after the cursor with the same pattern and one repeat; DELETE twice removes it; F3 LOOP restarts the chain at row 1 when it ends. LEFT and RIGHT are one click of the encoder, so they step the row's pattern (or its repeats while F2 is lit), and hold to repeat. SHIFT with an F key and F4 to F7 do nothing here.
 
 ## 8. MIDI
 
